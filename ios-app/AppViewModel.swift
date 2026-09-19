@@ -87,7 +87,7 @@ final class AppViewModel: ObservableObject {
     @Published var showShareSheet: Bool = false
 
     var isIOS27OrHigher: Bool {
-        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 17
     }
 
     // MARK: - Shared
@@ -318,8 +318,20 @@ final class AppViewModel: ObservableObject {
                     { _, line in
                         guard let line = line else { return }
                         let lineStr = String(cString: line)
-                        DispatchQueue.main.async {
-                            AppViewModel.shared?.processSyslogLine(lineStr)
+                        let lower = lineStr.lowercased()
+                        if lower.contains("passd") ||
+                           lower.contains("passbook") ||
+                           lower.contains("passkit") ||
+                           lower.contains("stockholm") ||
+                           lower.contains("nanopassd") ||
+                           lower.contains("wallet") ||
+                           lower.contains("pdcardfilemanager") ||
+                           lower.contains("pdpasslibrary") ||
+                           lower.contains("verificationcheck") ||
+                           lower.contains("/cards/") {
+                            DispatchQueue.main.async {
+                                AppViewModel.shared?.processSyslogLine(lineStr)
+                            }
                         }
                     },
                     nil,
@@ -569,6 +581,7 @@ final class AppViewModel: ObservableObject {
                 let stageCardDir = FileManager.default.temporaryDirectory
                     .appendingPathComponent("airlift_card_\(card.id)_\(UUID().uuidString)")
                 try? FileManager.default.createDirectory(at: stageCardDir, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: stageCardDir) }
 
                 for (name, data) in allSkins {
                     try? data.write(to: stageCardDir.appendingPathComponent(name))
@@ -604,8 +617,6 @@ final class AppViewModel: ObservableObject {
                         cont.resume()
                     }
                 }
-
-                try? FileManager.default.removeItem(at: stageCardDir)
 
                 if !writeOk {
                     await MainActor.run {
@@ -822,6 +833,7 @@ final class AppViewModel: ObservableObject {
                 let stageThemeDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("airlift_passthm_\(UUID().uuidString)")
             try? FileManager.default.createDirectory(at: stageThemeDir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: stageThemeDir) }
 
             let langs: [String]
             if targetLang == .all {
@@ -959,8 +971,6 @@ final class AppViewModel: ObservableObject {
                     self.passthmFlashProgress = 0.2 + Double(idx + 1) * 0.25
                 }
             }
-
-            try? FileManager.default.removeItem(at: stageThemeDir)
 
             await MainActor.run {
                 if allOk {

@@ -600,13 +600,13 @@ struct PairingTab: View {
                         .buttonStyle(.bordered)
                     }
                 } else {
-                    // iOS < 27 Guard: ONLY show Select Pairing File option!
+                    // iOS < 17 Guard: ONLY show Select Pairing File option!
                     Section {
                         VStack(alignment: .leading, spacing: 6) {
                             Label("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) Detected", systemImage: "info.circle.fill")
                                 .font(.subheadline.bold())
                                 .foregroundStyle(.blue)
-                            Text("Direct on-device pairing requires iOS 27+. On this device, please import a pairing file (.plist) generated from a Mac or PC.")
+                            Text("Direct on-device pairing requires iOS 17+. On this device, please import a pairing file (.plist) generated from a Mac or PC.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
