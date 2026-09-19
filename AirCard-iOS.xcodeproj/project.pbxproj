@@ -20,6 +20,7 @@
 		D01333FE5D76673B726EC922 /* TendiesEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54463055E9590B0A928A2697 /* TendiesEngine.swift */; };
 		D1372A9BF5FAB71669756638 /* GrappaHelper.m in Sources */ = {isa = PBXBuildFile; fileRef = CCEE0E39AF8DEAE3E55A456C /* GrappaHelper.m */; };
 		E2028685627EA8F9A2BF1732 /* PairingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A02FDAA5E5C8719C39DA4E6C /* PairingController.swift */; };
+		F425EA3763995D85ABFBB99B /* RespringHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744597D526DCBE3516400831 /* RespringHelper.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 		54463055E9590B0A928A2697 /* TendiesEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TendiesEngine.swift; sourceTree = "<group>"; };
 		55D5D94AD6F7BB50166EAAA8 /* AirCard-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "AirCard-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6DCB2FCB8D4F45B9474A81BC /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
+		744597D526DCBE3516400831 /* RespringHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RespringHelper.swift; sourceTree = "<group>"; };
 		81FCB10A2F3D7CEAED486771 /* TendiesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TendiesModel.swift; sourceTree = "<group>"; };
 		8EF8BF3979E64C5575AD150E /* GrappaHelper.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GrappaHelper.h; sourceTree = "<group>"; };
 		920112F6B415C22F51326996 /* NetworkStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatus.swift; sourceTree = "<group>"; };
@@ -91,6 +93,7 @@
 				988BAD6580C0B7784B5F4759 /* Models.swift */,
 				920112F6B415C22F51326996 /* NetworkStatus.swift */,
 				A02FDAA5E5C8719C39DA4E6C /* PairingController.swift */,
+				744597D526DCBE3516400831 /* RespringHelper.swift */,
 				54463055E9590B0A928A2697 /* TendiesEngine.swift */,
 				81FCB10A2F3D7CEAED486771 /* TendiesModel.swift */,
 				A416E9FC1E5258B289C6DA54 /* TendiesView.swift */,
@@ -178,6 +181,7 @@
 				8AC8E2DE3BA40D3721CFC50D /* Models.swift in Sources */,
 				6565B7F0AF43443DACB0FB9D /* NetworkStatus.swift in Sources */,
 				E2028685627EA8F9A2BF1732 /* PairingController.swift in Sources */,
+				F425EA3763995D85ABFBB99B /* RespringHelper.swift in Sources */,
 				D01333FE5D76673B726EC922 /* TendiesEngine.swift in Sources */,
 				010AC8DF1C1EED48625C6675 /* TendiesModel.swift in Sources */,
 				80E5245336B574F61E0D3194 /* TendiesView.swift in Sources */,

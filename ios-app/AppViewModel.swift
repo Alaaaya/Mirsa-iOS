@@ -1229,44 +1229,53 @@ final class AppViewModel: ObservableObject {
     }
 
     func respringDevice() async {
-        let pairingPath = PairingController.pairingFilePath()
-        guard FileManager.default.fileExists(atPath: pairingPath) else {
+        await MainActor.run {
+            self.tendiesFlashLog.append("🔄 Triggering SpringBoard respring (no reboot)…")
+        }
+
+        // 1. Try private FrontBoard / SpringBoardServices relaunch action first (instant in-memory respring)
+        if RespringHelper.respring() {
             await MainActor.run {
-                self.tendiesFlashLog.append("⚠️ Pairing file not found for respring. Please respring manually.")
+                self.tendiesFlashLog.append("✅ SpringBoard relaunch triggered via FrontBoardServices!")
             }
             return
         }
 
-        await MainActor.run {
-            self.tendiesFlashLog.append("🔄 Sending respring command to device...")
+        // 2. Try notification proxy reload over pairing tunnel
+        let pairingPath = PairingController.pairingFilePath()
+        if FileManager.default.fileExists(atPath: pairingPath) {
+            await withCheckedContinuation { cont in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var outError: UnsafeMutablePointer<CChar>? = nil
+                    let rc = pairingPath.withCString { pairC in
+                        al_device_respring(pairC, { _, msg in
+                            guard let msg = msg else { return }
+                            let line = String(cString: msg)
+                            DispatchQueue.main.async {
+                                AppViewModel.shared?.tendiesFlashLog.append("  " + line)
+                            }
+                        }, nil, &outError)
+                    }
+
+                    DispatchQueue.main.async {
+                        if rc == 0 {
+                            self.tendiesFlashLog.append("✅ Respring notification sent! Check your Lock Screen.")
+                        } else {
+                            let err = outError != nil ? String(cString: outError!) : "notification notice"
+                            self.tendiesFlashLog.append("ℹ️ \(err)")
+                        }
+                    }
+                    if let p = outError {
+                        al_string_free(p)
+                    }
+                    cont.resume()
+                }
+            }
         }
 
-        await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var outError: UnsafeMutablePointer<CChar>? = nil
-                let rc = pairingPath.withCString { pairC in
-                    al_device_respring(pairC, { _, msg in
-                        guard let msg = msg else { return }
-                        let line = String(cString: msg)
-                        DispatchQueue.main.async {
-                            AppViewModel.shared?.tendiesFlashLog.append("  " + line)
-                        }
-                    }, nil, &outError)
-                }
-
-                DispatchQueue.main.async {
-                    if rc == 0 {
-                        self.tendiesFlashLog.append("✅ Respring sent! Your device is reloading SpringBoard.")
-                    } else {
-                        let err = outError != nil ? String(cString: outError!) : "respring error"
-                        self.tendiesFlashLog.append("⚠️ Respring notice: \(err)")
-                    }
-                }
-                if let p = outError {
-                    al_string_free(p)
-                }
-                cont.resume()
-            }
+        // 3. Provide instant Display Zoom shortcut option so user can tap Done to respring without reboot
+        await MainActor.run {
+            self.tendiesFlashLog.append("💡 Tip: You can also tap 'Quick Respring (Display Zoom)' to reload SpringBoard.")
         }
     }
 
