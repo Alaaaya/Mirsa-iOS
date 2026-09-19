@@ -457,29 +457,65 @@ public final class TendiesEngine {
     // MARK: - Find Descriptors
 
     private func findDescriptorFolders(in rootURL: URL) -> [URL] {
-        var results: [URL] = []
+        var results: Set<URL> = []
         let fileManager = FileManager.default
-        guard let enumerator = fileManager.enumerator(
+
+        // 1. Signature marker files: find directories containing posterkit / wallpaper plists
+        if let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            while let fileURL = enumerator.nextObject() as? URL {
+                let name = fileURL.lastPathComponent.lowercased()
+                if name.contains("posterkit.provider") || name.hasSuffix("wallpaper.plist") || name == "descriptor.plist" {
+                    results.insert(fileURL.deletingLastPathComponent())
+                }
+            }
+        }
+
+        if !results.isEmpty {
+            return Array(results)
+        }
+
+        // 2. Look for "descriptor" or "descriptors" folders
+        if let enumerator = fileManager.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        while let itemURL = enumerator.nextObject() as? URL {
-            let nameLower = itemURL.lastPathComponent.lowercased()
-            if nameLower == "descriptor" || nameLower == "descriptors" || nameLower.hasSuffix("descriptor") {
-                // Get immediate children of this descriptor folder
-                if let children = try? fileManager.contentsOfDirectory(at: itemURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                    let subdirs = children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false }
-                    if !subdirs.isEmpty {
-                        results.append(contentsOf: subdirs)
-                    } else {
-                        results.append(itemURL)
+        ) {
+            while let itemURL = enumerator.nextObject() as? URL {
+                let nameLower = itemURL.lastPathComponent.lowercased()
+                if nameLower == "descriptor" || nameLower == "descriptors" || nameLower.hasSuffix("descriptor") {
+                    if let children = try? fileManager.contentsOfDirectory(at: itemURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                        let subdirs = children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false }
+                        if !subdirs.isEmpty {
+                            for s in subdirs { results.insert(s) }
+                        } else {
+                            results.insert(itemURL)
+                        }
                     }
                 }
             }
         }
-        return results
+
+        if !results.isEmpty {
+            return Array(results)
+        }
+
+        // 3. Check immediate child directories (e.g. UUID folders at root)
+        if let topLevel = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+            let dirs = topLevel.filter { url in
+                let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                let name = url.lastPathComponent
+                return isDir && !name.hasPrefix(".") && !name.contains("__MACOSX")
+            }
+            if !dirs.isEmpty {
+                return dirs
+            }
+        }
+
+        return [rootURL]
     }
 
     // MARK: - Plist Identifier Randomization

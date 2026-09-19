@@ -57,4 +57,11 @@ public enum RespringHelper {
             UIApplication.shared.open(url)
         }
     }
+
+    /// Opens instant Web respring (RoutineHub/JailbreakParty) in Safari which crashes SpringBoard render server cleanly without reboot
+    public static func openWebRespring() {
+        if let url = URL(string: "https://jailbreak.party/respring") {
+            UIApplication.shared.open(url)
+        }
+    }
 }
