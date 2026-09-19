@@ -1,0 +1,28 @@
+# Xcode & macOS
+.DS_Store
+*.xcworkspace
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+DerivedData/
+build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Temporary / Staging artifacts
+*.tmp
+*.log
+
+# Rust build artifacts
+target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# User pairing keys and secrets (never commit device pairing tokens)
+*.plist
+*.mobiledevicepairing
+*.mobilepair
+!ios-app/Info.plist
