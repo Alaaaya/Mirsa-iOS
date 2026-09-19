@@ -247,3 +247,91 @@ pub unsafe extern "C" fn al_passthm_extract(
     res.unwrap_or(1)
 }
 
+/// Extract all files and directories from a zip archive into `dest_dir`.
+/// Preserves directory hierarchies and skips unsafe path traversals.
+/// Returns 0 on success.
+#[no_mangle]
+pub unsafe extern "C" fn al_zip_extract_all(
+    archive_path: *const c_char,
+    dest_dir: *const c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let archive_path = match ffi_util::opt_str(archive_path, "").as_str() {
+            "" => return 1,
+            s => s.to_string(),
+        };
+        let dest_dir = match ffi_util::opt_str(dest_dir, "").as_str() {
+            "" => return 1,
+            s => s.to_string(),
+        };
+
+        let file = match std::fs::File::open(&archive_path) {
+            Ok(f) => f,
+            Err(_) => return 2,
+        };
+
+        let mut archive = match zip::ZipArchive::new(file) {
+            Ok(a) => a,
+            Err(_) => return 3,
+        };
+
+        let dest = std::path::Path::new(&dest_dir);
+        if std::fs::create_dir_all(dest).is_err() {
+            return 4;
+        }
+
+        for i in 0..archive.len() {
+            let mut file = match archive.by_index(i) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            let name = match file.enclosed_name() {
+                Some(n) => n.to_owned(),
+                None => continue,
+            };
+            let name_str = name.to_string_lossy();
+            if name_str.contains("__MACOSX") || name_str.ends_with(".DS_Store") {
+                continue;
+            }
+            let outpath = dest.join(&name);
+            if file.is_dir() {
+                let _ = std::fs::create_dir_all(&outpath);
+            } else {
+                if let Some(parent) = outpath.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Ok(mut outfile) = std::fs::File::create(&outpath) {
+                    let _ = std::io::copy(&mut file, &mut outfile);
+                }
+            }
+        }
+        0
+    }));
+    res.unwrap_or(1)
+}
+
+/// Query InstallationProxy over the pairing tunnel for an application's Container directory path.
+/// Returns 0 on success (with out_container set), 1 on error (with out_error set).
+#[no_mangle]
+pub unsafe extern "C" fn al_find_app_container(
+    pairing_path: *const c_char,
+    bundle_id: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_container: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        exploit::find_container(pairing_path, bundle_id, log_cb, ctx, out_container, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_find_app_container: {e:?}"));
+            }
+            1
+        }
+    }
+}
+

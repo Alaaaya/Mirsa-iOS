@@ -1,122 +1,163 @@
-# AirCard-iOS
+# airlift
 
-<p align="center">
-  <img src="ios-app/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="128" height="128" alt="AirCard-iOS Icon" style="border-radius: 28px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);" />
-</p>
+### An AirTraffic sandbox escape for iOS 27.0.
 
-<p align="center">
-  Apple Wallet card skins and lock screen passcode themes directly on iOS 27.
-</p>
+This is a simple proof-of-concept for developers and security researchers.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Platform-iOS%2027-blue?style=flat-square&logo=apple" alt="Platform" />
-  <img src="https://img.shields.io/badge/Swift-5.0-orange?style=flat-square&logo=swift" alt="Swift" />
-  <img src="https://img.shields.io/badge/Rust-FFI%20Core-red?style=flat-square&logo=rust" alt="Rust" />
-  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
-  <a href="https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y"><img src="https://img.shields.io/badge/Donate-PayPal-00457C?style=flat-square&logo=paypal" alt="Donate with PayPal" /></a>
-</p>
+If you are worried about 🔥🪲4⃣☁️ (burning bugs for clout) - there are always more bugs <sub><img src="./assets/trollface.svg" width="22" height="18" alt="trollface"></sub>
 
-## Overview
+AirTraffic syncs media, including Books, from a Mac to iOS. airlift abuses that path to read and write files outside AirTraffic's intended directory scope. It runs from a paired Mac over Wi-Fi or USB, with no iOS app required. Tested on iOS 27.0 RC (24A435); it should also work on iOS 27.0 final (24A437). Other iPhone builds are allowed with a warning.
 
-AirCard-iOS writes custom artwork to iOS system caches over a local loopback connection. It allows you to customize Apple Wallet card artwork and the passcode dialer directly from an iPhone running iOS 27 without keeping a computer connected.
+#### Verified scope
 
-Core file injection is handled by a Rust static library (`AirliftFFI`) that uses the AirTraffic protocol over a local tunnel provided by LocalDevVPN.
+Fresh-file writes were confirmed in the following directories:
 
-## Features
+<table>
+<tr><td>
 
-### Wallet card skins
-- Renders images to Wallet specifications (`cardBackgroundCombined@3x.png` at 1536×969, `@2x` at 1024×646, and `cardBackgroundCombined.pdf` for Suica and transit passes).
-- Invalidates local pass cache files (`FrontFace`, `Preview`, `PlaceHolder`) so changes show up when Wallet restarts.
-- Lets you set artwork for individual cards or apply one skin across all detected cards.
-- Live card detection identifies passes as you use Apple Pay.
-
-### Passcode keypad themes
-- Interactive dialer preview with touch panning and zoom framing.
-- Poster layout: spans one image across all ten keypad buttons.
-- Circle button layout: fits images directly inside each button dial.
-- Supports system cache targets including `TelephonyUI-10`.
-- Supports localized number subtexts, including Ukrainian and Russian Cyrillic variants.
-- Imports and exports themes as `.passthm` archives.
-
-### Pairing
-- Advertises locally over Bonjour so the phone can pair with itself in Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS.
-- Reads and syncs pairing records automatically into `aircard_pairing.plist`.
-
-## Installation
-
-Install `AirCard-iOS.ipa` using any standard sideloading tool:
-
-- SideStore or AltStore
-- TrollStore
-- LiveContainer
-- Xcode or iOS App Signer
-
-## Prerequisites
-
-1. **LocalDevVPN**: Running with loopback routing (`10.7.0.1` or `127.0.0.1`) so local connections reach internal device services.
-2. **Device pairing**: Pair in Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS, or place an existing pairing plist in the app's document folder.
-
-## Building from source
-
-### Requirements
-- macOS 14.0 or newer with Xcode 16 or newer
-- XcodeGen (`brew install xcodegen`)
-- Rust toolchain (only if rebuilding `rust-core`)
-
-### Build the IPA
-```bash
-git clone https://github.com/mak5er/AirCard-iOS.git
-cd AirCard-iOS
-./build-ipa.sh
-```
-The packaged archive will be saved at `build/AirCard-iOS.ipa`.
-
-### Rebuilding the Rust framework
-If you make changes in `rust-core`:
-```bash
-./build-ios.sh
+```text
+/var/mobile
+/var/mobile/Documents
+/var/mobile/Library
+/var/mobile/Library/Preferences
+/var/mobile/Library/Caches
+/var/mobile/Library/SpringBoard
+/var/mobile/Library/SMS
+/var/mobile/Library/Safari
+/var/mobile/Containers
+/var/mobile/Containers/Data/Application
+/var/mobile/Containers/Shared/AppGroup
+/var/tmp
 ```
 
-## Repository structure
+</td></tr>
+</table>
 
+Reads are indirect: a known file is moved into Media, read through AFC, and
+moved back.
+
+As of now, this does **not** work on the MobileGestalt plist.
+
+#### Components
+
+<table>
+<tr><td>
+
+```text
+──────────────── macOS ────────────────
+MobileDevice.framework
+↓
+AirTrafficHost.framework
+
+───────────────── iOS ─────────────────
+com.apple.streaming_zip_conduit
+↓
+com.apple.afc
+↓
+com.apple.atc / AirTrafficDevice
+↓
+Books sync client
+↓
+ATLegacyAssetLink
+↓
+ATAirlock
+↓
+NSFileManager
 ```
-AirCard-iOS/
-├── ios-app/                   # SwiftUI application
-│   ├── AirCardApp.swift       # App lifecycle
-│   ├── AppViewModel.swift     # State management and exploit orchestration
-│   ├── ContentView.swift      # Main UI views
-│   ├── Models.swift           # Image slicing, theme layout, archive packing
-│   ├── PairingController.swift# Bonjour host and pairing sync
-│   ├── NetworkStatus.swift    # VPN loopback detection
-│   ├── Utilities.swift        # Audio keep-alive and helpers
-│   ├── GrappaHelper.[h,m]     # ATC protocol helpers
-│   ├── Info.plist             # Bundle configuration
-│   └── Assets.xcassets/       # App icons and assets
-├── AirliftFFI.xcframework/    # Compiled arm64 Rust static library and headers
-├── rust-core/                 # Rust core source code
-├── project.yml                # XcodeGen project definition
-├── build-ipa.sh               # Build script producing the IPA
-├── build-ios.sh               # Script to rebuild the xcframework
-├── LICENSE                    # MIT License
-└── README.md                  # Project documentation
+
+</td></tr>
+</table>
+
+#### ATAirlock path validation
+
+Effective logic in `-[ATAirlock processCompletedAsset:]` for these Book assets:
+
+<table>
+<tr><td>
+
+```objc
+// Books "Persistent ID" reaches asset.identifier without path validation.
+NSString *source =
+    [@"/var/mobile/Media/Airlock/Book"
+        stringByAppendingPathComponent:asset.identifier];
+
+// FileComplete.AssetPath controls asset.path.
+NSString *destination =
+    [[@"/var/mobile/Media/"
+        stringByAppendingPathComponent:asset.path]
+        stringByStandardizingPath];
+
+// This checks the path string, not where a symlink resolves.
+if (![destination hasPrefix:@"/var/mobile/Media/"])
+    return;
+
+// The source is unchecked and the destination follows ancestor symlinks.
+[fileManager moveItemAtPath:source
+                     toPath:destination
+                      error:&error];
 ```
 
-## Credits
+</td></tr>
+</table>
 
-- **[@mak5er](https://github.com/mak5er)**: Architecture, UI, passcode theming, pairing automation.
-- **[@merybist](https://github.com/merybist)**: Initial base port.
-- **[AirLift](https://github.com/0xjohnnydev/airlift)** by **[0xjohnny (@0xjohnnydev)](https://github.com/0xjohnnydev)**: Original AirTraffic/ATAirlock sandbox escape and proof of concept underlying `AirliftFFI`.
-- Built upon concepts from the **AirCard** project.
+The unchecked source accepts `..` components from a Books asset identifier.
+StreamingZip accepts the relative symlink while it is still contained in its
+extraction directory. The first move relocates it below Media; the second uses
+it as part of the destination and writes the payload outside Media.
 
-## Support
+The included PoC writes a random canary, verifies it, and removes it. Existing
+Books sync files are preserved and restored after the run.
 
-If you would like to support the development of AirCard-iOS:
+#### Build and run
 
-- **PayPal**: [Donate via PayPal](https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y)
-- **TON**: `UQBm9KPhtMw-XVVjirUoa09wzrlyWsbeZhKfefl1Uw-qNZ-r`
-- **USDT (TRC20)**: `TDkDMCyjYxgvkWUnQiF5Erk2RyPQMT6G1n`
-- **USDT / BNB (BEP20)**: `0x0954dc491c502849d04956ef74634aa5931a08e8`
+airlift lists compatible paired iPhones and asks which one to use. Pass a
+UDID with `--device` to skip the prompt. Failed runs include helper diagnostics;
+pass `--verbose` to include them on successful runs too.
 
-## License
+<table>
+<tr><td>
 
-MIT License. See [LICENSE](LICENSE) for details.
+```sh
+make
+./airlift.py
+
+# Choose another destination.
+./airlift.py --target /var/mobile/Library/Safari
+```
+
+</td></tr>
+</table>
+
+The default destination is `/var/mobile/Library/SpringBoard`.
+
+---
+
+## LumiCards — Apple Wallet Card Skinner
+
+LumiCards allows customizing Apple Wallet card appearances without a jailbreak using the `airlift` exploit.
+
+### Installation
+
+#### macOS (Standalone Universal DMG)
+No dependencies or Terminal commands needed!
+1. Download or build **`LumiCards.dmg`**.
+2. Open `LumiCards.dmg` and drag **`LumiCards.app`** to your **Applications** folder.
+3. Supports both **Apple Silicon (M1/M2/M3/M4)** and **Intel (x86_64)** natively. Everything required (libimobiledevice, device communication, and image engine) is pre-packaged inside the app.
+
+#### Linux / Debian / Ubuntu (CLI only)
+```sh
+sudo apt update
+sudo apt install -y libimobiledevice-utils libimobiledevice6
+pip3 install pillow
+python3 lumicards.py
+```
+
+### How to Detect Cards
+1. Connect your iPhone via USB and click **Scan Cards**.
+2. On your iPhone, open the **Wallet** app and tap your card.
+3. The card will appear in LumiCards immediately!
+
+### Credits
+- **@mak5er** (Developer) — [GitHub](https://github.com/mak5er) · [Twitter / X](https://x.com/mak5er)
+- **@Lumid-Off** (Developer) — [GitHub](https://github.com/Lumid-Off) · [Twitter / X](https://x.com/LumidOff)
+- Powered by `airlift` & Apple MobileDevice framework.

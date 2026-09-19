@@ -67,6 +67,15 @@ final class AppViewModel: ObservableObject {
     @Published var passthmFlashProgress: Double = 0
     @Published var passthmFlashLog: [String] = []
 
+    // MARK: - Tendies / Wallpapers tab
+    @Published var tendieItems: [TendieItem] = []
+    @Published var posterBoardContainer: String = ""
+    @Published var isDetectingContainer: Bool = false
+    @Published var resetPBProtections: Bool = true
+    @Published var tendiesFlashPhase: FlashPhase = .idle
+    @Published var tendiesFlashProgress: Double = 0
+    @Published var tendiesFlashLog: [String] = []
+
     // MARK: - AirCard UI States & Properties
     static var detectedDeviceLanguage: PasscodeLanguageTarget {
         let code = Locale.preferredLanguages.first?.components(separatedBy: "-").first?.lowercased() ?? "en"
@@ -106,6 +115,8 @@ final class AppViewModel: ObservableObject {
         loadSavedCards()
         refreshNetworkStatus()
         scanDocumentsDirectory()
+        posterBoardContainer = UserDefaults.standard.string(forKey: "aircard.posterboard_container") ?? ""
+        loadSavedTendies()
 
         // Hook Rust log output into our log array.
         AppViewModel.sharedLogSink = { [weak self] line in
@@ -1044,11 +1055,133 @@ final class AppViewModel: ObservableObject {
         log.append(line)
     }
 
+    // MARK: - Tendies / Wallpapers
+
+    func loadSavedTendies() {
+        if let data = UserDefaults.standard.data(forKey: "aircard.saved_tendies"),
+           let items = try? JSONDecoder().decode([TendieItem].self, from: data) {
+            self.tendieItems = items.filter { FileManager.default.fileExists(atPath: $0.fileURL.path) }
+        }
+    }
+
+    func saveTendieItems() {
+        if let data = try? JSONEncoder().encode(tendieItems) {
+            UserDefaults.standard.set(data, forKey: "aircard.saved_tendies")
+        }
+    }
+
+    func importTendieFiles(urls: [URL]) async {
+        for url in urls {
+            do {
+                let item = try await TendiesEngine.shared.importTendie(from: url)
+                await MainActor.run {
+                    self.tendieItems.removeAll(where: { $0.fileName == item.fileName })
+                    self.tendieItems.append(item)
+                    self.saveTendieItems()
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func deleteTendie(item: TendieItem) {
+        try? FileManager.default.removeItem(at: item.fileURL)
+        tendieItems.removeAll(where: { $0.id == item.id })
+        saveTendieItems()
+    }
+
+    func autoDetectPosterBoardContainer() async {
+        let pairingPath = PairingController.pairingFilePath()
+        guard FileManager.default.fileExists(atPath: pairingPath) else {
+            await MainActor.run {
+                self.errorMessage = "No pairing file active. Pair your device first in the Pairing tab."
+            }
+            return
+        }
+
+        await MainActor.run { self.isDetectingContainer = true }
+        defer {
+            Task { @MainActor in self.isDetectingContainer = false }
+        }
+
+        do {
+            let container = try await TendiesEngine.shared.detectPosterBoardContainer(pairingPath: pairingPath)
+            await MainActor.run {
+                self.posterBoardContainer = container
+                UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
+                self.successAlertMessage = "PosterBoard container discovered:\n\(container)"
+                self.showSuccessAlert = true
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Auto-detect failed: \(error.localizedDescription)\nEnsure LocalDevVPN is connected and device is unlocked."
+            }
+        }
+    }
+
+    func flashSelectedTendies() async {
+        let selected = tendieItems.filter { $0.isSelected }
+        guard !selected.isEmpty else {
+            errorMessage = "No wallpapers selected to flash."
+            return
+        }
+
+        let pairingPath = PairingController.pairingFilePath()
+        guard FileManager.default.fileExists(atPath: pairingPath) else {
+            errorMessage = "No pairing file active. Please pair your device first."
+            return
+        }
+
+        var container = posterBoardContainer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if container.isEmpty {
+            do {
+                container = try await TendiesEngine.shared.detectPosterBoardContainer(pairingPath: pairingPath)
+                self.posterBoardContainer = container
+                UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
+            } catch {
+                errorMessage = "PosterBoard container could not be found automatically. Please enter it manually or tap Auto-Detect."
+                return
+            }
+        }
+
+        tendiesFlashPhase = .running
+        tendiesFlashProgress = 0
+        tendiesFlashLog = []
+
+        do {
+            try await TendiesEngine.shared.flashTendies(
+                items: selected,
+                containerPath: container,
+                resetProtections: resetPBProtections,
+                pairingPath: pairingPath,
+                log: { [weak self] line in
+                    DispatchQueue.main.async {
+                        self?.tendiesFlashLog.append(line)
+                    }
+                },
+                progress: { [weak self] p in
+                    DispatchQueue.main.async {
+                        self?.tendiesFlashProgress = p
+                    }
+                }
+            )
+            tendiesFlashPhase = .done(ok: true)
+        } catch {
+            tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
+            tendiesFlashPhase = .done(ok: false)
+        }
+    }
+
     func reset() {
         cardFlashPhase = .idle
         cardFlashProgress = 0
         passthmFlashPhase = .idle
         passthmFlashProgress = 0
+        tendiesFlashPhase = .idle
+        tendiesFlashProgress = 0
         errorMessage = nil
     }
 }

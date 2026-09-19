@@ -52,6 +52,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case pairing = "Pairing"
     case walletCards = "Wallet Cards"
     case passcodeThemes = "Passcode"
+    case wallpapers = "Wallpapers"
     var id: String { rawValue }
 }
 
