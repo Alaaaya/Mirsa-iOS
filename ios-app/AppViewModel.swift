@@ -152,7 +152,7 @@ final class AppViewModel: ObservableObject {
         if let rootItems = try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
             for u in rootItems where u.pathExtension.lowercased() == "tendies" {
                 let target = tendiesDir.appendingPathComponent(u.lastPathComponent)
-                if !FileManager.default.fileExists(atPath: target.path) {
+                if u.path != target.path && !FileManager.default.fileExists(atPath: target.path) {
                     try? FileManager.default.copyItem(at: u, to: target)
                 }
                 foundURLs.append(target)
@@ -166,20 +166,14 @@ final class AppViewModel: ObservableObject {
             }
         }
 
-        for u in foundURLs {
-            let fn = u.lastPathComponent
-            if !tendieItems.contains(where: { $0.fileName == fn }) {
-                Task {
-                    if let item = try? await TendiesEngine.shared.importTendie(from: u) {
-                        await MainActor.run {
-                            if !self.tendieItems.contains(where: { $0.fileName == item.fileName }) {
-                                self.tendieItems.append(item)
-                                self.saveTendieItems()
-                            }
-                        }
-                    }
-                }
-            }
+        let newURLs = foundURLs.filter { url in
+            !tendieItems.contains(where: { $0.fileName == url.lastPathComponent })
+        }
+
+        guard !newURLs.isEmpty else { return }
+
+        Task {
+            await self.importTendieFiles(urls: newURLs)
         }
     }
 

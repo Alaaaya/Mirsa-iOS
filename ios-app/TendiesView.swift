@@ -23,6 +23,46 @@ struct TendiesView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    if let err = vm.errorMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(err)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                            Spacer()
+                            Button {
+                                vm.errorMessage = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.red.opacity(0.12))
+                        .cornerRadius(10)
+                    }
+
+                    if vm.showSuccessAlert && !vm.successAlertMessage.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text(vm.successAlertMessage)
+                                .font(.caption)
+                                .foregroundColor(.green)
+                            Spacer()
+                            Button {
+                                vm.showSuccessAlert = false
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.green.opacity(0.12))
+                        .cornerRadius(10)
+                    }
+
                     // Header / Status Banner
                     containerConfigSection
 
@@ -37,10 +77,20 @@ struct TendiesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showFilePicker = true
+                    Menu {
+                        Button {
+                            showFilePicker = true
+                        } label: {
+                            Label("Pick .tendies File…", systemImage: "doc.badge.plus")
+                        }
+
+                        Button {
+                            vm.scanDocumentsForTendies()
+                        } label: {
+                            Label("Scan Documents / Files App", systemImage: "folder.badge.gearshape")
+                        }
                     } label: {
-                        Label("Import", systemImage: "plus.circle.fill")
+                        Image(systemName: "plus.circle.fill")
                             .font(.headline)
                     }
                 }
@@ -284,20 +334,36 @@ struct TendiesView: View {
                     .padding(.horizontal, 20)
             }
 
-            Button {
-                showFilePicker = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.and.arrow.down.fill")
-                    Text("Import .tendies File")
-                        .fontWeight(.semibold)
+            VStack(spacing: 10) {
+                Button {
+                    showFilePicker = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down.fill")
+                        Text("Import .tendies File")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(10)
+
+                Button {
+                    vm.scanDocumentsForTendies()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Scan Documents / Files App")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
             }
+            .padding(.horizontal, 16)
             .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity)
@@ -510,21 +576,19 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        var contentTypes: [UTType] = [
-            .zip,
-            .data,
-            .item,
-            .archive
-        ]
+        var contentTypes: [UTType] = []
         if let customType = UTType("com.aircard.tendies") {
-            contentTypes.insert(customType, at: 0)
+            contentTypes.append(customType)
         }
         if let extType = UTType(filenameExtension: "tendies") {
-            contentTypes.insert(extType, at: 0)
+            contentTypes.append(extType)
         }
+        contentTypes.append(contentsOf: [.archive, .zip, .data, .item])
 
-        // Open in place so security-scoped URL remains valid during synchronous copy
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: false)
+        // asCopy: true ensures iOS automatically coordinates and copies the chosen document(s)
+        // into the app sandbox tmp/ folder without requiring in-place document entitlements.
+        // This solves the bug where tapping "Open" did nothing on iOS.
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = true
         return picker
@@ -544,34 +608,10 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            var copiedURLs: [URL] = []
-            let storageDir = TendiesEngine.tendiesStorageDirectory
-
-            for url in urls {
-                let shouldStop = url.startAccessingSecurityScopedResource()
-                defer {
-                    if shouldStop {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-
-                let target = storageDir.appendingPathComponent(url.lastPathComponent)
-                if FileManager.default.fileExists(atPath: target.path) {
-                    try? FileManager.default.removeItem(at: target)
-                }
-
-                do {
-                    try FileManager.default.copyItem(at: url, to: target)
-                    copiedURLs.append(target)
-                } catch {
-                    if let data = try? Data(contentsOf: url) {
-                        try? data.write(to: target, options: .atomic)
-                        copiedURLs.append(target)
-                    }
-                }
-            }
-
-            parent.onPick(copiedURLs)
+            guard !urls.isEmpty else { return }
+            // With asCopy: true, files are safely copied to app tmp/ by iOS.
+            // Pass them directly to onPick; TendiesEngine will store and extract them.
+            parent.onPick(urls)
             parent.dismiss()
         }
 
