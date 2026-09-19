@@ -104,7 +104,8 @@ AirCard-iOS/
 
 - **[@mak5er](https://github.com/mak5er)**: Architecture, UI, passcode theming, pairing automation.
 - **[@merybist](https://github.com/merybist)**: Initial base port.
-- Built upon concepts from the **Airlift** and **AirCard** projects.
+- **[AirLift](https://github.com/0xjohnnydev/airlift)** by **[0xjohnny (@0xjohnnydev)](https://github.com/0xjohnnydev)**: Original AirTraffic/ATAirlock sandbox escape and proof of concept underlying `AirliftFFI`.
+- Built upon concepts from the **AirCard** project.
 
 ## License
 
