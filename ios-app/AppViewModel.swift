@@ -139,6 +139,48 @@ final class AppViewModel: ObservableObject {
 
         // Find .passthm themes
         documentsThemes = items.filter { $0.hasSuffix(".passthm") }.sorted()
+
+        // Auto-discover any .tendies dropped into Documents or Documents/Tendies
+        scanDocumentsForTendies()
+    }
+
+    func scanDocumentsForTendies() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let tendiesDir = TendiesEngine.tendiesStorageDirectory
+        
+        var foundURLs: [URL] = []
+        if let rootItems = try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
+            for u in rootItems where u.pathExtension.lowercased() == "tendies" {
+                let target = tendiesDir.appendingPathComponent(u.lastPathComponent)
+                if !FileManager.default.fileExists(atPath: target.path) {
+                    try? FileManager.default.copyItem(at: u, to: target)
+                }
+                foundURLs.append(target)
+            }
+        }
+        if let storedItems = try? FileManager.default.contentsOfDirectory(at: tendiesDir, includingPropertiesForKeys: nil) {
+            for u in storedItems where u.pathExtension.lowercased() == "tendies" {
+                if !foundURLs.contains(u) {
+                    foundURLs.append(u)
+                }
+            }
+        }
+
+        for u in foundURLs {
+            let fn = u.lastPathComponent
+            if !tendieItems.contains(where: { $0.fileName == fn }) {
+                Task {
+                    if let item = try? await TendiesEngine.shared.importTendie(from: u) {
+                        await MainActor.run {
+                            if !self.tendieItems.contains(where: { $0.fileName == item.fileName }) {
+                                self.tendieItems.append(item)
+                                self.saveTendieItems()
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @discardableResult
@@ -1184,9 +1226,53 @@ final class AppViewModel: ObservableObject {
                 }
             )
             tendiesFlashPhase = .done(ok: true)
+            tendiesFlashLog.append("🎉 Wallpapers applied! Triggering respring...")
+            await respringDevice()
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
             tendiesFlashPhase = .done(ok: false)
+        }
+    }
+
+    func respringDevice() async {
+        let pairingPath = PairingController.pairingFilePath()
+        guard FileManager.default.fileExists(atPath: pairingPath) else {
+            await MainActor.run {
+                self.tendiesFlashLog.append("⚠️ Pairing file not found for respring. Please respring manually.")
+            }
+            return
+        }
+
+        await MainActor.run {
+            self.tendiesFlashLog.append("🔄 Sending respring command to device...")
+        }
+
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var outError: UnsafeMutablePointer<CChar>? = nil
+                let rc = pairingPath.withCString { pairC in
+                    al_device_respring(pairC, { _, msg in
+                        guard let msg = msg else { return }
+                        let line = String(cString: msg)
+                        DispatchQueue.main.async {
+                            AppViewModel.shared?.tendiesFlashLog.append("  " + line)
+                        }
+                    }, nil, &outError)
+                }
+
+                DispatchQueue.main.async {
+                    if rc == 0 {
+                        self.tendiesFlashLog.append("✅ Respring sent! Your device is reloading SpringBoard.")
+                    } else {
+                        let err = outError != nil ? String(cString: outError!) : "respring error"
+                        self.tendiesFlashLog.append("⚠️ Respring notice: \(err)")
+                    }
+                }
+                if let p = outError {
+                    al_string_free(p)
+                }
+                cont.resume()
+            }
         }
     }
 

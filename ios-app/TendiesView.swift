@@ -48,20 +48,12 @@ struct TendiesView: View {
             .sheet(isPresented: $showFilePicker) {
                 TendiesDocumentPickerView { urls in
                     Task {
-                        // Short delay to allow picker sheet to finish dismissing before presenting any alert/progress
-                        try? await Task.sleep(nanoseconds: 350_000_000)
                         await vm.importTendieFiles(urls: urls)
                     }
                 }
             }
             .sheet(item: $selectedDetailItem) { item in
                 TendieDetailSheet(item: item)
-            }
-            .sheet(isPresented: Binding(
-                get: { vm.tendiesFlashPhase == .running || (isDonePhase(vm.tendiesFlashPhase)) },
-                set: { if !$0 { vm.tendiesFlashPhase = .idle } }
-            )) {
-                TendiesFlashProgressSheet()
             }
             .alert("Edit PosterBoard Container", isPresented: $showManualContainerEditor) {
                 TextField("/var/mobile/Containers/Data/Application/UUID", text: $manualContainerInput)
@@ -76,11 +68,6 @@ struct TendiesView: View {
                 Text("Specify the absolute path of the PosterBoard container data directory.")
             }
         }
-    }
-
-    private func isDonePhase(_ phase: AppViewModel.FlashPhase) -> Bool {
-        if case .done = phase { return true }
-        return false
     }
 
     // MARK: - Container Config Section
@@ -197,34 +184,75 @@ struct TendiesView: View {
                     }
                 }
 
-                // Flashing Action Bar
-                VStack(spacing: 8) {
+                // Flashing Action Bar & Inline Controls
+                VStack(spacing: 12) {
+                    if case .running = vm.tendiesFlashPhase {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Flashing Wallpapers to PosterBoard…")
+                                    .font(.subheadline.bold())
+                                ProgressView(value: vm.tendiesFlashProgress)
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(UIColor.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+                    } else {
+                        Button {
+                            Task {
+                                await vm.flashSelectedTendies()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                Text("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s") to iPhone")
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .foregroundColor(.white)
+                            .background(
+                                selectedCount > 0
+                                    ? LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
+                                    : LinearGradient(colors: [.gray], startPoint: .leading, endPoint: .trailing)
+                            )
+                            .cornerRadius(12)
+                        }
+                        .disabled(selectedCount == 0)
+                    }
+
+                    // Respring Button
                     Button {
                         Task {
-                            await vm.flashSelectedTendies()
+                            await vm.respringDevice()
                         }
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "sparkles")
-                            Text("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s") to iPhone")
-                                .fontWeight(.semibold)
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Respring Device")
+                                .fontWeight(.medium)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .foregroundColor(.white)
-                        .background(
-                            selectedCount > 0
-                                ? LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
-                                : LinearGradient(colors: [.gray], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .cornerRadius(12)
+                        .padding(.vertical, 10)
                     }
-                    .disabled(selectedCount == 0)
+                    .buttonStyle(.bordered)
+                    .tint(.purple)
 
-                    Text("Flashes custom lock screen wallpapers directly into PosterBoard.")
+                    Text("Flashes custom lock screen wallpapers directly into PosterBoard and resprings SpringBoard.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+
+                    if !vm.tendiesFlashLog.isEmpty {
+                        CompactLogView(
+                            title: "Wallpapers Flash Log (\(vm.tendiesFlashLog.count) lines)",
+                            lines: vm.tendiesFlashLog,
+                            onClear: { vm.tendiesFlashLog.removeAll() }
+                        )
+                        .padding(.top, 4)
+                    }
                 }
                 .padding(.top, 10)
             }
@@ -475,96 +503,7 @@ struct TendieDetailSheet: View {
     }
 }
 
-// MARK: - Flashing Progress Sheet
-
-struct TendiesFlashProgressSheet: View {
-    @EnvironmentObject var vm: AppViewModel
-    @Environment(\.dismiss) var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                // Status Graphic
-                VStack(spacing: 8) {
-                    if case .running = vm.tendiesFlashPhase {
-                        ProgressView()
-                            .scaleEffect(1.4)
-                            .padding(.bottom, 6)
-                        Text("Injecting Wallpapers into PosterBoard…")
-                            .font(.headline)
-                        ProgressView(value: vm.tendiesFlashProgress)
-                            .padding(.horizontal, 30)
-                    } else if case .done(let ok) = vm.tendiesFlashPhase {
-                        Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .font(.system(size: 52))
-                            .foregroundColor(ok ? .green : .red)
-                        Text(ok ? "Wallpapers Applied Successfully! 🎉" : "Flashing Failed")
-                            .font(.title3.bold())
-                    }
-                }
-                .padding(.top, 20)
-
-                // Log viewer
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(vm.tendiesFlashLog.enumerated()), id: \.offset) { idx, line in
-                                Text(line)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundColor(colorForLine(line))
-                                    .id(idx)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                    }
-                    .background(Color(UIColor.black))
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(UIColor.separator), lineWidth: 1)
-                    )
-                    .onChange(of: vm.tendiesFlashLog.count) {
-                        if let last = vm.tendiesFlashLog.indices.last {
-                            proxy.scrollTo(last)
-                        }
-                    }
-                }
-
-                if case .done = vm.tendiesFlashPhase {
-                    Button("Done") {
-                        vm.tendiesFlashPhase = .idle
-                        dismiss()
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                }
-            }
-            .padding(20)
-            .navigationTitle("PosterBoard Injection")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-
-    private func colorForLine(_ line: String) -> Color {
-        if line.contains("❌") || line.contains("error") || line.contains("Error") {
-            return .red
-        } else if line.contains("✅") || line.contains("🎉") {
-            return .green
-        } else if line.contains("⚠️") {
-            return .orange
-        } else if line.contains("🚀") || line.contains("✨") || line.contains("📦") {
-            return .cyan
-        }
-        return .white.opacity(0.85)
-    }
-}
-
-// MARK: - Tendies Document Picker (Native UIKit with asCopy: true)
+// MARK: - Tendies Document Picker
 
 struct TendiesDocumentPickerView: UIViewControllerRepresentable {
     let onPick: ([URL]) -> Void
@@ -584,7 +523,8 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
             contentTypes.insert(extType, at: 0)
         }
 
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
+        // Open in place so security-scoped URL remains valid during synchronous copy
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: false)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = true
         return picker
@@ -604,7 +544,34 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            parent.onPick(urls)
+            var copiedURLs: [URL] = []
+            let storageDir = TendiesEngine.tendiesStorageDirectory
+
+            for url in urls {
+                let shouldStop = url.startAccessingSecurityScopedResource()
+                defer {
+                    if shouldStop {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                let target = storageDir.appendingPathComponent(url.lastPathComponent)
+                if FileManager.default.fileExists(atPath: target.path) {
+                    try? FileManager.default.removeItem(at: target)
+                }
+
+                do {
+                    try FileManager.default.copyItem(at: url, to: target)
+                    copiedURLs.append(target)
+                } catch {
+                    if let data = try? Data(contentsOf: url) {
+                        try? data.write(to: target, options: .atomic)
+                        copiedURLs.append(target)
+                    }
+                }
+            }
+
+            parent.onPick(copiedURLs)
             parent.dismiss()
         }
 
@@ -613,3 +580,4 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         }
     }
 }
+
