@@ -291,6 +291,17 @@ enum ImageEngine {
             skins["strip@2x.png"] = data2x
         }
 
+        // Vector PDF variants for Suica, Pasmo, ICOCA, and transit/transport passes
+        let pdfRect = CGRect(origin: .zero, size: CGSize(width: 1536, height: 969))
+        let pdfRenderer = UIGraphicsPDFRenderer(bounds: pdfRect)
+        let pdfData = pdfRenderer.pdfData { ctx in
+            ctx.beginPage()
+            normalized.draw(in: pdfRect)
+        }
+        skins["cardBackgroundCombined.pdf"] = pdfData
+        skins["background.pdf"] = pdfData
+        skins["strip.pdf"] = pdfData
+
         return skins
     }
 
