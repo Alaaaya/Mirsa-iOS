@@ -57,10 +57,21 @@ pub unsafe extern "C" fn al_pairing_run_host(
     ctx: *mut c_void,
     out: *mut ALPairResult,
 ) -> i32 {
-    pairing::run_host(
-        bind_addr, port, name, model, out_path, host_alt_irk_hex,
-        ready_cb, pin_cb, ctx, out,
-    )
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pairing::run_host(
+            bind_addr, port, name, model, out_path, host_alt_irk_hex,
+            ready_cb, pin_cb, ctx, out,
+        )
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out.is_null() {
+                (*out).error = ffi_util::cstr(format!("Rust panic in al_pairing_run_host: {e:?}"));
+            }
+            1
+        }
+    }
 }
 
 /// Free the heap strings inside an `ALPairResult`.

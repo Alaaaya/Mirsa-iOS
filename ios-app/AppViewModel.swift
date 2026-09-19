@@ -181,7 +181,8 @@ final class AppViewModel: ObservableObject {
 
     func refreshPairingFile() {
         let path = PairingController.pairingFilePath()
-        let exists = FileManager.default.fileExists(atPath: path)
+        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+        let exists = FileManager.default.fileExists(atPath: path) && size >= 100
         hasPairingFile = exists
         pairingFileName = exists ? (path as NSString).lastPathComponent : ""
         scanDocumentsDirectory()
@@ -229,7 +230,7 @@ final class AppViewModel: ObservableObject {
                 await MainActor.run {
                     guard self.pairingPhase == .pairing else { return }
                     self.pairingStatus = ctrl.pairingStatus
-                    self.pairingPIN   = ctrl.pairingPIN
+                    self.pairingPIN = ctrl.pairingPIN
                 }
             }
         }
@@ -241,8 +242,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func deletePairingFile() {
-        let path = PairingController.pairingFilePath()
-        try? FileManager.default.removeItem(atPath: path)
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let aircardURL = docs.appendingPathComponent("aircard_pairing.plist")
+        let airliftURL = docs.appendingPathComponent("airlift_pairing.plist")
+        try? FileManager.default.removeItem(at: aircardURL)
+        try? FileManager.default.removeItem(at: airliftURL)
+        if let custom = PairingController.customPairingFilePath {
+            try? FileManager.default.removeItem(atPath: custom)
+        }
         PairingController.customPairingFilePath = nil
         refreshPairingFile()
         pairingStatus = "Pairing file deleted"
@@ -534,13 +541,12 @@ final class AppViewModel: ObservableObject {
         let pairingPath = PairingController.pairingFilePath()
 
         Task {
-            _ = await LocalNetworkAuthorization().request(timeout: 1.0)
-        }
+            _ = await LocalNetworkAuthorization().request(timeout: 2.0)
 
-        Task.detached { [weak self] in
-            guard let self = self else { return }
+            Task.detached { [weak self] in
+                guard let self = self else { return }
 
-            let total = Double(selected.count)
+                let total = Double(selected.count)
             var successCount = 0
             for (i, card) in selected.enumerated() {
                 await MainActor.run {
@@ -660,6 +666,7 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
+}
 
     // MARK: - Poster Slice
 
@@ -807,13 +814,12 @@ final class AppViewModel: ObservableObject {
         let detected = AppViewModel.detectedDeviceLanguage.code
 
         Task {
-            _ = await LocalNetworkAuthorization().request(timeout: 1.0)
-        }
+            _ = await LocalNetworkAuthorization().request(timeout: 2.0)
 
-        Task.detached { [weak self] in
-            guard let self = self else { return }
+            Task.detached { [weak self] in
+                guard let self = self else { return }
 
-            let stageThemeDir = FileManager.default.temporaryDirectory
+                let stageThemeDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("airlift_passthm_\(UUID().uuidString)")
             try? FileManager.default.createDirectory(at: stageThemeDir, withIntermediateDirectories: true)
 
@@ -970,6 +976,7 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
+}
 
     func exportPassthm() -> URL? {
         let keys = effectiveKeys
