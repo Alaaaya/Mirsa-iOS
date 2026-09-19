@@ -86,10 +86,6 @@ final class AppViewModel: ObservableObject {
     @Published var exportedThemeURL: URL? = nil
     @Published var showShareSheet: Bool = false
 
-    var isIOS27OrHigher: Bool {
-        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 17
-    }
-
     // MARK: - Shared
     @Published var errorMessage: String? = nil
     @Published var log: [String] = []
@@ -181,8 +177,7 @@ final class AppViewModel: ObservableObject {
 
     func refreshPairingFile() {
         let path = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
-        let exists = FileManager.default.fileExists(atPath: path) && size >= 100
+        let exists = FileManager.default.fileExists(atPath: path)
         hasPairingFile = exists
         pairingFileName = exists ? (path as NSString).lastPathComponent : ""
         scanDocumentsDirectory()
@@ -230,7 +225,7 @@ final class AppViewModel: ObservableObject {
                 await MainActor.run {
                     guard self.pairingPhase == .pairing else { return }
                     self.pairingStatus = ctrl.pairingStatus
-                    self.pairingPIN = ctrl.pairingPIN
+                    self.pairingPIN   = ctrl.pairingPIN
                 }
             }
         }
@@ -242,14 +237,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func deletePairingFile() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let aircardURL = docs.appendingPathComponent("aircard_pairing.plist")
-        let airliftURL = docs.appendingPathComponent("airlift_pairing.plist")
-        try? FileManager.default.removeItem(at: aircardURL)
-        try? FileManager.default.removeItem(at: airliftURL)
-        if let custom = PairingController.customPairingFilePath {
-            try? FileManager.default.removeItem(atPath: custom)
-        }
+        let path = PairingController.pairingFilePath()
+        try? FileManager.default.removeItem(atPath: path)
         PairingController.customPairingFilePath = nil
         refreshPairingFile()
         pairingStatus = "Pairing file deleted"
@@ -270,9 +259,6 @@ final class AppViewModel: ObservableObject {
     @Published var isScanningCards: Bool = false
     @Published var scanStatusText: String = ""
     private var stopScanningFlag = false
-    private let keepAlive = KeepAlive()
-    private var scanBackgroundTask: UIBackgroundTaskIdentifier = .invalid
-    private var flashBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     nonisolated static let cardRegexes: [NSRegularExpression] = [
         try! NSRegularExpression(pattern: "/(?:Cards|Passes/Cards)/([-A-Za-z0-9_+=]{20,44})(?:\\.pkpass|\\.cache|\\.pkcache|/|\\s|\"|'|\\)|,|$)"),
@@ -310,94 +296,61 @@ final class AppViewModel: ObservableObject {
         scanStatusText = "Open Apple Pay (double-click Side button) and tap your card…"
         log.append("Started live card scanner…")
 
-        // 1. Start audio keepalive and background task so iOS doesn't suspend sockets
-        keepAlive.startAudio()
-        if scanBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(scanBackgroundTask)
-            scanBackgroundTask = .invalid
-        }
-        scanBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "AirCardScan") { [weak self] in
-            Task { @MainActor in
-                self?.stopCardScanning()
-            }
-        }
-
         let pairingPath = PairingController.pairingFilePath()
 
-        Task {
-            // 2. Request local network permission before attempting socket connection
-            _ = await LocalNetworkAuthorization().request(timeout: 1.5)
+        let thread = Thread {
+            var outError: UnsafeMutablePointer<CChar>? = nil
 
-            // 3. Retain self for the C-callback context pointer
-            let unmanagedSelf = Unmanaged.passRetained(self)
-            let ctxPtr = unmanagedSelf.toOpaque()
-
-            Task.detached {
-                var outError: UnsafeMutablePointer<CChar>? = nil
-
-                let rc = pairingPath.withCString { pairC in
-                    al_syslog_stream_start(
-                        pairC,
-                        { ctx, line in
-                            guard let line = line, let ctx = ctx else { return }
-                            let lineStr = String(cString: line)
-                            let lower = lineStr.lowercased()
-                            if lower.contains("passd") ||
-                               lower.contains("passbook") ||
-                               lower.contains("passkit") ||
-                               lower.contains("stockholm") ||
-                               lower.contains("nanopassd") ||
-                               lower.contains("wallet") ||
-                               lower.contains("pdcardfilemanager") ||
-                               lower.contains("pdpasslibrary") ||
-                               lower.contains("verificationcheck") ||
-                               lower.contains("/cards/") {
-                                let vm = Unmanaged<AppViewModel>.fromOpaque(ctx).takeUnretainedValue()
-                                Task { @MainActor in
-                                    vm.processSyslogLine(lineStr)
-                                }
+            let rc = pairingPath.withCString { pairC in
+                al_syslog_stream_start(
+                    pairC,
+                    { _, line in
+                        guard let line = line else { return }
+                        let lineStr = String(cString: line)
+                        let lower = lineStr.lowercased()
+                        // Pre-filter on background thread to prevent flooding the main runloop
+                        if lower.contains("pass") ||
+                           lower.contains("card") ||
+                           lower.contains("stockholm") ||
+                           lower.contains("wallet") ||
+                           lower.contains("nanopass") ||
+                           lower.contains("verificationcheck") {
+                            DispatchQueue.main.async {
+                                AppViewModel.shared?.processSyslogLine(lineStr)
                             }
-                        },
-                        ctxPtr,
-                        &outError
-                    )
-                }
+                        }
+                    },
+                    nil,
+                    &outError
+                )
+            }
 
-                unmanagedSelf.release()
+            let errStr = outError.flatMap { String(validatingUTF8: $0) }
+            if let p = outError { al_string_free(p) }
 
-                let errStr = outError.flatMap { String(validatingUTF8: $0) }
-                if let p = outError { al_string_free(p) }
-
-                await MainActor.run {
-                    guard let vm = AppViewModel.shared else { return }
-                    vm.isScanningCards = false
-                    vm.keepAlive.stopAudio()
-                    if vm.scanBackgroundTask != .invalid {
-                        UIApplication.shared.endBackgroundTask(vm.scanBackgroundTask)
-                        vm.scanBackgroundTask = .invalid
-                    }
-                    if rc != 0 {
-                        let msg = errStr ?? "rc=\(rc)"
-                        vm.scanStatusText = "Scanner stopped: \(msg)"
-                        vm.log.append("❌ Scanner error: \(msg)")
-                        vm.errorMessage = "Card scanner error: \(msg)"
-                    } else {
-                        vm.scanStatusText = "Scanning stopped. Total cards: \(vm.cards.count)."
-                        vm.log.append("Scanning stopped. Total cards: \(vm.cards.count).")
-                    }
+            DispatchQueue.main.async {
+                guard let vm = AppViewModel.shared else { return }
+                vm.isScanningCards = false
+                if rc != 0 {
+                    let msg = errStr ?? "rc=\(rc)"
+                    vm.scanStatusText = "Scanner stopped: \(msg)"
+                    vm.log.append("❌ Scanner error: \(msg)")
+                    vm.errorMessage = "Card scanner error: \(msg)"
+                } else {
+                    vm.scanStatusText = "Scanning stopped. Total cards: \(vm.cards.count)."
+                    vm.log.append("Scanning stopped. Total cards: \(vm.cards.count).")
                 }
             }
         }
+        thread.name = "AirCard.SyslogScanner"
+        thread.stackSize = 4 * 1024 * 1024 // 4 MB stack
+        thread.qualityOfService = .userInitiated
+        thread.start()
     }
 
     func stopCardScanning() {
         al_syslog_stream_stop()
         isScanningCards = false
-        keepAlive.stopAudio()
-        if scanBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(scanBackgroundTask)
-            scanBackgroundTask = .invalid
-        }
         scanStatusText = "Scanning stopped. Total cards: \(cards.count)."
         saveCards()
     }
@@ -433,38 +386,26 @@ final class AppViewModel: ObservableObject {
 
         guard isWalletContext else { return }
 
-        var foundCandidates = Set<String>()
         for regex in Self.cardRegexes {
             let matches = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
             for m in matches {
                 if m.numberOfRanges > 1, let r = Range(m.range(at: 1), in: line) {
-                    let candidate = String(line[r]).trimmingCharacters(in: CharacterSet(charactersIn: "'\",. \t\r\n/"))
-                    if candidate.count == 36 && candidate.contains("-") { continue }
+                    let candidateRaw = String(line[r])
+                    guard let candidate = CardItem.cleanCardId(candidateRaw) else { continue }
                     if Self.dummyCardHashes.contains(candidate) { continue }
-                    if candidate.count >= 20 && candidate.count <= 44 {
-                        foundCandidates.insert(candidate)
+                    if !self.cards.contains(where: { $0.id == candidate }) {
+                        self.cards.append(CardItem(id: candidate, isSelected: true))
+                        self.saveCards()
+                        self.scanStatusText = "Found card: \(candidate)"
+                        self.log.append("Found card: \(candidate)")
+                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     }
                 }
             }
         }
-
-        var anyAdded = false
-        for candidate in foundCandidates {
-            if !self.cards.contains(where: { $0.id == candidate }) {
-                self.cards.append(CardItem(id: candidate, isSelected: true))
-                self.scanStatusText = "Found card: \(candidate)"
-                self.log.append("Found card: \(candidate)")
-                anyAdded = true
-            }
-        }
-
-        if anyAdded {
-            self.saveCards()
-            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        }
     }
 
-    private func cardImagePath(for cardId: String) -> URL {
+    nonisolated static func cardImagePath(for cardId: String) -> URL {
         let safeId = cardId.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "+", with: "-")
         let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let cardsDir = docDir.appendingPathComponent("WalletCards", isDirectory: true)
@@ -482,27 +423,24 @@ final class AppViewModel: ObservableObject {
                 break
             }
         }
-        var seen = Set<String>()
-        var uniqueHashes: [String] = []
-        for h in foundHashes {
-            let clean = h.trimmingCharacters(in: CharacterSet(charactersIn: "'\",. \t\r\n/"))
-            if !clean.isEmpty && !Self.dummyCardHashes.contains(clean) && !seen.contains(clean) {
-                seen.insert(clean)
-                uniqueHashes.append(clean)
+        var unique: [String] = []
+        for raw in foundHashes {
+            if let clean = CardItem.cleanCardId(raw), !unique.contains(clean) {
+                unique.append(clean)
             }
         }
-
-        cards = uniqueHashes.map { id in
-            let path = cardImagePath(for: id)
+        cards = unique.filter { !Self.dummyCardHashes.contains($0) }.map { id in
+            let path = Self.cardImagePath(for: id)
             let data = try? Data(contentsOf: path)
-            let img = data.flatMap { UIImage(data: $0) }
+            // Downsampled thumbnail keeps RAM minimal, preventing Jetsam OOM kills
+            let img = data.flatMap { ImageEngine.safeImageFromData($0, maxDimension: 512) }
             return CardItem(id: id, customImageData: data, customImage: img)
         }
     }
 
     func clearAllCards() {
         for card in cards {
-            let path = cardImagePath(for: card.id)
+            let path = Self.cardImagePath(for: card.id)
             try? FileManager.default.removeItem(at: path)
         }
         cards.removeAll()
@@ -510,18 +448,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func saveCards() {
-        var seen = Set<String>()
-        var uniqueHashes: [String] = []
-        for card in cards {
-            let clean = card.id.trimmingCharacters(in: CharacterSet(charactersIn: "'\",. \t\r\n/"))
-            if !clean.isEmpty && !seen.contains(clean) {
-                seen.insert(clean)
-                uniqueHashes.append(clean)
-            }
-        }
-        for key in storageKeys {
-            UserDefaults.standard.set(uniqueHashes, forKey: key)
-        }
+        let hashes = cards.map(\.id)
+        UserDefaults.standard.set(hashes, forKey: "aircard.cards")
+        UserDefaults.standard.set(hashes, forKey: "airlift.cards")
+        UserDefaults.standard.set(hashes, forKey: "mak5er.savedCards")
     }
 
     func setSkinForAllCards(image: UIImage) {
@@ -543,9 +473,8 @@ final class AppViewModel: ObservableObject {
         let parts = raw.components(separatedBy: CharacterSet(charactersIn: " \n\r\t,;"))
         var added = 0
         for p in parts {
-            let clean = p.trimmingCharacters(in: CharacterSet(charactersIn: "'\",. \t\r\n/"))
-            if clean.count >= 16 && clean.count <= 64 &&
-                !cards.contains(where: { $0.id == clean }) {
+            if let clean = CardItem.cleanCardId(p),
+               !cards.contains(where: { $0.id == clean }) {
                 cards.append(CardItem(id: clean))
                 added += 1
             }
@@ -564,7 +493,7 @@ final class AppViewModel: ObservableObject {
             cards.removeAll { $0.id == id }
         }
         saveCards()
-        let path = cardImagePath(for: id)
+        let path = Self.cardImagePath(for: id)
         try? FileManager.default.removeItem(at: path)
     }
 
@@ -573,15 +502,18 @@ final class AppViewModel: ObservableObject {
             cards[idx].customImage = nil
             cards[idx].customImageData = nil
         }
-        let path = cardImagePath(for: cardId)
+        let path = Self.cardImagePath(for: cardId)
         try? FileManager.default.removeItem(at: path)
     }
 
     func setCardImage(for cardId: String, image: UIImage) {
         guard let idx = cards.firstIndex(where: { $0.id == cardId }) else { return }
-        cards[idx].customImage = image
+        // Keep a lightweight thumbnail in memory for responsive UI & OOM protection
+        let thumb = ImageEngine.normalizeAndDownsample(image, maxDimension: 512)
+        cards[idx].customImage = thumb
 
-        let path = cardImagePath(for: cardId)
+        let actualId = cards[idx].id
+        let path = Self.cardImagePath(for: actualId)
         // Generate full resolution PNG data asynchronously in background
         Task.detached(priority: .userInitiated) {
             let data = ImageEngine.prepareCardImage(from: image)
@@ -589,7 +521,7 @@ final class AppViewModel: ObservableObject {
                 try? data.write(to: path)
             }
             await MainActor.run {
-                if let i = AppViewModel.shared?.cards.firstIndex(where: { $0.id == cardId }) {
+                if let i = AppViewModel.shared?.cards.firstIndex(where: { $0.id == actualId }) {
                     AppViewModel.shared?.cards[i].customImageData = data
                 }
             }
@@ -615,40 +547,34 @@ final class AppViewModel: ObservableObject {
         errorMessage = nil
 
         if !vpnUp {
-            cardFlashLog.append("⚠️ Notice: Loopback VPN not detected in active routes, attempting direct connection...")
-        }
-
-        // Keep audio running and start background task so flashing is not interrupted by sleep or app switching
-        keepAlive.startAudio()
-        if flashBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(flashBackgroundTask)
-            flashBackgroundTask = .invalid
-        }
-        flashBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CardFlash") { [weak self] in
-            Task { @MainActor in
-                self?.cardFlashPhase = .done(ok: false)
-                self?.cardFlashLog.append("⚠️ Flash aborted: iOS background execution limit reached.")
-            }
+            cardFlashLog.append("⚠️ Notice: Loopback VPN not detected, attempting direct loopback (127.0.0.1)...")
         }
 
         let pairingPath = PairingController.pairingFilePath()
 
-        Task {
-            _ = await LocalNetworkAuthorization().request(timeout: 1.5)
-
-            Task.detached { [weak self] in
-                guard let self = self else { return }
-
-                let total = Double(selected.count)
+        Task.detached { [weak self] in
+            guard let self = self else { return }
+            let total = Double(selected.count)
             var successCount = 0
             for (i, card) in selected.enumerated() {
+                let cleanId = CardItem.cleanCardId(card.id) ?? card.id
+                let safeCardId = cleanId.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "+", with: "-")
+
                 await MainActor.run {
-                    self.cardFlashLog.append("[\(i+1)/\(selected.count)] Flashing card \(card.id.prefix(12))…")
+                    self.cardFlashLog.append("[\(i+1)/\(selected.count)] Flashing card \(cleanId.prefix(12))…")
                     self.cardFlashProgress = Double(i) / total
                 }
 
-                guard let sourceImg = await MainActor.run(body: { card.customImage ?? card.customImageData.flatMap { UIImage(data: $0) } }) else {
-                    await MainActor.run { self.cardFlashLog.append("  ⚠️ No image for card \(card.id.prefix(8))") }
+                // Load source image at full resolution on demand to save memory
+                let sourceImg: UIImage? = {
+                    if let d = card.customImageData, let img = UIImage(data: d) { return img }
+                    let p = Self.cardImagePath(for: cleanId)
+                    if let d = try? Data(contentsOf: p), let img = UIImage(data: d) { return img }
+                    return card.customImage
+                }()
+
+                guard let sourceImg = sourceImg else {
+                    await MainActor.run { self.cardFlashLog.append("  ⚠️ No image for card \(cleanId.prefix(8))") }
                     continue
                 }
 
@@ -660,18 +586,17 @@ final class AppViewModel: ObservableObject {
                 }
 
                 let stageCardDir = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("airlift_card_\(card.id)_\(UUID().uuidString)")
+                    .appendingPathComponent("airlift_card_\(safeCardId)_\(UUID().uuidString)")
                 try? FileManager.default.createDirectory(at: stageCardDir, withIntermediateDirectories: true)
-                defer { try? FileManager.default.removeItem(at: stageCardDir) }
 
                 for (name, data) in allSkins {
                     try? data.write(to: stageCardDir.appendingPathComponent(name))
                 }
 
-                let pkpassTarget = "/var/mobile/Library/Passes/Cards/\(card.id).pkpass"
+                let pkpassTarget = "/var/mobile/Library/Passes/Cards/\(cleanId).pkpass"
 
                 await MainActor.run {
-                    self.cardFlashLog.append("  ⚡ Injecting skins into \(card.id.prefix(10)).pkpass…")
+                    self.cardFlashLog.append("  ⚡ Injecting skins into \(cleanId.prefix(10)).pkpass…")
                 }
 
                 var writeOk = false
@@ -699,6 +624,8 @@ final class AppViewModel: ObservableObject {
                     }
                 }
 
+                try? FileManager.default.removeItem(at: stageCardDir)
+
                 if !writeOk {
                     await MainActor.run {
                         self.cardFlashLog.append("  ❌ Failed to write card skins: \(errDesc ?? "exploit error")")
@@ -710,7 +637,7 @@ final class AppViewModel: ObservableObject {
                     self.cardFlashLog.append("  ✅ Skins applied! Invalidating pass cache…")
                 }
 
-                // 2. Invalidate cache leaves
+                // 2. Invalidate cache leaves (best effort: some iOS versions don't have .cache or .pkcache folders)
                 let stageInvDir = FileManager.default.temporaryDirectory
                     .appendingPathComponent("airlift_inv_\(UUID().uuidString)")
                 try? FileManager.default.createDirectory(at: stageInvDir, withIntermediateDirectories: true)
@@ -719,7 +646,7 @@ final class AppViewModel: ObservableObject {
                 }
 
                 for ext in [".cache", ".pkcache"] {
-                    let cacheTarget = "/var/mobile/Library/Passes/Cards/\(card.id)\(ext)"
+                    let cacheTarget = "/var/mobile/Library/Passes/Cards/\(cleanId)\(ext)"
                     await withCheckedContinuation { cont in
                         DispatchQueue.global(qos: .userInitiated).async {
                             var outError: UnsafeMutablePointer<CChar>? = nil
@@ -745,11 +672,6 @@ final class AppViewModel: ObservableObject {
             }
 
             await MainActor.run {
-                self.keepAlive.stopAudio()
-                if self.flashBackgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(self.flashBackgroundTask)
-                    self.flashBackgroundTask = .invalid
-                }
                 if successCount > 0 {
                     self.cardFlashPhase = .done(ok: true)
                     self.cardFlashProgress = 1.0
@@ -763,7 +685,6 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-}
 
     // MARK: - Poster Slice
 
@@ -905,20 +826,7 @@ final class AppViewModel: ObservableObject {
         errorMessage = nil
 
         if !vpnUp {
-            passthmFlashLog.append("⚠️ Notice: Loopback VPN not detected in active routes, attempting direct connection...")
-        }
-
-        // Keep audio running and start background task so flashing is not interrupted by sleep or app switching
-        keepAlive.startAudio()
-        if flashBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(flashBackgroundTask)
-            flashBackgroundTask = .invalid
-        }
-        flashBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PassthmFlash") { [weak self] in
-            Task { @MainActor in
-                self?.passthmFlashPhase = .done(ok: false)
-                self?.passthmFlashLog.append("⚠️ Flash aborted: iOS background execution limit reached.")
-            }
+            passthmFlashLog.append("⚠️ Notice: Loopback VPN not detected, attempting direct loopback (127.0.0.1)...")
         }
 
         let pairingPath = PairingController.pairingFilePath()
@@ -927,16 +835,12 @@ final class AppViewModel: ObservableObject {
         let targetBold = passcodeBoldTarget
         let detected = AppViewModel.detectedDeviceLanguage.code
 
-        Task {
-            _ = await LocalNetworkAuthorization().request(timeout: 1.5)
+        Task.detached { [weak self] in
+            guard let self = self else { return }
 
-            Task.detached { [weak self] in
-                guard let self = self else { return }
-
-                let stageThemeDir = FileManager.default.temporaryDirectory
+            let stageThemeDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("airlift_passthm_\(UUID().uuidString)")
             try? FileManager.default.createDirectory(at: stageThemeDir, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: stageThemeDir) }
 
             let langs: [String]
             if targetLang == .all {
@@ -1075,12 +979,9 @@ final class AppViewModel: ObservableObject {
                 }
             }
 
+            try? FileManager.default.removeItem(at: stageThemeDir)
+
             await MainActor.run {
-                self.keepAlive.stopAudio()
-                if self.flashBackgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(self.flashBackgroundTask)
-                    self.flashBackgroundTask = .invalid
-                }
                 if allOk {
                     self.passthmFlashProgress = 1.0
                     self.passthmFlashPhase = .done(ok: true)
@@ -1094,7 +995,6 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
-}
 
     func exportPassthm() -> URL? {
         let keys = effectiveKeys

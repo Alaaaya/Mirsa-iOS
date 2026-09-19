@@ -16,6 +16,29 @@ struct CardItem: Identifiable, Equatable {
         customImage ?? (customImageData.flatMap { UIImage(data: $0) })
     }
 
+    /// Normalizes and cleans a card identifier, stripping paths, extensions (.pkpass, .cache),
+    /// quotes, and whitespace. Validates length and format.
+    static func cleanCardId(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.trimmingCharacters(in: CharacterSet(charactersIn: "'\",()<>;[]{}"))
+        if s.contains("/") {
+            s = (s as NSString).lastPathComponent
+        }
+        for ext in [".pkpass", ".cache", ".pkcache"] {
+            if s.hasSuffix(ext) {
+                s = String(s.dropLast(ext.count))
+            }
+        }
+        s = s.trimmingCharacters(in: CharacterSet(charactersIn: "'\",()<>;[]{}. "))
+        if s.count >= 20 && s.count <= 64 && !s.contains("/") {
+            if s.count == 36 && s.filter({ $0 == "-" }).count == 4 {
+                return nil // UUID format, not a card hash
+            }
+            return s
+        }
+        return nil
+    }
+
     static func == (lhs: CardItem, rhs: CardItem) -> Bool {
         lhs.id == rhs.id &&
         lhs.isSelected == rhs.isSelected &&
@@ -247,27 +270,26 @@ enum ImageEngine {
 
     /// Prepares all exact resolution files for Apple Wallet pass skins.
     /// Perfectly fits standard, Plus, Pro, and Pro Max screens.
+    /// Emits cardBackgroundCombined, diffuse, background, and strip so all Apple Pay passes are covered.
     static func prepareAllCardSkins(from image: UIImage) -> [String: Data] {
         let normalized = normalizeAndDownsample(image, maxDimension: 2560)
         var skins: [String: Data] = [:]
 
-        // Main card background (combined with icon / logo)
-        // Apple Wallet pass renderer requires @3x and @2x of cardBackgroundCombined.png,
-        // and cardBackgroundCombined.pdf for PDF-backed transit cards (e.g. Suica, Pasmo).
-        if let bg3x = resizeImage(normalized, targetSize: CGSize(width: 1536, height: 969)) {
-            skins["cardBackgroundCombined@3x.png"] = bg3x
-        }
-        if let bg2x = resizeImage(normalized, targetSize: CGSize(width: 1024, height: 646)) {
-            skins["cardBackgroundCombined@2x.png"] = bg2x
-        }
+        let bg3x = resizeImage(normalized, targetSize: CGSize(width: 1536, height: 969))
+        let bg2x = resizeImage(normalized, targetSize: CGSize(width: 1024, height: 646))
 
-        let pdfRect = CGRect(origin: .zero, size: CGSize(width: 1536, height: 969))
-        let pdfRenderer = UIGraphicsPDFRenderer(bounds: pdfRect)
-        let pdfData = pdfRenderer.pdfData { ctx in
-            ctx.beginPage()
-            normalized.draw(in: pdfRect)
+        if let data3x = bg3x {
+            skins["cardBackgroundCombined@3x.png"] = data3x
+            skins["diffuse@3x.png"] = data3x
+            skins["background@3x.png"] = data3x
+            skins["strip@3x.png"] = data3x
         }
-        skins["cardBackgroundCombined.pdf"] = pdfData
+        if let data2x = bg2x {
+            skins["cardBackgroundCombined@2x.png"] = data2x
+            skins["diffuse@2x.png"] = data2x
+            skins["background@2x.png"] = data2x
+            skins["strip@2x.png"] = data2x
+        }
 
         return skins
     }
@@ -486,9 +508,7 @@ enum PasscodeThemePackager {
 
         let targetVers: [String]
         if telephonyVersion == "all" || telephonyVersion.isEmpty {
-            // Modern iOS (17, 18+) exclusively uses TelephonyUI-10.
-            // Focusing on TelephonyUI-10 avoids generating 4,000+ uncompressed images in RAM (saving ~350MB and preventing Jetsam OOM kills).
-            targetVers = ["TelephonyUI-10"]
+            targetVers = ["TelephonyUI-10", "TelephonyUI-9", "TelephonyUI-8"]
         } else {
             targetVers = [telephonyVersion]
         }
@@ -549,7 +569,7 @@ enum PasscodeThemePackager {
     }
 
     static func buildPassthm(keys: [String: UIImage]) throws -> Data {
-        try buildPassthm(keys: keys, telephonyVersion: "TelephonyUI-10", language: .all, bold: .both)
+        try buildPassthm(keys: keys, telephonyVersion: "all", language: .all, bold: .both)
     }
 
     // MARK: - Zip primitives
