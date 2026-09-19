@@ -35,14 +35,24 @@ public final class TendiesEngine {
         let baseName = (fileName as NSString).deletingPathExtension
         let destinationURL = Self.tendiesStorageDirectory.appendingPathComponent(fileName)
 
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            try? FileManager.default.removeItem(at: destinationURL)
+        if sourceURL.standardizedFileURL.path != destinationURL.standardizedFileURL.path {
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try? FileManager.default.removeItem(at: destinationURL)
+            }
+            do {
+                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            } catch {
+                let fileData = try Data(contentsOf: sourceURL)
+                try fileData.write(to: destinationURL, options: .atomic)
+            }
         }
-        do {
-            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-        } catch {
-            let fileData = try Data(contentsOf: sourceURL)
-            try fileData.write(to: destinationURL, options: .atomic)
+
+        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
+            throw NSError(
+                domain: "TendiesEngine",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to store wallpaper file at \(destinationURL.path)"]
+            )
         }
 
         // Staging extraction to inspect contents
