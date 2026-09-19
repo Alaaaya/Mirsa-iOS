@@ -486,7 +486,9 @@ enum PasscodeThemePackager {
 
         let targetVers: [String]
         if telephonyVersion == "all" || telephonyVersion.isEmpty {
-            targetVers = ["TelephonyUI-10", "TelephonyUI-9", "TelephonyUI-8"]
+            // Modern iOS (17, 18+) exclusively uses TelephonyUI-10.
+            // Focusing on TelephonyUI-10 avoids generating 4,000+ uncompressed images in RAM (saving ~350MB and preventing Jetsam OOM kills).
+            targetVers = ["TelephonyUI-10"]
         } else {
             targetVers = [telephonyVersion]
         }
@@ -547,7 +549,7 @@ enum PasscodeThemePackager {
     }
 
     static func buildPassthm(keys: [String: UIImage]) throws -> Data {
-        try buildPassthm(keys: keys, telephonyVersion: "all", language: .all, bold: .both)
+        try buildPassthm(keys: keys, telephonyVersion: "TelephonyUI-10", language: .all, bold: .both)
     }
 
     // MARK: - Zip primitives

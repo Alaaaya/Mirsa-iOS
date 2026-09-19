@@ -1143,6 +1143,11 @@ struct WalletCardsTab: View {
             .onAppear {
                 vm.refreshNetworkStatus()
             }
+            .onDisappear {
+                if vm.isScanningCards {
+                    vm.stopCardScanning()
+                }
+            }
         }
     }
 

@@ -53,22 +53,45 @@ enum NetworkStatus {
     }
 
     private static func isLoopbackTunnelUp(in ifs: [Interface], deviceIP: String) -> Bool {
+        let tunnels = ifs.filter { isTunnelInterface($0.name) }
+        guard !tunnels.isEmpty else { return false }
+
         guard let target = ipv4Value(deviceIP) else {
-            return ifs.contains { isTunnelInterface($0.name) }
+            return true
         }
-        if tunnelCarriesRoute(to: deviceIP, in: ifs) == true { return true }
-        return ifs.contains { isTunnelInterface($0.name) && subnet($0, contains: target) }
+
+        // 1. Direct subnet or IP match (point-to-point /32 tunnels like WireGuard/LocalDevVPN share 10.7.0.x / 10.0.0.x)
+        for iface in tunnels {
+            if subnet(iface, contains: target) {
+                return true
+            }
+            if let ifaceVal = ipv4Value(iface.ipv4) {
+                // Same /24 subnet (e.g. 10.7.0.x matching 10.7.0.1)
+                if (ifaceVal & 0xFFFF_FF00) == (target & 0xFFFF_FF00) {
+                    return true
+                }
+                // Same /8 subnet for 10.x.x.x
+                if (ifaceVal & 0xFF00_0000) == 0x0A00_0000 && (target & 0xFF00_0000) == 0x0A00_0000 {
+                    return true
+                }
+            }
+        }
+
+        // 2. Kernel routing check: does the route to deviceIP egress via a tunnel interface?
+        if let routeViaTunnel = tunnelCarriesRoute(to: deviceIP, in: ifs), routeViaTunnel {
+            return true
+        }
+
+        // 3. Fallback: if any tunnel interface has a non-loopback IPv4 address
+        return tunnels.contains { !$0.ipv4.isEmpty && !$0.ipv4.hasPrefix("127.") }
     }
 
     private static func tunnelCarriesRoute(to deviceIP: String, in ifs: [Interface]) -> Bool? {
         guard let source = routeSource(to: deviceIP),
               let iface = ifs.first(where: { $0.ipv4 == source })
         else { return nil }
-        guard isTunnelInterface(iface.name) else { return false }
-        return routeSource(to: defaultRouteProbe) != source
+        return isTunnelInterface(iface.name)
     }
-
-    private static let defaultRouteProbe = "203.0.113.1"
 
     private static func routeSource(to ip: String) -> String? {
         var remote = sockaddr_in()
@@ -123,6 +146,10 @@ enum NetworkStatus {
     private static func subnet(_ interface: Interface, contains target: UInt32) -> Bool {
         guard let address = ipv4Value(interface.ipv4) else { return false }
         guard let mask = interface.netmask.flatMap(ipv4Value), mask != 0 else {
+            return (address & 0xFFFF_FF00) == (target & 0xFFFF_FF00)
+        }
+        if mask == 0xFFFF_FFFF {
+            // Point-to-point VPN tunnel: compare first 3 octets (/24)
             return (address & 0xFFFF_FF00) == (target & 0xFFFF_FF00)
         }
         return (address & mask) == (target & mask)
