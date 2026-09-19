@@ -24,6 +24,10 @@ struct AirCardApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(vm)
+                .task {
+                    // Trigger iOS local network permission prompt immediately on launch
+                    _ = await LocalNetworkAuthorization().request(timeout: 2.5)
+                }
         }
     }
 }

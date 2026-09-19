@@ -359,6 +359,45 @@ struct ContentView: View {
                 ShareSheet(items: [url])
             }
         }
+        .onAppear {
+            Task {
+                _ = await LocalNetworkAuthorization().request(timeout: 2.0)
+            }
+        }
+    }
+}
+
+// MARK: - Reusable VPN Warning Banner
+
+struct VPNWarningBanner: View {
+    @ObservedObject var vm: AppViewModel
+
+    var body: some View {
+        if !vm.vpnUp {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("LocalDevVPN is Not Connected")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.orange)
+                    Spacer()
+                }
+
+                Text("The exploit requires LocalDevVPN connected to reach 10.7.0.1 on-device. Please open LocalDevVPN and tap Connect.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Link("Launch LocalDevVPN", destination: URL(string: "localdevvpn://")!)
+                    .font(.caption.bold())
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(12)
+            .background(Color.orange.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+        }
     }
 }
 
@@ -943,6 +982,8 @@ struct WalletCardsTab: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    VPNWarningBanner(vm: vm)
+
                     scannerBanner
 
                     if vm.cards.isEmpty {
@@ -1098,6 +1139,9 @@ struct WalletCardsTab: View {
                     }
                     activePicker = nil
                 }
+            }
+            .onAppear {
+                vm.refreshNetworkStatus()
             }
         }
     }
@@ -1324,6 +1368,14 @@ struct PasscodeThemeTab: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !vm.vpnUp {
+                    Section {
+                        VPNWarningBanner(vm: vm)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    }
+                }
+
                 // Mode picker
                 Section {
                     Picker("Mode", selection: $vm.passcodeMode) {
@@ -1365,7 +1417,10 @@ struct PasscodeThemeTab: View {
             .sheet(isPresented: $showCredits) {
                 CreditsSheet()
             }
-            .onAppear { vm.scanDocumentsDirectory() }
+            .onAppear {
+                vm.scanDocumentsDirectory()
+                vm.refreshNetworkStatus()
+            }
         }
     }
 }

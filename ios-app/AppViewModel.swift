@@ -533,8 +533,13 @@ final class AppViewModel: ObservableObject {
 
         let pairingPath = PairingController.pairingFilePath()
 
+        Task {
+            _ = await LocalNetworkAuthorization().request(timeout: 1.0)
+        }
+
         Task.detached { [weak self] in
             guard let self = self else { return }
+
             let total = Double(selected.count)
             var successCount = 0
             for (i, card) in selected.enumerated() {
@@ -800,6 +805,10 @@ final class AppViewModel: ObservableObject {
         let targetLang = passcodeLanguageTarget
         let targetBold = passcodeBoldTarget
         let detected = AppViewModel.detectedDeviceLanguage.code
+
+        Task {
+            _ = await LocalNetworkAuthorization().request(timeout: 1.0)
+        }
 
         Task.detached { [weak self] in
             guard let self = self else { return }
