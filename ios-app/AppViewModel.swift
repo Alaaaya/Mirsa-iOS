@@ -1144,11 +1144,13 @@ final class AppViewModel: ObservableObject {
         saveTendieItems()
     }
 
-    func autoDetectPosterBoardContainer() async {
+    func autoDetectPosterBoardContainer(silent: Bool = false) async {
         let pairingPath = PairingController.pairingFilePath()
         guard FileManager.default.fileExists(atPath: pairingPath) else {
-            await MainActor.run {
-                self.errorMessage = "No pairing file active. Pair your device first in the Pairing tab."
+            if !silent {
+                await MainActor.run {
+                    self.errorMessage = "No pairing file active. Pair your device first in the Pairing tab."
+                }
             }
             return
         }
@@ -1163,12 +1165,16 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 self.posterBoardContainer = container
                 UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
-                self.successAlertMessage = "PosterBoard container discovered:\n\(container)"
-                self.showSuccessAlert = true
+                if !silent {
+                    self.successAlertMessage = "PosterBoard container discovered:\n\(container)"
+                    self.showSuccessAlert = true
+                }
             }
         } catch {
-            await MainActor.run {
-                self.errorMessage = "Auto-detect failed: \(error.localizedDescription)\nEnsure LocalDevVPN is connected and device is unlocked."
+            if !silent {
+                await MainActor.run {
+                    self.errorMessage = "Auto-detect failed: \(error.localizedDescription)\nEnsure LocalDevVPN is connected and device is unlocked."
+                }
             }
         }
     }
@@ -1193,7 +1199,7 @@ final class AppViewModel: ObservableObject {
                 self.posterBoardContainer = container
                 UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
             } catch {
-                errorMessage = "PosterBoard container could not be found automatically. Please enter it manually or tap Auto-Detect."
+                errorMessage = "PosterBoard container could not be found automatically. Ensure LocalDevVPN is connected and iPhone is unlocked."
                 return
             }
         }
@@ -1220,63 +1226,26 @@ final class AppViewModel: ObservableObject {
                 }
             )
             tendiesFlashPhase = .done(ok: true)
-            tendiesFlashLog.append("🎉 Wallpapers applied! Triggering respring...")
-            await respringDevice()
+            tendiesFlashProgress = 1.0
+            tendiesFlashLog.append("🎉 Wallpapers applied to PosterBoard successfully!")
+            tendiesFlashLog.append("👉 Tap 'Respring SpringBoard' to reload without rebooting.")
+            successAlertMessage = "Wallpapers successfully installed! 🎉\n\nTo view them on your Lock Screen, tap 'Respring' to reload SpringBoard without rebooting."
+            showSuccessAlert = true
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
             tendiesFlashPhase = .done(ok: false)
         }
     }
 
-    func respringDevice() async {
-        await MainActor.run {
-            self.tendiesFlashLog.append("🔄 Triggering SpringBoard respring (no reboot)…")
-        }
-
-        // 1. Try private FrontBoard / SpringBoardServices relaunch action first (instant in-memory respring)
+    func respringDevice() {
+        tendiesFlashLog.append("🔄 Opening Display Zoom: tap 'Done' to reload SpringBoard instantly (no reboot)…")
+        // Try private framework first if available
         if RespringHelper.respring() {
-            await MainActor.run {
-                self.tendiesFlashLog.append("✅ SpringBoard relaunch triggered via FrontBoardServices!")
-            }
+            tendiesFlashLog.append("✅ SpringBoard relaunch triggered via FrontBoardServices!")
             return
         }
-
-        // 2. Try notification proxy reload over pairing tunnel
-        let pairingPath = PairingController.pairingFilePath()
-        if FileManager.default.fileExists(atPath: pairingPath) {
-            await withCheckedContinuation { cont in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    var outError: UnsafeMutablePointer<CChar>? = nil
-                    let rc = pairingPath.withCString { pairC in
-                        al_device_respring(pairC, { _, msg in
-                            guard let msg = msg else { return }
-                            let line = String(cString: msg)
-                            DispatchQueue.main.async {
-                                AppViewModel.shared?.tendiesFlashLog.append("  " + line)
-                            }
-                        }, nil, &outError)
-                    }
-
-                    DispatchQueue.main.async {
-                        if rc == 0 {
-                            self.tendiesFlashLog.append("✅ Respring notification sent! Check your Lock Screen.")
-                        } else {
-                            let err = outError != nil ? String(cString: outError!) : "notification notice"
-                            self.tendiesFlashLog.append("ℹ️ \(err)")
-                        }
-                    }
-                    if let p = outError {
-                        al_string_free(p)
-                    }
-                    cont.resume()
-                }
-            }
-        }
-
-        // 3. Provide instant Display Zoom shortcut option so user can tap Done to respring without reboot
-        await MainActor.run {
-            self.tendiesFlashLog.append("💡 Tip: You can also tap 'Quick Respring (Display Zoom)' to reload SpringBoard.")
-        }
+        // Open Display Zoom settings (100% reliable native respring across all iOS versions)
+        RespringHelper.openDisplayZoomSettings()
     }
 
     func reset() {

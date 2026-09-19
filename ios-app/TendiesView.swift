@@ -13,8 +13,6 @@ struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
     @State private var selectedDetailItem: TendieItem? = nil
-    @State private var showManualContainerEditor = false
-    @State private var manualContainerInput = ""
 
     private var selectedCount: Int {
         vm.tendieItems.filter { $0.isSelected }.count
@@ -66,76 +64,32 @@ struct TendiesView: View {
                     }
                 }
 
-                // Section 1: PosterBoard Container Target
-                Section("PosterBoard Target") {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            if vm.posterBoardContainer.isEmpty {
-                                Text("Container not detected")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                Text("Connect LocalDevVPN and tap Auto-Detect")
-                                    .font(.caption)
-                                    .foregroundColor(.orange)
-                            } else {
-                                Text(vm.posterBoardContainer)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text("Active PosterBoard data container")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if vm.isDetectingContainer {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Button("Auto-Detect") {
-                                Task { await vm.autoDetectPosterBoardContainer() }
-                            }
-                            .font(.caption.bold())
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        }
+                // Section 1: Import Wallpapers
+                Section {
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label(vm.tendieItems.isEmpty ? "Choose .tendies from Files…" : "Import More Wallpapers…", systemImage: "doc.badge.plus")
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-
-                    if !vm.posterBoardContainer.isEmpty {
-                        Button {
-                            manualContainerInput = vm.posterBoardContainer
-                            showManualContainerEditor = true
-                        } label: {
-                            Label("Edit Container Path Manually", systemImage: "pencil")
-                                .font(.caption)
-                        }
+                } footer: {
+                    if vm.posterBoardContainer.isEmpty {
+                        Text("PosterBoard container will be auto-detected automatically on flash.")
+                    } else {
+                        Text("Target: PosterBoard container detected ✅")
                     }
+                }
 
+                // Section 2: PosterBoard Options
+                Section {
                     Toggle(isOn: $vm.resetPBProtections) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Force PosterBoard Cache Refresh")
                                 .font(.subheadline.weight(.medium))
-                            Text("Resets file protections so iOS discovers new wallpapers immediately")
+                            Text("Resets file protections so iOS re-indexes wallpapers immediately")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
-                    }
-                }
-
-                // Section 2: Browse Files & Documents
-                Section("Browse Wallpapers") {
-                    Button {
-                        showFilePicker = true
-                    } label: {
-                        Label("Choose .tendies from Files…", systemImage: "doc.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Button {
-                        vm.scanDocumentsForTendies()
-                    } label: {
-                        Label("Scan App Documents Folder", systemImage: "folder.badge.gearshape")
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
 
@@ -207,31 +161,30 @@ struct TendiesView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.blue)
-                        .disabled(selectedCount == 0 || vm.posterBoardContainer.isEmpty)
+                        .disabled(selectedCount == 0)
                     }
-
-                    Button {
-                        Task {
-                            await vm.respringDevice()
-                        }
-                    } label: {
-                        Label("Respring SpringBoard (No Reboot)", systemImage: "arrow.clockwise")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.purple)
 
                     Button {
                         RespringHelper.openDisplayZoomSettings()
                     } label: {
-                        Label("Quick Respring via Display Zoom (Done)", systemImage: "textformat.size")
+                        Label("Respring SpringBoard (Display Zoom › Done)", systemImage: "arrow.clockwise")
+                            .bold()
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+
+                    Button {
+                        RespringHelper.openWebRespring()
+                    } label: {
+                        Label("Instant Web Respring (Safari)", systemImage: "safari")
                             .font(.caption)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderless)
                     .foregroundColor(.secondary)
                 } footer: {
-                    Text("Flashes custom wallpapers directly into PosterBoard. SpringBoard reloads without rebooting.")
+                    Text("To apply wallpapers without rebooting: tap Respring, then tap 'Done' in Display Zoom (or use Instant Web Respring).")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
@@ -267,20 +220,13 @@ struct TendiesView: View {
             .sheet(item: $selectedDetailItem) { item in
                 TendieDetailSheet(item: item)
             }
-            .alert("Edit PosterBoard Container", isPresented: $showManualContainerEditor) {
-                TextField("/var/mobile/Containers/Data/Application/UUID", text: $manualContainerInput)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                Button("Save") {
-                    vm.posterBoardContainer = manualContainerInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    UserDefaults.standard.set(vm.posterBoardContainer, forKey: "aircard.posterboard_container")
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Specify the absolute path of the PosterBoard container data directory.")
-            }
             .onAppear {
                 vm.scanDocumentsForTendies()
+            }
+            .task {
+                if vm.posterBoardContainer.isEmpty {
+                    await vm.autoDetectPosterBoardContainer(silent: true)
+                }
             }
         }
     }
