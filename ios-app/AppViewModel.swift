@@ -1228,9 +1228,14 @@ final class AppViewModel: ObservableObject {
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
             tendiesFlashLog.append("🎉 Wallpapers applied to PosterBoard successfully!")
-            tendiesFlashLog.append("👉 Tap 'Respring SpringBoard' to reload without rebooting.")
-            successAlertMessage = "Wallpapers successfully installed! 🎉\n\nTo view them on your Lock Screen, tap 'Respring' to reload SpringBoard without rebooting."
-            showSuccessAlert = true
+            tendiesFlashLog.append("🔄 Sending SpringBoard reload signal via tunnel...")
+            _ = await TendiesEngine.shared.sendRespringSignal(pairingPath: pairingPath)
+            tendiesFlashLog.append("✅ SpringBoard reload signal sent!")
+            tendiesFlashLog.append("⚡ Triggering instant SpringBoard respring...")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                RespringHelper.instantRespring()
+            }
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
             tendiesFlashPhase = .done(ok: false)
@@ -1238,14 +1243,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func respringDevice() {
-        tendiesFlashLog.append("🔄 Opening Display Zoom: tap 'Done' to reload SpringBoard instantly (no reboot)…")
-        // Try private framework first if available
-        if RespringHelper.respring() {
-            tendiesFlashLog.append("✅ SpringBoard relaunch triggered via FrontBoardServices!")
-            return
-        }
-        // Open Display Zoom settings (100% reliable native respring across all iOS versions)
-        RespringHelper.openDisplayZoomSettings()
+        tendiesFlashLog.append("⚡ Triggering SpringBoard respring...")
+        RespringHelper.instantRespring()
     }
 
     func reset() {

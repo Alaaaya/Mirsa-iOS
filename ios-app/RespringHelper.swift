@@ -47,21 +47,41 @@ public enum RespringHelper {
         return true
     }
 
-    /// Opens Display Zoom settings where tapping "Done" immediately triggers iOS's built-in SpringBoard respring
-    public static func openDisplayZoomSettings() {
-        if let url = URL(string: "App-Prefs:DISPLAY&path=DISPLAY_ZOOM"), UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
-        } else if let url = URL(string: "prefs:root=DISPLAY&path=DISPLAY_ZOOM"), UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
-        } else if let url = URL(string: "App-Prefs:root=DISPLAY") {
-            UIApplication.shared.open(url)
+    /// Triggers an immediate SpringBoard respring without rebooting the iPhone
+    public static func instantRespring() {
+        // 1. Try private framework FrontBoardServices / SpringBoardServices
+        if respring() {
+            return
         }
+
+        // 2. Instant Web Respring (Safari executes render server overload which triggers 1s SpringBoard reload)
+        if let url = URL(string: "https://jailbreak.party/respring") {
+            UIApplication.shared.open(url, options: [:]) { success in
+                if !success {
+                    openDisplayZoomSettings()
+                }
+            }
+            return
+        }
+
+        // 3. Fallback to Display Zoom settings
+        openDisplayZoomSettings()
     }
 
-    /// Opens instant Web respring (RoutineHub/JailbreakParty) in Safari which crashes SpringBoard render server cleanly without reboot
-    public static func openWebRespring() {
-        if let url = URL(string: "https://jailbreak.party/respring") {
-            UIApplication.shared.open(url)
+    /// Opens Display Zoom settings where tapping "Done" immediately triggers iOS's built-in SpringBoard respring
+    public static func openDisplayZoomSettings() {
+        let candidates = [
+            "App-prefs:DISPLAY&path=DISPLAY_ZOOM",
+            "prefs:root=DISPLAY&path=DISPLAY_ZOOM",
+            "App-prefs:root=DISPLAY",
+            "prefs:root=DISPLAY",
+            UIApplication.openSettingsURLString
+        ]
+        for c in candidates {
+            if let url = URL(string: c) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                return
+            }
         }
     }
 }

@@ -222,6 +222,23 @@ public final class TendiesEngine {
         }
     }
 
+    // MARK: - Send Respring Signal via Tunnel
+
+    public func sendRespringSignal(pairingPath: String) async -> Bool {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var outError: UnsafeMutablePointer<CChar>? = nil
+                let rc = pairingPath.withCString { pC in
+                    al_device_respring(pC, nil, nil, &outError)
+                }
+                if let p = outError {
+                    al_string_free(p)
+                }
+                continuation.resume(returning: rc == 0)
+            }
+        }
+    }
+
     // MARK: - Flash Tendies to Device
 
     public func flashTendies(
@@ -251,7 +268,7 @@ public final class TendiesEngine {
 
         let majorVer = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         let structVersion = (majorVer <= 16) ? 59 : 61
-        let versionsToWrite: [Int] = (majorVer >= 17) ? [61, 59] : [59]
+        let versionsToWrite: [Int] = [structVersion]
 
         log("🚀 Starting PosterBoard injection into \(normalizedContainer)")
         log("ℹ️ Target PosterBoard structure version: \(structVersion) (iOS \(majorVer))")
@@ -306,15 +323,17 @@ public final class TendiesEngine {
                     }
                 } else {
                     for descURL in descriptorFolders {
-                        let newUUID = UUID().uuidString.uppercased()
-                        let randomizedID = Int.random(in: 10000...99999)
-                        log("  ✨ Descriptor \(newUUID) (ID: \(randomizedID))…")
-
-                        // Update plist identifiers to prevent overlapping
-                        updatePlistIdentifiers(in: descURL, randomizedID: randomizedID)
+                        let originalName = descURL.lastPathComponent
+                        let targetUUID: String
+                        if UUID(uuidString: originalName) != nil {
+                            targetUUID = originalName.uppercased()
+                        } else {
+                            targetUUID = UUID().uuidString.uppercased()
+                        }
+                        log("  ✨ Descriptor \(targetUUID)…")
 
                         for sVer in versionsToWrite {
-                            let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(newUUID)"
+                            let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(targetUUID)"
                             try await writeDirectoryTree(
                                 sourceBaseDir: descURL,
                                 targetBaseDir: targetDescDir,
@@ -457,99 +476,42 @@ public final class TendiesEngine {
     // MARK: - Find Descriptors
 
     private func findDescriptorFolders(in rootURL: URL) -> [URL] {
-        var results: Set<URL> = []
         let fileManager = FileManager.default
 
-        // 1. Signature marker files: find directories containing posterkit / wallpaper plists
-        if let enumerator = fileManager.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            while let fileURL = enumerator.nextObject() as? URL {
-                let name = fileURL.lastPathComponent.lowercased()
-                if name.contains("posterkit.provider") || name.hasSuffix("wallpaper.plist") || name == "descriptor.plist" {
-                    results.insert(fileURL.deletingLastPathComponent())
-                }
-            }
-        }
-
-        if !results.isEmpty {
-            return Array(results)
-        }
-
-        // 2. Look for "descriptor" or "descriptors" folders
-        if let enumerator = fileManager.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            while let itemURL = enumerator.nextObject() as? URL {
-                let nameLower = itemURL.lastPathComponent.lowercased()
-                if nameLower == "descriptor" || nameLower == "descriptors" || nameLower.hasSuffix("descriptor") {
-                    if let children = try? fileManager.contentsOfDirectory(at: itemURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                        let subdirs = children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false }
-                        if !subdirs.isEmpty {
-                            for s in subdirs { results.insert(s) }
-                        } else {
-                            results.insert(itemURL)
-                        }
+        // 1. Standard Tendies format: check for "descriptors" or "descriptor" folder
+        for folderName in ["descriptors", "descriptor"] {
+            let descDir = rootURL.appendingPathComponent(folderName)
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: descDir.path, isDirectory: &isDir), isDir.boolValue {
+                if let contents = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                    let subdirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false && !$0.lastPathComponent.hasPrefix(".") && !$0.lastPathComponent.contains("__MACOSX") }
+                    if !subdirs.isEmpty {
+                        return subdirs
                     }
                 }
             }
         }
 
-        if !results.isEmpty {
-            return Array(results)
+        // 2. Check if root contains "versions" or "providerInfo.plist" directly
+        let rootVersions = rootURL.appendingPathComponent("versions")
+        if fileManager.fileExists(atPath: rootVersions.path) {
+            return [rootURL]
         }
 
-        // 3. Check immediate child directories (e.g. UUID folders at root)
+        // 3. Check top-level directories: look for folders with "versions" or UUID folder names
         if let topLevel = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-            let dirs = topLevel.filter { url in
+            let validSubdirs = topLevel.filter { url in
                 let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                let name = url.lastPathComponent
-                return isDir && !name.hasPrefix(".") && !name.contains("__MACOSX")
+                guard isDir, !url.lastPathComponent.hasPrefix("."), !url.lastPathComponent.contains("__MACOSX") else { return false }
+                let hasVersions = fileManager.fileExists(atPath: url.appendingPathComponent("versions").path)
+                let isUUID = UUID(uuidString: url.lastPathComponent) != nil
+                return hasVersions || isUUID
             }
-            if !dirs.isEmpty {
-                return dirs
+            if !validSubdirs.isEmpty {
+                return validSubdirs
             }
         }
 
         return [rootURL]
-    }
-
-    // MARK: - Plist Identifier Randomization
-
-    private func updatePlistIdentifiers(in folderURL: URL, randomizedID: Int) {
-        let fileManager = FileManager.default
-        guard let enumerator = fileManager.enumerator(
-            at: folderURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return }
-
-        while let fileURL = enumerator.nextObject() as? URL {
-            let fileName = fileURL.lastPathComponent
-
-            if fileName == "com.apple.posterkit.provider.descriptor.identifier" {
-                try? "\(randomizedID)".data(using: .utf8)?.write(to: fileURL)
-            } else if fileName == "com.apple.posterkit.provider.contents.userInfo" {
-                if let data = try? Data(contentsOf: fileURL),
-                   var plist = (try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil)) as? [String: Any] {
-                    plist["wallpaperRepresentingIdentifier"] = randomizedID
-                    if let updated = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
-                        try? updated.write(to: fileURL)
-                    }
-                }
-            } else if fileName.hasSuffix("Wallpaper.plist") {
-                if let data = try? Data(contentsOf: fileURL),
-                   var plist = (try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil)) as? [String: Any] {
-                    plist["identifier"] = randomizedID
-                    if let updated = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
-                        try? updated.write(to: fileURL)
-                    }
-                }
-            }
-        }
     }
 }
