@@ -24,7 +24,7 @@ Core file injection is handled by a Rust static library (`AirliftFFI`) that uses
 ## Features
 
 ### Wallet card skins
-- Renders images to Wallet specifications (`cardBackgroundCombined@3x.png` at 1536×969 and `@2x` at 1024×646).
+- Renders images to Wallet specifications (`cardBackgroundCombined@3x.png` at 1536×969, `@2x` at 1024×646, and `cardBackgroundCombined.pdf` for Suica and transit passes).
 - Invalidates local pass cache files (`FrontFace`, `Preview`, `PlaceHolder`) so changes show up when Wallet restarts.
 - Lets you set artwork for individual cards or apply one skin across all detected cards.
 - Live card detection identifies passes as you use Apple Pay.

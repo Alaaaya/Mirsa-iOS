@@ -252,13 +252,22 @@ enum ImageEngine {
         var skins: [String: Data] = [:]
 
         // Main card background (combined with icon / logo)
-        // Apple Wallet pass renderer requires @3x and @2x of cardBackgroundCombined.png
+        // Apple Wallet pass renderer requires @3x and @2x of cardBackgroundCombined.png,
+        // and cardBackgroundCombined.pdf for PDF-backed transit cards (e.g. Suica, Pasmo).
         if let bg3x = resizeImage(normalized, targetSize: CGSize(width: 1536, height: 969)) {
             skins["cardBackgroundCombined@3x.png"] = bg3x
         }
         if let bg2x = resizeImage(normalized, targetSize: CGSize(width: 1024, height: 646)) {
             skins["cardBackgroundCombined@2x.png"] = bg2x
         }
+
+        let pdfRect = CGRect(origin: .zero, size: CGSize(width: 1536, height: 969))
+        let pdfRenderer = UIGraphicsPDFRenderer(bounds: pdfRect)
+        let pdfData = pdfRenderer.pdfData { ctx in
+            ctx.beginPage()
+            normalized.draw(in: pdfRect)
+        }
+        skins["cardBackgroundCombined.pdf"] = pdfData
 
         return skins
     }
