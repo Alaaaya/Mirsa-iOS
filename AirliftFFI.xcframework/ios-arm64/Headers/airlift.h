@@ -117,6 +117,18 @@ void al_syslog_stream_stop(void);
 // Extract all files from a .passthm archive into dest_dir. Returns 0 on success.
 int32_t al_passthm_extract(const char *archive_path, const char *dest_dir);
 
+// Extract all files and directories from a zip archive into dest_dir. Returns 0 on success.
+int32_t al_zip_extract_all(const char *archive_path, const char *dest_dir);
+
+// Look up the Data Application Container directory for a bundle ID (e.g. "com.apple.PosterBoard").
+// Blocks until resolved or errored. Returns 0 on success, with out_container set.
+int32_t al_find_app_container(const char *pairing_path,
+                             const char *bundle_id,
+                             ALLogCallback log_cb,
+                             void *ctx,
+                             char **out_container,
+                             char **out_error);
+
 
 #ifdef __cplusplus
 }
