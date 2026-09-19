@@ -38,7 +38,12 @@ public final class TendiesEngine {
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             try? FileManager.default.removeItem(at: destinationURL)
         }
-        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        } catch {
+            let fileData = try Data(contentsOf: sourceURL)
+            try fileData.write(to: destinationURL, options: .atomic)
+        }
 
         // Staging extraction to inspect contents
         let tempExtractDir = FileManager.default.temporaryDirectory

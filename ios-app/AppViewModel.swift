@@ -1071,6 +1071,9 @@ final class AppViewModel: ObservableObject {
     }
 
     func importTendieFiles(urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        var importedCount = 0
+        var lastImportedName = ""
         for url in urls {
             do {
                 let item = try await TendiesEngine.shared.importTendie(from: url)
@@ -1078,11 +1081,23 @@ final class AppViewModel: ObservableObject {
                     self.tendieItems.removeAll(where: { $0.fileName == item.fileName })
                     self.tendieItems.append(item)
                     self.saveTendieItems()
+                    importedCount += 1
+                    lastImportedName = item.name
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)"
                 }
+            }
+        }
+        if importedCount > 0 {
+            await MainActor.run {
+                if importedCount == 1 {
+                    self.successAlertMessage = "Wallpaper '\(lastImportedName)' imported successfully!"
+                } else {
+                    self.successAlertMessage = "\(importedCount) wallpapers imported successfully!"
+                }
+                self.showSuccessAlert = true
             }
         }
     }

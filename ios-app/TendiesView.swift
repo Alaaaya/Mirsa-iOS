@@ -45,23 +45,13 @@ struct TendiesView: View {
                     }
                 }
             }
-            .fileImporter(
-                isPresented: $showFilePicker,
-                allowedContentTypes: [
-                    UTType(filenameExtension: "tendies") ?? .data,
-                    .zip,
-                    .data,
-                    .item
-                ],
-                allowsMultipleSelection: true
-            ) { result in
-                switch result {
-                case .success(let urls):
+            .sheet(isPresented: $showFilePicker) {
+                TendiesDocumentPickerView { urls in
                     Task {
+                        // Short delay to allow picker sheet to finish dismissing before presenting any alert/progress
+                        try? await Task.sleep(nanoseconds: 350_000_000)
                         await vm.importTendieFiles(urls: urls)
                     }
-                case .failure(let error):
-                    vm.errorMessage = "File picker error: \(error.localizedDescription)"
                 }
             }
             .sheet(item: $selectedDetailItem) { item in
@@ -571,5 +561,55 @@ struct TendiesFlashProgressSheet: View {
             return .cyan
         }
         return .white.opacity(0.85)
+    }
+}
+
+// MARK: - Tendies Document Picker (Native UIKit with asCopy: true)
+
+struct TendiesDocumentPickerView: UIViewControllerRepresentable {
+    let onPick: ([URL]) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        var contentTypes: [UTType] = [
+            .zip,
+            .data,
+            .item,
+            .archive
+        ]
+        if let customType = UTType("com.aircard.tendies") {
+            contentTypes.insert(customType, at: 0)
+        }
+        if let extType = UTType(filenameExtension: "tendies") {
+            contentTypes.insert(extType, at: 0)
+        }
+
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = true
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let parent: TendiesDocumentPickerView
+
+        init(_ parent: TendiesDocumentPickerView) {
+            self.parent = parent
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            parent.onPick(urls)
+            parent.dismiss()
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            parent.dismiss()
+        }
     }
 }

@@ -77,6 +77,18 @@
 				<string>com.apple.property-list</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PosterBoard Wallpaper</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.aircard.tendies</string>
+			</array>
+		</dict>
 	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
@@ -95,6 +107,25 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>passthm</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.aircard.tendies</string>
+			<key>UTTypeDescription</key>
+			<string>PosterBoard Wallpaper Archive</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tendies</string>
 				</array>
 			</dict>
 		</dict>
