@@ -80,13 +80,13 @@ final class PairingController: ObservableObject {
         let aircardPath = dir.appendingPathComponent("aircard_pairing.plist").path
         if FileManager.default.fileExists(atPath: aircardPath) {
             let size = (try? FileManager.default.attributesOfItem(atPath: aircardPath)[.size] as? Int) ?? 0
-            if size >= 100 { return aircardPath }
+            if size > 0 { return aircardPath }
         }
 
         let airliftPath = dir.appendingPathComponent("airlift_pairing.plist").path
         if FileManager.default.fileExists(atPath: airliftPath) {
             let size = (try? FileManager.default.attributesOfItem(atPath: airliftPath)[.size] as? Int) ?? 0
-            if size >= 100 {
+            if size > 0 {
                 _ = syncCanonicalPairingFile(from: airliftPath)
                 return aircardPath
             }
@@ -94,7 +94,7 @@ final class PairingController: ObservableObject {
 
         if let custom = customPairingFilePath, FileManager.default.fileExists(atPath: custom) {
             let size = (try? FileManager.default.attributesOfItem(atPath: custom)[.size] as? Int) ?? 0
-            if size >= 100 {
+            if size > 0 {
                 _ = syncCanonicalPairingFile(from: custom)
                 return aircardPath
             }
@@ -108,7 +108,7 @@ final class PairingController: ObservableObject {
             for candidate in plists {
                 let candidatePath = dir.appendingPathComponent(candidate).path
                 let size = (try? FileManager.default.attributesOfItem(atPath: candidatePath)[.size] as? Int) ?? 0
-                if size >= 100 {
+                if size > 0 {
                     _ = syncCanonicalPairingFile(from: candidatePath)
                     return aircardPath
                 }

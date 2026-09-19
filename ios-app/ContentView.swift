@@ -359,45 +359,6 @@ struct ContentView: View {
                 ShareSheet(items: [url])
             }
         }
-        .onAppear {
-            Task {
-                _ = await LocalNetworkAuthorization().request(timeout: 2.0)
-            }
-        }
-    }
-}
-
-// MARK: - Reusable VPN Warning Banner
-
-struct VPNWarningBanner: View {
-    @ObservedObject var vm: AppViewModel
-
-    var body: some View {
-        if !vm.vpnUp {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("LocalDevVPN is Not Connected")
-                        .font(.subheadline.bold())
-                        .foregroundStyle(.orange)
-                    Spacer()
-                }
-
-                Text("The exploit requires LocalDevVPN connected to reach 10.7.0.1 on-device. Please open LocalDevVPN and tap Connect.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Link("Launch LocalDevVPN", destination: URL(string: "localdevvpn://")!)
-                    .font(.caption.bold())
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-            .padding(12)
-            .background(Color.orange.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal)
-        }
     }
 }
 
@@ -406,7 +367,6 @@ struct VPNWarningBanner: View {
 struct PairingTab: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showDeleteConfirm = false
-    @State private var showFilePicker = false
     @State private var showCredits = false
 
     var body: some View {
@@ -422,7 +382,7 @@ struct PairingTab: View {
                             Text("AirCard-iOS")
                                 .font(.title2.bold())
                             Spacer()
-                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.2")
+                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.2.2")
                                 .font(.caption.monospaced().bold())
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.blue.opacity(0.12))
@@ -441,8 +401,8 @@ struct PairingTab: View {
                     VPNStatusRow(vm: vm)
                 }
 
-                // Pairing File Status
-                Section("Active Pairing File") {
+                // Pairing Status
+                Section("Active Pairing") {
                     HStack(spacing: 10) {
                         if vm.hasPairingFile {
                             Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
@@ -456,9 +416,9 @@ struct PairingTab: View {
                         } else {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("No pairing file loaded")
+                                Text("Not Paired")
                                     .font(.subheadline.bold())
-                                Text(vm.isIOS27OrHigher ? "Pair on device or select a pairing file." : "Select or drop a pairing file below.")
+                                Text("Tap 'Pair This iPhone' below to pair.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -474,178 +434,104 @@ struct PairingTab: View {
                             .buttonStyle(.borderless)
                         }
                     }
-
-                    Button {
-                        vm.refreshPairingFile()
-                    } label: {
-                        Label("Scan App Documents Folder", systemImage: "arrow.clockwise")
-                            .font(.subheadline)
-                    }
                 }
                 .confirmationDialog(
-                    "Delete pairing file?",
+                    "Delete pairing session?",
                     isPresented: $showDeleteConfirm,
                     titleVisibility: .visible
                 ) {
                     Button("Delete", role: .destructive) { vm.deletePairingFile() }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("The active pairing file will be removed.")
+                    Text("The active pairing credentials will be removed.")
                 }
 
-                // iOS 27+ On-Device Pairing Section
-                if vm.isIOS27OrHigher {
-                    Section("Pair on This iPhone") {
-                        if vm.pairingPhase == .pairing {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack(spacing: 8) {
-                                    ProgressView().scaleEffect(0.85)
-                                    Text(vm.pairingStatus.isEmpty ? "Starting local pairing host…" : vm.pairingStatus)
-                                        .font(.subheadline)
+                // On-Device Pairing Section (available for all iOS versions)
+                Section("Pair on This iPhone") {
+                    if vm.pairingPhase == .pairing {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 8) {
+                                ProgressView().scaleEffect(0.85)
+                                Text(vm.pairingStatus.isEmpty ? "Starting local pairing host…" : vm.pairingStatus)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            if let pin = vm.pairingPIN {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("ENTER THIS PIN ON THIS IPHONE:")
+                                        .font(.caption2.bold().uppercaseSmallCaps())
                                         .foregroundStyle(.secondary)
-                                }
 
-                                if let pin = vm.pairingPIN {
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        Text("ENTER THIS PIN ON THIS IPHONE:")
-                                            .font(.caption2.bold().uppercaseSmallCaps())
-                                            .foregroundStyle(.secondary)
-
-                                        HStack(alignment: .center, spacing: 0) {
-                                            Text(pin)
-                                                .font(.system(size: 40, weight: .black, design: .monospaced))
-                                                .foregroundStyle(.orange)
-                                            Spacer()
-                                            Button {
-                                                UIPasteboard.general.string = pin
-                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                            } label: {
-                                                Label("Copy", systemImage: "doc.on.doc")
-                                                    .font(.caption.bold())
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .tint(.orange)
-                                        }
-
-                                        Text("Settings > Privacy & Security > Developer Mode > Remote Pairing")
-                                            .font(.footnote.weight(.semibold))
-                                            .foregroundStyle(.primary)
-
+                                    HStack(alignment: .center, spacing: 0) {
+                                        Text(pin)
+                                            .font(.system(size: 40, weight: .black, design: .monospaced))
+                                            .foregroundStyle(.orange)
+                                        Spacer()
                                         Button {
-                                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                                UIApplication.shared.open(url)
-                                            }
+                                            UIPasteboard.general.string = pin
+                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                         } label: {
-                                            Label("Open Settings App Now", systemImage: "arrow.up.forward.app")
-                                                .bold()
-                                                .frame(maxWidth: .infinity)
+                                            Label("Copy", systemImage: "doc.on.doc")
+                                                .font(.caption.bold())
                                         }
-                                        .buttonStyle(.borderedProminent)
+                                        .buttonStyle(.bordered)
                                         .tint(.orange)
                                     }
-                                    .padding(14)
-                                    .background(Color.orange.opacity(0.12))
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                                }
 
-                                Button(role: .cancel) {
-                                    vm.cancelPairing()
-                                } label: {
-                                    Label("Cancel Pairing", systemImage: "xmark")
-                                        .frame(maxWidth: .infinity)
+                                    Text("Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.primary)
+
+                                    Button {
+                                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    } label: {
+                                        Label("Open Settings App Now", systemImage: "arrow.up.forward.app")
+                                            .bold()
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.orange)
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
-                            }
-                        } else {
-                            if !vm.pairingStatus.isEmpty && vm.pairingStatus != "idle" {
-                                Text(vm.pairingStatus)
-                                    .font(.caption)
-                                    .foregroundStyle(
-                                        vm.pairingStatus.contains("✅") ? .green :
-                                        vm.pairingStatus.contains("❌") || vm.pairingStatus.contains("failed") ? .red :
-                                        .secondary
-                                    )
+                                .padding(14)
+                                .background(Color.orange.opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
                             }
 
-                            Button {
-                                vm.startPairing()
+                            Button(role: .cancel) {
+                                vm.cancelPairing()
                             } label: {
-                                Label(
-                                    vm.hasPairingFile ? "Re-Pair This iPhone" : "Pair This iPhone",
-                                    systemImage: "antenna.radiowaves.left.and.right"
-                                )
-                                .bold()
-                                .frame(maxWidth: .infinity)
+                                Label("Cancel Pairing", systemImage: "xmark")
+                                    .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
+                            .buttonStyle(.bordered)
+                            .tint(.red)
                         }
-                    }
-
-                    // Alternative File Import Section
-                    Section("Pairing File (Alternative)") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("You can also select a `.plist` pairing file from Files:")
+                    } else {
+                        if !vm.pairingStatus.isEmpty && vm.pairingStatus != "idle" {
+                            Text(vm.pairingStatus)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(
+                                    vm.pairingStatus.contains("✅") ? .green :
+                                    vm.pairingStatus.contains("❌") || vm.pairingStatus.contains("failed") ? .red :
+                                    .secondary
+                                )
                         }
 
                         Button {
-                            showFilePicker = true
+                            vm.startPairing()
                         } label: {
-                            Label("Choose Pairing File from Files…", systemImage: "folder.badge.plus")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                } else {
-                    // iOS < 17 Guard: ONLY show Select Pairing File option!
-                    Section {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) Detected", systemImage: "info.circle.fill")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.blue)
-                            Text("Direct on-device pairing requires iOS 17+. On this device, please import a pairing file (.plist) generated from a Mac or PC.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    Section("Select Pairing File") {
-                        Button {
-                            showFilePicker = true
-                        } label: {
-                            Label("Choose Pairing File from Files…", systemImage: "folder.badge.plus")
-                                .bold()
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Label(
+                                vm.hasPairingFile ? "Re-Pair This iPhone" : "Pair This iPhone",
+                                systemImage: "antenna.radiowaves.left.and.right"
+                            )
+                            .bold()
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                    }
-                }
-
-                // Files found in Documents folder
-                if !vm.documentsPlistFiles.isEmpty {
-                    Section("Files in App Folder (On My iPhone › AirCard-iOS)") {
-                        ForEach(vm.documentsPlistFiles, id: \.self) { file in
-                            HStack {
-                                Image(systemName: file == vm.pairingFileName ? "checkmark.circle.fill" : "doc.text")
-                                    .foregroundStyle(file == vm.pairingFileName ? .green : .blue)
-                                Text(file)
-                                    .font(.system(size: 13, design: .monospaced))
-                                Spacer()
-                                if file != vm.pairingFileName {
-                                    Button("Select") {
-                                        vm.selectPairingFile(filename: file)
-                                    }
-                                    .font(.caption.bold())
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -682,20 +568,6 @@ struct PairingTab: View {
             }
             .sheet(isPresented: $showCredits) {
                 CreditsSheet()
-            }
-            .sheet(isPresented: $showFilePicker) {
-                DocumentPickerView(allowedContentTypes: [
-                    UTType(filenameExtension: "plist") ?? .propertyList,
-                    UTType(filenameExtension: "mobiledevicepairing") ?? .data,
-                    UTType(filenameExtension: "mobilepair") ?? .data,
-                    UTType.propertyList,
-                    UTType.xmlPropertyList
-                ]) { pickedURL in
-                    let success = vm.importPairingFile(from: pickedURL, originalName: pickedURL.lastPathComponent)
-                    if !success {
-                        vm.errorMessage = "Failed to read or save pairing file"
-                    }
-                }
             }
             .onAppear {
                 vm.refreshNetworkStatus()
@@ -982,8 +854,6 @@ struct WalletCardsTab: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    VPNWarningBanner(vm: vm)
-
                     scannerBanner
 
                     if vm.cards.isEmpty {
@@ -1138,14 +1008,6 @@ struct WalletCardsTab: View {
                         }
                     }
                     activePicker = nil
-                }
-            }
-            .onAppear {
-                vm.refreshNetworkStatus()
-            }
-            .onDisappear {
-                if vm.isScanningCards {
-                    vm.stopCardScanning()
                 }
             }
         }
@@ -1373,14 +1235,6 @@ struct PasscodeThemeTab: View {
     var body: some View {
         NavigationStack {
             Form {
-                if !vm.vpnUp {
-                    Section {
-                        VPNWarningBanner(vm: vm)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
-                }
-
                 // Mode picker
                 Section {
                     Picker("Mode", selection: $vm.passcodeMode) {
@@ -1422,10 +1276,7 @@ struct PasscodeThemeTab: View {
             .sheet(isPresented: $showCredits) {
                 CreditsSheet()
             }
-            .onAppear {
-                vm.scanDocumentsDirectory()
-                vm.refreshNetworkStatus()
-            }
+            .onAppear { vm.scanDocumentsDirectory() }
         }
     }
 }
