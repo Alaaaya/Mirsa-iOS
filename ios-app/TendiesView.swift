@@ -3,6 +3,7 @@
 //  AirCard-iOS
 //
 //  Dedicated UI for importing, previewing, and flashing PosterBoard .tendies wallpapers.
+//  Unified Form design matching Passcode Theme and Wallet Cards tabs.
 //
 
 import SwiftUI
@@ -15,15 +16,20 @@ struct TendiesView: View {
     @State private var showManualContainerEditor = false
     @State private var manualContainerInput = ""
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 155, maximum: 200), spacing: 16)
-    ]
+    private var selectedCount: Int {
+        vm.tendieItems.filter { $0.isSelected }.count
+    }
+
+    private var selectedAll: Bool {
+        !vm.tendieItems.isEmpty && vm.tendieItems.allSatisfy { $0.isSelected }
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    if let err = vm.errorMessage {
+            Form {
+                // Notice Banners
+                if let err = vm.errorMessage {
+                    Section {
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.red)
@@ -38,12 +44,11 @@ struct TendiesView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        .padding(12)
-                        .background(Color.red.opacity(0.12))
-                        .cornerRadius(10)
                     }
+                }
 
-                    if vm.showSuccessAlert && !vm.successAlertMessage.isEmpty {
+                if vm.showSuccessAlert && !vm.successAlertMessage.isEmpty {
+                    Section {
                         HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
@@ -58,39 +63,196 @@ struct TendiesView: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        .padding(12)
-                        .background(Color.green.opacity(0.12))
-                        .cornerRadius(10)
+                    }
+                }
+
+                // Section 1: PosterBoard Container Target
+                Section("PosterBoard Target") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            if vm.posterBoardContainer.isEmpty {
+                                Text("Container not detected")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Text("Connect LocalDevVPN and tap Auto-Detect")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            } else {
+                                Text(vm.posterBoardContainer)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text("Active PosterBoard data container")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if vm.isDetectingContainer {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button("Auto-Detect") {
+                                Task { await vm.autoDetectPosterBoardContainer() }
+                            }
+                            .font(.caption.bold())
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
                     }
 
-                    // Header / Status Banner
-                    containerConfigSection
+                    if !vm.posterBoardContainer.isEmpty {
+                        Button {
+                            manualContainerInput = vm.posterBoardContainer
+                            showManualContainerEditor = true
+                        } label: {
+                            Label("Edit Container Path Manually", systemImage: "pencil")
+                                .font(.caption)
+                        }
+                    }
 
-                    // Wallpapers Gallery
-                    gallerySection
+                    Toggle(isOn: $vm.resetPBProtections) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Force PosterBoard Cache Refresh")
+                                .font(.subheadline.weight(.medium))
+                            Text("Resets file protections so iOS discovers new wallpapers immediately")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+
+                // Section 2: Browse Files & Documents
+                Section("Browse Wallpapers") {
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label("Choose .tendies from Files…", systemImage: "doc.badge.plus")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button {
+                        vm.scanDocumentsForTendies()
+                    } label: {
+                        Label("Scan App Documents Folder", systemImage: "folder.badge.gearshape")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                // Section 3: Wallpapers Gallery
+                if !vm.tendieItems.isEmpty {
+                    Section {
+                        HStack {
+                            Text("\(vm.tendieItems.count) Wallpapers Imported")
+                                .font(.caption.bold())
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button(selectedAll ? "Deselect All" : "Select All") {
+                                let target = !selectedAll
+                                for i in 0..<vm.tendieItems.count {
+                                    vm.tendieItems[i].isSelected = target
+                                }
+                            }
+                            .font(.caption)
+                        }
+
+                        ForEach($vm.tendieItems) { $item in
+                            TendieRowView(item: $item) {
+                                selectedDetailItem = item
+                            } onDelete: {
+                                vm.deleteTendie(item: item)
+                            }
+                        }
+                    } header: {
+                        Text("Wallpapers Gallery")
+                    }
+                } else {
+                    Section {
+                        VStack(spacing: 10) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 32))
+                                .foregroundColor(.secondary)
+                            Text("No .tendies wallpapers loaded yet")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("Tap 'Choose .tendies from Files' or copy wallpapers into On My iPhone › AirCard-iOS.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                    }
+                }
+
+                // Section 4: Flash Action & Respring
+                Section {
+                    if case .running = vm.tendiesFlashPhase {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            VStack(alignment: .leading) {
+                                Text("Flashing Wallpapers…").font(.subheadline.bold())
+                                ProgressView(value: vm.tendiesFlashProgress)
+                            }
+                        }
+                    } else {
+                        Button {
+                            Task {
+                                await vm.flashSelectedTendies()
+                            }
+                        } label: {
+                            Label("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s") to PosterBoard", systemImage: "sparkles")
+                                .bold()
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .disabled(selectedCount == 0 || vm.posterBoardContainer.isEmpty)
+                    }
+
+                    Button {
+                        Task {
+                            await vm.respringDevice()
+                        }
+                    } label: {
+                        Label("Respring SpringBoard (No Reboot)", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.purple)
+
+                    Button {
+                        RespringHelper.openDisplayZoomSettings()
+                    } label: {
+                        Label("Quick Respring via Display Zoom (Done)", systemImage: "textformat.size")
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundColor(.secondary)
+                } footer: {
+                    Text("Flashes custom wallpapers directly into PosterBoard. SpringBoard reloads without rebooting.")
+                }
+
+                // Section 5: Flash Log (CompactLogView)
+                if !vm.tendiesFlashLog.isEmpty {
+                    Section {
+                        CompactLogView(
+                            title: "Flash Log (\(vm.tendiesFlashLog.count) lines)",
+                            lines: vm.tendiesFlashLog,
+                            onClear: { vm.tendiesFlashLog.removeAll() }
+                        )
+                    }
+                }
             }
-            .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("Wallpapers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            showFilePicker = true
-                        } label: {
-                            Label("Pick .tendies File…", systemImage: "doc.badge.plus")
-                        }
-
-                        Button {
-                            vm.scanDocumentsForTendies()
-                        } label: {
-                            Label("Scan Documents / Files App", systemImage: "folder.badge.gearshape")
-                        }
+                    Button {
+                        showFilePicker = true
                     } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: "plus")
                             .font(.headline)
                     }
                 }
@@ -117,432 +279,118 @@ struct TendiesView: View {
             } message: {
                 Text("Specify the absolute path of the PosterBoard container data directory.")
             }
-        }
-    }
-
-    // MARK: - Container Config Section
-
-    private var containerConfigSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "folder.badge.gearshape")
-                    .foregroundColor(.blue)
-                    .font(.headline)
-                Text("PosterBoard Container")
-                    .font(.headline)
-                Spacer()
-                if vm.isDetectingContainer {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                } else {
-                    Button("Auto-Detect") {
-                        Task {
-                            await vm.autoDetectPosterBoardContainer()
-                        }
-                    }
-                    .font(.caption.bold())
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-            }
-
-            if vm.posterBoardContainer.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                        .font(.caption)
-                    Text("Container not detected. Connect LocalDevVPN and tap Auto-Detect.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                HStack {
-                    Text(vm.posterBoardContainer)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Button {
-                        manualContainerInput = vm.posterBoardContainer
-                        showManualContainerEditor = true
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color(UIColor.tertiarySystemFill))
-                .cornerRadius(8)
-            }
-
-            Divider()
-
-            Toggle(isOn: $vm.resetPBProtections) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Force PosterBoard Refresh")
-                        .font(.subheadline.weight(.medium))
-                    Text("Resets file protections so iOS re-indexes posters immediately")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .tint(.blue)
-        }
-        .padding(14)
-        .background(Color(UIColor.secondarySystemGroupedBackground))
-        .cornerRadius(14)
-    }
-
-    // MARK: - Gallery Section
-
-    private var gallerySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Imported Tendies")
-                        .font(.title3.bold())
-                    Text("\(vm.tendieItems.count) wallpapers available")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-
-                if !vm.tendieItems.isEmpty {
-                    Button(selectedAll ? "Deselect All" : "Select All") {
-                        let target = !selectedAll
-                        for i in 0..<vm.tendieItems.count {
-                            vm.tendieItems[i].isSelected = target
-                        }
-                    }
-                    .font(.caption.weight(.medium))
-                }
-            }
-
-            if vm.tendieItems.isEmpty {
-                emptyStateCard
-            } else {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach($vm.tendieItems) { $item in
-                        TendieCardView(item: $item) {
-                            selectedDetailItem = item
-                        } onDelete: {
-                            vm.deleteTendie(item: item)
-                        }
-                    }
-                }
-
-                // Flashing Action Bar & Inline Controls
-                VStack(spacing: 12) {
-                    if case .running = vm.tendiesFlashPhase {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Flashing Wallpapers to PosterBoard…")
-                                    .font(.subheadline.bold())
-                                ProgressView(value: vm.tendiesFlashProgress)
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity)
-                        .background(Color(UIColor.secondarySystemGroupedBackground))
-                        .cornerRadius(12)
-                    } else {
-                        Button {
-                            Task {
-                                await vm.flashSelectedTendies()
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "sparkles")
-                                Text("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s") to iPhone")
-                                    .fontWeight(.semibold)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .foregroundColor(.white)
-                            .background(
-                                selectedCount > 0
-                                    ? LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
-                                    : LinearGradient(colors: [.gray], startPoint: .leading, endPoint: .trailing)
-                            )
-                            .cornerRadius(12)
-                        }
-                        .disabled(selectedCount == 0)
-                    }
-
-                    // Respring Button
-                    Button {
-                        Task {
-                            await vm.respringDevice()
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.clockwise")
-                            Text("Respring Device")
-                                .fontWeight(.medium)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.purple)
-
-                    Text("Flashes custom lock screen wallpapers directly into PosterBoard and resprings SpringBoard.")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    if !vm.tendiesFlashLog.isEmpty {
-                        CompactLogView(
-                            title: "Wallpapers Flash Log (\(vm.tendiesFlashLog.count) lines)",
-                            lines: vm.tendiesFlashLog,
-                            onClear: { vm.tendiesFlashLog.removeAll() }
-                        )
-                        .padding(.top, 4)
-                    }
-                }
-                .padding(.top, 10)
+            .onAppear {
+                vm.scanDocumentsForTendies()
             }
         }
-    }
-
-    private var selectedCount: Int {
-        vm.tendieItems.filter { $0.isSelected }.count
-    }
-
-    private var selectedAll: Bool {
-        !vm.tendieItems.isEmpty && vm.tendieItems.allSatisfy { $0.isSelected }
-    }
-
-    private var emptyStateCard: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 48))
-                .foregroundColor(.blue.opacity(0.8))
-                .padding(.top, 10)
-
-            VStack(spacing: 6) {
-                Text("No Tendies Imported")
-                    .font(.headline)
-                Text("Import .tendies files from your device to preview artwork and install custom PosterBoard wallpapers.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 20)
-            }
-
-            VStack(spacing: 10) {
-                Button {
-                    showFilePicker = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.down.fill")
-                        Text("Import .tendies File")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                }
-
-                Button {
-                    vm.scanDocumentsForTendies()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                        Text("Scan Documents / Files App")
-                            .fontWeight(.medium)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(24)
-        .background(Color(UIColor.secondarySystemGroupedBackground))
-        .cornerRadius(16)
     }
 }
 
-// MARK: - Tendie Card View
+// MARK: - Tendie Row View
 
-struct TendieCardView: View {
+struct TendieRowView: View {
     @Binding var item: TendieItem
     let onInspect: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Poster Mockup Image
-            ZStack(alignment: .topTrailing) {
-                ZStack(alignment: .topLeading) {
-                    if let img = item.uiPreview {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(height: 190)
-                            .clipped()
-                    } else {
-                        Rectangle()
-                            .fill(LinearGradient(
-                                colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.4)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ))
-                            .frame(height: 190)
-                            .overlay(
-                                Image(systemName: item.posterType.systemIcon)
-                                    .font(.system(size: 38))
-                                    .foregroundColor(.white.opacity(0.8))
-                            )
-                    }
+        HStack(spacing: 12) {
+            Toggle("", isOn: $item.isSelected)
+                .labelsHidden()
 
-                    // Delete button
-                    Button {
-                        onDelete()
-                    } label: {
-                        Image(systemName: "trash.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.white)
-                            .shadow(radius: 3)
-                    }
-                    .padding(8)
-                }
-
-                // Selection checkmark
-                Button {
-                    item.isSelected.toggle()
-                } label: {
-                    Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundColor(item.isSelected ? .green : .white)
-                        .background(Circle().fill(Color.black.opacity(0.4)))
-                        .shadow(radius: 2)
-                }
-                .padding(8)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onInspect()
-            }
-
-            // Information details
-            VStack(alignment: .leading, spacing: 6) {
-                Text(item.name)
-                    .font(.caption.bold())
-                    .lineLimit(1)
-                    .foregroundColor(.primary)
-
-                HStack(spacing: 4) {
-                    Label(item.posterType.rawValue, systemImage: item.posterType.systemIcon)
-                        .font(.system(size: 9, weight: .bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(item.posterType.badgeColor.opacity(0.18))
-                        .foregroundColor(item.posterType.badgeColor)
-                        .clipShape(Capsule())
-
-                    Spacer()
-
-                    if item.descriptorCount > 1 {
-                        Text("\(item.descriptorCount) items")
-                            .font(.system(size: 9, weight: .medium))
+            if let imgData = item.previewImageData, let uiImg = UIImage(data: imgData) {
+                Image(uiImage: uiImg)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 44, height: 60)
+                    .cornerRadius(6)
+                    .clipped()
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(UIColor.tertiarySystemFill))
+                    .frame(width: 44, height: 60)
+                    .overlay {
+                        Image(systemName: item.posterType.systemIcon)
                             .foregroundColor(.secondary)
                     }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name)
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(item.posterType.rawValue)
+                        .font(.caption2.bold())
+                        .foregroundColor(item.posterType.badgeColor)
+
+                    Text("•")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Text("\(item.descriptorCount) item\(item.descriptorCount == 1 ? "" : "s")")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(10)
-            .background(Color(UIColor.secondarySystemGroupedBackground))
+
+            Spacer()
+
+            Button {
+                onInspect()
+            } label: {
+                Image(systemName: "info.circle")
+                    .foregroundColor(.blue)
+            }
+            .buttonStyle(.borderless)
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.borderless)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(item.isSelected ? Color.blue : Color(UIColor.separator).opacity(0.4), lineWidth: item.isSelected ? 2 : 1)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 3)
+        .padding(.vertical, 4)
     }
 }
 
-// MARK: - Detail Sheet
+// MARK: - Tendie Detail Sheet
 
 struct TendieDetailSheet: View {
-    @Environment(\.dismiss) var dismiss
     let item: TendieItem
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    if let img = item.uiPreview {
-                        Image(uiImage: img)
+            List {
+                Section {
+                    if let imgData = item.previewImageData, let uiImg = UIImage(data: imgData) {
+                        Image(uiImage: uiImg)
                             .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 380)
-                            .cornerRadius(16)
-                            .shadow(radius: 8)
-                            .padding(.top, 10)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity, maxHeight: 300)
+                            .cornerRadius(12)
+                            .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+                            .listRowBackground(Color.clear)
                     }
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(item.name)
-                            .font(.title2.bold())
-
-                        HStack(spacing: 8) {
-                            Label(item.posterType.rawValue, systemImage: item.posterType.systemIcon)
-                                .font(.caption.bold())
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(item.posterType.badgeColor.opacity(0.2))
-                                .foregroundColor(item.posterType.badgeColor)
-                                .clipShape(Capsule())
-
-                            if item.isContainer {
-                                Text("Container Mode")
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(Color.indigo.opacity(0.2))
-                                    .foregroundColor(.indigo)
-                                    .clipShape(Capsule())
-                            }
-
-                            if item.unsafeContainer {
-                                Label("Needs PRB Reset", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(Color.orange.opacity(0.2))
-                                    .foregroundColor(.orange)
-                                    .clipShape(Capsule())
-                            }
-                        }
-
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            detailRow(title: "Filename", value: item.fileName)
-                            detailRow(title: "Target Extension", value: item.posterType.extensionBundleId)
-                            detailRow(title: "Descriptors Count", value: "\(item.descriptorCount)")
-                            detailRow(title: "Imported", value: item.dateImported.formatted(date: .abbreviated, time: .shortened))
-                        }
-                    }
-                    .padding(18)
-                    .background(Color(UIColor.secondarySystemGroupedBackground))
-                    .cornerRadius(16)
                 }
-                .padding(16)
+
+                Section("Information") {
+                    detailRow(title: "Name", value: item.name)
+                    detailRow(title: "File Name", value: item.fileName)
+                    detailRow(title: "Type", value: item.posterType.rawValue)
+                    detailRow(title: "Descriptors", value: "\(item.descriptorCount)")
+                    detailRow(title: "Target Extension", value: item.posterType.extensionBundleId)
+                    detailRow(title: "Format", value: item.isContainer ? "App Container" : "Descriptor Archive")
+                    if item.unsafeContainer {
+                        detailRow(title: "Warning", value: "Contains SQLite database")
+                    }
+                }
             }
-            .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("Wallpaper Details")
+            .navigationTitle(item.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -585,9 +433,7 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         }
         contentTypes.append(contentsOf: [.archive, .zip, .data, .item])
 
-        // asCopy: true ensures iOS automatically coordinates and copies the chosen document(s)
-        // into the app sandbox tmp/ folder without requiring in-place document entitlements.
-        // This solves the bug where tapping "Open" did nothing on iOS.
+        // asCopy: true ensures iOS safely copies documents into app sandbox tmp directory
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = true
@@ -609,8 +455,6 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
             guard !urls.isEmpty else { return }
-            // With asCopy: true, files are safely copied to app tmp/ by iOS.
-            // Pass them directly to onPick; TendiesEngine will store and extract them.
             parent.onPick(urls)
             parent.dismiss()
         }
@@ -620,4 +464,3 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         }
     }
 }
-

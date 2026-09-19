@@ -251,6 +251,7 @@ public final class TendiesEngine {
 
         let majorVer = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         let structVersion = (majorVer <= 16) ? 59 : 61
+        let versionsToWrite: [Int] = (majorVer >= 17) ? [61, 59] : [59]
 
         log("🚀 Starting PosterBoard injection into \(normalizedContainer)")
         log("ℹ️ Target PosterBoard structure version: \(structVersion) (iOS \(majorVer))")
@@ -294,13 +295,15 @@ public final class TendiesEngine {
 
                 if descriptorFolders.isEmpty {
                     log("  ⚠️ No descriptor directory found, flashing root contents…")
-                    let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(UUID().uuidString.uppercased())"
-                    try await writeDirectoryTree(
-                        sourceBaseDir: tempStageDir,
-                        targetBaseDir: targetDescDir,
-                        pairingPath: pairingPath,
-                        log: log
-                    )
+                    for sVer in versionsToWrite {
+                        let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(UUID().uuidString.uppercased())"
+                        try await writeDirectoryTree(
+                            sourceBaseDir: tempStageDir,
+                            targetBaseDir: targetDescDir,
+                            pairingPath: pairingPath,
+                            log: log
+                        )
+                    }
                 } else {
                     for descURL in descriptorFolders {
                         let newUUID = UUID().uuidString.uppercased()
@@ -310,14 +313,15 @@ public final class TendiesEngine {
                         // Update plist identifiers to prevent overlapping
                         updatePlistIdentifiers(in: descURL, randomizedID: randomizedID)
 
-                        let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(newUUID)"
-
-                        try await writeDirectoryTree(
-                            sourceBaseDir: descURL,
-                            targetBaseDir: targetDescDir,
-                            pairingPath: pairingPath,
-                            log: log
-                        )
+                        for sVer in versionsToWrite {
+                            let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(newUUID)"
+                            try await writeDirectoryTree(
+                                sourceBaseDir: descURL,
+                                targetBaseDir: targetDescDir,
+                                pairingPath: pairingPath,
+                                log: log
+                            )
+                        }
                     }
                 }
             }
@@ -347,6 +351,15 @@ public final class TendiesEngine {
             try await writeDirectoryTree(
                 sourceBaseDir: stagePrefDir,
                 targetBaseDir: targetPrefDir,
+                pairingPath: pairingPath,
+                log: log
+            )
+
+            // Also write to mobile global preferences for system daemon lookup
+            let mobilePrefDir = "/var/mobile/Library/Preferences"
+            try? await writeDirectoryTree(
+                sourceBaseDir: stagePrefDir,
+                targetBaseDir: mobilePrefDir,
                 pairingPath: pairingPath,
                 log: log
             )
