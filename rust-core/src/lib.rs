@@ -335,3 +335,26 @@ pub unsafe extern "C" fn al_find_app_container(
     }
 }
 
+/// Trigger device restart / respring via Diagnostics Relay over the pairing tunnel.
+/// Returns 0 on success, 1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn al_device_respring(
+    pairing_path: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        exploit::device_respring(pairing_path, log_cb, ctx, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_device_respring: {e:?}"));
+            }
+            1
+        }
+    }
+}
+

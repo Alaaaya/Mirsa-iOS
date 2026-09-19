@@ -129,6 +129,13 @@ int32_t al_find_app_container(const char *pairing_path,
                              char **out_container,
                              char **out_error);
 
+// Restart device / respring via Diagnostics Relay over the pairing tunnel.
+// Blocks until sent. Returns 0 on success.
+int32_t al_device_respring(const char *pairing_path,
+                          ALLogCallback log_cb,
+                          void *ctx,
+                          char **out_error);
+
 
 #ifdef __cplusplus
 }
