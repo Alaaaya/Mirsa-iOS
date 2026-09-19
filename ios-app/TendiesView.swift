@@ -165,26 +165,16 @@ struct TendiesView: View {
                     }
 
                     Button {
-                        RespringHelper.openDisplayZoomSettings()
+                        RespringHelper.instantRespring()
                     } label: {
-                        Label("Respring SpringBoard (Display Zoom › Done)", systemImage: "arrow.clockwise")
+                        Label("Respring SpringBoard", systemImage: "arrow.clockwise")
                             .bold()
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.purple)
-
-                    Button {
-                        RespringHelper.openWebRespring()
-                    } label: {
-                        Label("Instant Web Respring (Safari)", systemImage: "safari")
-                            .font(.caption)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundColor(.secondary)
                 } footer: {
-                    Text("To apply wallpapers without rebooting: tap Respring, then tap 'Done' in Display Zoom (or use Instant Web Respring).")
+                    Text("SpringBoard will respring cleanly to apply your new wallpapers without rebooting your iPhone.")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
