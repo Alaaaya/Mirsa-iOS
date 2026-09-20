@@ -282,6 +282,7 @@ final class AppViewModel: ObservableObject {
     func cancelPairing() {
         PairingController.shared.softCancel()
         pairingPhase = .idle
+        pairingStatus = ""
     }
 
     func deletePairingFile() {
@@ -1156,10 +1157,6 @@ final class AppViewModel: ObservableObject {
             await MainActor.run {
                 self.posterBoardContainer = container
                 UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
-                if !silent {
-                    self.successAlertMessage = "PosterBoard container discovered:\n\(container)"
-                    self.showSuccessAlert = true
-                }
             }
         } catch {
             if !silent {
