@@ -320,10 +320,14 @@ final class AppViewModel: ObservableObject {
 
 
     func toggleCardScanning() {
-        if isScanningCards {
-            stopCardScanning()
-        } else {
-            startCardScanning()
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            if isScanningCards {
+                stopCardScanning()
+            } else {
+                startCardScanning()
+            }
         }
     }
 
@@ -341,8 +345,12 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        isScanningCards = true
-        scanStatusText = "Open Apple Pay (double-click Side button) and tap your card…"
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            isScanningCards = true
+            scanStatusText = "Open Apple Pay (double-click Side button) and tap your card…"
+        }
         log.append("Started live card scanner…")
 
         let pairingPath = PairingController.pairingFilePath()
@@ -399,8 +407,12 @@ final class AppViewModel: ObservableObject {
 
     func stopCardScanning() {
         al_syslog_stream_stop()
-        isScanningCards = false
-        scanStatusText = "Scanning stopped. Total cards: \(cards.count)."
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            isScanningCards = false
+            scanStatusText = "Scanning stopped. Total cards: \(cards.count)."
+        }
         saveCards()
     }
 

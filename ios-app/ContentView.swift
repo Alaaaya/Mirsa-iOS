@@ -242,24 +242,34 @@ struct CompactLogView: View {
                 }
                 Button {
                     UIPasteboard.general.string = lines.joined(separator: "\n")
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        copied = false
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) {
+                        copied = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        var t2 = Transaction()
+                        t2.disablesAnimations = true
+                        withTransaction(t2) {
+                            copied = false
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc.fill")
-                        Text(copied ? "Copied! ✅" : "Copy")
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(copied ? "Copied" : "Copy")
+                            .font(.system(size: 11, weight: .bold))
                     }
-                    .font(.caption.bold())
                     .foregroundStyle(copied ? .green : .blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color(uiColor: .systemFill))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Color(uiColor: .tertiarySystemFill))
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.borderless)
+                .transaction { $0.animation = nil }
             }
 
             ScrollViewReader { proxy in
@@ -911,8 +921,9 @@ struct WalletCardsTab: View {
                     }
                 }
                 .padding(.vertical)
+                .transaction { $0.animation = nil }
             }
-            .animation(nil, value: vm.isScanningCards)
+            .transaction { $0.animation = nil }
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 60)
             }
@@ -930,6 +941,7 @@ struct WalletCardsTab: View {
                         .font(.subheadline.bold())
                         .foregroundStyle(vm.isScanningCards ? .red : .blue)
                     }
+                    .transaction { $0.animation = nil }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -1100,6 +1112,7 @@ struct WalletCardsTab: View {
             .background(vm.isScanningCards ? Color.blue.opacity(0.12) : Color(uiColor: .secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal)
+            .transaction { $0.animation = nil }
         }
     }
 
@@ -1233,6 +1246,7 @@ struct WalletCardsTab: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(vm.isScanningCards ? .red : .blue)
+                .transaction { $0.animation = nil }
 
                 Button {
                     showAddSheet = true
@@ -1248,10 +1262,13 @@ struct WalletCardsTab: View {
                     .frame(height: 48)
                 }
                 .buttonStyle(.bordered)
+                .transaction { $0.animation = nil }
             }
             .padding(.horizontal, 24)
+            .transaction { $0.animation = nil }
         }
         .frame(maxWidth: .infinity)
+        .transaction { $0.animation = nil }
     }
 }
 
