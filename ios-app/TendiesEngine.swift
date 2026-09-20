@@ -323,16 +323,15 @@ public final class TendiesEngine {
                     }
                 } else {
                     for descURL in descriptorFolders {
-                        let originalName = descURL.lastPathComponent
-                        let targetUUID: String
-                        if UUID(uuidString: originalName) != nil {
-                            targetUUID = originalName.uppercased()
-                        } else {
-                            targetUUID = UUID().uuidString.uppercased()
-                        }
-                        log("  ✨ Descriptor \(targetUUID)…")
+                        let targetUUID = UUID().uuidString.uppercased()
+                        let randomizedID = Int.random(in: 10000...99999)
+                        log("  ✨ Descriptor \(targetUUID) (ID: \(randomizedID))…")
+
+                        // Update plist identifiers to ensure synchronization and unique indexing
+                        updatePlistIdentifiers(in: descURL, randomizedID: randomizedID)
 
                         for sVer in versionsToWrite {
+                            // Primary target path
                             let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(targetUUID)"
                             try await writeDirectoryTree(
                                 sourceBaseDir: descURL,
@@ -340,50 +339,71 @@ public final class TendiesEngine {
                                 pairingPath: pairingPath,
                                 log: log
                             )
+
+                            // On iOS 18+, Collections was migrated to com.apple.Posters.CollectionsPosterApp
+                            if item.posterType == .collections {
+                                let modernTarget = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/com.apple.Posters.CollectionsPosterApp/descriptors/\(targetUUID)"
+                                try? await writeDirectoryTree(
+                                    sourceBaseDir: descURL,
+                                    targetBaseDir: modernTarget,
+                                    pairingPath: pairingPath,
+                                    log: log
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            progress(Double(itemIndex + 1) / (totalItems + (resetProtections ? 1 : 0)))
+            progress(Double(itemIndex + 1) / (totalItems + 1))
         }
 
-        // Reset file protections if requested
-        if resetProtections {
-            log("\n🔄 Forcing PosterBoard cache refresh and file protections reset…")
-            let stagePrefDir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("tendie_pref_\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: stagePrefDir, withIntermediateDirectories: true)
-            defer {
-                try? FileManager.default.removeItem(at: stagePrefDir)
-            }
+        // Always force PosterBoard cache refresh and file protections reset
+        log("\n🔄 Forcing PosterBoard cache refresh and file protections reset…")
+        let stagePrefDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tendie_pref_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stagePrefDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: stagePrefDir)
+        }
 
-            let prefPlistURL = stagePrefDir.appendingPathComponent("com.apple.PosterBoard.unprotectedUserDefaults.plist")
-            let prefDict: [String: Any] = [
-                "PBF_RESET_FILE_PROTECTIONS": true,
-                "PBF_LOCALE_DID_CHANGE": false
+        let prefPlistURL = stagePrefDir.appendingPathComponent("com.apple.PosterBoard.unprotectedUserDefaults.plist")
+        let prefDict: [String: Any] = [
+            "PBF_RESET_FILE_PROTECTIONS": true,
+            "PBF_LOCALE_DID_CHANGE": false,
+            "PersistedPosterContainerBundleIdentifiers": [
+                "com.apple.Posters.CollectionsPosterApp",
+                "com.apple.WallpaperKit.CollectionsPoster"
+            ],
+            "CompletedPosterBundleIdentifierMigrations": [
+                "com.apple.Posters.UnityPosterApp.ExtragalacticPoster",
+                "com.apple.Posters.WeatherPosterApp.WeatherPoster",
+                "com.apple.Posters.UnityPosterApp.Unity2025Poster",
+                "com.apple.Posters.UnityPosterApp.UnityPosterExtension",
+                "com.apple.Posters.UnityPosterApp.RhizomePoster",
+                "com.apple.Posters.KaleidoscopePosterApp.KaleidoscopePoster"
             ]
-            let plistData = try PropertyListSerialization.data(fromPropertyList: prefDict, format: .binary, options: 0)
-            try plistData.write(to: prefPlistURL)
+        ]
+        let plistData = try PropertyListSerialization.data(fromPropertyList: prefDict, format: .binary, options: 0)
+        try plistData.write(to: prefPlistURL)
 
-            let targetPrefDir = "\(normalizedContainer)/Library/Preferences"
-            try await writeDirectoryTree(
-                sourceBaseDir: stagePrefDir,
-                targetBaseDir: targetPrefDir,
-                pairingPath: pairingPath,
-                log: log
-            )
+        let targetPrefDir = "\(normalizedContainer)/Library/Preferences"
+        try await writeDirectoryTree(
+            sourceBaseDir: stagePrefDir,
+            targetBaseDir: targetPrefDir,
+            pairingPath: pairingPath,
+            log: log
+        )
 
-            // Also write to mobile global preferences for system daemon lookup
-            let mobilePrefDir = "/var/mobile/Library/Preferences"
-            try? await writeDirectoryTree(
-                sourceBaseDir: stagePrefDir,
-                targetBaseDir: mobilePrefDir,
-                pairingPath: pairingPath,
-                log: log
-            )
-            log("✅ PosterBoard preferences staged for reload")
-        }
+        // Also write to mobile global preferences for system daemon lookup
+        let mobilePrefDir = "/var/mobile/Library/Preferences"
+        try? await writeDirectoryTree(
+            sourceBaseDir: stagePrefDir,
+            targetBaseDir: mobilePrefDir,
+            pairingPath: pairingPath,
+            log: log
+        )
+        log("✅ PosterBoard preferences staged for reload")
 
         progress(1.0)
         log("\n🎉 All wallpapers injected successfully! Open Lock Screen settings or long-press lockscreen to choose your new wallpaper.")
@@ -422,9 +442,15 @@ public final class TendiesEngine {
             }
         }
 
+        let canonicalSource = sourceBaseDir.resolvingSymlinksInPath().path
+
         for dir in dirsToWrite {
-            var relPath = dir.path.replacingOccurrences(of: sourceBaseDir.path, with: "")
-            relPath = relPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let canonicalDir = dir.resolvingSymlinksInPath().path
+            var relPath = ""
+            if canonicalDir.hasPrefix(canonicalSource) {
+                relPath = String(canonicalDir.dropFirst(canonicalSource.count))
+                relPath = relPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            }
 
             let targetDir: String
             if relPath.isEmpty {
@@ -469,6 +495,41 @@ public final class TendiesEngine {
                     code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Failed to write directory: \(errDesc ?? "exploit error")"]
                 )
+            }
+        }
+    }
+
+    // MARK: - Plist Identifier Randomization (Matches Nugget implementation)
+
+    private func updatePlistIdentifiers(in folderURL: URL, randomizedID: Int) {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: folderURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        while let fileURL = enumerator.nextObject() as? URL {
+            let fileName = fileURL.lastPathComponent
+
+            if fileName == "com.apple.posterkit.provider.descriptor.identifier" {
+                try? "\(randomizedID)".data(using: .utf8)?.write(to: fileURL)
+            } else if fileName == "com.apple.posterkit.provider.contents.userInfo" {
+                if let data = try? Data(contentsOf: fileURL),
+                   var plist = (try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil)) as? [String: Any] {
+                    plist["wallpaperRepresentingIdentifier"] = randomizedID
+                    if let updated = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
+                        try? updated.write(to: fileURL)
+                    }
+                }
+            } else if fileName.hasSuffix("Wallpaper.plist") {
+                if let data = try? Data(contentsOf: fileURL),
+                   var plist = (try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil)) as? [String: Any] {
+                    plist["identifier"] = randomizedID
+                    if let updated = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
+                        try? updated.write(to: fileURL)
+                    }
+                }
             }
         }
     }
