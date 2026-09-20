@@ -20,7 +20,6 @@
 		D01333FE5D76673B726EC922 /* TendiesEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54463055E9590B0A928A2697 /* TendiesEngine.swift */; };
 		D1372A9BF5FAB71669756638 /* GrappaHelper.m in Sources */ = {isa = PBXBuildFile; fileRef = CCEE0E39AF8DEAE3E55A456C /* GrappaHelper.m */; };
 		E2028685627EA8F9A2BF1732 /* PairingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A02FDAA5E5C8719C39DA4E6C /* PairingController.swift */; };
-		E45948BE8F957DD168B004CC /* xpc_crash.c in Sources */ = {isa = PBXBuildFile; fileRef = 8E792F488957363A13168C7D /* xpc_crash.c */; };
 		F425EA3763995D85ABFBB99B /* RespringHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744597D526DCBE3516400831 /* RespringHelper.swift */; };
 /* End PBXBuildFile section */
 
@@ -33,13 +32,11 @@
 		6DCB2FCB8D4F45B9474A81BC /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 		744597D526DCBE3516400831 /* RespringHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RespringHelper.swift; sourceTree = "<group>"; };
 		81FCB10A2F3D7CEAED486771 /* TendiesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TendiesModel.swift; sourceTree = "<group>"; };
-		8E792F488957363A13168C7D /* xpc_crash.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = xpc_crash.c; sourceTree = "<group>"; };
 		8EF8BF3979E64C5575AD150E /* GrappaHelper.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GrappaHelper.h; sourceTree = "<group>"; };
 		920112F6B415C22F51326996 /* NetworkStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatus.swift; sourceTree = "<group>"; };
 		988BAD6580C0B7784B5F4759 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A02FDAA5E5C8719C39DA4E6C /* PairingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingController.swift; sourceTree = "<group>"; };
 		A416E9FC1E5258B289C6DA54 /* TendiesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TendiesView.swift; sourceTree = "<group>"; };
-		B0BE516C1412C88AD2D09FC5 /* xpc_crash.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = xpc_crash.h; sourceTree = "<group>"; };
 		CCEE0E39AF8DEAE3E55A456C /* GrappaHelper.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GrappaHelper.m; sourceTree = "<group>"; };
 		D0F9F55D9C9EC2D4AE16F004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E001E5A3AA0793BBC1F623A7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -101,8 +98,6 @@
 				81FCB10A2F3D7CEAED486771 /* TendiesModel.swift */,
 				A416E9FC1E5258B289C6DA54 /* TendiesView.swift */,
 				30060FC4F88D7BF91C2DCD5E /* Utilities.swift */,
-				8E792F488957363A13168C7D /* xpc_crash.c */,
-				B0BE516C1412C88AD2D09FC5 /* xpc_crash.h */,
 			);
 			path = "ios-app";
 			sourceTree = "<group>";
@@ -191,7 +186,6 @@
 				010AC8DF1C1EED48625C6675 /* TendiesModel.swift in Sources */,
 				80E5245336B574F61E0D3194 /* TendiesView.swift in Sources */,
 				771980AD8A57F84F9D2B30DC /* Utilities.swift in Sources */,
-				E45948BE8F957DD168B004CC /* xpc_crash.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

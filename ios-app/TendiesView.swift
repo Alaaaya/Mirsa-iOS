@@ -165,34 +165,36 @@ struct TendiesView: View {
                     }
 
                     Button {
-                        RespringHelper.instantRespring()
+                        RespringHelper.openPosterBoard()
+                        RespringHelper.openWallpaperSettings()
                     } label: {
-                        Label("Instant Respring (Pocket-Poster / XPC)", systemImage: "arrow.clockwise")
+                        Label("Open Wallpaper Settings", systemImage: "photo.on.rectangle.angled")
                             .bold()
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                    .tint(.green)
 
                     Button {
-                        RespringHelper.openSafariRespring()
+                        RespringHelper.reloadCollectionsViaLanguage()
+                        RespringHelper.openLanguageSettings()
                     } label: {
-                        Label("Safari Respring (Lumid-Off Crasher)", systemImage: "safari")
-                            .bold()
+                        Label("Reload SpringBoard (Language Settings)", systemImage: "globe")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
+                    .buttonStyle(.bordered)
 
                     Button {
-                        RespringHelper.openDisplayZoomSettings()
+                        Task {
+                            await vm.restartDeviceViaTunnel()
+                        }
                     } label: {
-                        Label("System Respring (Display Zoom)", systemImage: "gearshape")
+                        Label("Restart Device (via Tunnel)", systemImage: "arrow.clockwise.circle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                 } footer: {
-                    Text("Choose any respring method: Instant XPC (Pocket-Poster), Safari WebKit Crasher (Lumid-Off), or native Display Zoom. After respring, check Settings › Wallpaper › Add New › Collections.")
+                    Text("To see your new wallpapers: tap Open Wallpaper Settings and check the Collections category. If not visible immediately, tap Reload SpringBoard, select your current language and tap Done.")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
