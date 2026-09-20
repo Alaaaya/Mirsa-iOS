@@ -10,59 +10,105 @@ import UIKit
 import WebKit
 
 public final class RespringHelper: NSObject {
+    private static var crasherWindow: UIWindow?
     private static var crasherWebView: WKWebView?
 
-    /// Triggers an immediate SpringBoard respring using Lumid-Off's compositor overload
+    /// Triggers an immediate SpringBoard respring (without device reboot) using
+    /// full-screen WebKit GPU compositor overload (Lumid-Off & Mond techniques).
     public static func instantRespring() {
-        DispatchQueue.main.async {
-            // 1. Try private framework FrontBoardServices / SpringBoardServices first
-            if respringPrivateFramework() {
-                return
-            }
-
-            // 2. Local compositor crash via in-app WKWebView
-            // Overloads the RenderServer (backboardd/SpringBoard) with 5000 backdrop-filter blur layers
-            let config = WKWebViewConfiguration()
-            config.preferences.javaScriptCanOpenWindowsAutomatically = true
-            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 100, height: 100), configuration: config)
-            crasherWebView = webView
-
-            if let window = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .flatMap({ $0.windows })
-                .first(where: { $0.isKeyWindow }) {
-                window.addSubview(webView)
-            }
-
-            let crasherHTML = """
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="utf-8"></head>
-            <body style="background:#000;">
-            <script>
-                function crash() {
-                    for (let i = 0; i < 5000; i++) {
-                        const d = document.createElement('div');
-                        d.style.cssText = 'position:fixed;width:100vw;height:100vh;backdrop-filter:blur(999px);z-index:' + (9999 + i) + ';';
-                        document.body.appendChild(d);
-                    }
-                    setInterval(() => {
-                        window.history.pushState(null, '', window.location.href);
-                    }, 1);
-                }
-                window.addEventListener('DOMContentLoaded', crash);
-                crash();
-            </script>
-            </body>
-            </html>
-            """
-            webView.loadHTMLString(crasherHTML, baseURL: URL(string: "https://lumid-off.github.io"))
-
-            // 3. Also open Lumid-Off hosted crasher in Safari as instant backup
-            if let onlineURL = URL(string: "https://lumid-off.github.io/crash-springboard/") {
-                UIApplication.shared.open(onlineURL, options: [:], completionHandler: nil)
-            }
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { instantRespring() }
+            return
         }
+
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+
+        // 1. Try private framework FrontBoardServices / SpringBoardServices first
+        if respringPrivateFramework() {
+            return
+        }
+
+        // 2. Overload the RenderServer (backboardd/SpringBoard compositor)
+        // Must be on a high-level full-screen UIWindow (.alert + 100) so iOS doesn't optimize it away.
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = prefs
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+
+        let bounds = UIScreen.main.bounds
+        let webView = WKWebView(frame: bounds, configuration: config)
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.backgroundColor = .black
+        crasherWebView = webView
+
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+
+        let window: UIWindow
+        if let scene = activeScene {
+            window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+        } else {
+            window = UIWindow(frame: bounds)
+        }
+        window.windowLevel = .alert + 100
+        window.backgroundColor = .black
+        window.isHidden = false
+
+        let hostVC = UIViewController()
+        hostVC.view.backgroundColor = .black
+        hostVC.view.addSubview(webView)
+        webView.frame = hostVC.view.bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.rootViewController = hostVC
+        window.makeKeyAndVisible()
+        crasherWindow = window
+
+        // Combined Lumid-Off + Mond GPU crash payload
+        let crasherHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body, html { margin: 0; padding: 0; background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+            </style>
+        </head>
+        <body>
+        <script>
+            (function() {
+                var c = document.createElement('div');
+                c.style.cssText = 'perspective:1px;perspective-origin:9999999% 9999999%;width:100vw;height:100vh;';
+                document.body.appendChild(c);
+
+                // Create backdrop-filter blur layers with 3D transformations to exhaust GPU compositor
+                for (var i = 0; i < 2500; i++) {
+                    var d = document.createElement('div');
+                    d.style.cssText = 'position:fixed;width:100vw;height:100vh;backdrop-filter:blur(500px);-webkit-backdrop-filter:blur(500px);transform:translate3d(' + (i * 10) + 'px,' + (i * 10) + 'px,' + i + 'px) rotateY(90deg);z-index:' + (9999 + i) + ';';
+                    c.appendChild(d);
+                }
+
+                // Rapid allocation & history push to trigger RenderServer/SpringBoard timeout
+                setInterval(function() {
+                    try { window.history.pushState(null, '', window.location.href); } catch(e) {}
+                    try { crypto.getRandomValues(new Uint8Array(1024 * 1024 * 5)); } catch(e) {}
+                }, 0);
+            })();
+        </script>
+        </body>
+        </html>
+        """
+
+        webView.loadHTMLString(crasherHTML, baseURL: URL(string: "about:blank"))
+        window.layoutIfNeeded()
+        webView.setNeedsLayout()
+        webView.layoutIfNeeded()
+        webView.loadHTMLString(crasherHTML, baseURL: nil)
     }
 
     /// Attempts an in-memory SpringBoard respring using private FrontBoardServices / SpringBoardServices
