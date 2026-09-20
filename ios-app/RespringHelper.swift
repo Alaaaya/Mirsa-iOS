@@ -51,16 +51,6 @@ public final class RespringHelper: NSObject {
 </html>
 """
 
-    /// Directly launches PosterBoard daemon so it re-reads custom descriptors
-    @discardableResult
-    public static func openPosterBoard() -> Bool {
-        guard let obj = objc_getClass("LSApplicationWorkspace") as? NSObject else { return false }
-        let workspace = obj.perform(Selector(("defaultWorkspace")))?.takeUnretainedValue() as? NSObject
-        if let success = workspace?.perform(Selector(("openApplicationWithBundleID:")), with: "com.apple.PosterBoard") {
-            return success != nil
-        }
-        return false
-    }
 
     /// Opens Settings › Wallpaper directly so the user can immediately choose newly injected collections
     public static func openWallpaperSettings() {
