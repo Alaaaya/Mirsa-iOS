@@ -140,6 +140,34 @@ pub unsafe extern "C" fn al_exploit_write_dir(
     }
 }
 
+/// Inject an entire directory `folder_path` into `target_parent_dir/dest_name` outside the sandbox via AirTraffic exploit.
+///
+/// # Safety
+/// All pointer arguments must be null or valid for their documented use.
+#[no_mangle]
+pub unsafe extern "C" fn al_exploit_inject_folder(
+    pairing_path: *const c_char,
+    folder_path: *const c_char,
+    target_parent_dir: *const c_char,
+    dest_name: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        exploit::inject_folder(pairing_path, folder_path, target_parent_dir, dest_name, log_cb, ctx, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_exploit_inject_folder: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
 /// Free any `*mut c_char` returned by this library.
 ///
 /// # Safety

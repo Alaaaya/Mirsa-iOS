@@ -167,12 +167,22 @@ struct TendiesView: View {
                     Button {
                         RespringHelper.instantRespring()
                     } label: {
-                        Label("Respring SpringBoard", systemImage: "arrow.clockwise")
+                        Label("Instant Respring (Pocket-Poster / XPC)", systemImage: "arrow.clockwise")
                             .bold()
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.purple)
+
+                    Button {
+                        RespringHelper.openSafariRespring()
+                    } label: {
+                        Label("Safari Respring (Lumid-Off Crasher)", systemImage: "safari")
+                            .bold()
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
 
                     Button {
                         RespringHelper.openDisplayZoomSettings()
@@ -182,7 +192,7 @@ struct TendiesView: View {
                     }
                     .buttonStyle(.bordered)
                 } footer: {
-                    Text("SpringBoard will respring cleanly without rebooting your iPhone. After respring, long-press your Lock Screen or open Settings › Wallpaper › Add New and check the 'Collections' category. If not visible immediately, toggle Display Zoom or open Wallpaper settings.")
+                    Text("Choose any respring method: Instant XPC (Pocket-Poster), Safari WebKit Crasher (Lumid-Off), or native Display Zoom. After respring, check Settings › Wallpaper › Add New › Collections.")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
