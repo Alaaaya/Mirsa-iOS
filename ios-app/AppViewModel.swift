@@ -1228,12 +1228,9 @@ final class AppViewModel: ObservableObject {
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
             tendiesFlashLog.append("🎉 Wallpapers applied to PosterBoard successfully!")
-            tendiesFlashLog.append("🔄 Sending SpringBoard reload signal via tunnel...")
-            _ = await TendiesEngine.shared.sendRespringSignal(pairingPath: pairingPath)
-            tendiesFlashLog.append("✅ SpringBoard reload signal sent!")
             tendiesFlashLog.append("⚡ Triggering instant SpringBoard respring...")
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 RespringHelper.instantRespring()
             }
         } catch {

@@ -173,8 +173,16 @@ struct TendiesView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.purple)
+
+                    Button {
+                        RespringHelper.openDisplayZoomSettings()
+                    } label: {
+                        Label("System Respring (Display Zoom)", systemImage: "gearshape")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 } footer: {
-                    Text("SpringBoard will respring cleanly to apply your new wallpapers without rebooting your iPhone.")
+                    Text("SpringBoard will respring cleanly without rebooting your iPhone. After respring, long-press your Lock Screen or open Settings › Wallpaper › Add New and check the 'Collections' category. If not visible immediately, toggle Display Zoom or open Wallpaper settings.")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
