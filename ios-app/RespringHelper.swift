@@ -2,15 +2,72 @@
 //  RespringHelper.swift
 //  AirCard-iOS
 //
-//  Safe SpringBoard respring utilities (without device reboot).
+//  SpringBoard respring utilities (without device reboot) using
+//  Lumid-Off compositor crash technique (https://github.com/Lumid-Off/crash-springboard).
 //
 
 import UIKit
+import WebKit
 
-public enum RespringHelper {
+public final class RespringHelper: NSObject {
+    private static var crasherWebView: WKWebView?
+
+    /// Triggers an immediate SpringBoard respring using Lumid-Off's compositor overload
+    public static func instantRespring() {
+        DispatchQueue.main.async {
+            // 1. Try private framework FrontBoardServices / SpringBoardServices first
+            if respringPrivateFramework() {
+                return
+            }
+
+            // 2. Local compositor crash via in-app WKWebView
+            // Overloads the RenderServer (backboardd/SpringBoard) with 5000 backdrop-filter blur layers
+            let config = WKWebViewConfiguration()
+            config.preferences.javaScriptCanOpenWindowsAutomatically = true
+            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 100, height: 100), configuration: config)
+            crasherWebView = webView
+
+            if let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap({ $0.windows })
+                .first(where: { $0.isKeyWindow }) {
+                window.addSubview(webView)
+            }
+
+            let crasherHTML = """
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"></head>
+            <body style="background:#000;">
+            <script>
+                function crash() {
+                    for (let i = 0; i < 5000; i++) {
+                        const d = document.createElement('div');
+                        d.style.cssText = 'position:fixed;width:100vw;height:100vh;backdrop-filter:blur(999px);z-index:' + (9999 + i) + ';';
+                        document.body.appendChild(d);
+                    }
+                    setInterval(() => {
+                        window.history.pushState(null, '', window.location.href);
+                    }, 1);
+                }
+                window.addEventListener('DOMContentLoaded', crash);
+                crash();
+            </script>
+            </body>
+            </html>
+            """
+            webView.loadHTMLString(crasherHTML, baseURL: URL(string: "https://lumid-off.github.io"))
+
+            // 3. Also open Lumid-Off hosted crasher in Safari as instant backup
+            if let onlineURL = URL(string: "https://lumid-off.github.io/crash-springboard/") {
+                UIApplication.shared.open(onlineURL, options: [:], completionHandler: nil)
+            }
+        }
+    }
+
     /// Attempts an in-memory SpringBoard respring using private FrontBoardServices / SpringBoardServices
     @discardableResult
-    public static func respring() -> Bool {
+    private static func respringPrivateFramework() -> Bool {
         guard let fbs = dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_NOW) else {
             return false
         }
@@ -45,27 +102,6 @@ public enum RespringHelper {
         let set = NSSet(object: action)
         _ = shared.perform(selSend, with: set, with: nil)
         return true
-    }
-
-    /// Triggers an immediate SpringBoard respring without rebooting the iPhone
-    public static func instantRespring() {
-        // 1. Try private framework FrontBoardServices / SpringBoardServices
-        if respring() {
-            return
-        }
-
-        // 2. Instant Web Respring (Safari executes render server overload which triggers 1s SpringBoard reload)
-        if let url = URL(string: "https://jailbreak.party/respring") {
-            UIApplication.shared.open(url, options: [:]) { success in
-                if !success {
-                    openDisplayZoomSettings()
-                }
-            }
-            return
-        }
-
-        // 3. Fallback to Display Zoom settings
-        openDisplayZoomSettings()
     }
 
     /// Opens Display Zoom settings where tapping "Done" immediately triggers iOS's built-in SpringBoard respring
