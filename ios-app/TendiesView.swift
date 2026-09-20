@@ -51,9 +51,15 @@ struct TendiesView: View {
                     Button {
                         showFilePicker = true
                     } label: {
-                        Label(vm.tendieItems.isEmpty ? "Choose .tendies from Files…" : "Import More Wallpapers…", systemImage: "doc.badge.plus")
-                            .bold()
-                            .frame(maxWidth: .infinity, alignment: .center)
+                        HStack(spacing: 8) {
+                            Spacer()
+                            Image(systemName: "doc.badge.plus")
+                            Text(vm.tendieItems.isEmpty ? "Choose .tendies from Files…" : "Import More Wallpapers…")
+                            Spacer()
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
@@ -126,48 +132,56 @@ struct TendiesView: View {
 
                 // Section 4: Flash Action & Respring
                 Section {
-                    if case .running = vm.tendiesFlashPhase {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            VStack(alignment: .leading) {
-                                Text("Flashing Wallpapers…").font(.subheadline.bold())
-                                ProgressView(value: vm.tendiesFlashProgress)
+                    VStack(spacing: 12) {
+                        if case .running = vm.tendiesFlashPhase {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Flashing Wallpapers…").font(.subheadline.bold())
+                                    ProgressView(value: vm.tendiesFlashProgress)
+                                }
                             }
+                            .padding(.vertical, 4)
+                        } else {
+                            Button {
+                                Task {
+                                    await vm.flashSelectedTendies()
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Spacer()
+                                    Image(systemName: "sparkles")
+                                    Text("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s")")
+                                    Spacer()
+                                }
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.blue)
+                            .disabled(selectedCount == 0)
                         }
-                    } else {
-                        Button {
-                            Task {
-                                await vm.flashSelectedTendies()
-                            }
+
+                        Button(role: .destructive) {
+                            vm.isNeoSpringing = true
+                            isNeoSpringing = true
+                            RespringHelper.triggerNeoSpring()
                         } label: {
-                            Label("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s") to PosterBoard", systemImage: "sparkles")
-                                .bold()
-                                .frame(maxWidth: .infinity, alignment: .center)
+                            HStack(spacing: 8) {
+                                Spacer()
+                                Image(systemName: "bolt.fill")
+                                Text("Respring (NeoSpring)")
+                                Spacer()
+                            }
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.blue)
-                        .disabled(selectedCount == 0)
+                        .tint(.red)
                     }
-
-                    Button {
-                        RespringHelper.openWallpaperSettings()
-                    } label: {
-                        Label("Open Wallpaper Settings", systemImage: "photo.on.rectangle.angled")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button(role: .destructive) {
-                        vm.isNeoSpringing = true
-                        isNeoSpringing = true
-                        RespringHelper.triggerNeoSpring()
-                    } label: {
-                        Label("Respring (NeoSpring)", systemImage: "bolt.fill")
-                            .bold()
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                 } footer: {
                     Text("Flashing will automatically trigger NeoSpring to respring the device and apply your new wallpapers.")
                 }
@@ -182,6 +196,9 @@ struct TendiesView: View {
                         )
                     }
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 60)
             }
             .navigationTitle("Wallpapers")
             .navigationBarTitleDisplayMode(.inline)
