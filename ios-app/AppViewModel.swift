@@ -75,6 +75,7 @@ final class AppViewModel: ObservableObject {
     @Published var tendiesFlashPhase: FlashPhase = .idle
     @Published var tendiesFlashProgress: Double = 0
     @Published var tendiesFlashLog: [String] = []
+    @Published var isNeoSpringing: Bool = false
 
     // MARK: - AirCard UI States & Properties
     static var detectedDeviceLanguage: PasscodeLanguageTarget {
@@ -1227,11 +1228,12 @@ final class AppViewModel: ObservableObject {
             )
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
-            tendiesFlashLog.append("🎉 Wallpapers applied to PosterBoard successfully!")
-            tendiesFlashLog.append("⚡ Waking PosterBoard daemon...")
+            tendiesFlashLog.append("🎉 Wallpapers applied successfully!")
+            tendiesFlashLog.append("⚡ Triggering NeoSpring respring...")
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                RespringHelper.openPosterBoard()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.isNeoSpringing = true
+                RespringHelper.triggerNeoSpring()
             }
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
@@ -1240,7 +1242,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func respringDevice() {
-        tendiesFlashLog.append("⚡ Triggering NeoSpring...")
+        tendiesFlashLog.append("⚡ Triggering NeoSpring respring...")
+        isNeoSpringing = true
         RespringHelper.triggerNeoSpring()
     }
 

@@ -166,17 +166,15 @@ struct TendiesView: View {
                     }
 
                     Button {
-                        RespringHelper.openPosterBoard()
                         RespringHelper.openWallpaperSettings()
                     } label: {
                         Label("Open Wallpaper Settings", systemImage: "photo.on.rectangle.angled")
-                            .bold()
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
+                    .buttonStyle(.bordered)
 
                     Button(role: .destructive) {
+                        vm.isNeoSpringing = true
                         isNeoSpringing = true
                         RespringHelper.triggerNeoSpring()
                     } label: {
@@ -187,7 +185,7 @@ struct TendiesView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
                 } footer: {
-                    Text("To see your new wallpapers: tap Open Wallpaper Settings. If collections are not visible, tap Respring (NeoSpring) to reload SpringBoard.")
+                    Text("Flashing will automatically trigger NeoSpring to respring the device and apply your new wallpapers.")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
@@ -232,7 +230,7 @@ struct TendiesView: View {
                 }
             }
             .overlay {
-                if isNeoSpringing {
+                if isNeoSpringing || vm.isNeoSpringing {
                     ZStack {
                         Color.black.ignoresSafeArea()
                         NeoSpringView()
