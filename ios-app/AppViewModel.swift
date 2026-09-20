@@ -1228,10 +1228,10 @@ final class AppViewModel: ObservableObject {
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
             tendiesFlashLog.append("🎉 Wallpapers applied to PosterBoard successfully!")
-            tendiesFlashLog.append("⚡ Triggering instant SpringBoard respring...")
+            tendiesFlashLog.append("⚡ Waking PosterBoard daemon...")
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                RespringHelper.instantRespring()
+                RespringHelper.openPosterBoard()
             }
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
@@ -1240,19 +1240,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func respringDevice() {
-        tendiesFlashLog.append("⚡ Reloading SpringBoard & PosterBoard...")
-        RespringHelper.instantRespring()
-    }
-
-    func restartDeviceViaTunnel() async {
-        tendiesFlashLog.append("🔄 Sending device restart request via tunnel...")
-        let pairingPath = PairingController.pairingFilePath()
-        let success = await RespringHelper.restartDevice(pairingPath: pairingPath)
-        if success {
-            tendiesFlashLog.append("✅ Restart signal sent successfully")
-        } else {
-            tendiesFlashLog.append("⚠️ Restart failed (ensure loopback tunnel is connected)")
-        }
+        tendiesFlashLog.append("⚡ Triggering NeoSpring...")
+        RespringHelper.triggerNeoSpring()
     }
 
     func reset() {

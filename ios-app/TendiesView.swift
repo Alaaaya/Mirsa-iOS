@@ -13,6 +13,7 @@ struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
     @State private var selectedDetailItem: TendieItem? = nil
+    @State private var isNeoSpringing = false
 
     private var selectedCount: Int {
         vm.tendieItems.filter { $0.isSelected }.count
@@ -175,26 +176,18 @@ struct TendiesView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
 
-                    Button {
-                        RespringHelper.reloadCollectionsViaLanguage()
-                        RespringHelper.openLanguageSettings()
+                    Button(role: .destructive) {
+                        isNeoSpringing = true
+                        RespringHelper.triggerNeoSpring()
                     } label: {
-                        Label("Reload SpringBoard (Language Settings)", systemImage: "globe")
+                        Label("Respring (NeoSpring)", systemImage: "bolt.fill")
+                            .bold()
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        Task {
-                            await vm.restartDeviceViaTunnel()
-                        }
-                    } label: {
-                        Label("Restart Device (via Tunnel)", systemImage: "arrow.clockwise.circle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
                 } footer: {
-                    Text("To see your new wallpapers: tap Open Wallpaper Settings and check the Collections category. If not visible immediately, tap Reload SpringBoard, select your current language and tap Done.")
+                    Text("To see your new wallpapers: tap Open Wallpaper Settings. If collections are not visible, tap Respring (NeoSpring) to reload SpringBoard.")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
@@ -236,6 +229,16 @@ struct TendiesView: View {
             .task {
                 if vm.posterBoardContainer.isEmpty {
                     await vm.autoDetectPosterBoardContainer(silent: true)
+                }
+            }
+            .overlay {
+                if isNeoSpringing {
+                    ZStack {
+                        Color.black.ignoresSafeArea()
+                        NeoSpringView()
+                            .brightness(-1.0)
+                            .ignoresSafeArea()
+                    }
                 }
             }
         }
