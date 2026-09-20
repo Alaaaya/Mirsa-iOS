@@ -1127,16 +1127,6 @@ final class AppViewModel: ObservableObject {
                 }
             }
         }
-        if importedCount > 0 {
-            await MainActor.run {
-                if importedCount == 1 {
-                    self.successAlertMessage = "Wallpaper '\(lastImportedName)' imported successfully!"
-                } else {
-                    self.successAlertMessage = "\(importedCount) wallpapers imported successfully!"
-                }
-                self.showSuccessAlert = true
-            }
-        }
     }
 
     func deleteTendie(item: TendieItem) {

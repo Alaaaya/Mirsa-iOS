@@ -386,7 +386,7 @@ struct PairingTab: View {
                             Text("AirCard-iOS")
                                 .font(.title2.bold())
                             Spacer()
-                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.2.6")
+                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.3")
                                 .font(.caption.monospaced().bold())
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.blue.opacity(0.12))
@@ -1320,7 +1320,7 @@ struct ApplyThemeSection: View {
                 } label: {
                     Label(vm.loadedTheme == nil ? "Choose .passthm from Files…" : "Change .passthm…",
                           systemImage: "doc.badge.plus")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
 
                 if vm.loadedTheme != nil {
@@ -1372,8 +1372,10 @@ struct ApplyThemeSection: View {
                     vm.clearLoadedTheme()
                 } label: {
                     Label("Remove / Unload Theme", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .buttonStyle(.bordered)
+                .tint(.red)
             }
         }
     }
@@ -1543,7 +1545,7 @@ struct ThemeCreatorSection: View {
                     _ = vm.exportPassthm()
                 } label: {
                     Label("Export .passthm...", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .buttonStyle(.bordered)
 
@@ -1551,8 +1553,10 @@ struct ThemeCreatorSection: View {
                     vm.clearAllCreator()
                 } label: {
                     Label("Clear All", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .buttonStyle(.bordered)
+                .tint(.red)
             }
         }
     }
@@ -1565,7 +1569,7 @@ struct ThemeCreatorSection: View {
                 } label: {
                     Label(vm.posterImage == nil ? "Select Photo for Keypad…" : "Change Photo…",
                           systemImage: "photo")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
             .confirmationDialog("Choose Poster Image Source", isPresented: $showPosterSourceDialog, titleVisibility: .visible) {

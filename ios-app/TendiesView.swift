@@ -46,33 +46,17 @@ struct TendiesView: View {
                     }
                 }
 
-                if vm.showSuccessAlert && !vm.successAlertMessage.isEmpty {
-                    Section {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text(vm.successAlertMessage)
-                                .font(.caption)
-                                .foregroundColor(.green)
-                            Spacer()
-                            Button {
-                                vm.showSuccessAlert = false
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
                 // Section 1: Import Wallpapers
                 Section {
                     Button {
                         showFilePicker = true
                     } label: {
                         Label(vm.tendieItems.isEmpty ? "Choose .tendies from Files…" : "Import More Wallpapers…", systemImage: "doc.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .bold()
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                 } footer: {
                     if vm.posterBoardContainer.isEmpty {
                         Text("PosterBoard container will be auto-detected automatically on flash.")
@@ -158,7 +142,7 @@ struct TendiesView: View {
                         } label: {
                             Label("Flash \(selectedCount) Wallpaper\(selectedCount == 1 ? "" : "s") to PosterBoard", systemImage: "sparkles")
                                 .bold()
-                                .frame(maxWidth: .infinity)
+                                .frame(maxWidth: .infinity, alignment: .center)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.blue)
@@ -169,7 +153,7 @@ struct TendiesView: View {
                         RespringHelper.openWallpaperSettings()
                     } label: {
                         Label("Open Wallpaper Settings", systemImage: "photo.on.rectangle.angled")
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .buttonStyle(.bordered)
 
@@ -180,7 +164,7 @@ struct TendiesView: View {
                     } label: {
                         Label("Respring (NeoSpring)", systemImage: "bolt.fill")
                             .bold()
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
@@ -222,6 +206,10 @@ struct TendiesView: View {
                 TendieDetailSheet(item: item)
             }
             .onAppear {
+                vm.isNeoSpringing = false
+                isNeoSpringing = false
+                vm.showSuccessAlert = false
+                vm.successAlertMessage = ""
                 vm.scanDocumentsForTendies()
             }
             .task {
