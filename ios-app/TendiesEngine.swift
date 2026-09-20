@@ -295,62 +295,39 @@ public final class TendiesEngine {
                 continue
             }
 
-            if item.isContainer {
-                log("  📁 Packaging App Container structure…")
-                let containerFolder = tempStageDir.appendingPathComponent("container")
-                let srcDir = FileManager.default.fileExists(atPath: containerFolder.path) ? containerFolder : tempStageDir
+            log("  🖼 Locating wallpaper descriptors…")
+            let descriptors = findDescriptorsWithExtensions(in: tempStageDir, defaultExt: item.posterType.extensionBundleId)
+            log("  ✨ Found \(descriptors.count) descriptor(s) to install")
 
-                try await writeDirectoryTree(
-                    sourceBaseDir: srcDir,
-                    targetBaseDir: normalizedContainer,
-                    pairingPath: pairingPath,
-                    log: log
-                )
-            } else {
-                log("  🖼 Packaging Poster Descriptors…")
-                let descriptorFolders = findDescriptorFolders(in: tempStageDir)
+            for (descIndex, descItem) in descriptors.enumerated() {
+                let targetUUID = UUID().uuidString.uppercased()
+                let randomizedID = Int.random(in: 10000...99999)
+                log("  [\(descIndex + 1)/\(descriptors.count)] Descriptor \(targetUUID) (ID: \(randomizedID)) for \(descItem.ext)…")
 
-                if descriptorFolders.isEmpty {
-                    log("  ⚠️ No descriptor directory found, flashing root contents…")
-                    for sVer in versionsToWrite {
-                        let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(UUID().uuidString.uppercased())"
-                        try await writeDirectoryTree(
-                            sourceBaseDir: tempStageDir,
-                            targetBaseDir: targetDescDir,
+                // Update plist identifiers to ensure unique indexing without collisions
+                updatePlistIdentifiers(in: descItem.url, randomizedID: randomizedID)
+
+                for sVer in versionsToWrite {
+                    // Primary destination
+                    let targetParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(descItem.ext)/descriptors"
+                    try await injectDescriptorFolder(
+                        folderURL: descItem.url,
+                        targetParentDir: targetParentDir,
+                        destName: targetUUID,
+                        pairingPath: pairingPath,
+                        log: log
+                    )
+
+                    // On iOS 18+, Collections was migrated to com.apple.Posters.CollectionsPosterApp
+                    if descItem.ext == "com.apple.WallpaperKit.CollectionsPoster" {
+                        let modernParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/com.apple.Posters.CollectionsPosterApp/descriptors"
+                        try? await injectDescriptorFolder(
+                            folderURL: descItem.url,
+                            targetParentDir: modernParentDir,
+                            destName: targetUUID,
                             pairingPath: pairingPath,
                             log: log
                         )
-                    }
-                } else {
-                    for descURL in descriptorFolders {
-                        let targetUUID = UUID().uuidString.uppercased()
-                        let randomizedID = Int.random(in: 10000...99999)
-                        log("  ✨ Descriptor \(targetUUID) (ID: \(randomizedID))…")
-
-                        // Update plist identifiers to ensure synchronization and unique indexing
-                        updatePlistIdentifiers(in: descURL, randomizedID: randomizedID)
-
-                        for sVer in versionsToWrite {
-                            // Primary target path
-                            let targetDescDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(item.posterType.extensionBundleId)/descriptors/\(targetUUID)"
-                            try await writeDirectoryTree(
-                                sourceBaseDir: descURL,
-                                targetBaseDir: targetDescDir,
-                                pairingPath: pairingPath,
-                                log: log
-                            )
-
-                            // On iOS 18+, Collections was migrated to com.apple.Posters.CollectionsPosterApp
-                            if item.posterType == .collections {
-                                let modernTarget = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/com.apple.Posters.CollectionsPosterApp/descriptors/\(targetUUID)"
-                                try? await writeDirectoryTree(
-                                    sourceBaseDir: descURL,
-                                    targetBaseDir: modernTarget,
-                                    pairingPath: pairingPath,
-                                    log: log
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -534,45 +511,144 @@ public final class TendiesEngine {
         }
     }
 
-    // MARK: - Find Descriptors
+    // MARK: - Folder Injector Helper (Single Atomic Move via AirTraffic)
 
-    private func findDescriptorFolders(in rootURL: URL) -> [URL] {
+    private func injectDescriptorFolder(
+        folderURL: URL,
+        targetParentDir: String,
+        destName: String,
+        pairingPath: String,
+        log: @escaping (String) -> Void
+    ) async throws {
+        log("  📦 Injecting '\(destName)' into \(targetParentDir)…")
+        var errDesc: String? = nil
+        let ok: Bool = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var outError: UnsafeMutablePointer<CChar>? = nil
+                let rc = pairingPath.withCString { pairC in
+                    folderURL.path.withCString { folderC in
+                        targetParentDir.withCString { parentC in
+                            destName.withCString { destC in
+                                al_exploit_inject_folder(
+                                    pairC,
+                                    folderC,
+                                    parentC,
+                                    destC,
+                                    { _, msg in
+                                        guard let msg = msg else { return }
+                                        let line = String(cString: msg)
+                                        DispatchQueue.main.async {
+                                            AppViewModel.shared?.tendiesFlashLog.append("    " + line)
+                                        }
+                                    },
+                                    nil,
+                                    &outError
+                                )
+                            }
+                        }
+                    }
+                }
+                if let p = outError {
+                    errDesc = String(cString: p)
+                    al_string_free(p)
+                }
+                cont.resume(returning: rc == 0)
+            }
+        }
+
+        if !ok {
+            throw NSError(
+                domain: "TendiesEngine",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to inject descriptor: \(errDesc ?? "exploit error")"]
+            )
+        }
+    }
+
+    // MARK: - Find Descriptors With Targeted Extensions
+
+    private func findDescriptorsWithExtensions(in rootURL: URL, defaultExt: String) -> [(ext: String, url: URL)] {
         let fileManager = FileManager.default
+        var results: [(ext: String, url: URL)] = []
 
-        // 1. Standard Tendies format: check for "descriptors" or "descriptor" folder
-        for folderName in ["descriptors", "descriptor"] {
+        // 1. Check for standard container structure
+        let containerFolder = rootURL.appendingPathComponent("container")
+        let searchRoots = fileManager.fileExists(atPath: containerFolder.path) ? [containerFolder, rootURL] : [rootURL]
+
+        for sRoot in searchRoots {
+            let extensionsDir = sRoot.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore/61/Extensions")
+            if fileManager.fileExists(atPath: extensionsDir.path) {
+                if let extEntries = try? fileManager.contentsOfDirectory(at: extensionsDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                    for extFolder in extEntries {
+                        let descDir = extFolder.appendingPathComponent("descriptors")
+                        if fileManager.fileExists(atPath: descDir.path),
+                           let descEntries = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                            for d in descEntries where (try? d.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
+                                if !d.lastPathComponent.hasPrefix(".") && d.lastPathComponent != "__MACOSX" {
+                                    results.append((ext: extFolder.lastPathComponent, url: d))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !results.isEmpty {
+            return results
+        }
+
+        // 2. Check for "descriptors" or "descriptor" folder
+        for folderName in ["descriptors", "descriptor", "ordered-descriptors", "ordered-descriptor"] {
             let descDir = rootURL.appendingPathComponent(folderName)
-            var isDir: ObjCBool = false
-            if fileManager.fileExists(atPath: descDir.path, isDirectory: &isDir), isDir.boolValue {
-                if let contents = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                    let subdirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false && !$0.lastPathComponent.hasPrefix(".") && !$0.lastPathComponent.contains("__MACOSX") }
-                    if !subdirs.isEmpty {
-                        return subdirs
+            if fileManager.fileExists(atPath: descDir.path),
+               let contents = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                for d in contents where (try? d.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
+                    if !d.lastPathComponent.hasPrefix(".") && d.lastPathComponent != "__MACOSX" {
+                        results.append((ext: defaultExt, url: d))
+                    }
+                }
+            }
+        }
+        if !results.isEmpty {
+            return results
+        }
+
+        // 3. Check for "video-descriptors" or "video-descriptor"
+        for folderName in ["video-descriptors", "video-descriptor"] {
+            let descDir = rootURL.appendingPathComponent(folderName)
+            if fileManager.fileExists(atPath: descDir.path),
+               let contents = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                for d in contents where (try? d.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
+                    if !d.lastPathComponent.hasPrefix(".") && d.lastPathComponent != "__MACOSX" {
+                        results.append((ext: "com.apple.PhotosUIPrivate.PhotosPosterProvider", url: d))
+                    }
+                }
+            }
+        }
+        if !results.isEmpty {
+            return results
+        }
+
+        // 4. Check if root contains versions or Wallpaper.plist
+        if fileManager.fileExists(atPath: rootURL.appendingPathComponent("versions").path) ||
+           fileManager.fileExists(atPath: rootURL.appendingPathComponent("Wallpaper.plist").path) ||
+           fileManager.fileExists(atPath: rootURL.appendingPathComponent("com.apple.posterkit.provider.descriptor.identifier").path) {
+            return [(ext: defaultExt, url: rootURL)]
+        }
+
+        // 5. Fallback: scan any subfolder with "versions" or UUID name
+        if let topLevel = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+            for sub in topLevel where (try? sub.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
+                if !sub.lastPathComponent.hasPrefix(".") && sub.lastPathComponent != "__MACOSX" {
+                    let hasVersions = fileManager.fileExists(atPath: sub.appendingPathComponent("versions").path)
+                    let isUUID = UUID(uuidString: sub.lastPathComponent) != nil
+                    if hasVersions || isUUID {
+                        results.append((ext: defaultExt, url: sub))
                     }
                 }
             }
         }
 
-        // 2. Check if root contains "versions" or "providerInfo.plist" directly
-        let rootVersions = rootURL.appendingPathComponent("versions")
-        if fileManager.fileExists(atPath: rootVersions.path) {
-            return [rootURL]
-        }
-
-        // 3. Check top-level directories: look for folders with "versions" or UUID folder names
-        if let topLevel = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-            let validSubdirs = topLevel.filter { url in
-                let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                guard isDir, !url.lastPathComponent.hasPrefix("."), !url.lastPathComponent.contains("__MACOSX") else { return false }
-                let hasVersions = fileManager.fileExists(atPath: url.appendingPathComponent("versions").path)
-                let isUUID = UUID(uuidString: url.lastPathComponent) != nil
-                return hasVersions || isUUID
-            }
-            if !validSubdirs.isEmpty {
-                return validSubdirs
-            }
-        }
-
-        return [rootURL]
+        return results.isEmpty ? [(ext: defaultExt, url: rootURL)] : results
     }
 }
