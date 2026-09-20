@@ -1,163 +1,136 @@
-# airlift
+# AirCard-iOS
 
-### An AirTraffic sandbox escape for iOS 27.0.
+<p align="center">
+  <img src="ios-app/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="128" height="128" alt="AirCard-iOS Icon" style="border-radius: 28px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);" />
+</p>
 
-This is a simple proof-of-concept for developers and security researchers.
+<p align="center">
+  Apple Wallet card skins, lock screen passcode themes, and PosterBoard wallpapers directly on iOS 27+.
+</p>
 
-If you are worried about 🔥🪲4⃣☁️ (burning bugs for clout) - there are always more bugs <sub><img src="./assets/trollface.svg" width="22" height="18" alt="trollface"></sub>
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-iOS%2027+-blue?style=flat-square&logo=apple" alt="Platform" />
+  <img src="https://img.shields.io/badge/Swift-5.0-orange?style=flat-square&logo=swift" alt="Swift" />
+  <img src="https://img.shields.io/badge/Rust-FFI%20Core-red?style=flat-square&logo=rust" alt="Rust" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
+  <a href="https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y"><img src="https://img.shields.io/badge/Donate-PayPal-00457C?style=flat-square&logo=paypal" alt="Donate with PayPal" /></a>
+</p>
 
-AirTraffic syncs media, including Books, from a Mac to iOS. airlift abuses that path to read and write files outside AirTraffic's intended directory scope. It runs from a paired Mac over Wi-Fi or USB, with no iOS app required. Tested on iOS 27.0 RC (24A435); it should also work on iOS 27.0 final (24A437). Other iPhone builds are allowed with a warning.
+## Overview
 
-#### Verified scope
+AirCard-iOS customizes Apple Wallet card artwork, lock screen passcode dialers, and lock screen wallpapers on device without a jailbreak.
 
-Fresh-file writes were confirmed in the following directories:
+The app communicates with internal system services over a local loopback tunnel (`10.7.0.1` or `127.0.0.1`) provided by LocalDevVPN. File operations are handled by `AirliftFFI`, a Rust library that interfaces with the AirTraffic service.
 
-<table>
-<tr><td>
+> **Compatibility**: AirCard-iOS currently requires **iOS 27.0 or newer (iOS 27+)**.
 
-```text
-/var/mobile
-/var/mobile/Documents
-/var/mobile/Library
-/var/mobile/Library/Preferences
-/var/mobile/Library/Caches
-/var/mobile/Library/SpringBoard
-/var/mobile/Library/SMS
-/var/mobile/Library/Safari
-/var/mobile/Containers
-/var/mobile/Containers/Data/Application
-/var/mobile/Containers/Shared/AppGroup
-/var/tmp
+## Features
+
+### Apple Wallet card skins
+- Writes custom card artwork to Passbook caches (`cardBackgroundCombined@3x.png`, `@2x.png`, and `cardBackgroundCombined.pdf` for transit cards like Suica).
+- Flushes front-face and thumbnail caches so new artwork appears immediately when Wallet opens.
+- Detects card identifiers in real time when you bring up Apple Pay.
+- Apply artwork to individual cards or batch-flash every detected card.
+
+### Passcode dialer themes
+- Live dialer preview with touch panning and zoom framing.
+- Full poster layout across all ten buttons, or individual circular button cutouts.
+- Targets system dialer caches (`TelephonyUI-10`).
+- Localized number subtext options, including Ukrainian and Russian Cyrillic layouts.
+- Import and export themes as `.passthm` files.
+
+### PosterBoard wallpapers (.tendies)
+- Import and unpack `.tendies` wallpaper archives directly from the Files app.
+- Auto-detects PosterBoard wallpaper containers and active descriptor UUIDs.
+- Injects wallpaper configurations and assets into PosterBoard storage.
+- Automatically triggers a NeoSpring respring after flashing to apply wallpapers without rebooting your iPhone.
+
+### On-device pairing
+- Advertises locally over Bonjour so the phone can pair with itself via Settings > Privacy & Security > Developer Mode > Pair with AirCard-iOS.
+- Reads and syncs pairing records automatically into `aircard_pairing.plist`.
+- Once paired, no computer or external connection is needed.
+
+## Prerequisites
+
+1. **iOS 27+**: The exploit and paths currently target iOS 27.0 and above.
+2. **LocalDevVPN**: Running in loopback mode (`10.7.0.1` or `127.0.0.1`) so local connections can reach internal device services.
+3. **Developer Mode pairing**: Pair directly in Settings > Privacy & Security > Developer Mode > Pair with AirCard-iOS, or place an existing pairing plist in the app's documents directory.
+
+## Installation
+
+Install `AirCard-iOS.ipa` using your preferred sideloading method:
+
+- SideStore or AltStore
+- TrollStore
+- LiveContainer
+- Xcode or iOS App Signer
+
+## Building from source
+
+### Requirements
+- macOS 14.0 or newer with Xcode 16 or newer
+- XcodeGen (`brew install xcodegen`)
+- Rust toolchain (only needed if rebuilding `rust-core`)
+
+### Build the IPA
+```bash
+git clone https://github.com/mak5er/AirCard-iOS.git
+cd AirCard-iOS
+./build-ipa.sh
 ```
 
-</td></tr>
-</table>
+The completed package is written to `build/AirCard-iOS.ipa`.
 
-Reads are indirect: a known file is moved into Media, read through AFC, and
-moved back.
-
-As of now, this does **not** work on the MobileGestalt plist.
-
-#### Components
-
-<table>
-<tr><td>
-
-```text
-──────────────── macOS ────────────────
-MobileDevice.framework
-↓
-AirTrafficHost.framework
-
-───────────────── iOS ─────────────────
-com.apple.streaming_zip_conduit
-↓
-com.apple.afc
-↓
-com.apple.atc / AirTrafficDevice
-↓
-Books sync client
-↓
-ATLegacyAssetLink
-↓
-ATAirlock
-↓
-NSFileManager
+### Rebuilding the Rust framework
+To compile changes in `rust-core`:
+```bash
+./build-ios.sh
 ```
 
-</td></tr>
-</table>
+## Repository structure
 
-#### ATAirlock path validation
-
-Effective logic in `-[ATAirlock processCompletedAsset:]` for these Book assets:
-
-<table>
-<tr><td>
-
-```objc
-// Books "Persistent ID" reaches asset.identifier without path validation.
-NSString *source =
-    [@"/var/mobile/Media/Airlock/Book"
-        stringByAppendingPathComponent:asset.identifier];
-
-// FileComplete.AssetPath controls asset.path.
-NSString *destination =
-    [[@"/var/mobile/Media/"
-        stringByAppendingPathComponent:asset.path]
-        stringByStandardizingPath];
-
-// This checks the path string, not where a symlink resolves.
-if (![destination hasPrefix:@"/var/mobile/Media/"])
-    return;
-
-// The source is unchecked and the destination follows ancestor symlinks.
-[fileManager moveItemAtPath:source
-                     toPath:destination
-                      error:&error];
+```
+AirCard-iOS/
+├── ios-app/                   # SwiftUI application
+│   ├── AirCardApp.swift       # App entry point and lifecycle
+│   ├── AppViewModel.swift     # State management and exploit orchestration
+│   ├── ContentView.swift      # Main UI views
+│   ├── TendiesView.swift      # PosterBoard wallpaper view
+│   ├── TendiesEngine.swift    # Tendies extraction and injection logic
+│   ├── RespringHelper.swift   # NeoSpring WebKit respring implementation
+│   ├── Models.swift           # Image slicing, theme layout, archive packing
+│   ├── PairingController.swift# Bonjour host and pairing sync
+│   ├── NetworkStatus.swift    # VPN loopback detection
+│   ├── Utilities.swift        # Background keep-alive and helper functions
+│   ├── GrappaHelper.[h,m]     # ATC protocol helpers
+│   ├── Info.plist             # Bundle configuration
+│   └── Assets.xcassets/       # App icons and image sets
+├── AirliftFFI.xcframework/    # Compiled arm64 Rust static library and headers
+├── rust-core/                 # Rust core source code
+├── project.yml                # XcodeGen project definition
+├── build-ipa.sh               # IPA build script
+├── build-ios.sh               # Rust framework build script
+├── LICENSE                    # MIT License
+└── README.md                  # Project documentation
 ```
 
-</td></tr>
-</table>
+## Credits
 
-The unchecked source accepts `..` components from a Books asset identifier.
-StreamingZip accepts the relative symlink while it is still contained in its
-extraction directory. The first move relocates it below Media; the second uses
-it as part of the destination and writes the payload outside Media.
+- **[@mak5er](https://github.com/mak5er)**: Lead developer, UI, passcode theming, Tendies engine, on-device pairing.
+- **[@merybist](https://github.com/merybist)**: Initial base port.
+- **[AirLift](https://github.com/0xjohnnydev/airlift)** by **[0xjohnny (@0xjohnnydev)](https://github.com/0xjohnnydev)**: AirTraffic and ATAirlock sandbox escape research underlying `AirliftFFI`.
+- **[NeoSpring](https://github.com/rooootdev/neospring)** by **[@rooootdev](https://github.com/rooootdev)**: WebKit GPU process respring technique.
+- Built upon concepts from the **AirCard** project.
 
-The included PoC writes a random canary, verifies it, and removes it. Existing
-Books sync files are preserved and restored after the run.
+## Support
 
-#### Build and run
+If you want to support AirCard-iOS development:
 
-airlift lists compatible paired iPhones and asks which one to use. Pass a
-UDID with `--device` to skip the prompt. Failed runs include helper diagnostics;
-pass `--verbose` to include them on successful runs too.
+- **PayPal**: [Donate via PayPal](https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y)
+- **TON**: `UQBm9KPhtMw-XVVjirUoa09wzrlyWsbeZhKfefl1Uw-qNZ-r`
+- **USDT (TRC20)**: `TDkDMCyjYxgvkWUnQiF5Erk2RyPQMT6G1n`
+- **USDT / BNB (BEP20)**: `0x0954dc491c502849d04956ef74634aa5931a08e8`
 
-<table>
-<tr><td>
+## License
 
-```sh
-make
-./airlift.py
-
-# Choose another destination.
-./airlift.py --target /var/mobile/Library/Safari
-```
-
-</td></tr>
-</table>
-
-The default destination is `/var/mobile/Library/SpringBoard`.
-
----
-
-## LumiCards — Apple Wallet Card Skinner
-
-LumiCards allows customizing Apple Wallet card appearances without a jailbreak using the `airlift` exploit.
-
-### Installation
-
-#### macOS (Standalone Universal DMG)
-No dependencies or Terminal commands needed!
-1. Download or build **`LumiCards.dmg`**.
-2. Open `LumiCards.dmg` and drag **`LumiCards.app`** to your **Applications** folder.
-3. Supports both **Apple Silicon (M1/M2/M3/M4)** and **Intel (x86_64)** natively. Everything required (libimobiledevice, device communication, and image engine) is pre-packaged inside the app.
-
-#### Linux / Debian / Ubuntu (CLI only)
-```sh
-sudo apt update
-sudo apt install -y libimobiledevice-utils libimobiledevice6
-pip3 install pillow
-python3 lumicards.py
-```
-
-### How to Detect Cards
-1. Connect your iPhone via USB and click **Scan Cards**.
-2. On your iPhone, open the **Wallet** app and tap your card.
-3. The card will appear in LumiCards immediately!
-
-### Credits
-- **@mak5er** (Developer) — [GitHub](https://github.com/mak5er) · [Twitter / X](https://x.com/mak5er)
-- **@Lumid-Off** (Developer) — [GitHub](https://github.com/Lumid-Off) · [Twitter / X](https://x.com/LumidOff)
-- Powered by `airlift` & Apple MobileDevice framework.
+MIT License. See [LICENSE](LICENSE) for details.
