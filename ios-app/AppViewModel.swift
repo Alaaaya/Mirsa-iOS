@@ -1240,8 +1240,19 @@ final class AppViewModel: ObservableObject {
     }
 
     func respringDevice() {
-        tendiesFlashLog.append("⚡ Triggering SpringBoard respring...")
+        tendiesFlashLog.append("⚡ Reloading SpringBoard & PosterBoard...")
         RespringHelper.instantRespring()
+    }
+
+    func restartDeviceViaTunnel() async {
+        tendiesFlashLog.append("🔄 Sending device restart request via tunnel...")
+        let pairingPath = PairingController.pairingFilePath()
+        let success = await RespringHelper.restartDevice(pairingPath: pairingPath)
+        if success {
+            tendiesFlashLog.append("✅ Restart signal sent successfully")
+        } else {
+            tendiesFlashLog.append("⚠️ Restart failed (ensure loopback tunnel is connected)")
+        }
     }
 
     func reset() {
