@@ -287,6 +287,8 @@ struct TendieRowView: View {
             } label: {
                 Image(systemName: "info.circle")
                     .foregroundColor(.blue)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
 
@@ -295,6 +297,8 @@ struct TendieRowView: View {
             } label: {
                 Image(systemName: "trash")
                     .foregroundColor(.red)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
         }

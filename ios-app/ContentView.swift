@@ -175,6 +175,21 @@ struct CreditsSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+
+                            Divider()
+
+                            HStack(spacing: 12) {
+                                Image(systemName: "bolt.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(.yellow)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("NeoSpring & PosterBoard")
+                                        .font(.subheadline.bold())
+                                    Text("SpringBoard reload & .tendies wallpapers (@neonmodder123, @skadz108, @rooootdev)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         .padding(14)
                         .background(Color(uiColor: .tertiarySystemBackground))
@@ -487,14 +502,14 @@ struct PairingTab: View {
                                         .font(.footnote.weight(.semibold))
                                         .foregroundStyle(.primary)
 
-                                    Button {
+                                     Button {
                                         if let url = URL(string: UIApplication.openSettingsURLString) {
                                             UIApplication.shared.open(url)
                                         }
                                     } label: {
                                         Label("Open Settings App Now", systemImage: "arrow.up.forward.app")
                                             .bold()
-                                            .frame(maxWidth: .infinity)
+                                            .frame(maxWidth: .infinity, alignment: .center)
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .tint(.orange)
@@ -508,7 +523,7 @@ struct PairingTab: View {
                                 vm.cancelPairing()
                             } label: {
                                 Label("Cancel Pairing", systemImage: "xmark")
-                                    .frame(maxWidth: .infinity)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                             }
                             .buttonStyle(.bordered)
                             .tint(.red)
@@ -522,6 +537,8 @@ struct PairingTab: View {
                                     vm.pairingStatus.contains("❌") || vm.pairingStatus.contains("failed") ? .red :
                                     .secondary
                                 )
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .multilineTextAlignment(.center)
                         }
 
                         Button {
@@ -532,7 +549,7 @@ struct PairingTab: View {
                                 systemImage: "antenna.radiowaves.left.and.right"
                             )
                             .bold()
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, alignment: .center)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
@@ -550,7 +567,7 @@ struct PairingTab: View {
                 }
             }
             .navigationTitle("AirCard-iOS")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -630,7 +647,7 @@ struct VPNStatusRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
 
-            HStack {
+            HStack(spacing: 8) {
                 Text("Device IP:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -638,14 +655,20 @@ struct VPNStatusRow: View {
                     .font(.caption.monospaced())
                     .keyboardType(.decimalPad)
                     .autocorrectionDisabled()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(uiColor: .tertiarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                     .frame(width: 120)
+                Spacer()
                 Button {
                     vm.refreshNetworkStatus()
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Label("Refresh", systemImage: "arrow.clockwise")
                         .font(.caption)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
             }
 
             if !vm.networkDetail.isEmpty {
@@ -1176,6 +1199,7 @@ struct WalletCardsTab: View {
                 } label: {
                     Label("Scan Cards", systemImage: "wave.3.left.circle")
                         .bold()
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .buttonStyle(.borderedProminent)
 
@@ -1183,9 +1207,11 @@ struct WalletCardsTab: View {
                     showAddSheet = true
                 } label: {
                     Label("Add Manually", systemImage: "plus")
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .buttonStyle(.bordered)
             }
+            .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity)
     }
@@ -1360,7 +1386,9 @@ struct ApplyThemeSection: View {
                     vm.adoptThemeIntoCreator()
                 } label: {
                     Label("Edit in Theme Creator", systemImage: "pencil")
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .buttonStyle(.bordered)
             }
 
             PasscodeTargetSection()
@@ -1432,10 +1460,10 @@ struct PasscodeTargetSection: View {
                 }
 
                 // 1. Target System
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("System Caches:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                HStack {
+                    Text("System Caches")
+                        .font(.subheadline)
+                    Spacer()
                     Picker("Target", selection: $vm.targetTelephonyVersion) {
                         Text("TelephonyUI-10 (iOS 18+)").tag("TelephonyUI-10")
                         Text("TelephonyUI-9 (iOS 16–17)").tag("TelephonyUI-9")
@@ -1445,12 +1473,14 @@ struct PasscodeTargetSection: View {
                     .pickerStyle(.menu)
                 }
 
+                Divider()
+
                 // 2. System Language
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("System Language:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Picker("", selection: $vm.passcodeLanguageTarget) {
+                HStack {
+                    Text("System Language")
+                        .font(.subheadline)
+                    Spacer()
+                    Picker("Language", selection: $vm.passcodeLanguageTarget) {
                         ForEach(PasscodeLanguageTarget.allCases) { item in
                             Text(item.rawValue).tag(item)
                         }
@@ -1458,12 +1488,14 @@ struct PasscodeTargetSection: View {
                     .pickerStyle(.menu)
                 }
 
+                Divider()
+
                 // 3. Font Weight / Style
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Font Weight / Style:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Picker("", selection: $vm.passcodeBoldTarget) {
+                HStack {
+                    Text("Font Weight / Style")
+                        .font(.subheadline)
+                    Spacer()
+                    Picker("Style", selection: $vm.passcodeBoldTarget) {
                         ForEach(PasscodeBoldTarget.allCases) { item in
                             Text(item.rawValue).tag(item)
                         }
