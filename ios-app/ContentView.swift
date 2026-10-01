@@ -914,7 +914,7 @@ struct PairingTab: View {
                             Text("AirCard-iOS")
                                 .font(.title2.bold())
                             Spacer()
-                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.3")
+                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.3.1")
                                 .font(.caption.monospaced().bold())
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.blue.opacity(0.12))
