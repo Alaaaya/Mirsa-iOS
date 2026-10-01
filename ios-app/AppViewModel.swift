@@ -139,9 +139,12 @@ final class AppViewModel: ObservableObject {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         guard let items = try? FileManager.default.contentsOfDirectory(atPath: docs.path) else { return }
 
-        // Find plists
-        documentsPlistFiles = items.filter {
-            $0.hasSuffix(".plist") || $0.hasSuffix(".mobiledevicepairing") || $0.hasSuffix(".mobilepair")
+        // Find plists (exclude internal canonical copies)
+        documentsPlistFiles = items.filter { item in
+            let lower = item.lowercased()
+            let isPairingExt = lower.hasSuffix(".plist") || lower.hasSuffix(".mobiledevicepairing") || lower.hasSuffix(".mobilepair")
+            let isCanonical = item == "aircard_pairing.plist" || item == "airlift_pairing.plist" || item == "Info.plist"
+            return isPairingExt && !isCanonical
         }.sorted()
 
         // Find .passthm themes
@@ -190,6 +193,7 @@ final class AppViewModel: ObservableObject {
         defer { if isSecured { sourceURL.stopAccessingSecurityScopedResource() } }
 
         guard let data = try? Data(contentsOf: sourceURL), !data.isEmpty else {
+            errorMessage = "Selected pairing file is empty or could not be read."
             return false
         }
 
@@ -204,12 +208,16 @@ final class AppViewModel: ObservableObject {
             if let orig = originalName, !orig.isEmpty,
                orig != "aircard_pairing.plist" && orig != "airlift_pairing.plist" {
                 let origURL = docs.appendingPathComponent(orig)
-                try? data.write(to: origURL, options: .atomic)
+                if origURL.path != sourceURL.path {
+                    try? data.write(to: origURL, options: .atomic)
+                }
             }
 
             PairingController.customPairingFilePath = aircardURL.path
             refreshPairingFile()
-            pairingStatus = "Pairing file loaded ✅ (\(originalName ?? "aircard_pairing.plist"))"
+            let display = originalName ?? sourceURL.lastPathComponent
+            pairingStatus = "Pairing file loaded ✅ (\(display))"
+            log.append("Imported pairing file: \(display) (\(data.count) bytes)")
             return true
         } catch {
             errorMessage = "Failed to save pairing file: \(error.localizedDescription)"
@@ -221,9 +229,14 @@ final class AppViewModel: ObservableObject {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let path = docs.appendingPathComponent(filename).path
         let canonical = PairingController.syncCanonicalPairingFile(from: path)
-        let exists = FileManager.default.fileExists(atPath: canonical)
+        let exists = FileManager.default.fileExists(atPath: canonical) &&
+            ((try? FileManager.default.attributesOfItem(atPath: canonical)[.size] as? Int) ?? 0) > 0
         hasPairingFile = exists
-        pairingFileName = exists ? (canonical as NSString).lastPathComponent : ""
+        pairingFileName = exists ? (path as NSString).lastPathComponent : ""
+        if exists {
+            pairingStatus = "Active: \(pairingFileName) ✅"
+            log.append("Selected pairing file: \(pairingFileName)")
+        }
         scanDocumentsDirectory()
     }
 
@@ -231,7 +244,8 @@ final class AppViewModel: ObservableObject {
 
     func refreshPairingFile() {
         let path = PairingController.pairingFilePath()
-        let exists = FileManager.default.fileExists(atPath: path)
+        let exists = FileManager.default.fileExists(atPath: path) &&
+            ((try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0) > 0
         hasPairingFile = exists
         pairingFileName = exists ? (path as NSString).lastPathComponent : ""
         scanDocumentsDirectory()
@@ -292,11 +306,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func deletePairingFile() {
-        let path = PairingController.pairingFilePath()
-        try? FileManager.default.removeItem(atPath: path)
-        PairingController.customPairingFilePath = nil
-        refreshPairingFile()
+        PairingController.deleteStoredPairingCredentials()
+        hasPairingFile = false
+        pairingFileName = ""
         pairingStatus = "Pairing file deleted"
+        log.append("Deleted active pairing credentials")
+        scanDocumentsDirectory()
     }
 
     // MARK: - Network

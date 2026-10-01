@@ -72,9 +72,24 @@ final class PairingController: ObservableObject {
         return sourcePath
     }
 
+    /// Deletes every credential copy created or adopted by AirCard and clears the stored AltIRK.
+    static func deleteStoredPairingCredentials() {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let aircardURL = dir.appendingPathComponent("aircard_pairing.plist")
+        let airliftURL = dir.appendingPathComponent("airlift_pairing.plist")
+        try? FileManager.default.removeItem(at: aircardURL)
+        try? FileManager.default.removeItem(at: airliftURL)
+        if let custom = customPairingFilePath {
+            if custom != aircardURL.path && custom != airliftURL.path {
+                try? FileManager.default.removeItem(atPath: custom)
+            }
+            customPairingFilePath = nil
+        }
+        storedAltIRK = ""
+    }
+
     /// Path where the pairing file is written or read from.
-    /// Checks for canonical aircard_pairing.plist, custom path, or any plist in Documents,
-    /// automatically adopting and standardizing it.
+    /// Checks for canonical aircard_pairing.plist, airlift_pairing.plist, or custom path.
     static func pairingFilePath() -> String {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let aircardPath = dir.appendingPathComponent("aircard_pairing.plist").path
@@ -97,21 +112,6 @@ final class PairingController: ObservableObject {
             if size > 0 {
                 _ = syncCanonicalPairingFile(from: custom)
                 return aircardPath
-            }
-        }
-
-        // Scan Documents directory for any .plist file
-        if let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
-            let plists = files.filter {
-                $0.hasSuffix(".plist") || $0.hasSuffix(".mobiledevicepairing") || $0.hasSuffix(".mobilepair")
-            }
-            for candidate in plists {
-                let candidatePath = dir.appendingPathComponent(candidate).path
-                let size = (try? FileManager.default.attributesOfItem(atPath: candidatePath)[.size] as? Int) ?? 0
-                if size > 0 {
-                    _ = syncCanonicalPairingFile(from: candidatePath)
-                    return aircardPath
-                }
             }
         }
 
