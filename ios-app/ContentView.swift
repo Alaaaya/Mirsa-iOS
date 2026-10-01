@@ -216,6 +216,169 @@ struct CreditsSheet: View {
     }
 }
 
+// MARK: - Pairing File Guide Sheet
+
+struct PairingGuideSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var onImportTapped: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Where to find your pairing file")
+                            .font(.title2.bold())
+                        Text("AirCard-iOS can import pairing files exported by SideStore, LiveContainer, iLoader, or your computer.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // SideStore Card
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "app.badge.checkmark.fill")
+                                .font(.title3)
+                                .foregroundStyle(.blue)
+                            Text("SideStore")
+                                .font(.headline.bold())
+                            Spacer()
+                            Text("Recommended")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.12))
+                                .foregroundStyle(.blue)
+                                .clipShape(Capsule())
+                        }
+
+                        Text("SideStore automatically creates a pairing file during setup. You can pick it directly in the Files app:")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Path in Files app:")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.secondary)
+                            Text("On My iPhone › SideStore › ALTPairingFile.mobiledevicepairing")
+                                .font(.caption.monospaced())
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(uiColor: .systemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                    .padding(14)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    // LiveContainer Card
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "shippingbox.fill")
+                                .font(.title3)
+                                .foregroundStyle(.purple)
+                            Text("LiveContainer (SideStore inside)")
+                                .font(.headline.bold())
+                        }
+
+                        Text("If you run SideStore inside LiveContainer, the pairing file is stored inside LiveContainer's app storage:")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Path in Files app:")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.secondary)
+                            Text("On My iPhone › LiveContainer › SideStore › Documents › ALTPairingFile.mobiledevicepairing")
+                                .font(.caption.monospaced())
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(uiColor: .systemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                    .padding(14)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    // iLoader / Jitterbug / AltStore Card
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.down.doc.fill")
+                                .font(.title3)
+                                .foregroundStyle(.orange)
+                            Text("iLoader / Jitterbug / AltStore")
+                                .font(.headline.bold())
+                        }
+
+                        Text("• In iLoader: Settings › Export Pairing File › save to Files.\n• In Jitterbug: Export your <UDID>.mobiledevicepairing.\n• On PC/Mac: Run jitterbugpair or export from SideServer / AltServer, then AirDrop to your iPhone.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    // Direct Placement Card
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder.fill")
+                                .font(.title3)
+                                .foregroundStyle(.green)
+                            Text("Manual Drop in Files App")
+                                .font(.headline.bold())
+                        }
+
+                        Text("You can also copy any .mobiledevicepairing or .plist file directly into:")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Text("Files app › On My iPhone › AirCard-iOS")
+                            .font(.caption.monospaced())
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(uiColor: .systemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        Text("It will immediately appear under 'Discovered in Documents' in AirCard-iOS.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    // Action Button
+                    Button {
+                        dismiss()
+                        onImportTapped()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "square.and.arrow.down.fill")
+                            Text("Import Pairing File Now")
+                            Spacer()
+                        }
+                        .font(.headline)
+                        .frame(height: 48)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 4)
+                }
+                .padding()
+            }
+            .navigationTitle("Pairing Guide")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.bold()
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Compact Scrollable Log View with 1-Click Copy
 
 struct CompactLogView: View {
@@ -408,6 +571,7 @@ struct PairingTab: View {
     @State private var showDeleteConfirm = false
     @State private var showCredits = false
     @State private var showFilePicker = false
+    @State private var showPairingGuide = false
 
     private var isIOS27OrNewer: Bool {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
@@ -525,6 +689,18 @@ struct PairingTab: View {
                             }
                             .padding(.vertical, 4)
                         }
+
+                        Button {
+                            showPairingGuide = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "questionmark.circle")
+                                Text("Where to find SideStore / LiveContainer pairing file?")
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
 
                         Text("Supports .mobiledevicepairing, .plist, or .mobilepair exported from SideStore, iLoader, AltStore, Jitterbug, or Mac/PC.")
                             .font(.caption)
@@ -711,6 +887,13 @@ struct PairingTab: View {
                     .item
                 ]) { url in
                     _ = vm.importPairingFile(from: url, originalName: url.lastPathComponent)
+                }
+            }
+            .sheet(isPresented: $showPairingGuide) {
+                PairingGuideSheet {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showFilePicker = true
+                    }
                 }
             }
             .onAppear {
