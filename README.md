@@ -44,9 +44,6 @@ The app communicates with internal system services over a local loopback tunnel 
 - Auto-detects PosterBoard wallpaper containers and active descriptor UUIDs.
 - Injects wallpaper configurations and assets into PosterBoard storage.
 - Automatically triggers a NeoSpring respring after flashing to apply wallpapers without rebooting your iPhone.
-- Shows the connected device and tracks newly installed templates independently of imported archives.
-- Removes recorded templates in any order, then applies the same cache refresh and NeoSpring. Existing wallpaper configuration directories are preserved.
-- Retains interrupted operations for **Continue Removal** or **Retry Refresh**. Templates installed before tracking was introduced cannot be removed automatically.
 
 ### Pairing options
 - **Import pairing file**: Supports pairing files (`.mobiledevicepairing`, `.plist`, `.mobilepair`) from **SideStore**, **LiveContainer**, **iLoader**, **AltStore**, **Jitterbug**, or exported from Mac/PC.
@@ -136,8 +133,6 @@ AirCard-iOS/
 │   ├── ContentView.swift      # Main UI views
 │   ├── TendiesView.swift      # PosterBoard wallpaper view
 │   ├── TendiesEngine.swift    # Tendies extraction and injection logic
-│   ├── TendiesTemplateTransport.swift # Swift/Rust template operation bridge
-│   ├── TemplateManagement/   # Models, journal, and template lifecycle
 │   ├── RespringHelper.swift   # NeoSpring WebKit respring implementation
 │   ├── Models.swift           # Image slicing, theme layout, archive packing
 │   ├── PairingController.swift# Bonjour host and pairing sync
