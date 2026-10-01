@@ -160,11 +160,10 @@ AirCard-iOS/
 
 ## Support & Donations
 
-If you want to support AirCard-iOS development by **[@mak5er](https://x.com/mak5er)**:
-
-> "My testing iPhone is currently at 73% battery health and dies every few hours while testing. I’m a 17yo student from Ukraine and don’t really have spare cash for a new test phone or battery right now. If you've been using AirCard-iOS and want to support my work, any support means the world! ❤️" — [Read announcement on X](https://x.com/mak5er/status/2101574072194768952?s=20)
+If you want to support AirCard-iOS development by **[@mak5er](https://github.com/mak5er)**:
 
 - **Twitter / X**: [@mak5er](https://x.com/mak5er)
+- **GitHub**: [@mak5er](https://github.com/mak5er)
 - **PayPal**: [Donate via PayPal (Maksym Reva)](https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y)
 - **TON**: `UQBm9KPhtMw-XVVjirUoa09wzrlyWsbeZhKfefl1Uw-qNZ-r`
 - **USDT (TRC20)**: `TDkDMCyjYxgvkWUnQiF5Erk2RyPQMT6G1n`

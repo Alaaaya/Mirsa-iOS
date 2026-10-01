@@ -110,43 +110,32 @@ struct DonateView: View {
                     Spacer()
                 }
 
-                // Story quote
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("“my iphone is currently at 73% battery health and dies every few hours while testing 💀\n\ni’m a 17yo student from Ukraine and don’t really have spare cash for a new phone or battery right now.\n\nif you’ve been using AirCard / AirCard-iOS and want to support my work, any support means the world, thank you guys ❤️”")
-                        .font(.footnote)
-                        .foregroundStyle(.primary)
-                        .lineSpacing(3)
-                }
-                .padding(12)
-                .background(Color(uiColor: .tertiarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                // Social Links
+                // Social Links (Twitter & GitHub)
                 HStack(spacing: 10) {
                     Link(destination: URL(string: "https://x.com/mak5er")!) {
                         HStack(spacing: 5) {
                             Image(systemName: "bubble.left.and.bubble.right.fill")
-                            Text("Follow @mak5er")
+                            Text("Twitter / X")
                         }
                         .font(.caption.bold())
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .background(Color.blue.opacity(0.12))
                         .foregroundStyle(.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
 
-                    Link(destination: URL(string: "https://x.com/mak5er/status/2101574072194768952?s=20")!) {
+                    Link(destination: URL(string: "https://github.com/mak5er")!) {
                         HStack(spacing: 5) {
                             Image(systemName: "link")
-                            Text("View on X")
+                            Text("GitHub")
                         }
                         .font(.caption.bold())
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color(uiColor: .tertiarySystemBackground))
-                        .foregroundStyle(.secondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(.vertical, 10)
+                        .background(Color.primary.opacity(0.08))
+                        .foregroundStyle(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                 }
             }
