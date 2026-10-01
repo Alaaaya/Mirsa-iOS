@@ -158,11 +158,14 @@ AirCard-iOS/
 - **[NeoSpring](https://github.com/rooootdev/neospring)**: Swift implementation by **[@skadz108](https://github.com/skadz108)** and **[@rooootdev](https://github.com/rooootdev)**, and **[@neonmodder123](https://github.com/neonmodder123)** for the WebKit GPU process respring technique.
 - Built upon concepts from the **AirCard** project.
 
-## Support
+## Support & Donations
 
-If you want to support AirCard-iOS development:
+If you want to support AirCard-iOS development by **[@mak5er](https://x.com/mak5er)**:
 
-- **PayPal**: [Donate via PayPal](https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y)
+> "My testing iPhone is currently at 73% battery health and dies every few hours while testing. I’m a 17yo student from Ukraine and don’t really have spare cash for a new test phone or battery right now. If you've been using AirCard-iOS and want to support my work, any support means the world! ❤️" — [Read announcement on X](https://x.com/mak5er/status/2101574072194768952?s=20)
+
+- **Twitter / X**: [@mak5er](https://x.com/mak5er)
+- **PayPal**: [Donate via PayPal (Maksym Reva)](https://www.paypal.com/donate/?hosted_button_id=98QRTC2HFRA4Y)
 - **TON**: `UQBm9KPhtMw-XVVjirUoa09wzrlyWsbeZhKfefl1Uw-qNZ-r`
 - **USDT (TRC20)**: `TDkDMCyjYxgvkWUnQiF5Erk2RyPQMT6G1n`
 - **USDT / BNB (BEP20)**: `0x0954dc491c502849d04956ef74634aa5931a08e8`
