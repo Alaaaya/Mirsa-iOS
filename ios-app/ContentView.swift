@@ -904,8 +904,17 @@ struct WalletCardsTab: View {
     @State private var showSourceDialog: Bool = false
     @State private var isPhotosPickerPresented: Bool = false
     @State private var isDocumentPickerPresented: Bool = false
-    @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var showCredits = false
+    private struct CropRequest: Identifiable {
+        let id = UUID()
+        let image: UIImage
+        let target: ActiveCardPicker
+    }
+    @State private var pendingCrop: CropRequest?
+    @State private var cropRequest: CropRequest?
+    @State private var photoLoadFailed = false
+    @State private var pendingLoadError = false
+    @State private var cropAccepted = false
 
     var body: some View {
         NavigationStack {
@@ -1025,36 +1034,14 @@ struct WalletCardsTab: View {
                     activePicker = nil
                 }
             }
-            .photosPicker(
-                isPresented: $isPhotosPickerPresented,
-                selection: $selectedPhotos,
-                maxSelectionCount: 1,
-                matching: .images
-            )
-            .onChange(of: selectedPhotos) { _, items in
-                guard let item = items.first, let picker = activePicker else {
-                    if items.isEmpty { activePicker = nil }
-                    return
-                }
-                let currentPicker = picker
-                Task {
-                    if let image = await item.loadUIImage(maxDimension: 2560) {
-                        await MainActor.run {
-                            switch currentPicker {
-                            case .singleCard(let cardId):
-                                vm.setCardImage(for: cardId, image: image)
-                            case .bulkAll:
-                                vm.setSkinForAllCards(image: image)
-                            }
-                        }
-                    }
-                    await MainActor.run {
-                        selectedPhotos = []
-                        activePicker = nil
+            .sheet(isPresented: $isPhotosPickerPresented, onDismiss: { activePicker = nil }) {
+                if let target = activePicker {
+                    CardPhotoPicker { image in
+                        assignImage(image, to: target)
                     }
                 }
             }
-            .sheet(isPresented: $isDocumentPickerPresented) {
+            .sheet(isPresented: $isDocumentPickerPresented, onDismiss: presentPendingCrop) {
                 DocumentPickerView(allowedContentTypes: [
                     .image, .png, .jpeg, .heic,
                     UTType(filenameExtension: "webp") ?? .image,
@@ -1063,16 +1050,49 @@ struct WalletCardsTab: View {
                     guard let picker = activePicker else { return }
                     if let data = try? Data(contentsOf: url),
                        let image = ImageEngine.safeImageFromData(data, maxDimension: 2560) {
-                        switch picker {
-                        case .singleCard(let cardId):
-                            vm.setCardImage(for: cardId, image: image)
-                        case .bulkAll:
-                            vm.setSkinForAllCards(image: image)
-                        }
+                        pendingCrop = CropRequest(image: image, target: picker)
+                    } else {
+                        pendingLoadError = true
                     }
                     activePicker = nil
                 }
             }
+            .sheet(item: $cropRequest, onDismiss: {
+                if !cropAccepted { isDocumentPickerPresented = true }
+            }) { request in
+                CardPhotoCropView(image: request.image) { croppedImage in
+                    cropAccepted = true
+                    assignImage(croppedImage, to: request.target)
+                    activePicker = nil
+                }
+            }
+            .alert("Couldn't Load Photo", isPresented: $photoLoadFailed) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Choose another image or try downloading the photo to your iPhone first.")
+            }
+        }
+    }
+
+    private func assignImage(_ image: UIImage, to target: ActiveCardPicker) {
+        switch target {
+        case .singleCard(let cardId):
+            vm.setCardImage(for: cardId, image: image)
+        case .bulkAll:
+            vm.setSkinForAllCards(image: image)
+        }
+    }
+
+    private func presentPendingCrop() {
+        guard !isPhotosPickerPresented, !isDocumentPickerPresented else { return }
+        if let request = pendingCrop {
+            pendingCrop = nil
+            cropAccepted = false
+            activePicker = request.target
+            cropRequest = request
+        } else if pendingLoadError {
+            pendingLoadError = false
+            photoLoadFailed = true
         }
     }
 
