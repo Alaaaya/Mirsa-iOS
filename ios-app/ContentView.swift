@@ -407,6 +407,11 @@ struct PairingTab: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showDeleteConfirm = false
     @State private var showCredits = false
+    @State private var showFilePicker = false
+
+    private var isIOS27OrNewer: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+    }
 
     var body: some View {
         NavigationStack {
@@ -457,7 +462,9 @@ struct PairingTab: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Not Paired")
                                     .font(.subheadline.bold())
-                                Text("Tap 'Pair This iPhone' below to pair.")
+                                Text(isIOS27OrNewer
+                                     ? "Pair on this iPhone below or import a pairing file."
+                                     : "Import a pairing file from SideStore, iLoader, or PC below.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -468,9 +475,24 @@ struct PairingTab: View {
                                 showDeleteConfirm = true
                             } label: {
                                 Image(systemName: "trash")
-                                    .foregroundStyle(.red.opacity(0.7))
+                                    .foregroundStyle(.red)
                             }
                             .buttonStyle(.borderless)
+                        }
+                    }
+
+                    if vm.hasPairingFile {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "trash.fill")
+                                Text("Delete Pairing File")
+                                Spacer()
+                            }
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.red)
                         }
                     }
                 }
@@ -479,113 +501,166 @@ struct PairingTab: View {
                     isPresented: $showDeleteConfirm,
                     titleVisibility: .visible
                 ) {
-                    Button("Delete", role: .destructive) { vm.deletePairingFile() }
+                    Button("Delete Pairing", role: .destructive) { vm.deletePairingFile() }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("The active pairing credentials will be removed.")
+                    Text("The active pairing credentials will be removed so you can re-pair or import another file.")
                 }
 
-                // On-Device Pairing Section (available for all iOS versions)
-                Section("Pair on This iPhone") {
-                    if vm.pairingPhase == .pairing {
-                        VStack(alignment: .leading, spacing: 12) {
+                // Pairing File Import (SideStore / iLoader / PC)
+                Section("Pairing File") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            showFilePicker = true
+                        } label: {
                             HStack(spacing: 8) {
-                                ProgressView().scaleEffect(0.85)
-                                Text(vm.pairingStatus.isEmpty ? "Starting local pairing host…" : vm.pairingStatus)
-                                    .font(.subheadline)
+                                Image(systemName: "square.and.arrow.down.fill")
+                                    .foregroundStyle(.blue)
+                                Text("Import Pairing File…")
+                                    .font(.headline)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            .padding(.vertical, 4)
+                        }
 
-                            if let pin = vm.pairingPIN {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text("ENTER THIS PIN ON THIS IPHONE:")
-                                        .font(.caption2.bold().uppercaseSmallCaps())
+                        Text("Supports .mobiledevicepairing, .plist, or .mobilepair exported from SideStore, iLoader, AltStore, Jitterbug, or Mac/PC.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !vm.documentsPlistFiles.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Discovered in Documents:")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+
+                            ForEach(vm.documentsPlistFiles, id: \.self) { filename in
+                                HStack {
+                                    Image(systemName: "doc.text.fill")
+                                        .foregroundStyle(.blue)
+                                    Text(filename)
+                                        .font(.caption.monospaced())
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer()
+                                    Button("Use") {
+                                        vm.selectPairingFile(filename: filename)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
+                // On-Device Pairing Section (shown ONLY on iOS 27+)
+                if isIOS27OrNewer {
+                    Section("Pair on This iPhone") {
+                        if vm.pairingPhase == .pairing {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 8) {
+                                    ProgressView().scaleEffect(0.85)
+                                    Text(vm.pairingStatus.isEmpty ? "Starting local pairing host…" : vm.pairingStatus)
+                                        .font(.subheadline)
                                         .foregroundStyle(.secondary)
+                                }
 
-                                    HStack(alignment: .center, spacing: 0) {
-                                        Text(pin)
-                                            .font(.system(size: 40, weight: .black, design: .monospaced))
-                                            .foregroundStyle(.orange)
-                                        Spacer()
-                                        Button {
-                                            UIPasteboard.general.string = pin
-                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                        } label: {
-                                            Label("Copy", systemImage: "doc.on.doc")
-                                                .font(.caption.bold())
+                                if let pin = vm.pairingPIN {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text("ENTER THIS PIN ON THIS IPHONE:")
+                                            .font(.caption2.bold().uppercaseSmallCaps())
+                                            .foregroundStyle(.secondary)
+
+                                        HStack(alignment: .center, spacing: 0) {
+                                            Text(pin)
+                                                .font(.system(size: 40, weight: .black, design: .monospaced))
+                                                .foregroundStyle(.orange)
+                                            Spacer()
+                                            Button {
+                                                UIPasteboard.general.string = pin
+                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                            } label: {
+                                                Label("Copy", systemImage: "doc.on.doc")
+                                                    .font(.caption.bold())
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .tint(.orange)
                                         }
-                                        .buttonStyle(.bordered)
+
+                                        Text("Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(.primary)
+
+                                        Button {
+                                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                                UIApplication.shared.open(url)
+                                            }
+                                        } label: {
+                                            Label("Open Settings App Now", systemImage: "arrow.up.forward.app")
+                                                .bold()
+                                                .frame(maxWidth: .infinity, alignment: .center)
+                                        }
+                                        .buttonStyle(.borderedProminent)
                                         .tint(.orange)
                                     }
+                                    .padding(14)
+                                    .background(Color.orange.opacity(0.12))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                }
 
-                                    Text("Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS")
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(.primary)
-
-                                     Button {
-                                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                                            UIApplication.shared.open(url)
-                                        }
-                                    } label: {
-                                        Label("Open Settings App Now", systemImage: "arrow.up.forward.app")
-                                            .bold()
-                                            .frame(maxWidth: .infinity, alignment: .center)
+                                Button(role: .cancel) {
+                                    vm.cancelPairing()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Spacer()
+                                        Image(systemName: "xmark")
+                                        Text("Cancel Pairing")
+                                        Spacer()
                                     }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.orange)
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
                                 }
-                                .padding(14)
-                                .background(Color.orange.opacity(0.12))
-                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .buttonStyle(.bordered)
+                                .tint(.red)
                             }
+                        } else {
+                            VStack(spacing: 12) {
+                                if !vm.pairingStatus.isEmpty && vm.pairingStatus != "idle" {
+                                    Text(vm.pairingStatus)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(
+                                            vm.pairingStatus.contains("✅") ? .green :
+                                            vm.pairingStatus.contains("❌") || vm.pairingStatus.contains("failed") ? .red :
+                                            .secondary
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .frame(maxWidth: .infinity, alignment: .center)
+                                }
 
-                            Button(role: .cancel) {
-                                vm.cancelPairing()
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Spacer()
-                                    Image(systemName: "xmark")
-                                    Text("Cancel Pairing")
-                                    Spacer()
+                                Button {
+                                    vm.startPairing()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Spacer()
+                                        Image(systemName: "antenna.radiowaves.left.and.right")
+                                            .font(.body.weight(.semibold))
+                                        Text(vm.hasPairingFile ? "Re-Pair This iPhone" : "Pair This iPhone")
+                                            .font(.headline)
+                                        Spacer()
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 48)
                                 }
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
+                                .buttonStyle(.borderedProminent)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(.red)
+                            .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                         }
-                    } else {
-                        VStack(spacing: 12) {
-                            if !vm.pairingStatus.isEmpty && vm.pairingStatus != "idle" {
-                                Text(vm.pairingStatus)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(
-                                        vm.pairingStatus.contains("✅") ? .green :
-                                        vm.pairingStatus.contains("❌") || vm.pairingStatus.contains("failed") ? .red :
-                                        .secondary
-                                    )
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            }
-
-                            Button {
-                                vm.startPairing()
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Spacer()
-                                    Image(systemName: "antenna.radiowaves.left.and.right")
-                                        .font(.body.weight(.semibold))
-                                    Text(vm.hasPairingFile ? "Re-Pair This iPhone" : "Pair This iPhone")
-                                        .font(.headline)
-                                    Spacer()
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                     }
                 }
 
@@ -625,6 +700,18 @@ struct PairingTab: View {
             }
             .sheet(isPresented: $showCredits) {
                 CreditsSheet()
+            }
+            .sheet(isPresented: $showFilePicker) {
+                DocumentPickerView(allowedContentTypes: [
+                    UTType(filenameExtension: "mobiledevicepairing") ?? .data,
+                    UTType(filenameExtension: "plist") ?? .propertyList,
+                    UTType(filenameExtension: "mobilepair") ?? .data,
+                    .propertyList,
+                    .data,
+                    .item
+                ]) { url in
+                    _ = vm.importPairingFile(from: url, originalName: url.lastPathComponent)
+                }
             }
             .onAppear {
                 vm.refreshNetworkStatus()
