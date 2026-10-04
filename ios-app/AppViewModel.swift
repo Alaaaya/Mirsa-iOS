@@ -28,7 +28,11 @@ final class AppViewModel: ObservableObject {
     @Published var vpnUp: Bool = false
     @Published var wifiUp: Bool = false
     @Published var networkDetail: String = ""
-    @Published var deviceIP: String = "10.7.0.1"   // LocalDevVPN default peer
+    @Published var deviceIP: String = "10.7.0.1" {
+        didSet {
+            syncTargetHostsToRust()
+        }
+    }
 
     // MARK: - Tab
     @Published var selectedTab: AppTab = .pairing
@@ -316,6 +320,36 @@ final class AppViewModel: ObservableObject {
         vpnUp = vpn
         wifiUp = wifi
         networkDetail = detail
+        syncTargetHostsToRust()
+    }
+
+    /// Synchronizes the active device IP and candidate host addresses to the Rust core
+    /// so the RSD tunnel connects over the non-loopback VPN interface rather than 127.0.0.1.
+    func syncTargetHostsToRust() {
+        let ip = deviceIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ip.isEmpty {
+            ip.withCString { _ = al_set_target_host($0) }
+        } else {
+            _ = al_set_target_host(nil)
+        }
+
+        var candidates: [String] = []
+        if !ip.isEmpty {
+            candidates.append(ip)
+        }
+        for cand in NetworkStatus.tunnelHostCandidates() {
+            if !candidates.contains(cand) {
+                candidates.append(cand)
+            }
+        }
+        let cStrings = candidates.map { strdup($0) }
+        defer { cStrings.forEach { free($0) } }
+        var ptrs = cStrings.map { UnsafePointer($0) }
+        ptrs.withUnsafeBufferPointer { buf in
+            if let base = buf.baseAddress {
+                _ = al_set_target_hosts(base, buf.count)
+            }
+        }
     }
 
     // MARK: - Card management & Live Scanner
@@ -323,6 +357,7 @@ final class AppViewModel: ObservableObject {
     @Published var isScanningCards: Bool = false
     @Published var scanStatusText: String = ""
     private var stopScanningFlag = false
+    private var lastObservedNetwork: PaymentNetwork? = nil
 
     nonisolated static let cardRegexes: [NSRegularExpression] = [
         try! NSRegularExpression(pattern: "/(?:Cards|Passes/Cards)/([-A-Za-z0-9_+=]{20,44})(?:\\.pkpass|\\.cache|\\.pkcache|/|\\s|\"|'|\\)|,|$)"),
@@ -359,6 +394,7 @@ final class AppViewModel: ObservableObject {
             errorMessage = "Pairing file is required before scanning. Pair this iPhone or select a .plist first."
             return
         }
+        syncTargetHostsToRust()
 
         var t = Transaction()
         t.disablesAnimations = true
@@ -386,7 +422,11 @@ final class AppViewModel: ObservableObject {
                            lower.contains("stockholm") ||
                            lower.contains("wallet") ||
                            lower.contains("nanopass") ||
-                           lower.contains("verificationcheck") {
+                           lower.contains("verificationcheck") ||
+                           lower.contains("nfcd") ||
+                           lower.contains("dashboard") ||
+                           lower.contains("activation") ||
+                           lower.contains("setactivepaymentapplet") {
                             DispatchQueue.main.async {
                                 AppViewModel.shared?.processSyslogLine(lineStr)
                             }
@@ -442,7 +482,10 @@ final class AppViewModel: ObservableObject {
                                 lower.contains("pdcardfilemanager") ||
                                 lower.contains("pdpasslibrary") ||
                                 lower.contains("verificationcheck") ||
-                                lower.contains("/cards/")
+                                lower.contains("/cards/") ||
+                                lower.contains("nfcd") ||
+                                lower.contains("dashboard") ||
+                                lower.contains("activation")
 
         guard isWalletSubsystem else { return }
 
@@ -458,27 +501,67 @@ final class AppViewModel: ObservableObject {
                               lower.contains("pdcardfilemanager") ||
                               lower.contains("pdpasslibrary") ||
                               lower.contains("verificationcheck") ||
-                              lower.contains("/cards/")
+                              lower.contains("/cards/") ||
+                              lower.contains("dashboard loading") ||
+                              lower.contains("passids") ||
+                              lower.contains("applet") ||
+                              lower.contains("nfexpressmodemanager")
 
         guard isWalletContext else { return }
 
-        for regex in Self.cardRegexes {
-            let matches = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
-            for m in matches {
-                if m.numberOfRanges > 1, let r = Range(m.range(at: 1), in: line) {
-                    let candidateRaw = String(line[r])
-                    guard let candidate = CardItem.cleanCardId(candidateRaw) else { continue }
-                    if Self.dummyCardHashes.contains(candidate) { continue }
-                    if !self.cards.contains(where: { $0.id == candidate }) {
-                        self.cards.append(CardItem(id: candidate, isSelected: true))
-                        self.saveCards()
-                        self.scanStatusText = "Found card: \(candidate)"
-                        self.log.append("Found card: \(candidate)")
-                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                    }
+        // 1. Process activations / AIDs to track payment network & instant card ID
+        let activations = WalletScanParser.activationIDs(in: line)
+        for act in activations {
+            if let net = act.network {
+                self.lastObservedNetwork = net
+            }
+            if let id = act.id, let clean = CardItem.cleanCardId(id), !Self.dummyCardHashes.contains(clean) {
+                self.registerDiscoveredCard(id: clean, network: act.network ?? self.lastObservedNetwork)
+            }
+        }
+
+        // 2. High-confidence regex extraction
+        let candidates = WalletScanParser.cardIDs(in: line)
+        var foundAny = false
+        for cand in candidates {
+            if let clean = CardItem.cleanCardId(cand), !Self.dummyCardHashes.contains(clean) {
+                foundAny = true
+                self.registerDiscoveredCard(id: clean, network: self.lastObservedNetwork)
+            }
+        }
+
+        // 3. Fallback token extraction if no cards matched yet
+        if !foundAny && candidates.isEmpty {
+            let fallbacks = WalletScanParser.fallbackCardIDs(in: line)
+            for cand in fallbacks {
+                if let clean = CardItem.cleanCardId(cand), !Self.dummyCardHashes.contains(clean) {
+                    self.registerDiscoveredCard(id: clean, network: self.lastObservedNetwork)
                 }
             }
         }
+    }
+
+    private func registerDiscoveredCard(id: String, network: PaymentNetwork? = nil) {
+        if let existingIdx = self.cards.firstIndex(where: { $0.id == id }) {
+            if self.cards[existingIdx].paymentNetwork == nil, let net = network {
+                self.cards[existingIdx].paymentNetwork = net.displayName
+                self.saveCards()
+            }
+            return
+        }
+        let newCard = CardItem(
+            id: id,
+            displayName: nil,
+            paymentNetwork: network?.displayName,
+            isSelected: true,
+            isVerified: true
+        )
+        self.cards.append(newCard)
+        self.saveCards()
+        let netSuffix = network != nil ? " (\(network!.displayName))" : ""
+        self.scanStatusText = "Found card: \(id)\(netSuffix)"
+        self.log.append("Found card: \(id)\(netSuffix)")
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
     }
 
     nonisolated static func cardImagePath(for cardId: String) -> URL {
@@ -505,12 +588,23 @@ final class AppViewModel: ObservableObject {
                 unique.append(clean)
             }
         }
+        let displayNames = UserDefaults.standard.dictionary(forKey: "aircard.cardDisplayNames") as? [String: String] ?? [:]
+        let networks = UserDefaults.standard.dictionary(forKey: "aircard.cardPaymentNetworks") as? [String: String] ?? [:]
+
         cards = unique.filter { !Self.dummyCardHashes.contains($0) }.map { id in
             let path = Self.cardImagePath(for: id)
             let data = try? Data(contentsOf: path)
             // Downsampled thumbnail keeps RAM minimal, preventing Jetsam OOM kills
             let img = data.flatMap { ImageEngine.safeImageFromData($0, maxDimension: 512) }
-            return CardItem(id: id, customImageData: data, customImage: img)
+            return CardItem(
+                id: id,
+                displayName: displayNames[id],
+                paymentNetwork: networks[id],
+                isSelected: true,
+                isVerified: true,
+                customImageData: data,
+                customImage: img
+            )
         }
     }
 
@@ -528,6 +622,26 @@ final class AppViewModel: ObservableObject {
         UserDefaults.standard.set(hashes, forKey: "aircard.cards")
         UserDefaults.standard.set(hashes, forKey: "airlift.cards")
         UserDefaults.standard.set(hashes, forKey: "mak5er.savedCards")
+
+        var displayNames: [String: String] = [:]
+        var networks: [String: String] = [:]
+        for card in cards {
+            if let d = card.displayName, !d.isEmpty {
+                displayNames[card.id] = d
+            }
+            if let n = card.paymentNetwork, !n.isEmpty {
+                networks[card.id] = n
+            }
+        }
+        UserDefaults.standard.set(displayNames, forKey: "aircard.cardDisplayNames")
+        UserDefaults.standard.set(networks, forKey: "aircard.cardPaymentNetworks")
+    }
+
+    func updateCardName(id: String, newName: String) {
+        guard let idx = cards.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        cards[idx].displayName = trimmed.isEmpty ? nil : trimmed
+        saveCards()
     }
 
     func setSkinForAllCards(image: UIImage) {
@@ -551,7 +665,7 @@ final class AppViewModel: ObservableObject {
         for p in parts {
             if let clean = CardItem.cleanCardId(p),
                !cards.contains(where: { $0.id == clean }) {
-                cards.append(CardItem(id: clean))
+                cards.append(CardItem(id: clean, displayName: nil, paymentNetwork: nil, isSelected: true, isVerified: true))
                 added += 1
             }
         }
@@ -617,13 +731,15 @@ final class AppViewModel: ObservableObject {
         let selected = cards.filter { $0.isSelected && ($0.customImage != nil || $0.customImageData != nil) }
         guard !selected.isEmpty else { return }
 
+        syncTargetHostsToRust()
+
         cardFlashPhase    = .running
         cardFlashProgress = 0
         cardFlashLog.removeAll()
         errorMessage = nil
 
         if !vpnUp {
-            cardFlashLog.append("⚠️ Notice: Loopback VPN not detected, attempting direct loopback (127.0.0.1)...")
+            cardFlashLog.append("⚠️ Notice: Loopback VPN (LocalDevVPN or SideStore WireGuard) is strongly recommended for on-device operations.")
         }
 
         let pairingPath = PairingController.pairingFilePath()
@@ -752,7 +868,7 @@ final class AppViewModel: ObservableObject {
                     self.cardFlashPhase = .done(ok: true)
                     self.cardFlashProgress = 1.0
                     self.cardFlashLog.append("🎉 \(successCount)/\(selected.count) card(s) flashed! Force-close Wallet app to see changes.")
-                    self.successAlertMessage = "Skins successfully applied to \(successCount) card(s)!\n\nPlease force-close the Wallet app on your iPhone (or reboot) to see your new designs."
+                    self.successAlertMessage = "Skins successfully applied to \(successCount) card(s)!\n\nImportant Notes:\n• Force-close the Wallet app from the App Switcher (or reboot) to refresh cached card art.\n• Apple Card uses dynamic Metal GPU rendering and cannot have custom static artwork applied."
                     self.showSuccessAlert = true
                 } else {
                     self.cardFlashPhase = .done(ok: false)
@@ -900,9 +1016,10 @@ final class AppViewModel: ObservableObject {
         passthmFlashProgress = 0
         passthmFlashLog.removeAll()
         errorMessage = nil
+        syncTargetHostsToRust()
 
         if !vpnUp {
-            passthmFlashLog.append("⚠️ Notice: Loopback VPN not detected, attempting direct loopback (127.0.0.1)...")
+            passthmFlashLog.append("⚠️ Notice: Loopback VPN (LocalDevVPN or SideStore WireGuard) is strongly recommended for on-device operations.")
         }
 
         let pairingPath = PairingController.pairingFilePath()

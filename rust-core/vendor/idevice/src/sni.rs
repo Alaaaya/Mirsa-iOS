@@ -60,7 +60,23 @@ impl ServerCertVerifier for NoServerNameVerification {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.inner.supported_verify_schemes()
+        let mut schemes = self.inner.supported_verify_schemes();
+        for s in [
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA512,
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::ED25519,
+        ] {
+            if !schemes.contains(&s) {
+                schemes.push(s);
+            }
+        }
+        schemes
     }
 }
 
@@ -69,7 +85,7 @@ pub fn create_client_config(pairing_file: &PairingFile) -> Result<ClientConfig, 
     root_store.add(pairing_file.root_certificate.clone())?;
     let private_key = PrivateKeyDer::from_pem_slice(&pairing_file.host_private_key)?;
 
-    let mut config = ClientConfig::builder()
+    let mut config = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
         .with_root_certificates(root_store.clone())
         .with_client_auth_cert(vec![pairing_file.host_certificate.clone()], private_key)
         .unwrap();
@@ -77,6 +93,7 @@ pub fn create_client_config(pairing_file: &PairingFile) -> Result<ClientConfig, 
     let inner = rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store)).build()?;
     let verifier = Arc::new(NoServerNameVerification::new(inner));
     config.dangerous().set_certificate_verifier(verifier);
+    config.enable_sni = false;
 
     Ok(config)
 }

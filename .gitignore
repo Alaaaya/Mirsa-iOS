@@ -16,3 +16,4 @@ AirliftFFI.xcframework/
 # Package outputs
 *.ipa
 DerivedData/
+.serena/

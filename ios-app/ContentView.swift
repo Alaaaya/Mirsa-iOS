@@ -914,7 +914,7 @@ struct PairingTab: View {
                             Text("AirCard-iOS")
                                 .font(.title2.bold())
                             Spacer()
-                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.3.1")
+                            Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.3.2")
                                 .font(.caption.monospaced().bold())
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.blue.opacity(0.12))
@@ -1321,8 +1321,11 @@ struct WalletCardView: View {
     let onPickImage: () -> Void
     let onClearImage: () -> Void
     let onDelete: () -> Void
+    var onRename: ((String) -> Void)? = nil
 
     @State private var copied = false
+    @State private var isRenaming = false
+    @State private var renameText = ""
 
     var body: some View {
         VStack(spacing: 12) {
@@ -1427,33 +1430,56 @@ struct WalletCardView: View {
                 ))
                 .labelsHidden()
 
-                Text("Card #\(cardIndex + 1)")
-                    .font(.system(size: 13, weight: .semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(card.title)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
 
-                // Monospace Hash Pill with Copy Button
-                HStack(spacing: 4) {
-                    Text(card.id.prefix(8) + "…" + card.id.suffix(6))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-
-                    Button {
-                        UIPasteboard.general.string = card.id
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        copied = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                    } label: {
-                        Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
-                            .font(.system(size: 10))
-                            .foregroundStyle(copied ? .green : .secondary)
+                        if let network = card.paymentNetwork {
+                            Text(network)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.12))
+                                .foregroundStyle(.blue)
+                                .clipShape(Capsule())
+                        }
                     }
-                    .buttonStyle(.plain)
+
+                    // Monospace Hash Pill with Copy Button
+                    HStack(spacing: 4) {
+                        Text(card.id.prefix(8) + "…" + card.id.suffix(6))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+
+                        Button {
+                            UIPasteboard.general.string = card.id
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            copied = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                        } label: {
+                            Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
+                                .font(.system(size: 10))
+                                .foregroundStyle(copied ? .green : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color(uiColor: .systemFill))
-                .clipShape(Capsule())
 
                 Spacer()
+
+                Button {
+                    renameText = card.displayName ?? ""
+                    isRenaming = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
 
                 if card.uiImage != nil {
                     Image(systemName: "checkmark.circle.fill")
@@ -1481,6 +1507,15 @@ struct WalletCardView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(card.isSelected ? Color.blue.opacity(0.35) : Color.clear, lineWidth: 1.5)
         )
+        .alert("Rename Card", isPresented: $isRenaming) {
+            TextField("Card Name (e.g. Monobank)", text: $renameText)
+            Button("Save") {
+                onRename?(renameText)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a custom display name or bank name for this card.")
+        }
     }
 }
 
@@ -1755,6 +1790,9 @@ struct WalletCardsTab: View {
                     onDelete: {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         vm.deleteCard(id: card.id)
+                    },
+                    onRename: { newName in
+                        vm.updateCardName(id: card.id, newName: newName)
                     }
                 )
                 .id(card.id)
