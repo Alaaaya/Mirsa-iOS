@@ -147,9 +147,27 @@ int32_t al_device_respring(const char *pairing_path,
                           void *ctx,
                           char **out_error);
 
+// ---------------------------------------------------------------------------
+// Target Host Configuration
+// ---------------------------------------------------------------------------
+
+// Set the primary target host/IP (e.g. "10.7.0.1") to dial first for RSD and tunnel operations.
+// Passing NULL or "" resets to None.
+// Returns 0 on success.
+int32_t al_set_target_host(const char *host);
+
+// Set additional candidate target hosts (e.g. from local interface discovery).
+// `hosts` is an array of C-strings of length `count`.
+// Returns 0 on success.
+int32_t al_set_target_hosts(const char *const *hosts, size_t count);
+
+// Clear custom target host settings, reverting to default tunnel IP fallbacks.
+void al_clear_target_hosts(void);
+
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* AIRLIFT_H */
+

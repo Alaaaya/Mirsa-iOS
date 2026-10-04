@@ -74,6 +74,7 @@ pub enum TunnelFailureKind {
 /// Where a candidate host came from, named in the dial log so a failing run
 /// says which addresses were tried and why each one was on the list.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 enum HostSource {
     SessionCache,
     RsdPeer,
@@ -157,13 +158,16 @@ fn tunnel_host_candidates(rsd_host: IpAddr, extra: &[IpAddr]) -> Vec<(IpAddr, Ho
         push(&mut out, ip, HostSource::SessionCache);
     }
     push(&mut out, rsd_host, HostSource::RsdPeer);
+    #[cfg(not(target_os = "ios"))]
     push(
         &mut out,
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         HostSource::LoopbackDefault,
     );
     for ip in extra {
-        push(&mut out, *ip, HostSource::PairingInterface);
+        if !ip.is_loopback() {
+            push(&mut out, *ip, HostSource::PairingInterface);
+        }
     }
     out
 }

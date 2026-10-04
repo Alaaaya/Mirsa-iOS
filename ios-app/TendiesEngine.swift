@@ -102,25 +102,9 @@ public final class TendiesEngine {
 
             if pathLower.contains("/container/") || pathLower.hasSuffix("/container") {
                 isContainer = true
-                posterType = .container
                 if nameLower.contains("pbfposterextensiondatastoresqlitedatabase.sqlite3") {
                     unsafeContainer = true
                 }
-            }
-
-            if pathLower.contains("descriptor") || pathLower.contains("descriptors") {
-                if pathLower.contains("video") || pathLower.contains("photos") {
-                    posterType = .suggestedPhotos
-                } else if pathLower.contains("mercury") {
-                    posterType = .mercury
-                } else if posterType != .container {
-                    posterType = .collections
-                }
-            }
-
-            // Count descriptors by finding .wallpaper or sub-descriptor folders
-            if nameLower.hasSuffix(".wallpaper") || nameLower == "wallpaper.plist" {
-                descriptorCount += 1
             }
 
             // Image discovery
@@ -140,8 +124,20 @@ public final class TendiesEngine {
             }
         }
 
-        if descriptorCount == 0 {
-            descriptorCount = 1
+        // Use findDescriptorsWithExtensions to get accurate descriptor count and poster type
+        let foundDescriptors = findDescriptorsWithExtensions(in: tempExtractDir, defaultExt: "com.apple.WallpaperKit.CollectionsPoster")
+        descriptorCount = max(foundDescriptors.count, 1)
+
+        if let first = foundDescriptors.first {
+            if first.ext == "com.apple.MercuryPoster" || first.ext == "com.apple.Posters.MercuryPosterApp" {
+                posterType = .mercury
+            } else if first.ext == "com.apple.PhotosUIPrivate.PhotosPosterProvider" {
+                posterType = .suggestedPhotos
+            } else {
+                posterType = isContainer ? .container : .collections
+            }
+        } else if isContainer {
+            posterType = .container
         }
 
         // Pick best preview image
@@ -268,7 +264,6 @@ public final class TendiesEngine {
 
         let majorVer = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         let structVersion = (majorVer <= 16) ? 59 : 61
-        let versionsToWrite: [Int] = [structVersion]
 
         log("🚀 Starting PosterBoard injection into \(normalizedContainer)")
         log("ℹ️ Target PosterBoard structure version: \(structVersion) (iOS \(majorVer))")
@@ -302,33 +297,38 @@ public final class TendiesEngine {
             for (descIndex, descItem) in descriptors.enumerated() {
                 let targetUUID = UUID().uuidString.uppercased()
                 let randomizedID = Int.random(in: 10000...99999)
-                log("  [\(descIndex + 1)/\(descriptors.count)] Descriptor \(targetUUID) (ID: \(randomizedID)) for \(descItem.ext)…")
+                log("  [\(descIndex + 1)/\(descriptors.count)] Descriptor \(targetUUID) for \(descItem.ext)…")
 
-                // Update plist identifiers to ensure unique indexing without collisions
+                // Update plist identifiers for templates/videos without suggestionMetadata
                 updatePlistIdentifiers(in: descItem.url, randomizedID: randomizedID)
 
-                for sVer in versionsToWrite {
-                    // Primary destination
-                    let targetParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/\(descItem.ext)/descriptors"
-                    try await injectDescriptorFolder(
+                // 1. Primary destination: matches descriptor extension bundle ID
+                let primaryParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(descItem.ext)/descriptors"
+                try await injectDescriptorFolder(
+                    folderURL: descItem.url,
+                    targetParentDir: primaryParentDir,
+                    destName: targetUUID,
+                    pairingPath: pairingPath,
+                    log: log
+                )
+
+                // 2. On iOS 18+, also dual-inject to modern .Posters.<Name>App container if applicable
+                var modernExt: String? = nil
+                if descItem.ext == "com.apple.WallpaperKit.CollectionsPoster" {
+                    modernExt = "com.apple.Posters.CollectionsPosterApp"
+                } else if descItem.ext == "com.apple.MercuryPoster" {
+                    modernExt = "com.apple.Posters.MercuryPosterApp"
+                }
+
+                if let modernExt = modernExt, majorVer >= 18 {
+                    let modernParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(modernExt)/descriptors"
+                    try? await injectDescriptorFolder(
                         folderURL: descItem.url,
-                        targetParentDir: targetParentDir,
+                        targetParentDir: modernParentDir,
                         destName: targetUUID,
                         pairingPath: pairingPath,
                         log: log
                     )
-
-                    // On iOS 18+, Collections was migrated to com.apple.Posters.CollectionsPosterApp
-                    if descItem.ext == "com.apple.WallpaperKit.CollectionsPoster" {
-                        let modernParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(sVer)/Extensions/com.apple.Posters.CollectionsPosterApp/descriptors"
-                        try? await injectDescriptorFolder(
-                            folderURL: descItem.url,
-                            targetParentDir: modernParentDir,
-                            destName: targetUUID,
-                            pairingPath: pairingPath,
-                            log: log
-                        )
-                    }
                 }
             }
 
@@ -347,10 +347,13 @@ public final class TendiesEngine {
         let prefPlistURL = stagePrefDir.appendingPathComponent("com.apple.PosterBoard.unprotectedUserDefaults.plist")
         let prefDict: [String: Any] = [
             "PBF_RESET_FILE_PROTECTIONS": true,
-            "PBF_LOCALE_DID_CHANGE": false,
+            "PBF_LOCALE_DID_CHANGE": true,
             "PersistedPosterContainerBundleIdentifiers": [
                 "com.apple.Posters.CollectionsPosterApp",
-                "com.apple.WallpaperKit.CollectionsPoster"
+                "com.apple.WallpaperKit.CollectionsPoster",
+                "com.apple.MercuryPoster",
+                "com.apple.Posters.MercuryPosterApp",
+                "com.apple.PhotosUIPrivate.PhotosPosterProvider"
             ],
             "CompletedPosterBundleIdentifierMigrations": [
                 "com.apple.Posters.UnityPosterApp.ExtragalacticPoster",
@@ -478,7 +481,15 @@ public final class TendiesEngine {
 
     // MARK: - Plist Identifier Randomization (Matches Nugget implementation)
 
-    private func updatePlistIdentifiers(in folderURL: URL, randomizedID: Int) {
+    func updatePlistIdentifiers(in folderURL: URL, randomizedID: Int) {
+        // If suggestion metadata exists, the descriptor is pre-packaged with matching
+        // descriptorIdentifier and wallpaper identifiers (e.g. 7400.DYNAMIC <-> 7400).
+        // Randomizing only Wallpaper.plist desynchronizes PosterKit's suggestion lookup!
+        let suggestionMetadataURL = folderURL.appendingPathComponent("com.apple.posterkit.provider.identifierURL.suggestionMetadata.plist")
+        if FileManager.default.fileExists(atPath: suggestionMetadataURL.path) {
+            return
+        }
+
         let fileManager = FileManager.default
         guard let enumerator = fileManager.enumerator(
             at: folderURL,
@@ -490,10 +501,18 @@ public final class TendiesEngine {
             let fileName = fileURL.lastPathComponent
 
             if fileName == "com.apple.posterkit.provider.descriptor.identifier" {
-                try? "\(randomizedID)".data(using: .utf8)?.write(to: fileURL)
+                // IMPORTANT: ONLY randomize if the file content is a pure integer!
+                // For extensions like Mercury, Unity, Kaleidoscope, descriptor identifiers are
+                // required string symbols (e.g. "v6x.colorA", "Unity2025")!
+                // Overwriting them breaks extension lookup!
+                if let content = try? String(contentsOf: fileURL, encoding: .utf8),
+                   let _ = Int(content.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    try? "\(randomizedID)".data(using: .utf8)?.write(to: fileURL)
+                }
             } else if fileName == "com.apple.posterkit.provider.contents.userInfo" {
                 if let data = try? Data(contentsOf: fileURL),
-                   var plist = (try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil)) as? [String: Any] {
+                   var plist = (try? PropertyListSerialization.propertyList(from: data, options: .mutableContainers, format: nil)) as? [String: Any],
+                   plist["wallpaperRepresentingIdentifier"] != nil {
                     plist["wallpaperRepresentingIdentifier"] = randomizedID
                     if let updated = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0) {
                         try? updated.write(to: fileURL)
@@ -567,85 +586,136 @@ public final class TendiesEngine {
 
     // MARK: - Find Descriptors With Targeted Extensions
 
-    private func findDescriptorsWithExtensions(in rootURL: URL, defaultExt: String) -> [(ext: String, url: URL)] {
+    func isDescriptorFolder(_ url: URL) -> Bool {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return false }
+        let name = url.lastPathComponent
+        if name.hasPrefix(".") || name == "__MACOSX" { return false }
+
+        // Must not be the container root or Library itself
+        let ignoredNames: Set<String> = [
+            "container", "library", "application support", "prbposterextensiondatastore",
+            "extensions", "descriptors", "ordered-descriptors",
+            "mercury-descriptors", "mercurydescriptors", "video-descriptors", "videodescriptors"
+        ]
+        if ignoredNames.contains(name.lowercased()) {
+            return false
+        }
+
+        // 1. Has "versions" directory
+        let versions = url.appendingPathComponent("versions")
+        if fm.fileExists(atPath: versions.path) { return true }
+
+        // 2. Has "providerInfo.plist"
+        let providerInfo = url.appendingPathComponent("providerInfo.plist")
+        if fm.fileExists(atPath: providerInfo.path) { return true }
+
+        // 3. Has "com.apple.posterkit.provider.descriptor.identifier"
+        let descId = url.appendingPathComponent("com.apple.posterkit.provider.descriptor.identifier")
+        if fm.fileExists(atPath: descId.path) { return true }
+
+        // 4. Has "Wallpaper.plist"
+        let wallpaper = url.appendingPathComponent("Wallpaper.plist")
+        if fm.fileExists(atPath: wallpaper.path) { return true }
+
+        // 5. Ends with .wallpaper
+        if url.pathExtension.lowercased() == "wallpaper" { return true }
+
+        return false
+    }
+
+    func determineExtension(for folderURL: URL, defaultExt: String) -> String {
+        let pathLower = folderURL.path.lowercased()
+
+        // 1. Check path components for .../Extensions/<bundleID>/descriptors/<desc>
+        let components = folderURL.pathComponents
+        for i in 0..<components.count {
+            if components[i].lowercased() == "extensions", i + 1 < components.count {
+                let cand = components[i + 1]
+                if cand.contains(".") {
+                    return cand
+                }
+            }
+            if components[i].lowercased() == "descriptors", i > 0 {
+                let cand = components[i - 1]
+                if cand.contains(".") && !cand.lowercased().contains("store") {
+                    return cand
+                }
+            }
+        }
+
+        // 2. Check metadata inside suggestionMetadata.plist if present
+        let metadataURL = folderURL.appendingPathComponent("com.apple.posterkit.provider.identifierURL.suggestionMetadata.plist")
+        if let data = try? Data(contentsOf: metadataURL),
+           let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+           let objects = plist["$objects"] as? [Any] {
+            for obj in objects {
+                if let str = obj as? String {
+                    if str.hasPrefix("com.apple.") && str.contains("Poster") {
+                        return str
+                    }
+                }
+            }
+        }
+
+        // 3. Check descriptor identifier content (e.g. "v6x.colorA" or "v5..." -> Mercury)
+        let descIdURL = folderURL.appendingPathComponent("com.apple.posterkit.provider.descriptor.identifier")
+        if let descId = try? String(contentsOf: descIdURL, encoding: .utf8) {
+            let trimmed = descId.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("v6") || trimmed.hasPrefix("v5") || trimmed.hasPrefix("v4") || trimmed.contains(".color") {
+                return "com.apple.MercuryPoster"
+            }
+        }
+
+        // 4. Path string hints
+        if pathLower.contains("mercury") {
+            return "com.apple.MercuryPoster"
+        }
+        if pathLower.contains("video") || pathLower.contains("photo") {
+            return "com.apple.PhotosUIPrivate.PhotosPosterProvider"
+        }
+        if pathLower.contains("collection") || pathLower.contains("wallpaperkit") {
+            return "com.apple.WallpaperKit.CollectionsPoster"
+        }
+        if pathLower.contains("kaleidoscope") {
+            return "com.apple.Posters.KaleidoscopePosterApp.KaleidoscopePoster"
+        }
+        if pathLower.contains("unity") {
+            return "com.apple.Posters.UnityPosterApp.UnityPosterExtension"
+        }
+
+        return defaultExt
+    }
+
+    public func findDescriptorsWithExtensions(in rootURL: URL, defaultExt: String) -> [(ext: String, url: URL)] {
         let fileManager = FileManager.default
         var results: [(ext: String, url: URL)] = []
 
-        // 1. Check for standard container structure
-        let containerFolder = rootURL.appendingPathComponent("container")
-        let searchRoots = fileManager.fileExists(atPath: containerFolder.path) ? [containerFolder, rootURL] : [rootURL]
+        if isDescriptorFolder(rootURL) {
+            let ext = determineExtension(for: rootURL, defaultExt: defaultExt)
+            return [(ext: ext, url: rootURL)]
+        }
 
-        for sRoot in searchRoots {
-            let extensionsDir = sRoot.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore/61/Extensions")
-            if fileManager.fileExists(atPath: extensionsDir.path) {
-                if let extEntries = try? fileManager.contentsOfDirectory(at: extensionsDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                    for extFolder in extEntries {
-                        let descDir = extFolder.appendingPathComponent("descriptors")
-                        if fileManager.fileExists(atPath: descDir.path),
-                           let descEntries = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                            for d in descEntries where (try? d.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
-                                if !d.lastPathComponent.hasPrefix(".") && d.lastPathComponent != "__MACOSX" {
-                                    results.append((ext: extFolder.lastPathComponent, url: d))
-                                }
-                            }
-                        }
-                    }
-                }
+        // Recursive traversal to discover all descriptor directories
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [(ext: defaultExt, url: rootURL)] }
+
+        while let itemURL = enumerator.nextObject() as? URL {
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: itemURL.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            if itemURL.lastPathComponent.hasPrefix(".") || itemURL.lastPathComponent == "__MACOSX" {
+                enumerator.skipDescendants()
+                continue
             }
-        }
-        if !results.isEmpty {
-            return results
-        }
 
-        // 2. Check for "descriptors" or "descriptor" folder
-        for folderName in ["descriptors", "descriptor", "ordered-descriptors", "ordered-descriptor"] {
-            let descDir = rootURL.appendingPathComponent(folderName)
-            if fileManager.fileExists(atPath: descDir.path),
-               let contents = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                for d in contents where (try? d.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
-                    if !d.lastPathComponent.hasPrefix(".") && d.lastPathComponent != "__MACOSX" {
-                        results.append((ext: defaultExt, url: d))
-                    }
-                }
-            }
-        }
-        if !results.isEmpty {
-            return results
-        }
-
-        // 3. Check for "video-descriptors" or "video-descriptor"
-        for folderName in ["video-descriptors", "video-descriptor"] {
-            let descDir = rootURL.appendingPathComponent(folderName)
-            if fileManager.fileExists(atPath: descDir.path),
-               let contents = try? fileManager.contentsOfDirectory(at: descDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-                for d in contents where (try? d.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
-                    if !d.lastPathComponent.hasPrefix(".") && d.lastPathComponent != "__MACOSX" {
-                        results.append((ext: "com.apple.PhotosUIPrivate.PhotosPosterProvider", url: d))
-                    }
-                }
-            }
-        }
-        if !results.isEmpty {
-            return results
-        }
-
-        // 4. Check if root contains versions or Wallpaper.plist
-        if fileManager.fileExists(atPath: rootURL.appendingPathComponent("versions").path) ||
-           fileManager.fileExists(atPath: rootURL.appendingPathComponent("Wallpaper.plist").path) ||
-           fileManager.fileExists(atPath: rootURL.appendingPathComponent("com.apple.posterkit.provider.descriptor.identifier").path) {
-            return [(ext: defaultExt, url: rootURL)]
-        }
-
-        // 5. Fallback: scan any subfolder with "versions" or UUID name
-        if let topLevel = try? fileManager.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-            for sub in topLevel where (try? sub.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false {
-                if !sub.lastPathComponent.hasPrefix(".") && sub.lastPathComponent != "__MACOSX" {
-                    let hasVersions = fileManager.fileExists(atPath: sub.appendingPathComponent("versions").path)
-                    let isUUID = UUID(uuidString: sub.lastPathComponent) != nil
-                    if hasVersions || isUUID {
-                        results.append((ext: defaultExt, url: sub))
-                    }
-                }
+            if isDescriptorFolder(itemURL) {
+                let ext = determineExtension(for: itemURL, defaultExt: defaultExt)
+                results.append((ext: ext, url: itemURL))
+                enumerator.skipDescendants() // Do not look for nested descriptors inside a descriptor folder
             }
         }
 

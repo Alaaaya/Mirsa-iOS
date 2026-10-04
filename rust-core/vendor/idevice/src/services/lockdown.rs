@@ -172,27 +172,25 @@ impl LockdownClient {
             return Err(IdeviceError::NoEstablishedConnection);
         }
 
-        let legacy = self
-            .get_value(Some("ProductVersion"), None)
-            .await
-            .ok()
-            .as_ref()
-            .and_then(|x| x.as_string())
-            .and_then(|x| x.split(".").next())
-            .and_then(|x| x.parse::<u8>().ok())
-            .map(|x| x < 5)
-            .unwrap_or(false);
+        // Standard lockdownd handshake: greet with QueryType first.
+        tracing::info!("lockdown: greeting daemon with QueryType...");
+        match self.idevice.get_type().await {
+            Ok(t) => tracing::info!("lockdown: QueryType responded: {t}"),
+            Err(e) => tracing::warn!("lockdown: QueryType warning: {e:?}"),
+        }
 
         let request = crate::plist!({
             "Label": self.idevice.label.clone(),
+            "ProtocolVersion": "2",
             "Request": "StartSession",
             "HostID": pairing_file.host_id.clone(),
             "SystemBUID": pairing_file.system_buid.clone()
-
         });
+        tracing::info!("lockdown: sending StartSession (HostID: {})...", pairing_file.host_id);
         self.idevice.send_plist(request).await?;
 
         let response = self.idevice.read_plist().await?;
+        tracing::info!("lockdown: StartSession response received: {:?}", response);
         match response.get("EnableSessionSSL") {
             Some(plist::Value::Boolean(enable)) => {
                 if !enable {
@@ -208,8 +206,10 @@ impl LockdownClient {
             }
         }
 
-        self.idevice.start_session(pairing_file, legacy).await?;
-        Ok(legacy)
+        tracing::info!("lockdown: starting TLS session with rustls...");
+        self.idevice.start_session(pairing_file, false).await?;
+        tracing::info!("lockdown: TLS session established successfully!");
+        Ok(false)
     }
 
     /// Requests to start a service on the device
