@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  Apple Wallet card skins, lock screen passcode themes, and PosterBoard wallpapers directly on iOS 27+.
+  Apple Wallet card skins, lock screen passcode themes, and PosterBoard wallpapers directly on iOS (18.0 – 27.2 beta 2).
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-iOS%2027+-blue?style=flat-square&logo=apple" alt="Platform" />
+  <img src="https://img.shields.io/badge/Platform-iOS%2018.0%E2%80%9327.2%20b2-blue?style=flat-square&logo=apple" alt="Platform" />
   <img src="https://img.shields.io/badge/Swift-5.0-orange?style=flat-square&logo=swift" alt="Swift" />
   <img src="https://img.shields.io/badge/Rust-FFI%20Core-red?style=flat-square&logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
@@ -22,7 +22,17 @@ AirCard-iOS customizes Apple Wallet card artwork, lock screen passcode dialers, 
 
 The app communicates with internal system services over a local loopback tunnel (`10.7.0.1` or `127.0.0.1`) provided by LocalDevVPN. File operations are handled by `AirliftFFI`, a Rust library that interfaces with the AirTraffic service.
 
-> **Compatibility**: AirCard-iOS currently requires **iOS 27.0 or newer (iOS 27+)**.
+## Compatibility
+
+| iOS Version | Status | Pairing Method | Features Supported |
+| :--- | :--- | :--- | :--- |
+| **iOS 27.0 – 27.0.1** | ✅ Supported | On-device Settings or imported pairing file | Wallet skins, Passcode themes, Tendies wallpapers |
+| **iOS 27.2 beta 1 – beta 2** | ✅ Supported | On-device Settings or imported pairing file | Tested and working |
+| **iOS 18.0 – 26.x** | ✅ Supported | Imported pairing file only | Wallet skins & Passcode themes (via SideStore / LiveContainer / AltStore pairing file) |
+| **iOS 27.2 beta 3+** | ❌ Patched | None | Apple patched the underlying `airlift` exploit. Does not work. |
+
+> [!IMPORTANT]
+> **Do not update past iOS 27.2 beta 2:** Apple patched the AirTraffic sync exploit in iOS 27.2 beta 3. If you update past beta 2, file injection will no longer work.
 
 ## Features
 
@@ -52,7 +62,7 @@ The app communicates with internal system services over a local loopback tunnel 
 
 ## Prerequisites
 
-1. **iOS 27+** (for on-device Settings pairing) or **Any supported iOS version** when using an imported pairing file (e.g. from SideStore / iLoader).
+1. **iOS 18.0 – 27.2 beta 2** (iOS 27.0+ for on-device Settings pairing, or imported pairing file on iOS 18–26). Note: iOS 27.2 beta 3+ is patched.
 2. **LocalDevVPN / WireGuard**: Running in loopback mode (`10.7.0.1` or `127.0.0.1`) so local connections can reach internal device services.
 3. **Pairing record**: Either on-device pairing or an imported pairing file.
 

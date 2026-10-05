@@ -346,7 +346,7 @@ struct CreditsSheet: View {
                 Text("AirCard-iOS")
                     .font(.title2.bold())
 
-                Text("Apple Wallet Skins & Passcode Themes for iOS 18+")
+                Text("Apple Wallet Skins & Passcode Themes (iOS 18.0 – 27.2 b2)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -901,6 +901,13 @@ struct PairingTab: View {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
     }
 
+    private var isPotentiallyPatchedOS: Bool {
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        if os.majorVersion > 27 { return true }
+        if os.majorVersion == 27 && os.minorVersion >= 3 { return true }
+        return false
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -921,9 +928,20 @@ struct PairingTab: View {
                                 .foregroundStyle(.blue)
                                 .clipShape(Capsule())
                         }
-                        Text("Apply custom wallet card skins and passcode themes on-device using the AirTraffic sandbox escape.")
+                        Text("Apply custom wallet card skins and passcode themes on-device. Supports iOS 18.0 – 27.2 beta 2 (iOS 27.2 beta 3+ patched).")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+
+                        if isPotentiallyPatchedOS {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text("iOS 27.2 beta 3 or newer detected: Apple patched the AirTraffic exploit on this version. Operations will likely fail.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
