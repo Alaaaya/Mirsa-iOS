@@ -9,13 +9,13 @@ class OpenInRouting(unittest.TestCase):
   self.assertNotIn('MirsaInstallMode',route)
   self.assertIn('explicitIncomingInstall = true',route)
   real=store.split('private func installAsReal',1)[1].split('// MARK:',1)[0]
-  self.assertIn('networkReady(vm)',real); self.assertIn('SideloadService.install(',real)
+  self.assertIn('realAppNetworkReady(vm)',real); self.assertIn('SideloadService.install(',real)
  def test_certificate_passes_selected_identity_and_ota_fail_closed(self):
   root=(R/'ios-app/Apps/CertificateInstall.swift').read_text()
   self.assertIn('identity: identity, store: store',root)
-  cert=(R/'ios-app/Apps/CertificateInstall.swift').read_text().split('guard FileManager.default.fileExists',1)[0]
+  cert=(R/'ios-app/Apps/CertificateInstall.swift').read_text().split('/// Moves the signed IPA',1)[0]
   self.assertIn('OwnCertificateDevice.require()',cert)
-  self.assertIn('material:identity.material,options:PersonalProjectOptions()',cert)
+  self.assertIn('material: identity.material, options: PersonalProjectOptions()',cert)
   self.assertNotIn('pairingFilePath',cert)
   ota=(R/'ios-app/Apps/CertificateOTA.swift').read_text()
   self.assertIn('cachedUDID: device',ota);self.assertIn('if let explicitMaterial',ota)

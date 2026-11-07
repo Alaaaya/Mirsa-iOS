@@ -71,11 +71,10 @@ enum NetworkStatus {
               let iface = ifs.first(where: { $0.ipv4 == source })
         else { return nil }
         guard isTunnelInterface(iface.name) else { return false }
-        // LocalDevVPN may also carry the default route on cellular. Requiring
-        // a different default source rejects a working 5G tunnel. This is only
-        // permission to attempt; the authenticated transport proves reachability.
-        return true
+        return routeSource(to: defaultRouteProbe) != source
     }
+
+    private static let defaultRouteProbe = "203.0.113.1"
 
     private static func routeSource(to ip: String) -> String? {
         var remote = sockaddr_in()
