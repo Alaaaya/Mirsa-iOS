@@ -64,6 +64,9 @@ struct ParsedCertificate {
     let signature: [UInt8]
     let issuerName: [UInt8]
     let subjectName: [UInt8]
+    let notBefore: Date?
+    let notAfter: Date?
+    let extendedKeyUsage: [[UInt8]]?
     let serial: [UInt8]       // raw INTEGER content bytes
     let publicKeyBits: [UInt8] // subjectPublicKey BIT STRING contents (no unused-bits byte)
     let ocspURL: URL?
@@ -82,7 +85,7 @@ struct ParsedCertificate {
         guard let oid = alg.first, oid.tag == 0x06, top[2].tag == 0x03, top[2].content.count > 1 else { return nil }
         var f = d.children(tbsNode)
         if let first = f.first, first.tag == 0xA0 { f.removeFirst() }
-        guard f.count >= 6, f[0].tag == 0x02, f[2].tag == 0x30, f[4].tag == 0x30, f[5].tag == 0x30 else { return nil }
+        guard f.count >= 6, f[0].tag == 0x02, f[2].tag == 0x30, f[3].tag == 0x30, f[4].tag == 0x30, f[5].tag == 0x30 else { return nil }
         let spki = d.children(f[5])
         guard spki.count == 2, spki[1].tag == 0x03, spki[1].content.count > 1 else { return nil }
         der = d.bytes
@@ -92,6 +95,26 @@ struct ParsedCertificate {
         serial = d.body(f[0])
         issuerName = d.raw(f[2])
         subjectName = d.raw(f[4])
+        let validity = d.children(f[3])
+        func time(_ n: DERNode) -> Date? {
+            let t = String(decoding: d.body(n), as: UTF8.self)
+            if n.tag == 0x18 { return OCSPChecker.generalizedTime(t) }
+            guard n.tag == 0x17, t.count == 13, let yy = Int(t.prefix(2)) else { return nil }
+            return OCSPChecker.generalizedTime((yy >= 50 ? "19" : "20") + t)
+        }
+        notBefore = validity.count == 2 ? time(validity[0]) : nil
+        notAfter = validity.count == 2 ? time(validity[1]) : nil
+        var eku: [[UInt8]]? = nil
+        if let ext = f.last(where: { $0.tag == 0xA3 }) {
+            for e in d.children(ext).flatMap({ d.children($0) }) {
+                let parts = d.children(e)
+                guard parts.count >= 2, parts[0].tag == 0x06, d.body(parts[0]) == [0x55, 0x1D, 0x25],
+                      let octet = parts.last, octet.tag == 0x04,
+                      let seq = d.node(at: octet.content.lowerBound, limit: octet.end) else { continue }
+                eku = d.children(seq).filter { $0.tag == 0x06 }.map { d.body($0) }
+            }
+        }
+        extendedKeyUsage = eku
         publicKeyBits = Array(d.body(spki[1]).dropFirst())
         var ocsp: URL?; var issuer: URL?
         if let ext = f.last(where: { $0.tag == 0xA3 }) {
@@ -216,7 +239,10 @@ enum OCSPChecker {
             for c in d.children(list) {
                 let certDER = d.raw(c)
                 let ocspSigning: [UInt8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x09]
-                guard let parsed = ParsedCertificate(Data(certDER)), contains(certDER, ocspSigning),
+                guard let parsed = ParsedCertificate(Data(certDER)),
+                      parsed.issuerName == issuer.subjectName,
+                      parsed.extendedKeyUsage?.contains(ocspSigning) == true,
+                      let nb = parsed.notBefore, let na = parsed.notAfter, nb <= now, now <= na,
                       verify(parsed.tbs, oid: parsed.sigAlgOID, signature: parsed.signature, key: issuerKey),
                       let rk = key(of: certDER),
                       verify(tbsBytes, oid: d.body(sigOID), signature: sig, key: rk) else { continue }
@@ -226,6 +252,9 @@ enum OCSPChecker {
         guard authenticated else {
             return bad("The OCSP answer signature could not be verified.", "ما قدرنا نتحقق من توقيع جواب OCSP.", "واژووی وەڵامی OCSP پشتڕاست نەکرایەوە.", "Îmzeya bersiva OCSP nehat piştrastkirin.")
         }
+        if let nb = issuer.notBefore, let na = issuer.notAfter, !(nb <= now && now <= na) {
+            return bad("The issuer certificate is not valid now.", "شهادة المُصدِر مو صالحة هلأ.", "شەهادەی دەرکەر ئێستا دروست نییە.", "Sertîfîka derxerê niha derbasdar nîne.")
+        }
         var f = d.children(b[0])
         if let first = f.first, first.tag == 0xA0 { f.removeFirst() }
         guard f.count >= 3, f[2].tag == 0x30 else { return invalid() }
@@ -233,7 +262,7 @@ enum OCSPChecker {
             let s = d.children(single)
             guard s.count >= 3, s[0].tag == 0x30 else { continue }
             let id = d.children(s[0])
-            guard id.count == 4, d.body(id[3]) == leaf.serial,
+            guard id.count == 4, d.children(id[0]).first.map({ d.body($0) }) == [0x2B, 0x0E, 0x03, 0x02, 0x1A], d.body(id[3]) == leaf.serial,
                   d.body(id[1]) == [UInt8](Insecure.SHA1.hash(data: Data(issuer.subjectName))),
                   d.body(id[2]) == [UInt8](Insecure.SHA1.hash(data: Data(issuer.publicKeyBits))) else { continue }
             guard s[2].tag == 0x18, let thisUpdate = generalizedTime(String(decoding: d.body(s[2]), as: UTF8.self)) else { return invalid() }
@@ -252,11 +281,6 @@ enum OCSPChecker {
             }
         }
         return bad("The OCSP answer is for another certificate.", "جواب OCSP لشهادة ثانية.", "وەڵامی OCSP بۆ شەهادەیەکی ترە.", "Bersiva OCSP ji bo sertîfîkayeke din e.")
-    }
-    private static func contains(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
-        guard haystack.count >= needle.count else { return false }
-        for i in 0...(haystack.count - needle.count) where Array(haystack[i..<(i + needle.count)]) == needle { return true }
-        return false
     }
 }
 
