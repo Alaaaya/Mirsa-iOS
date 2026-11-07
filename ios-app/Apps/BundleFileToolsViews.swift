@@ -70,13 +70,18 @@ struct HexEditorView: View {
                     if idx < bytes.count {
                         Text(String(format: "%02X", bytes[idx]))
                             .padding(.horizontal, 1)
-                            .background(idx == selected ? Color.accentColor.opacity(0.4) : (bytes[idx] != (idx < original.count ? original[idx] : nil) ? Color.orange.opacity(0.3) : .clear))
+                            .background(cellColor(idx))
                             .onTapGesture { selected = idx; input = String(format: "%02X", bytes[idx]) }
                     } else { Text("  ") }
                 }
             }
             Text(String(bytes[start..<min(start + perRow, bytes.count)].map { $0 >= 32 && $0 < 127 ? Character(UnicodeScalar($0)) : "." }))
         }.font(.system(size: 11, design: .monospaced))
+    }
+    private func cellColor(_ idx: Int) -> Color {
+        if idx == selected { return Color.accentColor.opacity(0.4) }
+        let changed: Bool = idx < original.count && bytes[idx] != original[idx]
+        return changed ? Color.orange.opacity(0.3) : Color.clear
     }
     private func load() {
         do {
