@@ -2,7 +2,7 @@ name: Home gesture UITest
 on:
   workflow_dispatch:
   push:
-    branches: [kat/none-ui-gesture]
+    branches: [kat/choice-first-cellular]
 permissions:
   contents: read
 jobs:
