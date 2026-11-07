@@ -3,7 +3,13 @@ import SwiftUI
 /// UI-test only. Active solely when launched with -MirsaUITestHarness (never in normal launches).
 /// Hosts the REAL MirsaHomeScreen and PersonalAppsHome with seeded fixture apps so XCUITest can drag.
 enum MirsaUITestHarness {
-    static var active: Bool { ProcessInfo.processInfo.arguments.contains("-MirsaUITestHarness") }
+    static var active: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-MirsaUITestHarness")
+        #else
+        return false
+        #endif
+    }
 }
 
 struct MirsaUITestHarnessView: View {
