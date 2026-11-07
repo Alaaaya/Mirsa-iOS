@@ -177,7 +177,7 @@ final class PersonalProjectIntegrationTests: XCTestCase {
         XCTAssertEqual(progress.entry(for: app.id)?.canCancel, true)
         try await snapshot(AppTile(app: app), name: "SIMULATOR-FIXTURE-main-AppTile-50-percent-cancel")
         try await snapshot(MirsaHomeScreen(apps: [app], allAppIDs: [app.id], onLaunch: { _ in }, onSettings: {},
-                                           onImport: {}, onDownloads: {}, menu: { _ in EmptyView() }),
+                                           onImport: {}, onImportLink: {}, onDownloads: {}, menu: { _ in EmptyView() }),
                            name: "SIMULATOR-FIXTURE-main-home-50-percent")
         progress.cancel(op)
         XCTAssertNil(progress.entry(for: app.id))
