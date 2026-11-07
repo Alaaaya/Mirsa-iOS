@@ -34,5 +34,9 @@
   "1.3.171": {
     "en": "Fixed a crash during certificate installation caused by reading imported app icons. Missing or unsupported icons now use a safe placeholder. Added Delete and Delete All to crash logs, with confirmation before deleting all logs. This update has not yet been tested on a physical device.",
     "ar": "صلّحنا مشكلة كانت بتسكّر مرسى أثناء التثبيت بالشهادة بسبب قراءة أيقونة التطبيق المستورد. الأيقونات الناقصة أو غير المدعومة صار إلها بديل آمن. أضفنا حذف وحذف الكل لسجلات الكراش، مع تأكيد قبل حذف الكل. هالتحديث لسا مو مجرّب على جهاز فعلي."
+  },
+  "1.3.173": {
+    "ar": "التوقيع بالشهادة صار يحذف الصلاحيات غير المدعومة بوضع التوافق، بالتطبيق والإضافات، مع تنبيه بالميزات اللي ممكن تتأثر. المطابقة الصارمة وفحص الشهادة والجهاز والصلاحية محفوظين. أضفنا حذف التويكات بالسحب أو الضغط المطوّل مع تأكيد، وإظهار اسم التطبيق الحالي. بتويكات المجتمع صار في تعديل وحذف ورفع نسخة جديدة لصاحب التويك أو المشرف، مع تحقق على السيرفر وتفعيل المشرف بكود لمرة واحدة من الإعدادات. هالتحديث لسا مو مجرّب على جهاز فعلي.",
+    "en": "Certificate signing now removes unsupported entitlements in compatibility mode for apps and extensions, with a warning about affected features. Strict matching and certificate, device and expiry checks remain intact. Added confirmed swipe and long-press tweak deletion and current app display names. Community tweaks support editing, deletion and new-version uploads by the author or an authorized admin, enforced server-side. Admin access is activated once in Settings with a single-use code. This update has not yet been tested on a physical device."
   }
 }
