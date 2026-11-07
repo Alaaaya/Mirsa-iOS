@@ -143,9 +143,10 @@ final class FileToolsTests: XCTestCase {
         XCTAssertTrue(m.exists("b.txt")); XCTAssertFalse(m.exists("New/a.txt"))
         let z = try m.stageZip("Assets", intoDirectory: "")
         XCTAssertEqual(z, "Assets.zip")
-        let dir = try m.stageUnzip("Assets.zip", intoDirectory: "")
+        XCTAssertThrowsError(try m.stageUnzip("Assets.zip", intoDirectory: "")) // existing directory must never be overwritten
+        let dir = try m.stageUnzip("Assets.zip", intoDirectory: "", folderName: "Unpacked")
         XCTAssertEqual(try m.readData(dir + "/Assets/a.txt"), Data("hello".utf8))
-        XCTAssertTrue(m.search("a.txt", content: false).contains { $0.path == "b.txt" })
+        XCTAssertTrue(m.search("b.txt", content: false).contains { $0.path == "b.txt" })
         XCTAssertTrue(m.search("hell", content: true).contains { $0.line == 1 })
     }
     func testProtectedItemsCannotBeMovedOrOverwrittenByCopy() throws {
