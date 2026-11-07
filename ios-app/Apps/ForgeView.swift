@@ -33,12 +33,10 @@ private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () ->
 struct ForgeView: View {
     @ObservedObject private var store = ForgeStore.shared
     @State private var picking = false
-    @State private var translateMode = false
     @State private var error: String?
     @State private var status: String?
     @State private var shareURL: URL?
     @State private var debID: UUID?
-    @State private var langs: Set<String> = ["ar", "ckb", "kmr"]
     @State private var gallery = false
 
     var body: some View {
@@ -50,17 +48,8 @@ struct ForgeView: View {
                         Text(tr("Describe it, Mirsa writes and injects it.", "اوصفه وميرسا بتكتبه وبتحقنه.", ckb: "وەسفی بکە، میرسا دەینووسێت و دەیچەسپێنێت.", kmr: "Vebêje, Mirsa dinivîse û dixe.")).font(.footnote).foregroundStyle(.white.opacity(0.6))
                     }
                     Spacer()
-                    Button { translateMode = false; picking = true } label: { Image(systemName: "plus").font(.title3.bold()).foregroundStyle(.white).frame(width: 44, height: 44).background(Color.accentColor).cornerRadius(12) }
+                    Button { picking = true } label: { Image(systemName: "plus").font(.title3.bold()).foregroundStyle(.white).frame(width: 44, height: 44).background(Color.accentColor).cornerRadius(12) }
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(tr("Translate an app", "ترجم تطبيق", ckb: "ئەپێک وەربگێڕە", kmr: "Appekê wergerîne"), systemImage: "character.bubble.fill").font(.headline).foregroundStyle(.white)
-                    HStack { ForEach(IPAStringsTranslator.targets, id: \.code) { t in
-                        Button { if langs.contains(t.code) { langs.remove(t.code) } else { langs.insert(t.code) } } label: {
-                            Text(t.label).font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 6)
-                                .background(langs.contains(t.code) ? Color.accentColor : Color.white.opacity(0.1)).foregroundStyle(.white).cornerRadius(8)
-                        }.buttonStyle(.plain) } }
-                    forgeButton("doc.badge.gearshape", tr("Choose IPA", "اختر IPA", ckb: "IPA هەڵبژێرە", kmr: "IPA hilbijêre")) { translateMode = true; picking = true }
-                }.padding(14).background(forgeCard).cornerRadius(16)
                 ForEach(store.projects) { p in
                     NavigationLink(destination: ForgeProjectView(id: p.id)) {
                         VStack(alignment: .leading, spacing: 3) {
@@ -89,16 +78,55 @@ struct ForgeView: View {
         let local = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
         do {
             try FileManager.default.copyItem(at: url, to: local); defer { try? FileManager.default.removeItem(at: local) }
-            if !translateMode {
-                let info = try await ForgeStore.inspect(ipa: local)
-                _ = try store.create(ipa: local, info: info)
-            } else {
-                store.busy = tr("Translating…", "عم أترجم…", ckb: "وەردەگێڕرێت…", kmr: "Tê wergerandin…"); defer { store.busy = nil }
-                let chosen = IPAStringsTranslator.targets.filter { langs.contains($0.code) }
-                let r = try await IPAStringsTranslator.run(ipa: local, languages: chosen) { _ in }
-                status = tr("Translated \(r.strings) strings in \(r.files) files.", "تمت ترجمة \(r.strings) نص بـ \(r.files) ملف.", ckb: "\(r.strings) دەق وەرگێڕدرا.", kmr: "\(r.strings) rêzik hatin wergerandin.")
-                shareURL = r.output
-            }
+            let info = try await ForgeStore.inspect(ipa: local)
+            _ = try store.create(ipa: local, info: info)
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Tools > Translation. Same card, language chips and actions that used to live in Tweaks.
+struct ForgeTranslateView: View {
+    @ObservedObject private var store = ForgeStore.shared
+    @State private var picking = false
+    @State private var error: String?
+    @State private var status: String?
+    @State private var shareURL: URL?
+    @State private var langs: Set<String> = ["ar", "ckb", "kmr"]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(tr("Translate an app", "ترجم تطبيق", ckb: "ئەپێک وەربگێڕە", kmr: "Appekê wergerîne"), systemImage: "character.bubble.fill").font(.headline).foregroundStyle(.white)
+                    HStack { ForEach(IPAStringsTranslator.targets, id: \.code) { t in
+                        Button { if langs.contains(t.code) { langs.remove(t.code) } else { langs.insert(t.code) } } label: {
+                            Text(t.label).font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(langs.contains(t.code) ? Color.accentColor : Color.white.opacity(0.1)).foregroundStyle(.white).cornerRadius(8)
+                        }.buttonStyle(.plain) } }
+                    forgeButton("doc.badge.gearshape", tr("Choose IPA", "اختر IPA", ckb: "IPA هەڵبژێرە", kmr: "IPA hilbijêre")) { picking = true }
+                }.padding(14).background(forgeCard).cornerRadius(16)
+                if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
+                if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
+            guard case .success(let url) = r else { return }
+            Task { await handle(url) }
+        }
+        .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
+    }
+    private func handle(_ url: URL) async {
+        error = nil; status = nil
+        let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+        do {
+            try FileManager.default.copyItem(at: url, to: local); defer { try? FileManager.default.removeItem(at: local) }
+            store.busy = tr("Translating…", "عم أترجم…", ckb: "وەردەگێڕرێت…", kmr: "Tê wergerandin…"); defer { store.busy = nil }
+            let chosen = IPAStringsTranslator.targets.filter { langs.contains($0.code) }
+            let r = try await IPAStringsTranslator.run(ipa: local, languages: chosen) { _ in }
+            status = tr("Translated \(r.strings) strings in \(r.files) files.", "تمت ترجمة \(r.strings) نص بـ \(r.files) ملف.", ckb: "\(r.strings) دەق وەرگێڕدرا.", kmr: "\(r.strings) rêzik hatin wergerandin.")
+            shareURL = r.output
         } catch { self.error = error.localizedDescription }
     }
 }
