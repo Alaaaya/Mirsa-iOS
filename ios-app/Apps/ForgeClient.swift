@@ -86,7 +86,7 @@ enum ForgeClient {
     /// AES-256-GCM, per-job master key, HKDF-SHA256 per purpose, AAD = purpose|job|v1. Layout nonce||ciphertext||tag. Throws on any tampering.
     static func open(_ blob: Data, masterB64: String, job: String, purpose: String) throws -> Data {
         guard let m = Data(base64Encoded: masterB64), m.count == 32, blob.count >= 28 else { throw Failure.message("Invalid encrypted result") }
-        let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: m), salt: Data("mirsa-forge-v1".utf8), info: Data((purpose + "|" + job).utf8), outputByteCount: 32)
+        let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: m), salt: Data("cc-v1".utf8), info: Data((purpose + "|" + job).utf8), outputByteCount: 32)
         do { return try AES.GCM.open(try AES.GCM.SealedBox(combined: blob), using: key, authenticating: Data((purpose + "|" + job + "|v1").utf8)) }
         catch { throw Failure.message("The downloaded result failed verification and was discarded.") }
     }
