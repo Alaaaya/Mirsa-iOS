@@ -70,13 +70,14 @@ struct ForgeProject: Codable, Identifiable {
         p.name = "Tweak" + String(info.name.filter { $0.isLetter || $0.isNumber }.prefix(24))
         projects.insert(p, at: 0); save(); return p.id
     }
-    /// Removes the entry with every version, dylib and the source IPA, then persists the removal.
-    func delete(_ id: UUID) {
+    /// Removes the entry with every version, dylib and the source IPA. The entry is kept when the files cannot be removed.
+    func delete(_ id: UUID) throws {
         let folder = Self.root.appendingPathComponent(id.uuidString, isDirectory: true)
-        try? FileManager.default.removeItem(at: folder)
-        projects.removeAll { $0.id == id }; save()
+        if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
+        projects.removeAll { $0.id == id }
+        try JSONEncoder().encode(projects).write(to: index, options: .atomic)
     }
-    /// Reads the live display name from the stored source IPA (the technical build name stays untouched).
+    /// Reads the display name from the stored source IPA (a snapshot, only the last fallback).
     nonisolated static func liveName(ipa: URL) async -> String? {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appendingPathComponent("forgename-" + UUID().uuidString, isDirectory: true)
@@ -91,10 +92,34 @@ struct ForgeProject: Codable, Identifiable {
         for k in ["CFBundleDisplayName", "CFBundleName"] { if let v = info[k] as? String, !v.trimmingCharacters(in: .whitespaces).isEmpty { return v } }
         return nil
     }
+    /// Priority: project draft name, personal library, managed apps, downloads, then the source IPA snapshot.
+    nonisolated static func resolveName(bundleID: String, drafts: [(bundleID: String, name: String)], library: [(bundleID: String, name: String)],
+                                        managed: [(bundleID: String, name: String)], downloads: [(bundleID: String, name: String)]) -> String? {
+        for list in [drafts, library, managed, downloads] {
+            if let m = list.first(where: { $0.bundleID == bundleID && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }) { return m.name }
+        }
+        return nil
+    }
+    func liveMetadataName(_ bundleID: String) -> String? {
+        let lib = PersonalAppsLibrary.shared
+        var drafts: [(bundleID: String, name: String)] = []
+        for app in lib.apps {
+            guard let d = try? Data(contentsOf: lib.draftURL(app)), let dr = try? JSONDecoder().decode(PersonalProjectDraft.self, from: d) else { continue }
+            drafts.append((dr.bundleID.isEmpty ? app.bundleID : dr.bundleID, dr.name))
+        }
+        return Self.resolveName(bundleID: bundleID, drafts: drafts,
+            library: lib.apps.map { ($0.bundleID, $0.name) },
+            managed: AppsStore.shared.apps.map { ($0.id, $0.name) },
+            downloads: DownloadsLibrary.shared.items.map { ($0.bundleID, $0.name) })
+    }
     func refreshNames() async {
         for p in projects {
-            let src = dir(p).appendingPathComponent("source.ipa")
-            guard FileManager.default.fileExists(atPath: src.path), let n = await Self.liveName(ipa: src), n != p.appName else { continue }
+            var name = liveMetadataName(p.bundleID)
+            if name == nil {
+                let src = dir(p).appendingPathComponent("source.ipa")
+                if FileManager.default.fileExists(atPath: src.path) { name = await Self.liveName(ipa: src) }
+            }
+            guard let n = name, n != p.appName else { continue }
             update(p.id) { $0.appName = n }
         }
     }
