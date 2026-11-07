@@ -10,3 +10,6 @@ alter table mirsa_forge_gallery enable row level security; -- only the edge func
 create or replace function mirsa_forge_install(p_id uuid) returns void language sql security definer as $$ update mirsa_forge_gallery set installs = installs + 1 where id = p_id $$;
 create or replace function mirsa_forge_report(p_id uuid) returns void language sql security definer as $$ update mirsa_forge_gallery set reported = reported + 1 where id = p_id $$;
 revoke all on function mirsa_forge_install(uuid), mirsa_forge_report(uuid) from public, anon, authenticated;
+
+create table if not exists mirsa_forge_keys(job text primary key, user_id uuid not null, k text not null, fetched boolean not null default false, created_at timestamptz not null default now());
+alter table mirsa_forge_keys enable row level security;

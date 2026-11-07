@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Talks to the tweak-forge edge function with the signed-in Mirsa session. No secrets live in the app.
 enum ForgeClient {
@@ -54,14 +55,23 @@ enum ForgeClient {
         return o
     }
 
-    static func getData(_ query: [String: String]) async throws -> Data {
+    static func getData(_ query: [String: String]) async throws -> (Data, String, String) {
         var c = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
         c.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         var req = URLRequest(url: c.url!, timeoutInterval: 60)
         req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession(configuration: .ephemeral).data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw Failure.message(message((resp as? HTTPURLResponse)?.statusCode ?? 0, data)) }
-        return data
+        let h = resp as! HTTPURLResponse
+        return (data, h.value(forHTTPHeaderField: "x-forge-key") ?? "", h.value(forHTTPHeaderField: "x-forge-kind") ?? "")
+    }
+
+    /// AES-256-GCM, per-job master key, HKDF-SHA256 per purpose, AAD = purpose|job|v1. Layout nonce||ciphertext||tag. Throws on any tampering.
+    static func open(_ blob: Data, masterB64: String, job: String, purpose: String) throws -> Data {
+        guard let m = Data(base64Encoded: masterB64), m.count == 32, blob.count >= 28 else { throw Failure.message("Invalid encrypted result") }
+        let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: m), salt: Data("mirsa-forge-v1".utf8), info: Data((purpose + "|" + job).utf8), outputByteCount: 32)
+        do { return try AES.GCM.open(try AES.GCM.SealedBox(combined: blob), using: key, authenticating: Data((purpose + "|" + job + "|v1").utf8)) }
+        catch { throw Failure.message("The downloaded result failed verification and was discarded.") }
     }
 
     static func json(_ body: [String: Any]) async throws -> [String: Any] {

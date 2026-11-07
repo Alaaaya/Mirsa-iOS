@@ -71,3 +71,22 @@ export const JOB_TTL_MS = 3600_000;         // queued source
 export const MAX_DYLIB_BYTES = 4 * 1024 * 1024;
 export const MAX_GALLERY_PER_USER = 20;
 export function isExpired(createdMs, nowMs, ttl) { return nowMs - createdMs >= ttl; }
+
+// AES-256-GCM envelope: nonce(12) || ciphertext || tag(16) (same layout as CryptoKit AES.GCM combined). Per-job master key, HKDF-separated per purpose, AAD binds purpose|job|version.
+const enc = new TextEncoder();
+export const b64 = u8 => btoa(String.fromCharCode(...u8));
+export const unb64 = s => Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
+export async function purposeKey(master, job, purpose) {
+  const base = await crypto.subtle.importKey("raw", master, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: enc.encode("mirsa-forge-v1"), info: enc.encode(purpose + "|" + job) }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+export async function seal(master, job, purpose, plain) {
+  const key = await purposeKey(master, job, purpose), nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: enc.encode(purpose + "|" + job + "|v1") }, key, plain));
+  const out = new Uint8Array(12 + ct.length); out.set(nonce); out.set(ct, 12); return out;
+}
+export async function open(master, job, purpose, blob) {
+  if (blob.length < 28) throw Error("short");
+  const key = await purposeKey(master, job, purpose);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.slice(0, 12), additionalData: enc.encode(purpose + "|" + job + "|v1") }, key, blob.slice(12)));
+}
