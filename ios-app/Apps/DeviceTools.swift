@@ -213,6 +213,8 @@ struct CrashLogsView: View {
     @State private var names: [String] = []
     @State private var query = ""
     @State private var opened: CrashFile?
+    @State private var deleting = false
+    @State private var confirmDeleteAll = false
     struct CrashFile: Identifiable { let id = UUID(); let name: String; let url: URL; let text: String }
 
     var body: some View {
@@ -221,9 +223,30 @@ struct CrashLogsView: View {
             if m.loading { ProgressView() }
             ForEach(shown, id: \.self) { n in
                 Button { Task { await open(n) } } label: { Text(n).font(.footnote).lineLimit(2) }
+                    .swipeActions {
+                        Button(role: .destructive) { Task { await remove([n]) } } label: {
+                            Label(MirsaTr.lit("Delete"), systemImage: "trash")
+                        }
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) { Task { await remove([n]) } } label: {
+                            Label(MirsaTr.lit("Delete"), systemImage: "trash")
+                        }
+                    }
             }
         }
+        .disabled(deleting || m.loading)
         .searchable(text: $query)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(MirsaTr.lit("Delete all"), role: .destructive) { confirmDeleteAll = true }
+                    .disabled(names.isEmpty || deleting || m.loading)
+            }
+        }
+        .alert(MirsaTr.lit("Delete all crash logs?"), isPresented: $confirmDeleteAll) {
+            Button(MirsaTr.lit("Cancel"), role: .cancel) {}
+            Button(MirsaTr.lit("Delete all"), role: .destructive) { Task { await remove(names) } }
+        }
         .navigationTitle(tr("Crash logs", "سجلات الكراش"))
         .task { await load() }
         .refreshable { await load() }
@@ -236,6 +259,27 @@ struct CrashLogsView: View {
         }
         .toolAlert(m)
         .mirsaScreen()
+    }
+
+    @MainActor
+    private func remove(_ targets: [String]) async {
+        guard !deleting, !targets.isEmpty else { return }
+        deleting = true
+        defer { deleting = false }
+        m.error = nil
+        do {
+            let data = try JSONEncoder().encode(targets)
+            let arg = String(decoding: data, as: UTF8.self)
+            let result = await m.run("crash_remove", arg: arg)
+            let failure = result == nil ? m.error : nil
+            // Refresh even after a partial failure, without losing the deletion error.
+            await load()
+            if let failure {
+                m.error = MirsaTr.lit("Couldn't delete crash logs. Enable LocalDevVPN and check pairing, then try again.") + "\n\n" + failure
+            }
+        } catch {
+            m.error = error.localizedDescription
+        }
     }
 
     private func load() async {

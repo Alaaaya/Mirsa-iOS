@@ -13,6 +13,9 @@ extension MirsaTr {
     }
 
     static let legacy: [String: (String, String, String)] = [
+        "Couldn't delete crash logs. Enable LocalDevVPN and check pairing, then try again.": ("ما قدرت احذف سجلات الكراش. شغّل LocalDevVPN وتأكد من الاقتران وجرّب كمان مرة.", "نەتوانرا تۆمارەکانی تێکچوون بسڕدرێنەوە. LocalDevVPN چالاک بکە و هاوتاکردن بپشکنە، پاشان دووبارە هەوڵ بدە.", "Tomarên ketinê nehatin jêbirin. LocalDevVPN çalak bike û cotkirinê kontrol bike, paşê dîsa biceribîne."),
+        "Delete all crash logs?": ("متأكد بدك تحذف كل السجلات؟", "دڵنیایت دەتەوێت هەموو تۆمارەکانی تێکچوون بسڕیتەوە؟", "Tu dixwazî hemû tomarên ketinê jê bibî?"),
+        "Delete all": ("حذف الكل", "سڕینەوەی هەمووی", "Hemûyan jê bibe"),
         "Signed IPA": ("الـ IPA الموقّع", "IPA واژۆکراو", "IPA îmzekirî"),
         "Exported IPA": ("الـ IPA المصدّر", "IPA هەناردەکراو", "IPA derxistî"),
         "Staged changes": ("التعديلات المجهّزة", "گۆڕانکارییە ئامادەکراوەکان", "Guhertinên amadekirî"),
