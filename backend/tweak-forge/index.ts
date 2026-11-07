@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
+import { cleanupStorage } from "./cleanup.ts";
 import { isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_USER, MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON, classify429, retryDelayMs, seal, b64, unb64 } from "./contract.mjs";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -135,12 +136,7 @@ async function build(body: any, uid: string) {
   return json({ job });
 }
 async function cleanupForge() {
-  const old: string[] = [];
-  for (const [dir, ttl] of [["forge/jobs", JOB_TTL_MS], ["forge/out", TEMP_TTL_MS]] as const) {
-    const { data } = await db.storage.from(BUCKET).list(dir, { limit: 1000 });
-    for (const f of data ?? []) if (isExpired(new Date(f.created_at ?? 0).getTime(), Date.now(), ttl)) old.push(dir + "/" + f.name);
-  }
-  if (old.length) await db.storage.from(BUCKET).remove(old);
+  const old = await cleanupStorage(db, BUCKET, "forge", Date.now());
   await db.from("mirsa_forge_keys").delete().lt("created_at", new Date(Date.now() - TEMP_TTL_MS).toISOString());
   return old.length;
 }
