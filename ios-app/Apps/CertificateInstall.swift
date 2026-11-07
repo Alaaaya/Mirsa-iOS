@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Install through a saved personal certificate (P12 + profile): sign locally,
-/// then push the signed app with installation_proxy. No Apple ID, no free-slot
+/// then open the temporary HTTPS OTA installer. No Apple ID, no free-slot
 /// use. The profile inside the app still limits devices, bundle ID and expiry,
 /// and iOS may refuse an expired, revoked or untrusted certificate. Nothing is
 /// bypassed and no "unlimited" claim is made.
@@ -49,6 +49,7 @@ enum CertificateInstall {
     static func run(input: URL, appID: String?, identity: PersonalIdentityVault.SavedIdentity,
                     store: AppsStore? = nil) async throws -> [String: Any] {
         guard !running, store?.busy == nil else { throw Failure.busy }
+        guard FileManager.default.fileExists(atPath: input.path) else { throw Failure.missingIPA }
         // Selecting "Install with certificate" is an explicit OTA route. It
         // must not inherit the Apple ID default or require a current VPN.
         _ = try OwnCertificateDevice.require()

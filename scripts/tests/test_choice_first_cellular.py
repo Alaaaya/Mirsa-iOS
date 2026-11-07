@@ -38,4 +38,11 @@ class ChoiceFirstCellular(unittest.TestCase):
   cert=read('ios-app/Apps/CertificateInstall.swift').split('/// Moves the signed IPA',1)[0]
   self.assertIn('OwnCertificateDevice.require()',cert)
   self.assertNotIn('pairingFilePath',cert)
+  self.assertNotIn('MirsaInstallMode.ownCertificate',cert)
+  self.assertNotIn('networkReady',cert)
+  self.assertNotIn('installSigned',cert)
+  wrapper=read('ios-app/Apps/IncomingIPAChoiceSheet.swift')
+  self.assertNotIn('networkReady',wrapper)
+  self.assertNotIn('.wifi',wrapper)
+  self.assertNotIn('vpnUp',wrapper)
 if __name__=='__main__': unittest.main()
