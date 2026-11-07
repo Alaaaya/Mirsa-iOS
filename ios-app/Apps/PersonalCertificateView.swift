@@ -258,6 +258,10 @@ enum PersonalCertificateSigner {
             }
             info["MinimumOSVersion"] = minimum
         }
+        if options.removeDeviceRestrictions {
+            DeviceRestrictions.strip(&info)
+            try DeviceRestrictions.stripExtensions(in: app)
+        }
         if options.removeWatchApp {
             let watch = app.appendingPathComponent("Watch", isDirectory: true)
             if fm.fileExists(atPath: watch.path) { try fm.removeItem(at: watch) }
@@ -418,6 +422,7 @@ struct PersonalCertificateView: View {
     @State private var latest: PersonalIdentityVault.SavedIdentity?
     @State private var count = 0
     @State private var phase = 0.0
+    @State private var showQueue = false
     @FocusState private var passwordFocused: Bool
     private enum ImportKind: String, Identifiable { case p12, profile; var id: String { rawValue } }
 
@@ -444,6 +449,10 @@ struct PersonalCertificateView: View {
                     .opacity(canSave ? 1 : 0.3), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }.buttonStyle(.plain).disabled(!canSave)
             if let latest { savedCard(latest) }
+            Button { showQueue = true } label: {
+                Label(sgText("Signing queue and app clone", "طابور التوقيع ونسخ التطبيقات", "ڕیزی واژووکردن و کلۆنی ئەپ", "Rêzika îmzekirinê û klona sepanê"), systemImage: "square.stack.3d.up.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
+            }.buttonStyle(.bordered).accessibilityIdentifier("open-signing-queue")
             Text(personalText("The IPA must be unencrypted. Each retained app or extension needs a matching Development or Ad Hoc profile that includes the connected device. Device authorization is checked through pairing when signing.",
                               "لازم ملف IPA يكون غير مشفّر. كل تطبيق أو إضافة بتحتفظ فيها بدها بروفايل Development أو Ad Hoc مطابق ومضاف فيه الجهاز المتصل. تطابق الجهاز بينفحص عبر الاقتران وقت التوقيع."))
                 .font(.caption).foregroundStyle(.secondary)
@@ -455,6 +464,7 @@ struct PersonalCertificateView: View {
         .padding(18).appsGlass(cornerRadius: 28)
         .environment(\.layoutDirection, .leftToRight)
         .disabled(saving)
+        .sheet(isPresented: $showQueue) { SigningQueueView() }
         .sheet(item: $picker) { kind in
             DocumentPickerView(allowedContentTypes: [UTType(filenameExtension: kind == .profile ? "mobileprovision" : kind.rawValue) ?? .data]) { url in
                 receive(url, kind: kind)

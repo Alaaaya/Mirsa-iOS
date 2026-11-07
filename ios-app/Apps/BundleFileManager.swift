@@ -10,8 +10,8 @@ enum BundleFileContent {
 final class BundleFileManager {
     let root: URL
     let stagingDirectory: URL
-    private(set) var overlay: BundleOverlay
-    private let guardrails: BundleGuard
+    var overlay: BundleOverlay
+    let guardrails: BundleGuard
 
     init(root: URL, stagingDirectory: URL, overlay: BundleOverlay = BundleOverlay()) throws {
         guard !BundlePath.isSymlink(root) else { throw BundleFileError.symlinkNotAllowed("") }
@@ -33,7 +33,10 @@ final class BundleFileManager {
                 if p == newPath || p.hasPrefix(newPath + "/") { p = old + p.dropFirst(newPath.count) }
                 else if p == old || p.hasPrefix(old + "/") { return .none }
             case let .delete(d): if p == d || p.hasPrefix(d + "/") { return .none }
-            case let .importFile(dir, name, blob): if p == BundlePath.join(dir, name) { return .added(blob) }
+            case let .importFile(dir, name, blob):
+                let j = BundlePath.join(dir, name)
+                if p == j { return .added(blob) }
+                if p.hasPrefix(j + "/") { return .added(blob + String(p.dropFirst(j.count))) }
             case let .writeFile(w, blob): if p == w { return .added(blob) }
             }
         }
@@ -43,7 +46,7 @@ final class BundleFileManager {
         if path.isEmpty { return true }
         switch source(of: path) {
         case .none: return false
-        case .added: return true
+        case let .added(b): return (try? BundlePath.resolve(b, in: stagingDirectory)) != nil
         case let .original(o): return (try? BundlePath.resolve(o, in: root)) != nil
         }
     }
@@ -55,6 +58,11 @@ final class BundleFileManager {
             guard kids.count <= BundleLimits.maxEntriesPerDirectory else { throw BundleFileError.tooLarge(kids.count) }
             names.formUnion(kids)
             // renamed-away originals are filtered by exists(); renamed-in names added below
+        }
+        if case let .added(b) = source(of: directory), let url = try? BundlePath.resolve(b, in: stagingDirectory),
+           let kids = try? FileManager.default.contentsOfDirectory(atPath: url.path) {
+            guard kids.count <= BundleLimits.maxEntriesPerDirectory else { throw BundleFileError.tooLarge(kids.count) }
+            names.formUnion(kids)
         }
         for op in overlay.ops {
             switch op {
@@ -72,7 +80,7 @@ final class BundleFileManager {
         return out
     }
 
-    private func fileURL(of path: String) throws -> URL {
+    func fileURL(of path: String) throws -> URL {
         switch source(of: path) {
         case .none: throw BundleFileError.notFound(path)
         case let .added(b): return try BundlePath.resolve(b, in: stagingDirectory)
@@ -223,7 +231,7 @@ final class BundleFileManager {
             try? FileManager.default.removeItem(at: stagingDirectory.appendingPathComponent(f))
         }
     }
-    private func copyBlob(from source: URL) throws -> String {
+    func copyBlob(from source: URL) throws -> String {
         let fm = FileManager.default
         if BundlePath.isSymlink(source) { throw BundleFileError.symlinkNotAllowed(source.lastPathComponent) }
         let a = try fm.attributesOfItem(atPath: source.path)

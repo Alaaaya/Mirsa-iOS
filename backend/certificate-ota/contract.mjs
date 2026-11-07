@@ -25,3 +25,16 @@ export function isExpired(expiresAt, now = Date.now()) {
   const time = Date.parse(expiresAt);
   return !Number.isFinite(time) || time <= now;
 }
+
+export function lifetime(value) {
+  if (value === null || value === undefined || value === "900") return 900;
+  if (value === "172800") return 172800;
+  throw new Error("lifetime");
+}
+export const SHARE_PAGE = "https://alaaaya.github.io/Mirsa-iOS/install.html";
+export function shareLink(page, token, expiresAt) {
+  if (page !== SHARE_PAGE || !/^[a-f0-9]{64}$/.test(token)) throw new Error("share_page");
+  const date = new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) throw new Error("expiry");
+  return page + "#token=" + token + "&expires=" + encodeURIComponent(date.toISOString());
+}
