@@ -3,6 +3,11 @@ import Foundation
 /// Interface presence is a preflight hint, never proof of a successful pairing.
 /// The transport still authenticates the pairing file and establishes the session.
 enum DeviceConnectionPolicy {
+    /// Scoped to Apple ID real-app installation, never shared import or OTA.
+    static func mayInstallRealApp(wifi: Bool, tunnelRoute: Bool, hasPairing: Bool) -> Bool {
+        wifi && mayAttempt(tunnelRoute: tunnelRoute, hasPairing: hasPairing)
+    }
+
     static func mayAttempt(tunnelRoute: Bool, hasPairing: Bool) -> Bool {
         tunnelRoute && hasPairing
     }

@@ -2,6 +2,11 @@ import XCTest
 @testable import Mirsa
 
 final class DeviceConnectionPolicyTests: XCTestCase {
+    func testAppleIDRealAppGuardIsScoped() {
+        XCTAssertFalse(DeviceConnectionPolicy.mayInstallRealApp(wifi: false, tunnelRoute: true, hasPairing: true))
+        XCTAssertTrue(DeviceConnectionPolicy.mayInstallRealApp(wifi: true, tunnelRoute: true, hasPairing: true))
+        XCTAssertFalse(DeviceConnectionPolicy.mayInstallRealApp(wifi: true, tunnelRoute: false, hasPairing: true))
+    }
     func testCellularVPNCanAttemptWithoutWifi() {
         XCTAssertTrue(DeviceConnectionPolicy.mayAttempt(tunnelRoute: true, hasPairing: true))
     }
