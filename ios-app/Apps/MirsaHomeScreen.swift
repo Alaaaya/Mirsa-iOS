@@ -235,7 +235,7 @@ struct MirsaHomeScreen<Menu: View>: View {
             jiggle = false
             DispatchQueue.main.async { jiggle = true }
         })
-        .contextMenu {
+        .modifier(MirsaHomeContextMenu(editing: editing) {
             Button { pin(app) } label: {
                 Label(pinnedIDs.contains(app.id) ? tr("Remove from dock", "إزالة من الدوك") : tr("Pin to dock", "تثبيت بالدوك"),
                       systemImage: pinnedIDs.contains(app.id) ? "pin.slash" : "pin")
@@ -246,7 +246,7 @@ struct MirsaHomeScreen<Menu: View>: View {
             }
             Divider()
             menu(app)
-        }
+        })
     }
 
     private func pin(_ app: ManagedApp) {
@@ -328,7 +328,7 @@ struct MirsaHomeItemsGrid<Tile: View, Icon: View>: View {
             }
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity).frame(height: 110)
-            .background { RoundedRectangle(cornerRadius: 20).fill(.ultraThinMaterial) }
+
         }
         .buttonStyle(.plain)
         .accessibilityLabel(f.name)
@@ -474,7 +474,7 @@ struct MirsaHomeTileShell<Content: View>: View {
         let busy = entry != nil
         content()
             .contentShape(Rectangle())
-            .onTapGesture { if enabled && !busy { onTap() } }
+            .modifier(MirsaHomeTap(enabled: enabled && !busy, action: onTap))
             .accessibilityElement(children: .contain)
             .accessibilityLabel(entry.map { MirsaHomeOperationBadge.label(name: name, entry: $0) } ?? name)
             .accessibilityAddTraits(.isButton)
@@ -526,18 +526,44 @@ struct MirsaHomeOperationBadge: View {
 
 
 /// Decoded icon cache outside views so animation/editing never reloads or flashes the icon.
+@MainActor
 enum MirsaIconCache {
-    private static let cache = NSCache<NSString, UIImage>()
+    // One strongly retained decoded image per stable app/path. Missing or locked
+    // files must not replace a previously loaded icon with a placeholder.
+    private struct Entry {
+        let revision: Date
+        let image: UIImage
+    }
+    private static var images: [String: Entry] = [:]
     static func image(id: String, path: String) -> UIImage? {
-        let mt = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let key = "\(id)|\(mt)" as NSString
-        if let hit = cache.object(forKey: key) { return hit }
-        guard let img = UIImage(contentsOfFile: path) else { return nil }
-        let decoded = img.preparingForDisplay() ?? img
-        cache.setObject(decoded, forKey: key)
+        let key = id + "|" + path
+        let previous = images[key]
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let revision = attributes[.modificationDate] as? Date else { return previous?.image }
+        if let previous, previous.revision == revision { return previous.image }
+        guard let image = UIImage(contentsOfFile: path) else { return previous?.image }
+        let decoded = image.preparingForDisplay() ?? image
+        images[key] = Entry(revision: revision, image: decoded)
         return decoded
     }
 }
+
+struct MirsaHomeContextMenu<Items: View>: ViewModifier {
+    let editing: Bool
+    @ViewBuilder let items: () -> Items
+    @ViewBuilder func body(content: Content) -> some View {
+        if editing { content } else { content.contextMenu(menuItems: items) }
+    }
+}
+
+private struct MirsaHomeTap: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.onTapGesture(perform: action) } else { content }
+    }
+}
+
 
 
 /// Long press only exists while NOT editing, so it never competes with drag.
