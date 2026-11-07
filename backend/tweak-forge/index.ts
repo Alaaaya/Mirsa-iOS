@@ -26,12 +26,20 @@ async function allow(uid: string, action: string) {
 }
 async function llm(system: string, userText: string, maxTokens: number) {
   if (!LLM_KEY) throw Error("llm_not_configured");
-  const r = await fetch(LLM_URL + "/chat/completions", {
-    method: "POST", headers: { authorization: "Bearer " + LLM_KEY, "content-type": "application/json" },
-    body: JSON.stringify({ model: LLM_MODEL, temperature: 0.2, max_tokens: maxTokens, messages: [{ role: "system", content: system }, { role: "user", content: userText }] }),
-  });
-  if (!r.ok) throw Error("llm_failed");
-  return (await r.json()).choices?.[0]?.message?.content ?? "";
+  // Gemini sometimes answers 503 under load: retry, then fall back to lighter models.
+  const models = [LLM_MODEL, "gemini-flash-lite-latest", "gemini-2.5-flash"];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const model = models[Math.min(Math.floor(attempt / 2), models.length - 1)];
+    const r = await fetch(LLM_URL + "/chat/completions", {
+      method: "POST", headers: { authorization: "Bearer " + LLM_KEY, "content-type": "application/json" },
+      body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens, messages: [{ role: "system", content: system }, { role: "user", content: userText }] }),
+    });
+    if (r.ok) { const t = (await r.json()).choices?.[0]?.message?.content ?? ""; if (t) return t; }
+    else if (![429, 500, 503].includes(r.status)) { await r.text(); throw Error("llm_failed"); }
+    else await r.text();
+    await new Promise((res) => setTimeout(res, 1200 * (attempt + 1)));
+  }
+  throw Error("llm_unavailable");
 }
 const LANGS: Record<string, string> = { ar: "Arabic", ckb: "Sorani Kurdish", kmr: "Kurmanji Kurdish (Latin script)", en: "English" };
 
@@ -108,6 +116,6 @@ Deno.serve(async req => {
     return json({ id: data.id });
   } catch (e) {
     const m = String((e as Error).message);
-    return json({ error: m === "llm_not_configured" ? m : "server_error" }, m === "llm_not_configured" ? 503 : 500);
+    return json({ error: m === "llm_not_configured" || m === "llm_unavailable" ? m : "server_error" }, m === "llm_not_configured" || m === "llm_unavailable" ? 503 : 500);
   }
 });
