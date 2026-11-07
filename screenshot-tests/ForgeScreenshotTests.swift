@@ -23,12 +23,16 @@ final class ForgeScreenshotTests: XCTestCase {
             format: "label CONTAINS %@ OR label CONTAINS %@", "الأدوات", "Tools"
         )).firstMatch
         XCTAssertTrue(tools.waitForExistence(timeout: 30), app.debugDescription)
+        // Dismiss the real automatic update sheet through its visible control.
+        let later = app.buttons["لاحقاً"]
+        if later.waitForExistence(timeout: 8) { later.tap() }
         tools.tap()
 
         let tweaks = app.buttons.matching(NSPredicate(
             format: "label CONTAINS %@ OR label CONTAINS %@", "التويكس", "Tweaks"
         )).firstMatch
         XCTAssertTrue(tweaks.waitForExistence(timeout: 15), app.debugDescription)
+        if later.exists { later.tap() }
         tweaks.tap()
 
         XCTAssertTrue(app.staticTexts["ترجم تطبيق"].waitForExistence(timeout: 15), app.debugDescription)
