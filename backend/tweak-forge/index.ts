@@ -137,7 +137,8 @@ async function build(body: any, uid: string) {
 }
 async function cleanupForge() {
   const old = await cleanupStorage(db, BUCKET, "forge", Date.now());
-  await db.from("mirsa_forge_keys").delete().lt("created_at", new Date(Date.now() - TEMP_TTL_MS).toISOString());
+  const keys = await db.from("mirsa_forge_keys").delete().lt("created_at", new Date(Date.now() - TEMP_TTL_MS).toISOString());
+  if (keys.error) throw Error("keys_cleanup");
   return old.length;
 }
 // Called only by the trusted workflow steps, authenticated with a shared secret held in the repo secrets.
