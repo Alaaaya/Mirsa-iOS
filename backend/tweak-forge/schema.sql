@@ -58,3 +58,5 @@ begin
   return 'ok';
 end $$;
 revoke all on function mirsa_forge_gate(text,uuid,text,text,int,int,int) from public, anon, authenticated;
+
+alter table mirsa_forge_gallery add column if not exists owner_device text;

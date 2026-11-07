@@ -232,6 +232,10 @@ struct ForgeGalleryView: View {
     @State private var items: [[String: Any]] = []
     @State private var error: String?
     @State private var note: String?
+    @State private var editing: [String: Any]?
+    @State private var editName = ""
+    @State private var editDesc = ""
+    @State private var deleting: [String: Any]?
     var body: some View {
         NavigationView {
             List {
@@ -242,7 +246,12 @@ struct ForgeGalleryView: View {
                         Text(it["target_bundle_id"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Button(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne")) { Task { await use(it) } }.buttonStyle(.bordered)
-                            Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.bordered)
+                            if it["mine"] as? Bool == true {
+                                Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")) { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it }.buttonStyle(.bordered)
+                                Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { deleting = it }.buttonStyle(.bordered)
+                            } else {
+                                Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.bordered)
+                            }
                         }
                     }
                 }
@@ -250,7 +259,23 @@ struct ForgeGalleryView: View {
                 if let error { Text(error).foregroundStyle(.red) }
             }.navigationTitle(tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê"))
         }
-        .task { do { items = (try await ForgeClient.get(["action": "gallery"]))["items"] as? [[String: Any]] ?? [] } catch { self.error = error.localizedDescription } }
+        .task { await reload() }
+        .alert(tr("Edit tweak", "تعديل التويك", ckb: "دەستکاری تویک", kmr: "Tweakê biguherîne"), isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+            TextField(tr("Name", "الاسم", ckb: "ناو", kmr: "Nav"), text: $editName)
+            TextField(tr("Description", "الوصف", ckb: "وەسف", kmr: "Danasîn"), text: $editDesc)
+            Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { let id = editing?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-update", "id": id, "name": editName, "description": editDesc]) } }
+            Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) {}
+        }
+        .alert(tr("Delete this tweak?", "حذف هالتويك؟", ckb: "ئەم تویکە بسڕیتەوە؟", kmr: "Ev tweak jê bibe?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { let id = deleting?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-delete", "id": id]) } }
+            Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) {}
+        } message: { Text(tr("It disappears for everyone.", "رح يختفي عند الجميع.", ckb: "بۆ هەموو دەبزر دەبێت.", kmr: "Ji bo herkesî winda dibe.")) }
+    }
+    private func reload() async {
+        do { items = (try await ForgeClient.get(["action": "gallery"]))["items"] as? [[String: Any]] ?? [] } catch { self.error = error.localizedDescription }
+    }
+    private func mutate(_ body: [String: Any]) async {
+        do { _ = try await ForgeClient.json(body); error = nil; await reload() } catch { self.error = error.localizedDescription }
     }
     private func use(_ it: [String: Any]) async {
         guard let id = it["id"] as? String else { return }

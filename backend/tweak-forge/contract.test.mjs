@@ -51,3 +51,24 @@ test("429 classification and bounded retry delay", () => {
   assert.equal(retryDelayMs("2", ""), 2000);
   assert.equal(retryDelayMs(null, ""), 6000);
 });
+import { isGalleryOwner, galleryPatch } from "./contract.mjs";
+const D1 = "11111111-1111-1111-1111-111111111111", D2 = "22222222-2222-2222-2222-222222222222";
+test("gallery ownership", () => {
+  const row = { user_id: "u1", owner_device: D1 };
+  assert.equal(isGalleryOwner(row, "u1", D1), true);
+  assert.equal(isGalleryOwner(row, "u2", D1), false);   // other account
+  assert.equal(isGalleryOwner(row, "u1", D2), false);   // right account, spoofed/other device
+  assert.equal(isGalleryOwner(row, "u1", ""), false);   // missing device
+  assert.equal(isGalleryOwner(row, "u1", undefined), false);
+  assert.equal(isGalleryOwner(row, "", D1), false);     // unauthenticated
+  assert.equal(isGalleryOwner(null, "u1", D1), false);
+  assert.equal(isGalleryOwner({ user_id: "u1", owner_device: null }, "u1", D2), true);  // legacy
+  assert.equal(isGalleryOwner({ user_id: "u1", owner_device: null }, "u2", D1), false);
+});
+test("gallery patch validation", () => {
+  assert.deepEqual(galleryPatch({ name: "Good Name", description: "x" }), { name: "Good Name", description: "x" });
+  assert.equal(galleryPatch({}), null);
+  assert.equal(galleryPatch({ name: "1bad" }), null);
+  assert.equal(galleryPatch({ code: '%hook A\nsystem("id");\n%end' }), null);
+  assert.equal(galleryPatch({ user_id: "evil" }), null); // cannot set owner
+});
