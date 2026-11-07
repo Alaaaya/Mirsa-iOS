@@ -3,9 +3,23 @@ import UniformTypeIdentifiers
 
 private let forgeCard = Color(red: 0.11, green: 0.12, blue: 0.16)
 struct ShareItem: Identifiable { let url: URL; var id: String { url.path } }
+/// Secondary share action: the same tweak as a .deb. Only offered inside the share menu.
+final class DebActivity: UIActivity {
+    let onTap: () -> Void
+    init(onTap: @escaping () -> Void) { self.onTap = onTap }
+    override var activityType: UIActivity.ActivityType? { .init("com.alaa.mirsa.forge.deb") }
+    override var activityTitle: String? { tr("Share as .deb", "مشاركة كـ .deb", ckb: "وەک .deb بڵاوبکەرەوە", kmr: "Wekî .deb parve bike") }
+    override var activityImage: UIImage? { UIImage(systemName: "shippingbox") }
+    override class var activityCategory: UIActivity.Category { .action }
+    override func canPerform(withActivityItems activityItems: [Any]) -> Bool { true }
+    override func perform() { onTap(); activityDidFinish(true) }
+}
 struct ForgeShareSheet: UIViewControllerRepresentable {
     let url: URL
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
+    var onDeb: (() -> Void)? = nil
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: onDeb.map { [DebActivity(onTap: $0)] })
+    }
     func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
 }
 private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () -> Void) -> some View {
@@ -23,6 +37,7 @@ struct ForgeView: View {
     @State private var error: String?
     @State private var status: String?
     @State private var shareURL: URL?
+    @State private var debID: UUID?
     @State private var langs: Set<String> = ["ar", "ckb", "kmr"]
     @State private var gallery = false
 
@@ -95,6 +110,7 @@ struct ForgeProjectView: View {
     @State private var error: String?
     @State private var note: String?
     @State private var shareURL: URL?
+    @State private var debID: UUID?
     @State private var editing = false
     @State private var draft = ""
     @State private var updating = false
@@ -126,11 +142,11 @@ struct ForgeProjectView: View {
                         }
                         if store.needsRebuild(p) { Text(tr("Toggles apply on the next build.", "الخيارات بتنطبق بالبناء الجاي.", ckb: "گۆڕانکاریەکان لە دروستکردنی داهاتوو جێبەجێ دەبن.", kmr: "Vebijark di çêkirina din de têne bicihanîn.")).font(.caption).foregroundStyle(.orange) }
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
-                    if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, .deb export and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
+                    if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, exporting the dylib and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
                     HStack {
                         forgeButton("syringe.fill", tr("Inject", "احقن", ckb: "بچەسپێنە", kmr: "Bixe")) { run { shareURL = try await store.inject(id) } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
-                        forgeButton("square.and.arrow.up", ".deb") { run { shareURL = try await store.exportDeb(id) } }
+                        forgeButton("square.and.arrow.up", ".dylib") { run { shareURL = try await store.exportDylib(id); debID = id } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                         forgeButton("books.vertical", tr("Library", "المكتبة", ckb: "کتێبخانە", kmr: "Pirtûkxane")) { run { try await store.addToLibrary(id); note = tr("Added.", "انضاف.", ckb: "زیادکرا.", kmr: "Hat zêdekirin.") } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
@@ -159,7 +175,7 @@ struct ForgeProjectView: View {
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
         .task { await store.refreshStatus() }
-        .sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
+        .sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
         .sheet(isPresented: $editing) {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { store.editCode(id, code: draft); editing = false } } } }
