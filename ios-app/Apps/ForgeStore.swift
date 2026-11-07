@@ -19,6 +19,7 @@ struct ForgeProject: Codable, Identifiable {
     static let shared = ForgeStore()
     @Published var projects: [ForgeProject] = []
     @Published var busy: String?
+    @Published var pendingGalleryCode: String?
     nonisolated static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaForge", isDirectory: true)
     }
@@ -167,3 +168,51 @@ struct ForgeProject: Codable, Identifiable {
     }
 }
 extension ForgeStore.TargetInfo { var appVersion: String { version } }
+
+extension ForgeStore {
+    func publish(_ id: UUID) async throws {
+        guard let p = project(id), let v = p.currentVersion else { return }
+        _ = try await ForgeClient.json(["action": "publish", "name": p.name, "bundleID": p.bundleID, "description": v.prompt, "code": v.code,
+            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }])
+    }
+    /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
+    func injectInspector(_ id: UUID) async throws -> URL {
+        guard let p = project(id), let prev = p.current, let pv = p.currentVersion else { throw ForgeClient.Failure.message("No project") }
+        let savedValues = p.values
+        let iv = ForgeVersion(prompt: "Inspector", code: ForgeInspector.code, settings: [], explain: "")
+        addVersion(id, iv)
+        defer { update(id) { $0.versions.removeAll { $0.id == iv.id }; $0.current = prev; $0.values = savedValues }
+                try? FileManager.default.removeItem(at: dylibURL(p, iv)); _ = pv }
+        return try await inject(id)
+    }
+}
+enum ForgeInspector {
+    static let code = """
+    %hook UIWindow
+    - (void)becomeKeyWindow {
+      %orig;
+      static char key;
+      if (!objc_getAssociatedObject(self, &key)) {
+        objc_setAssociatedObject(self, &key, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(mirsaInspect:)];
+        g.minimumPressDuration = 0.8; g.cancelsTouchesInView = NO;
+        [self addGestureRecognizer:g];
+      }
+    }
+    %new
+    - (void)mirsaInspect:(UILongPressGestureRecognizer *)g {
+      if (g.state != UIGestureRecognizerStateBegan) return;
+      UIView *v = [self hitTest:[g locationInView:self] withEvent:nil];
+      NSMutableArray *chain = [NSMutableArray array];
+      for (UIView *c = v; c; c = c.superview) [chain addObject:NSStringFromClass([c class])];
+      NSString *text = [chain componentsJoinedByString:@" < "];
+      [UIPasteboard generalPasteboard].string = text;
+      UIViewController *top = self.rootViewController;
+      while (top.presentedViewController) top = top.presentedViewController;
+      UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Mirsa Inspector (copied)" message:text preferredStyle:UIAlertControllerStyleAlert];
+      [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+      [top presentViewController:a animated:YES completion:nil];
+    }
+    %end
+    """
+}
