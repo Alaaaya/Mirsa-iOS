@@ -9,7 +9,7 @@ export async function routeOracle(base, secret, job, request = fetch) {
   if ((r?.status === 200 || r?.status === 202) && r.body?.accepted === true) return "oracle";
   if (r?.status === 503 && r.body?.accepted === false) return "github";
   const q = await send(base + "/jobs/" + job, {method:"GET", headers});
-  if (q?.status === 404 || (q?.status === 503 && q.body?.accepted === false)) return "github";
+  // Even 404 cannot exclude a delayed initial POST. Only its explicit rejection permits fallback.
   if ((q?.status === 200 || q?.status === 202) && q.body?.accepted === true) return "oracle";
   return "uncertain";
 }
