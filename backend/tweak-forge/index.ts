@@ -33,6 +33,23 @@ async function allow(uid: string, action: string) {
   await db.from("mirsa_forge_usage").insert({ user_id: uid, action });
   return true;
 }
+const DEV_CAP: Record<string, number> = { generate: num("FORGE_DEV_GEN", 5), translate: num("FORGE_DEV_TR", 10) };
+const IP_CAP: Record<string, number> = { generate: num("FORGE_IP_GEN", 15), translate: num("FORGE_IP_TR", 30) }; // 3x one device: shared Wi-Fi/NAT headroom
+const MAX_DEV_PER_USER = num("FORGE_MAX_DEV", 2);
+async function sha(s: string) { return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join(""); }
+// Only the gateway-set cf-connecting-ip is trusted (client-sent X-Forwarded-For is ignored). Salt rotates daily so hashes expire.
+async function ipHash(req: Request) {
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  return await sha((Deno.env.get("IP_SALT") ?? "") + "|" + day + "|" + ip);
+}
+async function gate(req: Request, uid: string, action: string): Promise<string> {
+  const device = req.headers.get("x-mirsa-device") ?? "";
+  if (!/^[0-9a-f-]{36}$/.test(device)) return "bad_device";
+  const { data, error } = await db.rpc("mirsa_forge_gate", { p_device: device, p_user: uid, p_iph: await ipHash(req), p_action: action, p_dev_cap: DEV_CAP[action], p_ip_cap: IP_CAP[action], p_max_dev: MAX_DEV_PER_USER });
+  if (error) return "gate_error";
+  return String(data);
+}
 async function llm(system: string, userText: string, maxTokens: number, uid: string) {
   if (!LLM_KEY) throw Error("llm_not_configured");
   let ti = 0, calls = 0, tempRetries = 0, serverRetries = 0;
@@ -196,6 +213,12 @@ Deno.serve(async req => {
       return json({ error: "bad_request" }, 400);
     }
     if (!(await allow(u.id, action))) return json({ error: "rate_limited" }, 429);
+    if (action === "translate" || action === "generate") {
+      const g = await gate(req, u.id, action);
+      if (g === "bad_device") return json({ error: "bad_request" }, 400);
+      if (g === "gate_error") return json({ error: "server_error" }, 500);
+      if (g !== "ok") return json({ error: "daily_limit", message: "الحد اليومي خلص، جرّب بكرا" }, 429);
+    }
     if (action === "translate") return await translate(body, u.id);
     if (action === "generate") return await generate(body, u.id);
     if (action === "build") return await build(body, u.id);
