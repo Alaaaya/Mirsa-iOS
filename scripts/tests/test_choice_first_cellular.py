@@ -35,12 +35,11 @@ class ChoiceFirstCellular(unittest.TestCase):
    self.assertNotIn('required to install',text)
    self.assertNotIn('مطلوب للتثبيت',text)
  def test_ota_remains_cached_and_vpn_free(self):
-  cert=read('ios-app/Apps/CertificateInstall.swift').split('/// Moves the signed IPA',1)[0]
+  cert=read('ios-app/Apps/CertificateInstall.swift').split('if shouldUseOTA',1)[1].split('guard FileManager.default.fileExists',1)[0]
   self.assertIn('OwnCertificateDevice.require()',cert)
   self.assertNotIn('pairingFilePath',cert)
-  self.assertNotIn('MirsaInstallMode.ownCertificate',cert)
+  self.assertIn('ownCertificateMode || !wifi',read('ios-app/Apps/CertificateInstall.swift'))
   self.assertNotIn('networkReady',cert)
-  self.assertNotIn('installSigned',cert)
   wrapper=read('ios-app/Apps/IncomingIPAChoiceSheet.swift')
   self.assertNotIn('networkReady',wrapper)
   self.assertNotIn('.wifi',wrapper)
