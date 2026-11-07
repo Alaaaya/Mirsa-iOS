@@ -13,9 +13,9 @@ class OpenInRouting(unittest.TestCase):
  def test_certificate_passes_selected_identity_and_ota_fail_closed(self):
   root=(R/'ios-app/Apps/CertificateInstall.swift').read_text()
   self.assertIn('identity: identity, store: store',root)
-  cert=(R/'ios-app/Apps/CertificateInstall.swift').read_text().split('if shouldUseOTA',1)[1].split('guard FileManager.default.fileExists',1)[0]
-  self.assertIn('OwnCertificateDevice.require()',cert)
-  self.assertIn('material:identity.material,options:PersonalProjectOptions()',cert)
+  cert=(R/'ios-app/Apps/CertificateInstall.swift').read_text()
+  self.assertNotIn('pairingFilePath',cert)
+  self.assertIn('material: identity.material, options: PersonalProjectOptions()',cert)
   self.assertNotIn('pairingFilePath',cert)
   ota=(R/'ios-app/Apps/CertificateOTA.swift').read_text()
   self.assertIn('cachedUDID: device',ota);self.assertIn('if let explicitMaterial',ota)

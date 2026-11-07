@@ -114,7 +114,11 @@ pub(crate) struct Options {
 }
 struct Profile { data: Vec<u8>, parsed: ProvisioningProfile }
 pub(crate) fn validate_profile(p: &ProvisioningProfile, cert: &[u8], udid: &str, now: SystemTime) -> Result<(), String> {
-    if udid.is_empty() || udid.len() > 128 || !udid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+    validate_profile_device(p, cert, Some(udid), now)
+}
+fn validate_profile_device(p: &ProvisioningProfile, cert: &[u8], device: Option<&str>, now: SystemTime) -> Result<(), String> {
+    let udid = device.unwrap_or("");
+    if device.is_some() && (udid.is_empty() || udid.len() > 128 || !udid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) {
         return Err("وصل الجهاز الحقيقي أولاً للحصول على UDID والتحقق من البروفايل.".into());
     }
     let expiry: SystemTime = p.plist().get("ExpirationDate").and_then(plist::Value::as_date)
@@ -123,7 +127,7 @@ pub(crate) fn validate_profile(p: &ProvisioningProfile, cert: &[u8], udid: &str,
     let created: SystemTime = p.plist().get("CreationDate").and_then(plist::Value::as_date)
         .ok_or("البروفايل بلا تاريخ إنشاء.")?.into();
     if created > now { return Err("البروفايل لسا ما بلشت صلاحيته.".into()); }
-    if !p.plist().get("ProvisionedDevices").and_then(plist::Value::as_array)
+    if device.is_some() && !p.plist().get("ProvisionedDevices").and_then(plist::Value::as_array)
             .is_some_and(|ds| ds.iter().any(|d| d.as_string() == Some(udid))) {
         return Err("هالجهاز مو مضاف بالبروفايل. أضف UDID الجهاز واستورد البروفايل الجديد.".into());
     }
@@ -248,7 +252,7 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         let (parsed,verification) = profile_with_verification(&data,index)?;
         if verification.profile_verification != "verified" { status.profile_verification = "unverified".into(); }
         status.warnings.extend(verification.warnings);
-        validate_profile(&parsed, &cert, &target_udid, now)?;
+        validate_profile_device(&parsed, &cert, if target_udid.is_empty() { None } else { Some(&target_udid) }, now)?;
         profiles.push(Profile { data, parsed });
     }
     let mut nodes = nested::inventory(app, opts)?;
@@ -315,7 +319,10 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         apple_codesign_quick::sign_bundle(&node.path, &settings).map_err(|_| format!("تعذّر توقيع التطبيق {id}."))?;
         crate::signing_progress::report(completed + 1, nodes.len())?;
     }
-    status.device_authorization = "checked".into();
+    status.device_authorization = if target_udid.is_empty() {
+        status.warnings.push(serde_json::json!({"code":"device_inclusion_unknown","message":"شمول هالجهاز بالبروفايل مو متحقق منه. iOS بيقرر قبول التثبيت."}));
+        "not_checked"
+    } else { "checked" }.into();
     Ok(status)
 }
 #[cfg(test)]
@@ -420,6 +427,14 @@ mod authorization_tests {
     #[test] fn unsupported_cms_proceeds_with_explicit_warning() {
         let (_,v)=profile_with_verification(include_bytes!("../tests/cms-fixtures/unsupported-test.der"),2).unwrap();
         assert_eq!(v.profile_verification,"unverified"); assert_eq!(v.warnings.len(),1); assert_eq!(v.warnings[0]["profile_index"],2);
+    }
+    #[test] fn unknown_device_does_not_skip_certificate_or_expiry() {
+        let p=profile(); let cert=include_bytes!("../tests/p12-fixtures/leaf.der");
+        let now=UNIX_EPOCH+std::time::Duration::from_secs(1800000000);
+        assert!(validate_profile_device(&p,cert,None,now).is_ok());
+        assert!(validate_profile_device(&p,b"wrong",None,now).is_err());
+        assert!(validate_profile_device(&p,cert,None,UNIX_EPOCH+std::time::Duration::from_secs(2200000000)).is_err());
+        assert!(validate_profile_device(&p,cert,Some("WRONG"),now).is_err());
     }
     #[test] fn device_cert_and_expiry_remain_hard() {
         let p=profile(); let cert=include_bytes!("../tests/p12-fixtures/leaf.der");
@@ -579,7 +594,7 @@ fn signing_udid(opts: &Options, read: impl FnOnce(&str)->Result<String,String>) 
         let id = opts.cached_udid.trim();
         if !((id.len()==40 && id.bytes().all(|c|c.is_ascii_hexdigit())) ||
              (id.len()==25 && id.as_bytes()[8]==b'-' && id.bytes().enumerate().all(|(i,c)| i==8 || c.is_ascii_hexdigit()))) {
-            return Err("إعداد الجهاز مطلوب مرة واحدة. افتح الإعدادات وفعّل VPN والاقتران واضغط قراءة الجهاز، وبعدين طفي VPN وثبّت.".into());
+            return Ok(String::new());
         }
         return Ok(id.into());
     }
@@ -591,10 +606,10 @@ fn signing_udid(opts: &Options, read: impl FnOnce(&str)->Result<String,String>) 
         let o=Options {cached_only:true,cached_udid:"00008110-0012345678901234".into(),..Default::default()};
         assert!(signing_udid(&o, |_|panic!("VPN called")).is_ok());
     }
-    #[test] fn missing_invalid_fail_without_network() {
+    #[test] fn missing_invalid_unknown_without_network() {
         for id in ["","invented"] {
             let o=Options {cached_only:true,cached_udid:id.into(),..Default::default()};
-            assert!(signing_udid(&o, |_|panic!("VPN called")).unwrap_err().contains("مرة واحدة"));
+            assert_eq!(signing_udid(&o, |_|panic!("VPN called")).unwrap(), "");
         }
     }
 }

@@ -16,7 +16,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         if let explicitMaterial { selectedMaterial = explicitMaterial }
         else if let identity = try PersonalIdentityVault.savedIdentities().first { selectedMaterial = identity.material }
         else { throw SideloadError.message(personalText("Import your certificate first.", "استورد شهادتك بالأول.")) }
-        let device = try OwnCertificateDevice.require()
+        let device = (try? OwnCertificateDevice.require()) ?? ""
         let fm = FileManager.default
         let stage = fm.temporaryDirectory.appendingPathComponent("ota-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: stage.appendingPathComponent("Payload"), withIntermediateDirectories: true)
@@ -33,11 +33,14 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let signed = try await Task.detached {
             try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: "", options: options, cachedUDID: device)
         }.value
-        defer { try? fm.removeItem(at: signed.url.deletingLastPathComponent()) }
+        let kept: URL
+        do { kept = try CertificateInstall.retain(signed.url) }
+        catch { throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, signed.url), signedURL: signed.url) }
+        do {
         let info = try IPAEditorService.info(in: app)
         guard let bundleID = info["CFBundleIdentifier"] as? String,
               let version = info["CFBundleVersion"] as? String else { throw SideloadError.message("Missing application identity.") }
-        let bytes = try Data(contentsOf: signed.url, options: .mappedIfSafe)
+        let bytes = try Data(contentsOf: kept, options: .mappedIfSafe)
         guard bytes.count <= 30 * 1024 * 1024 else { throw SideloadError.message("OTA upload limit is 30 MB.") }
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
@@ -70,11 +73,15 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             throw SideloadError.message(personalText("iOS could not open OTA installation.", "iOS ما قدر يفتح تثبيت OTA."))
         }
         // Opening the installer is not evidence of successful device installation.
+        // Keep the signed artifact even after handing off to iOS.
+        } catch {
+            throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, kept), signedURL: kept)
+        }
     }
 }
 
 enum OwnCertificateDevice {
-    static let message = "إعداد الجهاز مطلوب مرة واحدة. فعّل VPN والاقتران واضغط قراءة الجهاز هون، وبعد نجاح القراءة طفي VPN وثبّت بشهادتك."
+    static let message = "قراءة الجهاز اختيارية للتحقق من شمول البروفايل. بدونها فيك توقّع وتفتح مثبّت iOS، بس شمول هالجهاز مو متحقق منه."
     static var query: [String: Any] {
         [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:"mirsa.owncert.realdevice.v1", kSecAttrAccount as String:"device", kSecAttrSynchronizable as String:false]
     }
