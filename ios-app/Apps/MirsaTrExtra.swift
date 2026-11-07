@@ -2,6 +2,7 @@ import Foundation
 
 extension MirsaTr {
     static let extraCkb: [String: String] = [
+        "Real app installation needs Wi-Fi + LocalDevVPN": "دامەزراندنی ئەپی ڕاستەقینە پێویستی بە Wi-Fi + LocalDevVPN هەیە",
         "Install with Apple ID": "دامەزراندن بە Apple ID",
         "Save to my library": "هەڵگرتن لە کتێبخانەکەم",
         "Sign & install with certificate": "واژۆکردن و دامەزراندن بە بڕوانامە",
@@ -47,6 +48,7 @@ extension MirsaTr {
         "{} code file(s)": "{} فایلی کۆد",
     ]
     static let extraKmr: [String: String] = [
+        "Real app installation needs Wi-Fi + LocalDevVPN": "Sazkirina sepana rastîn Wi-Fi + LocalDevVPN dixwaze",
         "Install with Apple ID": "Bi Apple ID saz bike",
         "Save to my library": "Di pirtûkxaneya min de tomar bike",
         "Sign & install with certificate": "Bi sertîfîkayê îmze û saz bike",
