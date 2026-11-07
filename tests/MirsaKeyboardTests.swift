@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Vision
 @testable import Mirsa
 
 @MainActor
@@ -84,6 +85,8 @@ final class MirsaKeyboardTests: XCTestCase {
                       "Project scroll must retain interactive keyboard dismissal")
         XCTAssertFalse(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
                        "CTA must not be exposed or cover the page while software keyboard is visible")
+        XCTAssertFalse(try renderedCTAContains(window),
+                       "CTA text must not be rendered over the actual software keyboard")
         attach("project-real-keyboard-visible-focused-field", window: window)
         // First-responder resignation precedes the keyboard's didHide event.
         // Wait for the real OS lifecycle, not an arbitrary animation duration.
@@ -103,9 +106,34 @@ final class MirsaKeyboardTests: XCTestCase {
             host.view.layoutIfNeeded()
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        XCTAssertTrue(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
-                      "CTA must return after keyboard fully dismisses")
+        // df9c673's actual attachment proves the CTA is visibly restored even
+        // when hosted SwiftUI omits its cached element from UIKit traversal.
+        // Require the real rendered CTA too, not merely a visibility state.
+        XCTAssertTrue(try renderedCTAContains(window),
+                      "CTA must visibly return after keyboard fully dismisses")
         attach("project-real-keyboard-hidden-CTA-restored", window: window)
+    }
+
+    private func renderedCTAContains(_ window: UIWindow) throws -> Bool {
+        var rendered = false
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        XCTAssertTrue(rendered, "CTA verification requires actually rendered app pixels")
+        let cg = try XCTUnwrap(image.cgImage)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        let supported = try request.supportedRecognitionLanguages()
+        request.recognitionLanguages = ["ar-SA", "en-US"].filter { supported.contains($0) }
+        try VNImageRequestHandler(cgImage: cg).perform([request])
+        let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: " ")
+        // Whitespace only, no fuzzy matching or dropped Arabic characters.
+        let normalized = text.filter { !$0.isWhitespace }
+        return ["تصدير الإعدادات فقط", "توقيع وتثبيت",
+                "Export configuration only", "Sign & Install"]
+            .contains { normalized.contains($0.filter { !$0.isWhitespace }) }
     }
 
     private func accessibilityContains(_ root: NSObject, identifier: String) -> Bool {
