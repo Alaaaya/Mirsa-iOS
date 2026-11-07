@@ -13,6 +13,13 @@ extension MirsaTr {
     }
 
     static let legacy: [String: (String, String, String)] = [
+        "Signed IPA": ("الـ IPA الموقّع", "IPA واژۆکراو", "IPA îmzekirî"),
+        "Exported IPA": ("الـ IPA المصدّر", "IPA هەناردەکراو", "IPA derxistî"),
+        "Staged changes": ("التعديلات المجهّزة", "گۆڕانکارییە ئامادەکراوەکان", "Guhertinên amadekirî"),
+        "Extracted app": ("ملفات التطبيق المستخرجة", "فایلە دەرهێنراوەکانی ئەپ", "Pelên sepanê yên derxistî"),
+        "Project icon": ("أيقونة المشروع", "ئایکۆنی پڕۆژە", "Îkona projeyê"),
+        "Project configuration": ("إعدادات المشروع", "ڕێکخستنەکانی پڕۆژە", "Mîhengên projeyê"),
+        "Original IPA": ("الـ IPA الأصلي", "IPA ئەسڵی", "IPA orîjînal"),
         "No logs yet. Import a .ips crash report using the import button. Mirsa cannot read other apps’ system logs.": ("ما في سجلات بعد. استورد تقرير أعطال .ips من زر الاستيراد. ميرسا ما بيقدر يقرأ سجلات النظام لتطبيقات ثانية.", "هێشتا تۆمار نییە. ڕاپۆرتی .ips هاوردە بکە. Mirsa ناتوانێت تۆماری سیستەمی ئەپەکانی تر بخوێنێتەوە.", "Hê tomar tune. Rapora .ips bişîne hundir. Mirsa nikare tomarên pergalê yên sepanên din bixwîne."),
         "Existing project files from their actual storage locations.": ("ملفات المشروع الموجودة بمكان تخزينها الفعلي.", "فایلە هەبووەکانی پڕۆژە لە شوێنی ڕاستەقینەی پاشەکەوتکردنیان.", "Pelên heyî yên projeyê ji cihên rastîn ên tomarkirinê."),
         "Date": ("تاريخ", "بەروار", "Dîrok"),
