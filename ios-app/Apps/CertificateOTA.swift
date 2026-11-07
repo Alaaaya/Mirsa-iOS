@@ -11,7 +11,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 }
 @MainActor enum CertificateOTA {
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
-    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil) async throws {
+    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil) async throws {
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }
         else if let identity = try PersonalIdentityVault.savedIdentities().first { selectedMaterial = identity.material }
@@ -36,6 +36,11 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let kept: URL
         do { kept = try CertificateInstall.retain(signed.url) }
         catch { throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, signed.url), signedURL: signed.url) }
+        if let projectID {
+            let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
+            let relative = kept.path.replacingOccurrences(of: base.path + "/", with: "")
+            UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)
+        }
         do {
         let info = try IPAEditorService.info(in: app)
         guard let bundleID = info["CFBundleIdentifier"] as? String,
