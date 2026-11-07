@@ -163,6 +163,15 @@ struct ForgeProject: Codable, Identifiable {
         let url = try await build(id)
         try await IPATweakLibrary.shared.addFile(url)
     }
+    /// Primary output: the built tweak dylib itself.
+    func exportDylib(_ id: UUID) async throws -> URL {
+        guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
+        var lib = dylibURL(p, v)
+        if needsRebuild(p) || !FileManager.default.fileExists(atPath: lib.path) { lib = try await build(id) }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent(p.name.filter { $0.isLetter || $0.isNumber } + ".dylib")
+        try? FileManager.default.removeItem(at: out)
+        try FileManager.default.copyItem(at: lib, to: out); return out
+    }
     func exportDeb(_ id: UUID) async throws -> URL {
         guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
         var lib = dylibURL(p, v)
