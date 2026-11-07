@@ -1,0 +1,59 @@
+name: Forge actual simulator screenshot
+on:
+  workflow_dispatch:
+  push:
+    branches: [kat/forge-screenshot]
+permissions:
+  contents: read
+jobs:
+  screenshot:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build real simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Navigate actual app and attach screenshot
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; print(next((d["udid"] for d in ds if "Pro Max" in d["name"]),ds[0]["udid"]))')
+          echo "SIMULATOR_ID=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl status_bar "$DEVICE" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme ForgeScreenshot -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/ScreenshotData -resultBundlePath build/ForgeScreenshot.xcresult -parallel-testing-enabled NO test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/forge-screenshot.log
+      - name: Export real XCTest screenshots
+        if: always()
+        run: |
+          if [ -d build/ForgeScreenshot.xcresult ]; then
+            mkdir -p build/screenshots
+            xcrun xcresulttool export attachments --path build/ForgeScreenshot.xcresult --output-path build/screenshots
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Forge-real-simulator-screenshot
+          path: |
+            build/screenshots
+            build/forge-screenshot.log
+          if-no-files-found: warn

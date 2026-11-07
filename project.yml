@@ -68,6 +68,18 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa.tests
 
+  ForgeScreenshotTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: screenshot-tests
+    dependencies:
+      - target: Mirsa
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa.forge-screenshots
+
 schemes:
   Mirsa:
     build:
@@ -76,3 +88,10 @@ schemes:
     test:
       targets:
         - MirsaTests
+  ForgeScreenshot:
+    build:
+      targets:
+        Mirsa: all
+    test:
+      targets:
+        - ForgeScreenshotTests
