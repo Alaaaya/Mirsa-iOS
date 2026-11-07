@@ -36,10 +36,10 @@ final class MirsaHomeGestureUITests: XCTestCase {
         first.press(forDuration: 1.0)
         if arrange.waitForExistence(timeout: 3) { arrange.tap() }
         XCTAssertTrue(done.waitForExistence(timeout: 5))
-        // reorder: drag tile 3 onto the left 12% strip of tile 1
+        // reorder: drag tile 3 onto the left reorder strip of tile 1
         let t3 = tile("\(prefix) 3"), t1 = tile("\(prefix) 1")
         t3.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 1.0, thenDragTo: t1.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)))
+            .press(forDuration: 1.0, thenDragTo: t1.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.5)), withVelocity: .slow, thenHoldForDuration: 1.0)
         app.buttons["uit.refresh"].tap()
         let afterReorder = layout()
         shot("\(tab)-after-reorder")
@@ -50,7 +50,7 @@ final class MirsaHomeGestureUITests: XCTestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 5))
         let t5 = tile("\(prefix) 5"), t4 = tile("\(prefix) 4")
         t5.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 1.0, thenDragTo: t4.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5)))
+            .press(forDuration: 1.0, thenDragTo: t4.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5)), withVelocity: .slow, thenHoldForDuration: 1.0)
         app.buttons["uit.refresh"].tap()
         let afterFolder = layout()
         shot("\(tab)-after-folder")
