@@ -40,8 +40,15 @@ final class OCSPAndRestrictionsTests: XCTestCase {
             let seq = E.tlv(0x30, eku.flatMap { oid($0) })
             exts = E.tlv(0xA3, E.tlv(0x30, E.tlv(0x30, oid([0x55,0x1D,0x25]) + E.tlv(0x04, seq))))
         }
-        let tbs = E.tlv(0x30, [0xA0,0x03,0x02,0x01,0x02] + E.tlv(0x02, [serial]) + E.tlv(0x30, oid(ecdsa256))
-                        + name(issuer) + E.tlv(0x30, utc(from) + utc(to)) + name(subject) + spki + exts)
+        var tbsFields: [UInt8] = [0xA0, 0x03, 0x02, 0x01, 0x02]
+        tbsFields += E.tlv(0x02, [serial])
+        tbsFields += E.tlv(0x30, oid(ecdsa256))
+        tbsFields += name(issuer)
+        tbsFields += E.tlv(0x30, utc(from) + utc(to))
+        tbsFields += name(subject)
+        tbsFields += spki
+        tbsFields += exts
+        let tbs = E.tlv(0x30, tbsFields)
         return Data(E.tlv(0x30, tbs + E.tlv(0x30, oid(ecdsa256)) + E.tlv(0x03, [0] + sign(tbs, signer))))
     }
     private struct Fixture { let issuerKey: SecKey; let issuer: ParsedCertificate; let leaf: ParsedCertificate }
