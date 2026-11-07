@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
-import { isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_USER, MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON } from "./contract.mjs";
+import { isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_USER, MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON, seal, b64, unb64 } from "./contract.mjs";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
@@ -79,12 +79,15 @@ async function build(body: any, uid: string) {
   const bad = validateLogos(body.code); if (bad) return json({ error: "unsafe_or_invalid_code", detail: bad }, 422);
   const source = assembleSource({ id: body.id, bundleID: body.bundleID, code: body.code, settings: body.settings ?? [], values: body.values ?? {} });
   const job = crypto.randomUUID().replaceAll("-", "");
-  const up = await db.storage.from(BUCKET).upload("forge/jobs/" + job + ".json", new Blob([JSON.stringify({ user: uid, source, created: Date.now() })], { type: "application/json" }), { upsert: false });
+  const master = crypto.getRandomValues(new Uint8Array(32));
+  const sealed = await seal(master, job, "src", new TextEncoder().encode(source));
+  const kr = await db.from("mirsa_forge_keys").insert({ job, user_id: uid, k: b64(master) }); if (kr.error) throw Error("keys");
+  const up = await db.storage.from(BUCKET).upload("forge/jobs/" + job + ".bin", sealed, { contentType: "application/octet-stream", upsert: false });
   if (up.error) throw Error("storage");
   const r = await fetch("https://api.github.com/repos/" + GH_REPO + "/actions/workflows/build.yml/dispatches", {
     method: "POST", headers: { authorization: "Bearer " + GH_TOKEN, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "mirsa-forge" },
     body: JSON.stringify({ ref: "main", inputs: { job } }) });
-  if (r.status !== 204) { await r.text(); await db.storage.from(BUCKET).remove(["forge/jobs/" + job + ".json"]); return json({ error: "builder_unavailable" }, 503); }
+  if (r.status !== 204) { await r.text(); await db.storage.from(BUCKET).remove(["forge/jobs/" + job + ".bin"]); await db.from("mirsa_forge_keys").delete().eq("job", job); return json({ error: "builder_unavailable" }, 503); }
   return json({ job });
 }
 async function cleanupForge() {
@@ -94,6 +97,7 @@ async function cleanupForge() {
     for (const f of data ?? []) if (isExpired(new Date(f.created_at ?? 0).getTime(), Date.now(), ttl)) old.push(dir + "/" + f.name);
   }
   if (old.length) await db.storage.from(BUCKET).remove(old);
+  await db.from("mirsa_forge_keys").delete().lt("created_at", new Date(Date.now() - TEMP_TTL_MS).toISOString());
   return old.length;
 }
 // Called only by the trusted workflow steps, authenticated with a shared secret held in the repo secrets.
@@ -104,38 +108,39 @@ async function builderCall(req: Request, url: URL) {
   if (url.searchParams.get("action") === "builder-done") {
     const job = url.searchParams.get("job"); if (!hex32(job)) return json({ error: "bad_request" }, 400);
     const body = new Uint8Array(await req.arrayBuffer());
-    if (body.length > MAX_DYLIB_BYTES) return json({ error: "too_big" }, 413);
+    if (body.length > MAX_DYLIB_BYTES + 64) return json({ error: "too_big" }, 413);
     const ok = url.searchParams.get("ok") === "1";
-    if (ok && !(body.length > 1000 && ((body[0] === 0xcf && body[1] === 0xfa) || (body[0] === 0xca && body[1] === 0xfe)))) return json({ error: "bad_artifact" }, 422);
-    const key = ok ? "forge/out/" + job + ".dylib" : "forge/out/" + job + ".err";
-    await db.storage.from(BUCKET).upload(key, body.slice(0, ok ? body.length : 3000), { upsert: true, contentType: "application/octet-stream" });
+    if (body.length < 1000 && ok) return json({ error: "bad_artifact" }, 422);
+    const key = ok ? "forge/out/" + job + ".enc" : "forge/out/" + job + ".err";
+    await db.storage.from(BUCKET).upload(key, body, { upsert: true, contentType: "application/octet-stream" });
     return json({ ok: true });
   }
   const j = await req.json(); if (j.action !== "builder-fetch" || !hex32(j.job)) return json({ error: "bad_request" }, 400);
-  const path = "forge/jobs/" + j.job + ".json";
+  // One use: atomically claim the key row; a second fetch (or replay) gets nothing.
+  const claim = await db.from("mirsa_forge_keys").update({ fetched: true }).eq("job", j.job).eq("fetched", false).gte("created_at", new Date(Date.now() - JOB_TTL_MS).toISOString()).select("user_id,k").maybeSingle();
+  if (!claim.data) return json({ error: "not_found" }, 404);
+  const path = "forge/jobs/" + j.job + ".bin";
   const { data, error } = await db.storage.from(BUCKET).download(path);
   if (error || !data) return json({ error: "not_found" }, 404);
-  const rec = JSON.parse(await data.text());
-  // One use: remember owner, drop the source.
-  await db.storage.from(BUCKET).upload("forge/out/" + j.job + ".owner", new TextEncoder().encode(rec.user), { upsert: true, contentType: "text/plain" });
+  const ct = new Uint8Array(await data.arrayBuffer());
   await db.storage.from(BUCKET).remove([path]);
-  return json({ source: rec.source });
+  return json({ source: b64(ct), key: claim.data.k });
 }
 async function buildStatus(url: URL, uid: string) {
   const job = url.searchParams.get("job"); if (!hex32(job)) return json({ error: "bad_request" }, 400);
+  const row = await db.from("mirsa_forge_keys").select("user_id,k,fetched").eq("job", job).maybeSingle();
+  if (!row.data || row.data.user_id !== uid) return json({ error: "not_found" }, 404);
   const own = async (p: string) => { const { data } = await db.storage.from(BUCKET).download(p); return data; };
-  // Ownership: queued source file or the owner marker must name this user.
-  const q = await own("forge/jobs/" + job + ".json"); const m = await own("forge/out/" + job + ".owner");
-  if (q) { if (JSON.parse(await q.text()).user !== uid) return json({ error: "not_found" }, 404); return json({ state: "queued" }); }
-  if (!m || (await m.text()) !== uid) return json({ error: "not_found" }, 404);
-  const d = await own("forge/out/" + job + ".dylib");
-  if (d) { if (url.searchParams.get("fetch") !== "1") return json({ state: "done" });
-    const bytes = new Uint8Array(await d.arrayBuffer());
-    await db.storage.from(BUCKET).remove(["forge/out/" + job + ".dylib", "forge/out/" + job + ".owner"]);
-    return new Response(bytes, { headers: { ...H, "content-type": "application/octet-stream" } }); }
-  const e = await own("forge/out/" + job + ".err");
-  if (e) { await db.storage.from(BUCKET).remove(["forge/out/" + job + ".err", "forge/out/" + job + ".owner"]); return json({ state: "failed", log: (await e.text()).slice(0, 3000) }); }
-  return json({ state: "running" });
+  const d = await own("forge/out/" + job + ".enc"), e = await own("forge/out/" + job + ".err");
+  if (d || e) {
+    if (url.searchParams.get("fetch") !== "1") return json({ state: d ? "done" : "failed" });
+    // Ciphertext only; the app decrypts locally with the per-job key (returned once, then everything is deleted).
+    const bytes = new Uint8Array(await (d ?? e)!.arrayBuffer());
+    await db.storage.from(BUCKET).remove(["forge/out/" + job + ".enc", "forge/out/" + job + ".err"]);
+    await db.from("mirsa_forge_keys").delete().eq("job", job);
+    return new Response(bytes, { headers: { ...H, "content-type": "application/octet-stream", "x-forge-key": row.data.k, "x-forge-kind": d ? "dylib" : "err" } });
+  }
+  return json({ state: row.data.fetched ? "running" : "queued" });
 }
 Deno.serve(async req => {
   try {
@@ -177,7 +182,7 @@ Deno.serve(async req => {
     if (error) return json({ error: "publish_failed" }, 500);
     return json({ id: data.id });
   } catch (e) {
-    const m = String((e as Error).message);
+    const m = String((e as Error).message); console.error("forge_err", m.slice(0, 120));
     return json({ error: m === "llm_not_configured" || m === "llm_unavailable" ? m : "server_error" }, m === "llm_not_configured" || m === "llm_unavailable" ? 503 : 500);
   }
 });
