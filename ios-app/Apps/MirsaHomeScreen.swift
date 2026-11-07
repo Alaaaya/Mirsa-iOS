@@ -195,7 +195,7 @@ struct MirsaHomeScreen<Menu: View>: View {
 
     private func appIcon(_ app: ManagedApp) -> some View {
         Group {
-            if let icon = UIImage(contentsOfFile: AppsStore.iconURL(app.id).path) {
+            if let icon = MirsaIconCache.image(id: app.id, path: AppsStore.iconURL(app.id).path) {
                 Image(uiImage: icon).resizable().scaledToFill()
             } else {
                 Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.caption.bold()))
@@ -207,7 +207,7 @@ struct MirsaHomeScreen<Menu: View>: View {
         MirsaHomeTileShell(appID: app.id, name: app.name, enabled: !editing, onTap: { onLaunch(app) }) {
             VStack(spacing: 8) {
                 Group {
-                    if let icon = UIImage(contentsOfFile: AppsStore.iconURL(app.id).path) {
+                    if let icon = MirsaIconCache.image(id: app.id, path: AppsStore.iconURL(app.id).path) {
                         Image(uiImage: icon).resizable().scaledToFill()
                     } else {
                         Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.title2.bold()))
@@ -225,9 +225,6 @@ struct MirsaHomeScreen<Menu: View>: View {
             .padding(.horizontal, compact ? 0 : 8)
             .frame(maxWidth: .infinity)
             .frame(height: compact ? 58 : 110)
-            .background {
-                if !compact { RoundedRectangle(cornerRadius: 20).fill(.ultraThinMaterial) }
-            }
         }
         .rotationEffect(.degrees(editing ? (jiggle ? 1.6 : -1.6) : 0))
         .animation(editing ? .easeInOut(duration: 0.12).repeatForever(autoreverses: true) : .default, value: jiggle)
@@ -246,7 +243,7 @@ struct MirsaHomeScreen<Menu: View>: View {
             }
             .disabled(!pinnedIDs.contains(app.id) && pinnedIDs.filter { Set(allAppIDs).contains($0) }.count >= 4)
             Button { withAnimation { editing = true }; jiggle = false; DispatchQueue.main.async { jiggle = true } } label: {
-                Label(tr("Edit home screen", "تعديل الشاشة الرئيسية"), systemImage: "square.grid.3x3")
+                Label(tr("Arrange apps", "ترتيب التطبيقات"), systemImage: "square.grid.3x3")
             }
             Divider()
             menu(app)
@@ -351,6 +348,7 @@ struct MirsaHomeCell<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @State private var reorderHover = false
     @State private var ontoHover = false
+    @State private var cellWidth: CGFloat = 1
 
     var body: some View {
         if editing {
@@ -358,21 +356,13 @@ struct MirsaHomeCell<Content: View>: View {
                 .draggable(itemID)
                 .scaleEffect(ontoHover ? 1.06 : 1)
                 .animation(.easeOut(duration: 0.15), value: ontoHover)
-                .overlay {
-                    GeometryReader { g in
-                        HStack(spacing: 0) {
-                            Color.clear.frame(width: g.size.width * 0.26).contentShape(Rectangle())
-                                .dropDestination(for: String.self) { items, _ in
-                                    guard let d = items.first else { return false }
-                                    return onReorder(d)
-                                } isTargeted: { reorderHover = $0 }
-                            Color.clear.contentShape(Rectangle())
-                                .dropDestination(for: String.self) { items, _ in
-                                    guard let d = items.first else { return false }
-                                    return onOnto(d)
-                                } isTargeted: { ontoHover = $0 }
-                        }
-                    }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cellWidth = $0 }
+                .dropDestination(for: String.self) { items, location in
+                    guard let d = items.first else { return false }
+                    reorderHover = false; ontoHover = false
+                    return location.x < cellWidth * 0.26 ? onReorder(d) : onOnto(d)
+                } isTargeted: { targeted in
+                    if !targeted { reorderHover = false; ontoHover = false }
                 }
                 .overlay(alignment: .leading) {
                     if reorderHover { Capsule().fill(.white).frame(width: 3).padding(.vertical, 6).offset(x: -5) }
@@ -525,5 +515,20 @@ struct MirsaHomeOperationBadge: View {
             }
             .environment(\.layoutDirection, .leftToRight)
         }
+    }
+}
+
+
+/// Decoded icon cache outside views so animation/editing never reloads or flashes the icon.
+enum MirsaIconCache {
+    private static let cache = NSCache<NSString, UIImage>()
+    static func image(id: String, path: String) -> UIImage? {
+        let mt = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let key = "\(id)|\(mt)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let img = UIImage(contentsOfFile: path) else { return nil }
+        let decoded = img.preparingForDisplay() ?? img
+        cache.setObject(decoded, forKey: key)
+        return decoded
     }
 }
