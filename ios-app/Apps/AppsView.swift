@@ -827,7 +827,7 @@ struct InstallChoiceSheet: View {
                         showCertificate = true
                     }
                     .sheet(isPresented: $showCertificate) {
-                        CertificateInstallSheet(pending: current, store: store) { dismiss() }
+                        CertificateInstallSheet(pending: current, store: store) { store.cancelPending(); dismiss() }
                     }
                     if let onPersonal {
                         optionCard(selected: false, icon: "square.stack.3d.up.fill", iconTint: .teal,

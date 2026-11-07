@@ -53,8 +53,8 @@ struct DeviceToolsView: View {
                     NavigationLink { CrashLogsView() } label: { Label(tr("Crash logs", "سجلات الكراش"), systemImage: "exclamationmark.triangle") }
                     NavigationLink { MediaFilesView(path: "/") } label: { Label(tr("Media files", "ملفات الوسائط"), systemImage: "folder") }
                 } footer: {
-                    Text(tr("These need Wi-Fi, LocalDevVPN and Mirsa's pairing.",
-                            "هدول بدهم واي فاي وLocalDevVPN والاقتران تبع Mirsa."))
+                    Text(tr("These need LocalDevVPN and Mirsa's pairing, over Wi-Fi or cellular.",
+                            "هدول بدهم LocalDevVPN والاقتران تبع Mirsa، على واي فاي أو بيانات الهاتف."))
                 }
             }
             .navigationTitle(tr("Device", "الجهاز"))
