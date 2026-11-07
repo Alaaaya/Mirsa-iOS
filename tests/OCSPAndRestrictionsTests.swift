@@ -13,6 +13,12 @@ final class OCSPAndRestrictionsTests: XCTestCase {
         f.dateFormat = "yyyyMMddHHmmss'Z'"
         return E.tlv(0x18, Array(f.string(from: d).utf8))
     }
+    /// X.509 validity uses UTCTime (before 2050) so Security's own parser accepts the fixtures.
+    private func utc(_ d: Date) -> [UInt8] {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyMMddHHmmss'Z'"
+        return E.tlv(0x17, Array(f.string(from: d).utf8))
+    }
     private func oid(_ b: [UInt8]) -> [UInt8] { E.tlv(0x06, b) }
     private let ecdsa256: [UInt8] = [0x2A,0x86,0x48,0xCE,0x3D,0x04,0x03,0x02]
     private func name(_ cn: String) -> [UInt8] {
@@ -35,7 +41,7 @@ final class OCSPAndRestrictionsTests: XCTestCase {
             exts = E.tlv(0xA3, E.tlv(0x30, E.tlv(0x30, oid([0x55,0x1D,0x25]) + E.tlv(0x04, seq))))
         }
         let tbs = E.tlv(0x30, [0xA0,0x03,0x02,0x01,0x02] + E.tlv(0x02, [serial]) + E.tlv(0x30, oid(ecdsa256))
-                        + name(issuer) + E.tlv(0x30, gt(from) + gt(to)) + name(subject) + spki + exts)
+                        + name(issuer) + E.tlv(0x30, utc(from) + utc(to)) + name(subject) + spki + exts)
         return Data(E.tlv(0x30, tbs + E.tlv(0x30, oid(ecdsa256)) + E.tlv(0x03, [0] + sign(tbs, signer))))
     }
     private struct Fixture { let issuerKey: SecKey; let issuer: ParsedCertificate; let leaf: ParsedCertificate }
@@ -112,6 +118,20 @@ final class OCSPAndRestrictionsTests: XCTestCase {
     func testExpiredIssuerRejected() {
         let fx = fixture(issuerFrom: now.addingTimeInterval(-86400 * 3), issuerTo: now.addingTimeInterval(-86400))
         assertNotVerified(parse(fx, response(fx)))
+    }
+    func testSecurityAcceptsFixtureCertificate() {
+        let k = newKey()
+        let der = cert(subject: "S", issuer: "S", serial: 1, key: k, signer: k, from: now.addingTimeInterval(-60), to: now.addingTimeInterval(600))
+        XCTAssertNotNil(SecCertificateCreateWithData(nil, der as CFData), "fixture must be a certificate Security can parse")
+    }
+    func testValidDelegateAuthenticatesGoodAnswer() {
+        let fx = fixture(); let dk = newKey()
+        let delegate = cert(subject: "Delegate", issuer: "Issuer", serial: 5, key: dk, signer: fx.issuerKey,
+                            from: now.addingTimeInterval(-60), to: now.addingTimeInterval(600), eku: [[0x2B,0x06,0x01,0x05,0x05,0x07,0x03,0x09]])
+        XCTAssertEqual(parse(fx, response(fx, signer: dk, extraCerts: [UInt8](delegate))), .good(checked: now))
+        // same delegate must NOT authenticate once the issuer binding is wrong
+        let other = fixture()
+        assertNotVerified(parse(other, response(other, signer: dk, extraCerts: [UInt8](delegate))))
     }
     func testDelegateWithoutOCSPSigningEKURejected() {
         let fx = fixture(); let dk = newKey()
