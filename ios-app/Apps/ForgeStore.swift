@@ -19,6 +19,7 @@ struct ForgeProject: Codable, Identifiable {
     static let shared = ForgeStore()
     @Published var projects: [ForgeProject] = []
     @Published var busy: String?
+    @Published var builderReady = false
     @Published var pendingGalleryCode: String?
     nonisolated static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaForge", isDirectory: true)
@@ -215,4 +216,8 @@ enum ForgeInspector {
     }
     %end
     """
+}
+
+extension ForgeStore {
+    func refreshStatus() async { builderReady = ((try? await ForgeClient.get(["action": "status"]))?["builder"] as? Bool) ?? false }
 }

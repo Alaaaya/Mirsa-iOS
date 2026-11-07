@@ -112,6 +112,7 @@ struct ForgeProjectView: View {
                     HStack {
                         forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run { try await store.generate(id, prompt: prompt); prompt = "" } }
                         forgeButton("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) { run { shareURL = try await store.injectInspector(id) } }
+                            .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                     }
                 }.padding(14).background(forgeCard).cornerRadius(16)
                 if let pending = store.pendingGalleryCode {
@@ -125,10 +126,14 @@ struct ForgeProjectView: View {
                         }
                         if store.needsRebuild(p) { Text(tr("Toggles apply on the next build.", "الخيارات بتنطبق بالبناء الجاي.", ckb: "گۆڕانکاریەکان لە دروستکردنی داهاتوو جێبەجێ دەبن.", kmr: "Vebijark di çêkirina din de têne bicihanîn.")).font(.caption).foregroundStyle(.orange) }
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
+                    if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, .deb export and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
                     HStack {
                         forgeButton("syringe.fill", tr("Inject", "احقن", ckb: "بچەسپێنە", kmr: "Bixe")) { run { shareURL = try await store.inject(id) } }
+                            .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                         forgeButton("square.and.arrow.up", ".deb") { run { shareURL = try await store.exportDeb(id) } }
+                            .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                         forgeButton("books.vertical", tr("Library", "المكتبة", ckb: "کتێبخانە", kmr: "Pirtûkxane")) { run { try await store.addToLibrary(id); note = tr("Added.", "انضاف.", ckb: "زیادکرا.", kmr: "Hat zêdekirin.") } }
+                            .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                     }
                     HStack {
                         forgeButton("chevron.left.forwardslash.chevron.right", tr("Edit code", "عدّل الكود", ckb: "کۆد", kmr: "Kod")) { draft = v.code; editing = true }
@@ -153,6 +158,7 @@ struct ForgeProjectView: View {
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
+        .task { await store.refreshStatus() }
         .sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
         .sheet(isPresented: $editing) {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
