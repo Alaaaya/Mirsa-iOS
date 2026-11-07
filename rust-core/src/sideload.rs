@@ -1139,6 +1139,20 @@ async fn dev_tool(pairing_path: String, kind: String, arg: String, out_path: Str
             let names = c.ls(dir).await.map_err(|e| format!("crash list: {e:?}"))?;
             Ok(json!(names.into_iter().filter(|n| n != "." && n != "..").collect::<Vec<_>>()))
         }
+        "crash_remove" => {
+            let names: Vec<String> = serde_json::from_str(&arg)
+                .map_err(|e| format!("Invalid crash log selection: {e}"))?;
+            // Only direct report names, never directories or arbitrary AFC paths.
+            if names.is_empty() || names.iter().any(|n| n.is_empty() || n == "." || n == ".."
+                || n.contains('/') || n.contains('\\') || n.contains('\0')) {
+                return Err("Invalid crash log name".into());
+            }
+            let mut c: CrashReportCopyMobileClient = dev_connect(&mut tunnel).await?;
+            for name in names {
+                c.remove(name).await.map_err(|e| format!("crash remove: {e:?}"))?;
+            }
+            Ok(json!({ "removed": true }))
+        }
         "crash_pull" => {
             let mut c: CrashReportCopyMobileClient = dev_connect(&mut tunnel).await?;
             let bytes = c.pull(arg.clone()).await.map_err(|e| format!("crash pull: {e:?}"))?;
