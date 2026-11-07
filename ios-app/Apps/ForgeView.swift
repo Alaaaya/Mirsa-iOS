@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private let forgeCard = Color(red: 0.11, green: 0.12, blue: 0.16)
-struct ShareItem: Identifiable { let url: URL; var id: String { url.path } }
+struct ForgeShareItem: Identifiable { let url: URL; var id: String { url.path } }
 struct ForgeShareSheet: UIViewControllerRepresentable {
     let url: URL
     func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
@@ -66,7 +66,7 @@ struct ForgeView: View {
             Task { await handle(url) }
         }
         .sheet(isPresented: $gallery) { ForgeGalleryView() }
-        .sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
+        .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
     }
     private func handle(_ url: URL) async {
         error = nil; status = nil
@@ -159,7 +159,7 @@ struct ForgeProjectView: View {
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
         .task { await store.refreshStatus() }
-        .sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
+        .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
         .sheet(isPresented: $editing) {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { store.editCode(id, code: draft); editing = false } } } }
