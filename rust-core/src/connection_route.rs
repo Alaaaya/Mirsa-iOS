@@ -12,7 +12,7 @@ pub(crate) fn device_host(host: &str) -> Option<String> {
 }
 pub(crate) fn candidates(preferred: Option<&str>) -> Vec<String> {
     let mut hosts = Vec::new();
-    for h in preferred.into_iter().chain(["10.7.0.1", "172.16.0.1"]) {
+    for h in ["10.7.0.1", "172.16.0.1"].into_iter().chain(preferred) {
         if let Some(h) = device_host(h) {
             if !hosts.contains(&h) { hosts.push(h); }
         }
@@ -48,7 +48,7 @@ mod tests {
     }
     #[test] fn defaults_and_preference() {
         assert_eq!(candidates(None), vec!["10.7.0.1","172.16.0.1"]);
-        assert_eq!(candidates(Some("172.16.0.1")), vec!["172.16.0.1","10.7.0.1"]);
+        assert_eq!(candidates(Some("172.16.0.1")), vec!["10.7.0.1","172.16.0.1"]);
     }
     #[test] fn tunnel_not_device() {
         assert_eq!(candidates(Some("10.7.1.1")), candidates(None));
