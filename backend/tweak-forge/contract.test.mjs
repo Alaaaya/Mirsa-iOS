@@ -29,3 +29,16 @@ test("parse model json and names", () => {
 
 import { isExpired, TEMP_TTL_MS, MAX_DYLIB_BYTES } from "./contract.mjs";
 test("24h boundary", () => { assert.equal(isExpired(0, TEMP_TTL_MS - 1, TEMP_TTL_MS), false); assert.equal(isExpired(0, TEMP_TTL_MS, TEMP_TTL_MS), true); assert.equal(MAX_DYLIB_BYTES, 4194304); });
+
+import { seal, open as unseal } from "./contract.mjs";
+test("AES-GCM roundtrip, tamper, swap, replay-binding", async () => {
+  const k = crypto.getRandomValues(new Uint8Array(32)), job = "a".repeat(32), msg = new TextEncoder().encode("secret source");
+  const s1 = await seal(k, job, "src", msg), s2 = await seal(k, job, "src", msg);
+  assert.notDeepEqual(s1.slice(0, 12), s2.slice(0, 12));
+  assert.equal(new TextDecoder().decode(await unseal(k, job, "src", s1)), "secret source");
+  const t = s1.slice(); t[20] ^= 1; await assert.rejects(unseal(k, job, "src", t));
+  await assert.rejects(unseal(k, job, "out", s1));            // purpose swap
+  await assert.rejects(unseal(k, "b".repeat(32), "src", s1)); // job swap
+  await assert.rejects(unseal(crypto.getRandomValues(new Uint8Array(32)), job, "src", s1));
+  assert.ok(!Buffer.from(s1).includes(Buffer.from("secret")));
+});
