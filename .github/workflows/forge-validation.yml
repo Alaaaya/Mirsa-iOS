@@ -1,0 +1,54 @@
+name: Forge validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [mega-translate-tweaks]
+permissions:
+  contents: read
+jobs:
+  rust-inject:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Rust injection tests
+        run: cargo test --manifest-path rust-core/Cargo.toml --lib -- inject tweak_targets 2>&1 | tee rust.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forge-rust-log
+          path: rust.log
+  swift-deb:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Swift ForgeDeb tests
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MirsaTests/ForgeDebTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee swift.log | tail -40
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forge-swift-log
+          path: swift.log
