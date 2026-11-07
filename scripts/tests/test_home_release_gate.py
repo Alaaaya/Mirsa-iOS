@@ -1,14 +1,13 @@
 """Source/release gates, not a substitute for physical drag gesture testing."""
 from pathlib import Path
-import subprocess,re,unittest
+import json,re,unittest
 R=Path(__file__).resolve().parents[2]
 class Gate(unittest.TestCase):
  def test_existing_titles_unchanged_in_all_languages(self):
   for f in ['ios-app/Apps/PersonalProjectDetailView.swift','ios-app/Apps/MirsaTr.swift']:
-   before=subprocess.check_output(['git','show','30c06ef:'+f],cwd=R,text=True)
+   old=json.loads((R/'scripts/tests/direct_title_baseline.json').read_text())[f]
    after=(R/f).read_text()
    # Includes the Arabic source title and both Kurdish localized titles.
-   old=[x.strip() for x in before.splitlines() if '"Direct injection (main executable)"' in x]
    new=[x.strip() for x in after.splitlines() if '"Direct injection (main executable)"' in x]
    self.assertEqual(len(old),len(new))
    for a,b in zip(old,new):
