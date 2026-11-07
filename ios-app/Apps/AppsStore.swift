@@ -226,15 +226,21 @@ final class AppsStore: ObservableObject {
 
     /// This prerequisite belongs only to Apple ID real-app installs/renewals.
     /// Import, editing, library and certificate OTA never call it.
-    func realAppNetworkReady(_ vm: AppViewModel?) -> Bool {
+    func realAppNetworkReady(_ vm: AppViewModel?, selfUpdate: Bool = false) -> Bool {
         let ip = vm?.deviceIP ?? "10.7.0.1"
         let status = NetworkStatus.summarize(deviceIP: ip)
         guard status.wifi else {
-            error = tr("Real app installation needs Wi-Fi + LocalDevVPN",
-                       "التثبيت الحقيقي بدو واي فاي + LocalDevVPN")
+            error = selfUpdate
+                ? tr("Updating needs Wi-Fi + LocalDevVPN", "التحديث بدو واي فاي + LocalDevVPN")
+                : tr("Real app installation needs Wi-Fi + LocalDevVPN", "التثبيت الحقيقي بدو واي فاي + LocalDevVPN")
             return false
         }
-        guard networkReady(vm) else { error = L.t("err.vpn"); return false }
+        guard networkReady(vm) else {
+            error = selfUpdate
+                ? tr("Updating needs Wi-Fi + LocalDevVPN", "التحديث بدو واي فاي + LocalDevVPN")
+                : tr("Real app installation needs Wi-Fi + LocalDevVPN", "التثبيت الحقيقي بدو واي فاي + LocalDevVPN")
+            return false
+        }
         return DeviceConnectionPolicy.mayInstallRealApp(wifi: status.wifi, tunnelRoute: status.vpn, hasPairing: true)
     }
 
@@ -875,7 +881,7 @@ final class AppsStore: ObservableObject {
                     outcome: activitySucceeded ? .success : operationOutcome)
             }
         }
-        guard realAppNetworkReady(vm) else { return }
+        guard realAppNetworkReady(vm, selfUpdate: true) else { return }
         guard await ensureSession() else { error = L.t("err.notSignedIn"); return }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }

@@ -30,6 +30,8 @@ class ChoiceFirstCellular(unittest.TestCase):
   route=read('ios-app/NetworkStatus.swift')
   self.assertIn('realAppNetworkReady(vm)',store)
   self.assertIn('التثبيت الحقيقي بدو واي فاي + LocalDevVPN',store)
+  self.assertIn('التحديث بدو واي فاي + LocalDevVPN',store)
+  self.assertIn('realAppNetworkReady(vm, selfUpdate: true)',store)
   for file in ['ios-app/Apps/AppsStrings.swift','ios-app/Apps/MirsaTr.swift','ios-app/Apps/DeviceTools.swift']:
    text=read(file)
    self.assertNotIn('required to install',text)
