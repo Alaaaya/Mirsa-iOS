@@ -4,15 +4,12 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        case pairing, device, wallet, passcode, wallpapers
+        case pairing, device
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .pairing: return "antenna.radiowaves.left.and.right"
             case .device: return "iphone.gen3"
-            case .wallet: return "creditcard.fill"
-            case .passcode: return "lock.circle.fill"
-            case .wallpapers: return "photo.stack.fill"
             }
         }
     }
@@ -29,9 +26,6 @@ struct ToolsTab: View {
                 switch section {
                 case .pairing: SetupPairingSheet(showsClose: false)
                 case .device: DeviceToolsView()
-                case .wallet: WalletCardsTab()
-                case .passcode: PasscodeThemeTab()
-                case .wallpapers: TendiesView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
