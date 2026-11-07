@@ -33,3 +33,28 @@ end $$;
 create or replace function mirsa_forge_flag(p_tier text) returns void language sql security definer as $$
   insert into mirsa_forge_flags values (p_tier, date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles' + interval '1 day') on conflict (tier) do update set until = excluded.until $$;
 revoke all on function mirsa_forge_reserve(uuid,text,int,int,int), mirsa_forge_flag(text) from public, anon, authenticated;
+
+-- Per-device + per-IP request caps (translate/generate). Day boundary = Pacific time, same as the provider's RPD reset.
+create table if not exists mirsa_forge_devices (device text primary key, user_id uuid not null, created_at timestamptz not null default now());
+create table if not exists mirsa_forge_gate_use (id bigserial primary key, device text not null, user_id uuid not null, iph text not null, action text not null, created_at timestamptz not null default now());
+create index if not exists mirsa_forge_gate_use_dev on mirsa_forge_gate_use (device, action, created_at desc);
+create index if not exists mirsa_forge_gate_use_ip on mirsa_forge_gate_use (iph, action, created_at desc);
+alter table mirsa_forge_devices enable row level security; alter table mirsa_forge_gate_use enable row level security;
+create or replace function mirsa_forge_gate(p_device text, p_user uuid, p_iph text, p_action text, p_dev_cap int, p_ip_cap int, p_max_dev int) returns text language plpgsql security definer as $$
+declare dstart timestamptz := date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'; owner uuid;
+begin
+  perform pg_advisory_xact_lock(7771002);
+  select user_id into owner from mirsa_forge_devices where device = p_device;
+  if owner is not null and owner <> p_user then return 'device_bound'; end if;
+  if owner is null then
+    if (select count(*) from mirsa_forge_devices where user_id = p_user and created_at >= dstart) >= p_max_dev then return 'device_rotate'; end if;
+    insert into mirsa_forge_devices(device, user_id) values (p_device, p_user);
+  end if;
+  if (select count(*) from mirsa_forge_gate_use where device = p_device and action = p_action and created_at >= dstart) >= p_dev_cap then return 'device_day'; end if;
+  if (select count(*) from mirsa_forge_gate_use where iph = p_iph and action = p_action and created_at >= dstart) >= p_ip_cap then return 'ip_day'; end if;
+  insert into mirsa_forge_gate_use(device, user_id, iph, action) values (p_device, p_user, p_iph, p_action);
+  delete from mirsa_forge_gate_use where created_at < now() - interval '3 days';
+  delete from mirsa_forge_devices where created_at < now() - interval '30 days';
+  return 'ok';
+end $$;
+revoke all on function mirsa_forge_gate(text,uuid,text,text,int,int,int) from public, anon, authenticated;
