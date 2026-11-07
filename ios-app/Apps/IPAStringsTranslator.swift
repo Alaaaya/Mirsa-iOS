@@ -98,6 +98,9 @@ enum IPAStringsTranslator {
         for (key, raw) in strings {
             let entry = raw as? [String: Any] ?? [:]
             let locs = entry["localizations"] as? [String: Any] ?? [:]
+            // Plural / device variations and substitutions are not handled yet: skip them instead of translating the key wrongly.
+            let srcLoc = locs[source] as? [String: Any]
+            if entry["shouldTranslate"] as? Bool == false || srcLoc?["variations"] != nil || srcLoc?["substitutions"] != nil { continue }
             let text = ((locs[source] as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String ?? key
             if translatable(text), locs[code] == nil { todo[key] = text }
         }

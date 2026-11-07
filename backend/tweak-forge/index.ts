@@ -84,6 +84,7 @@ Deno.serve(async req => {
   try {
     const u = await user(req); if (!u) return json({ error: "unauthorized" }, 401);
     const url = new URL(req.url);
+    if (req.method === "GET" && url.searchParams.get("action") === "status") return json({ llm: !!LLM_KEY, builder: !!(BUILDER_URL && BUILDER_SECRET) });
     if (req.method === "GET" && url.searchParams.get("action") === "gallery") {
       const { data } = await db.from("mirsa_forge_gallery").select("id,name,target_bundle_id,description,installs,created_at").lt("reported", 3).order("installs", { ascending: false }).limit(50);
       return json({ items: data ?? [] });
