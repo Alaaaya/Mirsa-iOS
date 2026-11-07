@@ -55,7 +55,7 @@ struct BundleFileBrowserView: View {
             case .directory:
                 NavigationLink { BundleFileBrowserView(manager: manager, directory: e.path, onChange: onChange) } label: { Label(e.name, systemImage: "folder") }
             case .plist, .text:
-                NavigationLink { BundleFileEditorView(manager: manager, entry: e, onChange: { onChange(); reload() }) } label: {
+                NavigationLink { Group { if e.kind == .plist { StructuredPlistEditor(manager: manager, entry: e, onChange: { onChange(); reload() }) } else { BundleFileEditorView(manager: manager, entry: e, onChange: { onChange(); reload() }) } } } label: {
                     Label(e.name, systemImage: e.kind == .plist ? "list.bullet.rectangle" : "doc.text") }
             case .binary:
                 Label { Text(e.name); Text(ByteCountFormatter.string(fromByteCount: Int64(e.size), countStyle: .file)).font(.caption).foregroundStyle(.secondary) } icon: { Image(systemName: "doc") }
@@ -95,7 +95,7 @@ struct BundleFileEditorView: View {
             if let message { Text(message).font(.footnote).foregroundStyle(.red).padding(.horizontal) }
         }
         .navigationTitle(entry.name)
-        .toolbar { Button(MirsaTr.lit("Stage")) { save() } }
+        .toolbar { Button(MirsaTr.lit("Edit")) { save() } }
         .alert(MirsaTr.lit("Staged with warnings"), isPresented: $showWarnings) {
             Button(MirsaTr.lit("OK")) { dismiss() }
         } message: { Text(warnings.joined(separator: "\n")) }
