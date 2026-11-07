@@ -258,6 +258,10 @@ enum PersonalCertificateSigner {
             }
             info["MinimumOSVersion"] = minimum
         }
+        if options.removeDeviceRestrictions {
+            DeviceRestrictions.strip(&info)
+            try DeviceRestrictions.stripExtensions(in: app)
+        }
         if options.removeWatchApp {
             let watch = app.appendingPathComponent("Watch", isDirectory: true)
             if fm.fileExists(atPath: watch.path) { try fm.removeItem(at: watch) }
