@@ -56,6 +56,18 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+  MirsaUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: uitests
+    dependencies:
+      - target: Mirsa
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa.uitests
+        TEST_TARGET_NAME: Mirsa
   MirsaTests:
     type: bundle.unit-test
     platform: iOS
@@ -76,3 +88,10 @@ schemes:
     test:
       targets:
         - MirsaTests
+  MirsaUI:
+    build:
+      targets:
+        Mirsa: all
+    test:
+      targets:
+        - MirsaUITests
