@@ -25,3 +25,21 @@ Local signer still uses the existing real-device pairing/VPN UDID check. OTA del
 not VPN. This batch does NOT remove that local signing dependency or weaken actual-UDID verification.
 Profile matching is strict for Mirsa self-install, normal certificate compatibility stays strict-OFF.
 The first locally selected saved certificate is used, matching the existing vault selection semantics.
+
+## Explicit 48-hour links
+
+Apply share-links.sql after schema.sql before deploying this revision of index.ts.
+POST defaults to 900 seconds for all existing installation clients. Only the explicit
+x-mirsa-lifetime: 172800 header selects 48 hours; arbitrary lifetimes are rejected.
+The authenticated request still uploads only the signed IPA. Both flows retain the
+same private bucket, 256-bit download token and all existing upload/egress quotas.
+Response adds shareURL, an HTTPS page with a Safari install link. The app generates
+the QR locally using CoreImage, so no QR service receives the bearer token.
+Every page, manifest and IPA request checks the same database expiry and readiness.
+Each consumes one of the existing eight GETs; a 48h lifetime is NOT unlimited downloads.
+No automatic trust, revocation bypass or proof of device installation is claimed.
+Cleanup deletes database rows only one day AFTER expiry, not one day after upload.
+This is necessary so a 48h link survives the first daily cleanup.
+UI is embedded in project detail only for a retained signed export, not unsigned output.
+User must explicitly tap Create link after reading the disclosure.
+This revision has NOT been deployed or real-device tested by its source worker.
