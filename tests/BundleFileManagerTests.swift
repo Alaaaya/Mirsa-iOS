@@ -143,7 +143,13 @@ final class BundleFileManagerTests: XCTestCase {
     func testProtectedDestinationsAndCaseAliasesRejected() throws {
         let m = try manager(try makeBundle())
         try Data("x".utf8).write(to: tmp.appendingPathComponent("i.txt"))
-        XCTAssertThrowsError(try m.stageRename("Assets/a.txt", to: "Info.plist"))
+        // Rename is relative to the source parent, not the bundle root.
+        // Protect root metadata without banning legitimate nested plists.
+        let rootSource = tmp.appendingPathComponent("root.txt")
+        try Data("root".utf8).write(to: rootSource)
+        try m.stageImport(from: rootSource, intoDirectory: "", name: "root.txt")
+        XCTAssertThrowsError(try m.stageRename("root.txt", to: "Info.plist"))
+        XCTAssertNoThrow(try m.stageRename("Assets/a.txt", to: "Info.plist"))
         XCTAssertThrowsError(try m.stageImport(from: tmp.appendingPathComponent("i.txt"), intoDirectory: "", name: "info.plist"))
         XCTAssertThrowsError(try m.stageImport(from: tmp.appendingPathComponent("i.txt"), intoDirectory: "", name: "main"))
         XCTAssertThrowsError(try m.stageImport(from: tmp.appendingPathComponent("i.txt"), intoDirectory: "", name: "_CodeSignature"))
