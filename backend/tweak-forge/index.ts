@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { cleanupStorage } from "./cleanup.ts";
-import { isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_USER, MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON, classify429, retryDelayMs, seal, b64, unb64 } from "./contract.mjs";
+import { isGalleryOwner, galleryPatch, isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_USER, MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON, classify429, retryDelayMs, seal, b64, unb64 } from "./contract.mjs";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
@@ -17,7 +17,7 @@ const TIERS = [
 ];
 const USER_DAY = num("FORGE_USER_DAY", 60);
 class Quota extends Error { constructor(public kind: "daily" | "busy", public retry = 0) { super(kind); } }
-const LIMITS: Record<string, number> = { translate: 30, generate: 20, build: 20, publish: 5 }; // per hour per user
+const LIMITS: Record<string, number> = { translate: 30, generate: 20, build: 20, publish: 5, "gallery-update": 30, "gallery-delete": 30 }; // per hour per user
 const H = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...H, "content-type": "application/json" } });
 
@@ -190,8 +190,9 @@ Deno.serve(async req => {
     if (req.method === "GET" && url.searchParams.get("action") === "status") return json({ llm: !!LLM_KEY, builder: builderReady() });
     if (req.method === "GET" && url.searchParams.get("action") === "build-status") return await buildStatus(url, u.id);
     if (req.method === "GET" && url.searchParams.get("action") === "gallery") {
-      const { data } = await db.from("mirsa_forge_gallery").select("id,name,target_bundle_id,description,installs,created_at").lt("reported", 3).order("installs", { ascending: false }).limit(50);
-      return json({ items: data ?? [] });
+      const { data } = await db.from("mirsa_forge_gallery").select("id,name,target_bundle_id,description,installs,created_at,user_id,owner_device").lt("reported", 3).order("installs", { ascending: false }).limit(50);
+      const dev = req.headers.get("x-mirsa-device") ?? "";
+      return json({ items: (data ?? []).map(({ user_id, owner_device, ...r }) => ({ ...r, mine: isGalleryOwner({ user_id, owner_device }, u.id, dev) })) });
     }
     if (req.method === "GET" && url.searchParams.get("action") === "gallery-item") {
       const id = url.searchParams.get("id") ?? "";
@@ -209,6 +210,16 @@ Deno.serve(async req => {
       return json({ error: "bad_request" }, 400);
     }
     if (!(await allow(u.id, action))) return json({ error: "rate_limited" }, 429);
+    if (action === "gallery-update" || action === "gallery-delete") {
+      const dev = req.headers.get("x-mirsa-device") ?? "";
+      if (!/^[0-9a-f-]{36}$/.test(dev) || !/^[0-9a-f-]{36}$/.test(String(body.id))) return json({ error: "bad_request" }, 400);
+      const { data: row } = await db.from("mirsa_forge_gallery").select("id,user_id,owner_device").eq("id", body.id).maybeSingle();
+      if (!row || !isGalleryOwner(row, u.id, dev)) return json({ error: "not_found" }, 404); // same answer for missing and not-yours
+      if (action === "gallery-delete") { const { error } = await db.from("mirsa_forge_gallery").delete().eq("id", row.id).eq("user_id", u.id); return error ? json({ error: "server_error" }, 500) : json({ ok: true }); }
+      const patch = galleryPatch(body); if (!patch) return json({ error: "unsafe_or_invalid_code" }, 422);
+      const { error } = await db.from("mirsa_forge_gallery").update({ ...patch, owner_device: dev }).eq("id", row.id).eq("user_id", u.id);
+      return error ? json({ error: "server_error" }, 500) : json({ ok: true });
+    }
     if (action === "translate" || action === "generate") {
       const g = await gate(req, u.id, action);
       if (g === "bad_device") return json({ error: "bad_request" }, 400);
@@ -224,6 +235,7 @@ Deno.serve(async req => {
     const { count: mine } = await db.from("mirsa_forge_gallery").select("id", { count: "exact", head: true }).eq("user_id", u.id);
     if ((mine ?? 0) >= MAX_GALLERY_PER_USER) return json({ error: "rate_limited" }, 429);
     const { data, error } = await db.from("mirsa_forge_gallery").insert({ user_id: u.id, name: body.name, target_bundle_id: body.bundleID,
+      owner_device: /^[0-9a-f-]{36}$/.test(req.headers.get("x-mirsa-device") ?? "") ? req.headers.get("x-mirsa-device") : null,
       description: String(body.description ?? "").slice(0, 300), code: body.code, settings: body.settings ?? [] }).select("id").single();
     if (error) return json({ error: "publish_failed" }, 500);
     return json({ id: data.id });

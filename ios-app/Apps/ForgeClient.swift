@@ -66,6 +66,7 @@ enum ForgeClient {
         c.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         var req = URLRequest(url: c.url!, timeoutInterval: 30)
         req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
+        req.setValue(deviceID(), forHTTPHeaderField: "x-mirsa-device")
         let (data, resp) = try await URLSession(configuration: .ephemeral).data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200, let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure.message(message(status, data)) }
