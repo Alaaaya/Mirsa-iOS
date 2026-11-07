@@ -229,13 +229,12 @@ struct MirsaHomeScreen<Menu: View>: View {
         .rotationEffect(.degrees(editing ? (jiggle ? 1.6 : -1.6) : 0))
         .animation(editing ? .easeInOut(duration: 0.12).repeatForever(autoreverses: true) : .default, value: jiggle)
         .modifier(DockDrag(enabled: editing && compact, id: app.id))
-        .onLongPressGesture(minimumDuration: 0.5) {
-            guard !editing else { return }
+        .modifier(MirsaEditLongPress(editing: editing) {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             withAnimation { editing = true }
             jiggle = false
             DispatchQueue.main.async { jiggle = true }
-        }
+        })
         .contextMenu {
             Button { pin(app) } label: {
                 Label(pinnedIDs.contains(app.id) ? tr("Remove from dock", "إزالة من الدوك") : tr("Pin to dock", "تثبيت بالدوك"),
@@ -362,7 +361,14 @@ struct MirsaHomeCell<Content: View>: View {
                     reorderHover = false; ontoHover = false
                     return location.x < cellWidth * 0.26 ? onReorder(d) : onOnto(d)
                 } isTargeted: { targeted in
-                    if !targeted { reorderHover = false; ontoHover = false }
+                    ontoHover = targeted
+                    if !targeted { reorderHover = false }
+                }
+                .overlay {
+                    if ontoHover {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(.white.opacity(0.8), lineWidth: 2).allowsHitTesting(false)
+                    }
                 }
                 .overlay(alignment: .leading) {
                     if reorderHover { Capsule().fill(.white).frame(width: 3).padding(.vertical, 6).offset(x: -5) }
@@ -530,5 +536,15 @@ enum MirsaIconCache {
         let decoded = img.preparingForDisplay() ?? img
         cache.setObject(decoded, forKey: key)
         return decoded
+    }
+}
+
+
+/// Long press only exists while NOT editing, so it never competes with drag.
+struct MirsaEditLongPress: ViewModifier {
+    let editing: Bool
+    let action: () -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if editing { content } else { content.onLongPressGesture(minimumDuration: 0.5, perform: action) }
     }
 }
