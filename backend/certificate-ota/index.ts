@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { unzipSync } from "npm:fflate@0.8.3";
-import { validateMetadata, manifest, MAX_IPA_BYTES, isExpired, linkPage, lifetime } from "./contract.mjs";
+import { validateMetadata, manifest, MAX_IPA_BYTES, isExpired, shareLink, lifetime } from "./contract.mjs";
 
 const root = Deno.env.get("SUPABASE_URL")!;
 const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -53,13 +53,10 @@ Deno.serve(async req => {
   if(req.method==="GET") {
    const token=u.searchParams.get("token") ?? "";
    const kind=u.searchParams.get("kind");
-   if(!/^[0-9a-f]{64}$/.test(token) || !["manifest","ipa","install"].includes(kind ?? "")) return json({error:"not_found"},404);
+   if(!/^[0-9a-f]{64}$/.test(token) || !["manifest","ipa"].includes(kind ?? "")) return json({error:"not_found"},404);
    const {data,error}=await db.rpc("mirsa_ota_download",{p_token:token});
    const job=data?.[0];
    if(error || !job || isExpired(job.expires_at)) return json({error:"expired_or_unavailable"},410);
-   if(kind==="install") {
-    return new Response(linkPage(job.metadata,base+"?kind=manifest&token="+token,job.expires_at),{headers:{...headers,"content-type":"text/html; charset=utf-8","content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'","x-frame-options":"DENY"}});
-   }
    if(kind==="manifest") {
     return new Response(manifest(job.metadata,base+"?kind=ipa&token="+token),{headers:{...headers,"content-type":"application/xml"}});
    }
@@ -81,6 +78,10 @@ Deno.serve(async req => {
   } catch { return json({error:"metadata"},400); }
   let ttl;
   try { ttl=lifetime(req.headers.get("x-mirsa-lifetime")); } catch {return json({error:"lifetime"},400);}
+  if(ttl===172800) {
+   try {shareLink(Deno.env.get("MIRSA_OTA_SHARE_PAGE_URL"),"0".repeat(64),new Date().toISOString());}
+   catch {return json({error:"share_page_unconfigured"},503);}
+  }
   const token=freshToken();
   const {error:quota}=await db.rpc("mirsa_ota_reserve_v2",{p_owner:who.id,p_token:token,p_bytes:length,p_metadata:metadata,p_seconds:ttl});
   if(quota) return json({error:"quota"},429);
@@ -101,6 +102,6 @@ Deno.serve(async req => {
   const {data:job,error:ready}=await db.from("mirsa_ota_jobs").update({ready:true}).eq("token",token).select("expires_at").single();
   if(ready || !job || isExpired(job.expires_at)) {await bucket.remove([token+".ipa"]);return json({error:"expired"},410);}
   const manifestURL=base+"?kind=manifest&token="+token;
-  return json({shareURL:base+"?kind=install&token="+token, manifestURL, installURL:"itms-services://?action=download-manifest&url="+encodeURIComponent(manifestURL), expiresAt:job.expires_at});
+  return json({shareURL:ttl===172800 ? shareLink(Deno.env.get("MIRSA_OTA_SHARE_PAGE_URL"),token,job.expires_at) : undefined, manifestURL, installURL:"itms-services://?action=download-manifest&url="+encodeURIComponent(manifestURL), expiresAt:job.expires_at});
  } catch {return json({error:"unavailable"},503);}
 });
