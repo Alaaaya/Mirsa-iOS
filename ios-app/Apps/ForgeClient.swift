@@ -19,6 +19,8 @@ enum ForgeClient {
     private static func message(_ status: Int, _ data: Data) -> String {
         let code = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? ""
         switch (status, code) {
+        case (429, "daily_limit"): return tr("Daily limit reached. Try again tomorrow.", "الحد اليومي خلص، جرّب بكرا", ckb: "سنووری ڕۆژانە تەواو بوو، سبەی تاقی بکەرەوە.", kmr: "Sînorê rojane qediya, sibê biceribîne.")
+        case (429, "busy"): return tr("The AI is busy right now. Try again in a minute.", "الذكاء الاصطناعي مشغول هلأ. جرّب بعد دقيقة.", ckb: "زیرەکی دەستکرد ئێستا سەرقاڵە. دوای خولەکێک تاقی بکەرەوە.", kmr: "AI niha mijûl e. Piştî hûrdemekê biceribîne.")
         case (429, _): return tr("Hourly limit reached. Try again later.", "وصلت للحد بالساعة. جرّب بعدين.", ckb: "گەیشتیتە سنووری کاتژمێری. دواتر تاقی بکەرەوە.", kmr: "Sînorê demjimêrê tije bû. Paşê biceribîne.")
         case (503, "llm_not_configured"): return tr("The AI service is not set up on the server yet.", "خدمة الذكاء الاصطناعي مو مفعّلة على السيرفر بعد.", ckb: "خزمەتگوزاری زیرەکی دەستکرد هێشتا لەسەر سێرڤەر چالاک نەکراوە.", kmr: "Xizmeta AI hê li ser serverê ne çalak e.")
         case (503, "builder_not_configured"): return tr("The tweak build server is not connected yet.", "سيرفر بناء التويكس مو موصول بعد.", ckb: "سێرڤەری دروستکردنی تویک هێشتا پەیوەست نەکراوە.", kmr: "Servera çêkirina tweakê hê ne girêdayî ye.")
