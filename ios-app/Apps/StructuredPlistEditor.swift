@@ -45,9 +45,21 @@ struct StructuredPlistEditor: View {
                 TextField(label("Search keys and values"), text: $search)
                     .padding(12).background(Color.purple.opacity(0.13), in: Capsule()).overlay(Capsule().stroke(Color.purple.opacity(0.25))).padding(.horizontal)
                 ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(rows) { row in treeRow(row) }
-                    }.padding(.horizontal, 12)
+                    LazyVStack(spacing: 12) {
+                        ForEach(0..<4, id: \.self) { group in
+                            let members = rows.filter { category($0) == group }
+                            if !members.isEmpty {
+                                VStack(spacing: 0) {
+                                    ForEach(members) { row in
+                                        treeRow(row)
+                                        if row.id != members.last?.id { Divider().overlay(Color.white.opacity(0.06)).padding(.horizontal, 12) }
+                                    }
+                                }
+                                .background(Color(red: 0.12, green: 0.10, blue: 0.29).opacity(0.7), in: RoundedRectangle(cornerRadius: 22))
+                                .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.purple.opacity(0.23), lineWidth: 1))
+                            }
+                        }
+                    }.padding(.horizontal, 16)
                 }
             }
         }
@@ -121,16 +133,16 @@ struct StructuredPlistEditor: View {
         } else { visit(doc.root, [], label("Root"), "root", 0) }
         return result
     }
+    private func category(_ row: Row) -> Int {
+        let key: String
+        if case .key(let root)? = row.path.first { key = root } else { key = row.key }
+        if ["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleVersion"].contains(key) { return 0 }
+        if key.hasPrefix("NS") && key.contains("UsageDescription") { return 2 }
+        if ["UIRequiredDeviceCapabilities", "CFBundleShortVersionString", "MinimumOSVersion"].contains(key) { return 3 }
+        return 1
+    }
     @ViewBuilder private func treeRow(_ row: Row) -> some View {
         HStack(spacing: 8) {
-            if row.container {
-                Button {
-                    if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
-                } label: {
-                    Image(systemName: expanded.contains(row.id) || !search.isEmpty ? "chevron.down" : "chevron.right")
-                        .font(.caption.bold()).frame(width: 20, height: 34)
-                }.buttonStyle(.plain)
-            } else { Image(systemName: row.type == "bool" ? "switch.2" : "text.alignleft").foregroundStyle(.cyan).frame(width: 20) }
             Button {
                 if row.container {
                     if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
@@ -141,14 +153,18 @@ struct StructuredPlistEditor: View {
                                                text: Self.display(row.value), adding: false, container: row.container)
             } label: {
                 HStack(spacing: 8) {
-                    Text(row.key).font(.system(size: 12, weight: .medium)).lineLimit(3)
+                    Text(row.key).font(.system(size: 13, weight: .semibold)).lineLimit(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(label(row.type == "dictionary" ? "Dict" : row.type.capitalized))
                         .font(.system(size: 10, weight: .semibold)).padding(.horizontal, 7).padding(.vertical, 4)
                         .background(typeColor(row.type), in: Capsule())
                     if row.type != "bool" {
                         Text(Self.display(row.value)).font(.system(size: 11)).foregroundStyle(.secondary)
-                            .lineLimit(3).multilineTextAlignment(.trailing).frame(maxWidth: 110, alignment: .trailing)
+                            .lineLimit(3).multilineTextAlignment(.trailing).frame(maxWidth: 105, alignment: .trailing)
+                    }
+                    if row.type != "bool" && !row.key.contains("UsageDescription") {
+                        Image(systemName: row.container && expanded.contains(row.id) ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                     }
                 }
             }.buttonStyle(.plain)
@@ -165,8 +181,7 @@ struct StructuredPlistEditor: View {
             }
         }
         .padding(.leading, CGFloat(min(row.depth, 8)) * 13)
-        .padding(.horizontal, 10).padding(.vertical, 9)
-        .background(Color.white.opacity(row.depth.isMultiple(of: 2) ? 0.045 : 0.025), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 13).padding(.vertical, 14)
         .contextMenu {
             if editing {
                 Button(label("Edit")) {
