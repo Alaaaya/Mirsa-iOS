@@ -352,6 +352,9 @@ struct MirsaHomeCell<Content: View>: View {
     var body: some View {
         if editing {
             content()
+                // The icon-only tile has transparent margins. Include those margins in
+                // hit testing so the left reorder strip remains an actual drop target.
+                .contentShape(Rectangle())
                 .draggable(itemID)
                 .scaleEffect(ontoHover ? 1.06 : 1)
                 .animation(.easeOut(duration: 0.15), value: ontoHover)
