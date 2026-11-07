@@ -38,9 +38,12 @@ struct MirsaUITestHarnessView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $which) {
-                Text("Main").tag(0); Text("Personal").tag(1)
-            }.pickerStyle(.segmented).accessibilityIdentifier("uit.picker")
+            HStack {
+                Button("Main") { which = 0 }
+                Button("Personal") { which = 1 }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("uit.picker")
             Text(layoutText(which == 0 ? "main" : "personal")).font(.system(size: 9))
                 .accessibilityIdentifier("uit.layout")
             Button("refresh") { tick += 1 }.accessibilityIdentifier("uit.refresh")
