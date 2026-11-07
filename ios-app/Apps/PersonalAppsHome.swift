@@ -88,13 +88,13 @@ struct PersonalAppsHome<Menu: View, Overlay: View>: View {
         .rotationEffect(.degrees(editing ? (jiggle ? 1.6 : -1.6) : 0))
         .animation(editing ? .easeInOut(duration: 0.12).repeatForever(autoreverses: true) : .default, value: jiggle)
         .modifier(MirsaEditLongPress(editing: editing) { startEditing() })
-        .contextMenu {
+        .modifier(MirsaHomeContextMenu(editing: editing) {
             Button { startEditing() } label: {
                 Label(tr("Arrange apps", "ترتيب التطبيقات"), systemImage: "square.grid.3x3")
             }
             Divider()
             menu(a)
-        }
+        })
     }
 }
 
@@ -113,7 +113,7 @@ private struct PersonalHomeIcon: View {
     @State private var image: UIImage?
     private var cached: UIImage? { MirsaIconCache.image(id: app.id.uuidString, path: library.iconURL(app).path) }
     var body: some View {
-        let shown = image ?? cached
+        let shown = cached ?? image
         Group {
             if let image = shown { Image(uiImage: image).resizable().scaledToFill() }
             else { Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.title3.bold())) }
