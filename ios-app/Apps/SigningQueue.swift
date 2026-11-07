@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 final class SigningQueue: ObservableObject {
     static let shared = SigningQueue()
     enum State: Equatable { case waiting, signing, done, failed, cancelled }
-    final class Item: ObservableObject, Identifiable {
+    final class Item: ObservableObject, Identifiable, @unchecked Sendable {
         let id = UUID()
         let ipa: URL
         let title: String
