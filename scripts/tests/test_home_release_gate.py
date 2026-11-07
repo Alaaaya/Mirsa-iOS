@@ -3,6 +3,14 @@ from pathlib import Path
 import json,re,unittest
 R=Path(__file__).resolve().parents[2]
 class Gate(unittest.TestCase):
+ def test_removed_tools_have_no_screen_or_entrypoint(self):
+  tools=(R/'ios-app/Apps/ToolsTab.swift').read_text()
+  self.assertIn('case pairing, device',tools)
+  self.assertIn('case .pairing: SetupPairingSheet(showsClose: false)',tools)
+  self.assertIn('case .device: DeviceToolsView()',tools)
+  for name in ['WalletCardsTab','PasscodeThemeTab','TendiesView']:
+   for f in (R/'ios-app').rglob('*.swift'):
+    self.assertNotIn(name,f.read_text(),str(f))
  def test_existing_titles_unchanged_in_all_languages(self):
   for f in ['ios-app/Apps/PersonalProjectDetailView.swift','ios-app/Apps/MirsaTr.swift']:
    old=json.loads((R/'scripts/tests/direct_title_baseline.json').read_text())[f]
