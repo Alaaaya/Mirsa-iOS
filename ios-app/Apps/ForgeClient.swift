@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Security
 
 /// Talks to the tweak-forge edge function with the signed-in Mirsa session. No secrets live in the app.
 enum ForgeClient {
@@ -14,6 +15,19 @@ enum ForgeClient {
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         return try await auth.token(forceRefresh: false)
+    }
+
+    /// Random per-install ID kept in the Keychain (this device only, no hardware fingerprint). Without App Attest the server cannot prove it
+    /// belongs to a physical device; the server binds it to the signed-in account and limits new IDs per account and per IP instead.
+    static func deviceID() -> String {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.alaa.mirsa.forge.device"]
+        var out: AnyObject?
+        var get = q; get[kSecReturnData as String] = true; get[kSecMatchLimit as String] = kSecMatchLimitOne
+        if SecItemCopyMatching(get as CFDictionary, &out) == errSecSuccess, let d = out as? Data, let s = String(data: d, encoding: .utf8), UUID(uuidString: s) != nil { return s }
+        let id = UUID().uuidString.lowercased()
+        var add = q; add[kSecValueData as String] = Data(id.utf8); add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(add as CFDictionary, nil)
+        return id
     }
 
     private static func message(_ status: Int, _ data: Data) -> String {
@@ -36,6 +50,7 @@ enum ForgeClient {
         req.httpMethod = "POST"
         req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(deviceID(), forHTTPHeaderField: "x-mirsa-device")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let cfg = URLSessionConfiguration.ephemeral; cfg.httpCookieStorage = nil
         let session = URLSession(configuration: cfg, delegate: OTANoRedirect(), delegateQueue: nil)
