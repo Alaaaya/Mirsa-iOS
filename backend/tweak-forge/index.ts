@@ -3,7 +3,9 @@ import { isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_US
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
-const LLM_KEY = Deno.env.get("LLM_API_KEY") ?? Deno.env.get("GEMINI_API_KEY");
+// Fail-closed: provider calls only when the key is attested free-tier (owner attestation, not independently verified).
+const FREE_ATTESTED = Deno.env.get("GEMINI_FREE_TIER_ATTESTED") === "owner-attested-2026-11-07";
+const LLM_KEY = FREE_ATTESTED ? (Deno.env.get("LLM_API_KEY") ?? Deno.env.get("GEMINI_API_KEY")) : undefined;
 const LLM_MODEL = Deno.env.get("LLM_MODEL") ?? "gemini-3.5-flash-lite";
 const FLASH_MODEL = Deno.env.get("LLM_FALLBACK_MODEL") ?? "gemini-3.5-flash";
 const num = (k: string, d: number) => Number(Deno.env.get(k) ?? d);
