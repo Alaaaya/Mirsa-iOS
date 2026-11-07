@@ -72,7 +72,8 @@ enum MachOViewer {
         let ncmds = Int(MachOInspector.u32(hd, 16, big: false)), sizeofcmds = Int(MachOInspector.u32(hd, 20, big: false))
         guard ncmds <= 4096, sizeofcmds <= 4 * 1024 * 1024, UInt64(hdrSize + sizeofcmds) <= size else { throw MachOViewerError.malformed }
         try h.seek(toOffset: offset + UInt64(hdrSize))
-        guard let cmds = try h.read(upToCount: sizeofcmds), cmds.count == sizeofcmds else { throw MachOViewerError.malformed }
+        let cmds = sizeofcmds == 0 ? Data() : (try h.read(upToCount: sizeofcmds) ?? Data())
+        guard cmds.count == sizeofcmds else { throw MachOViewerError.malformed }
         var r = MachOSliceReport(arch: cpuName(cpu, sub), fileType: fileTypes[ftype] ?? "Type \(ftype)", encrypted: false, cryptID: 0,
                                  uuid: nil, minOS: nil, platform: nil, signed: false, libraries: [], rpaths: [])
         var off = 0

@@ -77,7 +77,7 @@ final class OCSPAndRestrictionsTests: XCTestCase {
         return Data(E.tlv(0x30, [0x0A,0x01,responseStatus] + (responseStatus == 0 ? E.tlv(0xA0, rb) : [])))
     }
     private func parse(_ fx: Fixture, _ data: Data) -> RevocationStatus {
-        OCSPChecker.parse(response: data, leaf: fx.leaf, issuer: fx.issuer, issuerKey: fx.issuerKey, now: now)
+        OCSPChecker.parse(response: data, leaf: fx.leaf, issuer: fx.issuer, issuerKey: SecKeyCopyPublicKey(fx.issuerKey)!, now: now)
     }
     private func assertNotVerified(_ s: RevocationStatus, file: StaticString = #filePath, line: UInt = #line) {
         if case .notVerified = s { return }
