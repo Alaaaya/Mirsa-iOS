@@ -84,14 +84,13 @@ struct PersonalAppsHome<Menu: View, Overlay: View>: View {
             }
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity).frame(height: 110)
-            .background { RoundedRectangle(cornerRadius: 20).fill(.ultraThinMaterial) }
         }
         .rotationEffect(.degrees(editing ? (jiggle ? 1.6 : -1.6) : 0))
         .animation(editing ? .easeInOut(duration: 0.12).repeatForever(autoreverses: true) : .default, value: jiggle)
         .onLongPressGesture(minimumDuration: 0.5) { startEditing() }
         .contextMenu {
             Button { startEditing() } label: {
-                Label(tr("Edit home screen", "تعديل الشاشة الرئيسية"), systemImage: "square.grid.3x3")
+                Label(tr("Arrange apps", "ترتيب التطبيقات"), systemImage: "square.grid.3x3")
             }
             Divider()
             menu(a)
@@ -112,13 +111,16 @@ private struct PersonalHomeIcon: View {
     let app: PersonalLibraryApp
     @ObservedObject var library: PersonalAppsLibrary
     @State private var image: UIImage?
+    private var cached: UIImage? { MirsaIconCache.image(id: app.id.uuidString, path: library.iconURL(app).path) }
     var body: some View {
+        let shown = image ?? cached
         Group {
-            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            if let image = shown { Image(uiImage: image).resizable().scaledToFill() }
             else { Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.title3.bold())) }
         }
         .task(id: app.id) {
-            image = library.icon(for: app)
+            if let c = cached { image = c; return }
+            if image == nil { image = library.icon(for: app) }
             if image == nil { image = await library.ensureIcon(for: app) }
         }
     }
