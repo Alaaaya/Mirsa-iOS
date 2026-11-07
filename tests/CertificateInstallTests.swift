@@ -25,3 +25,22 @@ final class CertificateInstallTests: XCTestCase {
         } else { XCTFail() }
     }
 }
+
+extension CertificateInstallTests {
+    func testSigningResultPreservesRealDeviceAuthorizationAndDroppedGroups() {
+        let parsed = PersonalProfileVerification.parse([
+            "profile_verification": "verified", "device_authorization": "checked",
+            "warnings": [["code": "entitlements_dropped", "message": "com.apple.security.application-groups",
+                          "bundle_id": "com.kdt.livecontainer"]]
+        ])
+        XCTAssertEqual(parsed.device_authorization, "checked")
+        XCTAssertTrue(parsed.warningText.contains("com.kdt.livecontainer"))
+        XCTAssertTrue(parsed.warningText.contains("com.apple.security.application-groups"))
+    }
+    func testUnknownDeviceIsNotReportedChecked() {
+        let parsed = PersonalProfileVerification.parse([
+            "profile_verification": "verified", "device_authorization": "not_checked", "warnings": []
+        ])
+        XCTAssertEqual(parsed.device_authorization, "not_checked")
+    }
+}

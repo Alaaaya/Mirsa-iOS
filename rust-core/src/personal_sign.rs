@@ -127,8 +127,8 @@ fn validate_profile_device(p: &ProvisioningProfile, cert: &[u8], device: Option<
     let created: SystemTime = p.plist().get("CreationDate").and_then(plist::Value::as_date)
         .ok_or("البروفايل بلا تاريخ إنشاء.")?.into();
     if created > now { return Err("البروفايل لسا ما بلشت صلاحيته.".into()); }
-    if device.is_some() && !p.plist().get("ProvisionedDevices").and_then(plist::Value::as_array)
-            .is_some_and(|ds| ds.iter().any(|d| d.as_string() == Some(udid))) {
+    if device.is_some() && p.plist().get("ProvisionsAllDevices").and_then(plist::Value::as_boolean) != Some(true) && !p.plist().get("ProvisionedDevices").and_then(plist::Value::as_array)
+            .is_some_and(|ds| ds.iter().any(|d| d.as_string().is_some_and(|s| s.eq_ignore_ascii_case(udid)))) {
         return Err("هالجهاز مو مضاف بالبروفايل. أضف UDID الجهاز واستورد البروفايل الجديد.".into());
     }
     if !p.plist().get("DeveloperCertificates").and_then(plist::Value::as_array)
@@ -284,8 +284,11 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         if node.path == app && !opts.custom_entitlements_path.is_empty() {
             for (k, v) in custom_entitlements(&opts.custom_entitlements_path)? { requested.insert(k, v); }
         }
-        let constrained = nested::constrain(&requested, p.entitlements(), prefix, id, team, &mapping)
+        let (constrained, dropped) = nested::constrain(&requested, p.entitlements(), prefix, id, team, &mapping, opts.strict_profile)
             .map_err(|e| format!("{id} - {e}"))?;
+        if !dropped.is_empty() {
+            status.warnings.push(serde_json::json!({"code":"entitlements_dropped","message":dropped.join(", "), "bundle_id":id, "entitlements":dropped}));
+        }
         let mut constrained = constrained;
         if fallback {
             constrained.insert("application-identifier".into(), compat_app_identifier(patterns[index], prefix, id).into());
@@ -506,7 +509,7 @@ mod compat_tests {
     fn compat_rejects_invalid_ids_and_does_not_widen_entitlements() {
         assert!(compat_main_identity(&[PROFILE], "../bad", "", false).is_err());
         let mut r = plist::Dictionary::new(); r.insert("com.apple.developer.healthkit".into(), true.into());
-        assert!(nested::constrain(&r, &plist::Dictionary::new(), "T", "jokersport.app", "T", &BTreeMap::new()).is_err());
+        assert!(nested::constrain(&r, &plist::Dictionary::new(), "T", "jokersport.app", "T", &BTreeMap::new(), true).is_err());
     }
 }
 #[cfg(test)]
@@ -536,7 +539,7 @@ mod coexistence_tests {
             let info = plist::Value::from_file(n.path.join("Info.plist")).unwrap();
             assert_eq!(info.as_dictionary().unwrap()["CFBundleIdentifier"].as_string(), Some(id));
             let allowed = plist::Dictionary::new();
-            let e = nested::constrain(&plist::Dictionary::new(), &allowed, "LEGACYPREFIX", id, "DIFFERENTTEAM", &map).unwrap();
+            let e = nested::constrain(&plist::Dictionary::new(), &allowed, "LEGACYPREFIX", id, "DIFFERENTTEAM", &map, true).unwrap().0;
             assert_eq!(e["application-identifier"].as_string(), Some(format!("LEGACYPREFIX.{id}").as_str()));
             assert_eq!(e["com.apple.developer.team-identifier"].as_string(), Some("DIFFERENTTEAM"));
         }
@@ -578,7 +581,7 @@ mod coexistence_tests {
             requested.insert("keychain-access-groups".into(), vec![plist::Value::String(format!("OLDPREFIX.{}", n.id))].into());
             let mut allowed = plist::Dictionary::new();
             allowed.insert("keychain-access-groups".into(), vec![plist::Value::String("PREFIX.*".into())].into());
-            let e = nested::constrain(&requested, &allowed, "PREFIX", id, "TEAM", &map).unwrap();
+            let e = nested::constrain(&requested, &allowed, "PREFIX", id, "TEAM", &map, true).unwrap().0;
             assert_eq!(e["application-identifier"].as_string(), Some(format!("PREFIX.{id}").as_str()));
             assert_eq!(e["keychain-access-groups"].as_array().unwrap()[0].as_string(), Some(format!("PREFIX.{id}").as_str()));
         }

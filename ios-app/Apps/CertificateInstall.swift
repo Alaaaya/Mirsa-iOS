@@ -57,9 +57,10 @@ enum CertificateInstall {
         guard FileManager.default.fileExists(atPath: input.path) else { throw Failure.missingIPA }
         let staged = try stageSignedApp(ipa: input, in: FileManager.default.temporaryDirectory)
         defer { try? FileManager.default.removeItem(at: staged.stage) }
-        try await CertificateOTA.install(source: staged.app, material: identity.material, options: PersonalProjectOptions())
+        let verification = try await CertificateOTA.install(source: staged.app, material: identity.material, options: PersonalProjectOptions())
         return ["otaInstallerOpened": true, "installed": false,
-                "device_authorization": (try? OwnCertificateDevice.require()) == nil ? "not_checked" : "checked"]
+                "warnings": verification.warnings.map { ["code": $0.code, "message": PersonalProfileVerification.localizedWarning($0)] },
+                "device_authorization": verification.device_authorization ?? "not_checked"]
     }
 
     /// Moves the signed IPA to a persistent, backup-excluded folder so a failed

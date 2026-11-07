@@ -11,7 +11,8 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 }
 @MainActor enum CertificateOTA {
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
-    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil) async throws {
+    @discardableResult
+    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil) async throws -> PersonalProfileVerification {
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }
         else if let identity = try PersonalIdentityVault.savedIdentities().first { selectedMaterial = identity.material }
@@ -77,6 +78,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         guard let target = install.url, await UIApplication.shared.open(target) else {
             throw SideloadError.message(personalText("iOS could not open OTA installation.", "iOS ما قدر يفتح تثبيت OTA."))
         }
+        return signed.verification
         // Opening the installer is not evidence of successful device installation.
         // Keep the signed artifact even after handing off to iOS.
         } catch {

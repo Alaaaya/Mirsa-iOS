@@ -29,6 +29,7 @@ struct PersonalProfileVerification: Codable, Equatable {
         let profile_index: Int?
     }
     let profile_verification: String
+    var device_authorization: String? = nil
     let warnings: [Warning]
     var isVerified: Bool { profile_verification == "verified" && warnings.isEmpty }
     static let unknown = PersonalProfileVerification(profile_verification: "unverified", warnings: [
@@ -40,13 +41,24 @@ struct PersonalProfileVerification: Codable, Equatable {
               let values = result["warnings"] as? [[String: Any]] else { return .unknown }
         let warnings = values.compactMap { value -> Warning? in
             guard let code = value["code"] as? String, let message = value["message"] as? String, !message.isEmpty else { return nil }
-            return Warning(code: code, message: message, profile_index: value["profile_index"] as? Int)
+            return Warning(code: code, message: code == "entitlements_dropped" ? ((value["bundle_id"] as? String).map { $0 + " · " } ?? "") + message : message, profile_index: value["profile_index"] as? Int)
         }
         guard warnings.count == values.count else { return .unknown }
         if status != "verified" && warnings.isEmpty { return .unknown }
-        return Self(profile_verification: status, warnings: warnings)
+        return Self(profile_verification: status, device_authorization: result["device_authorization"] as? String, warnings: warnings)
     }
-    var warningText: String { warnings.map(\.message).joined(separator: "\n") }
+    var warningText: String { warnings.map(Self.localizedWarning).joined(separator: "\n") }
+    static func localizedWarning(_ warning: Warning) -> String {
+        guard warning.code == "entitlements_dropped" else { return warning.message }
+        let title: String
+        switch AppLanguageStore.shared.current {
+        case .english: title = "Compatibility mode removed unsupported entitlements; related features may not work."
+        case .arabic: title = "وضع التوافق حذف صلاحيات مو مدعومة؛ الميزات المرتبطة فيها ممكن ما تشتغل."
+        case .sorani: title = "دۆخی گونجان دەسەڵاتە پشتگیرینەکراوەکانی سڕییەوە؛ تایبەتمەندییە پەیوەندیدارەکان لەوانەیە کار نەکەن."
+        case .kurmanji: title = "Moda lihevhatinê destûrên bê piştgirî rakirin; dibe ku taybetmendiyên girêdayî wan nexebitin."
+        }
+        return title + "\n" + warning.message
+    }
 }
 
 // Separate from Apple ID storage and its handover/export/wipe operations.

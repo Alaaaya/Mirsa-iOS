@@ -106,11 +106,26 @@ fn authorized(request: &Value, allowed: &Value) -> bool {
         _ => request == allowed
     }
 }
+// Intersection never grants profile-only capabilities or expands requested wildcards.
+fn intersection(request: &Value, allowed: &Value) -> Option<Value> {
+    match (request, allowed) {
+        (Value::Array(rs), Value::Array(as_)) => {
+            let kept: Vec<_> = rs.iter().filter(|r| as_.iter().any(|a| authorized(r,a))).cloned().collect();
+            if kept.is_empty() && !rs.is_empty() { None } else { Some(Value::Array(kept)) }
+        },
+        (Value::Dictionary(rs), Value::Dictionary(as_)) => {
+            let mut kept = Dictionary::new();
+            for (k,r) in rs { if let Some(v) = as_.get(k).and_then(|a| intersection(r,a)) { kept.insert(k.clone(),v); } }
+            if kept.is_empty() && !rs.is_empty() { None } else { Some(Value::Dictionary(kept)) }
+        },
+        _ if authorized(request,allowed) => Some(request.clone()),
+        _ => None,
+    }
+}
 pub(super) fn constrain(request: &Dictionary, allowed: &Dictionary, prefix: &str, id: &str, team: &str,
-    map: &BTreeMap<String,String>) -> Result<Dictionary> {
+    map: &BTreeMap<String,String>, strict: bool) -> Result<(Dictionary, Vec<String>)> {
     let mut out = Dictionary::new();
-    // Never copy the full profile grant into the executable. Preserve requested
-    // entitlements only if authorized; unknown/essential unsupported keys fail.
+    let mut dropped = Vec::new();
     for (k,v) in request {
         if matches!(k.as_str(), "application-identifier" | "com.apple.developer.team-identifier" ) { continue; }
         let mut v = v.clone();
@@ -119,22 +134,24 @@ pub(super) fn constrain(request: &Dictionary, allowed: &Dictionary, prefix: &str
                 for group in groups {
                     if let Some(s) = group.as_string() {
                         if let Some((_,old)) = s.split_once('.') {
-                            if let Some(new) = map.get(old) { *group = format!("{prefix}.{new}").into(); }
+                            *group = format!("{prefix}.{}",map.get(old).map(String::as_str).unwrap_or(old)).into();
                         }
                     }
                 }
             }
         }
-        if !allowed.get(k).is_some_and(|a| authorized(&v,a)) {
-            return Err(format!("الصلاحية المطلوبة {k} مو موجودة بالبروفايل. استورد بروفايل يدعمها."));
+        let filtered = allowed.get(k).and_then(|a| intersection(&v,a));
+        if filtered.as_ref() != Some(&v) {
+            if strict { return Err(format!("الصلاحية المطلوبة {k} مو موجودة بالبروفايل. استورد بروفايل يدعمها.")); }
+            dropped.push(k.clone());
         }
-        out.insert(k.clone(),v);
+        if let Some(v) = filtered { out.insert(k.clone(),v); }
     }
     out.insert("application-identifier".into(), format!("{prefix}.{id}").into());
     out.insert("com.apple.developer.team-identifier".into(), team.into());
-
-    Ok(out)
+    Ok((out,dropped))
 }
+
 fn be(d: &[u8], at: usize) -> Result<u32> { d.get(at..at+4).and_then(|s| s.try_into().ok()).map(u32::from_be_bytes).ok_or("توقيع Mach-O غير صالح.".into()) }
 fn le(d: &[u8], at: usize) -> Result<u32> { d.get(at..at+4).and_then(|s| s.try_into().ok()).map(u32::from_le_bytes).ok_or("ملف Mach-O غير صالح.".into()) }
 fn signature_entitlements(d: &[u8]) -> Result<Dictionary> {
@@ -208,7 +225,7 @@ mod tests {
     }
     #[test] fn unauthorized_entitlements_fail() {
         let mut r=Dictionary::new(); r.insert("essential".into(),true.into());
-        assert!(constrain(&r,&Dictionary::new(),"TEAM","com.test","TEAM",&BTreeMap::new()).is_err());
+        assert!(constrain(&r,&Dictionary::new(),"TEAM","com.test","TEAM",&BTreeMap::new(),true).is_err());
     }
     #[test] fn references_only_rewrite_known_keys() {
         let mut v=Value::Dictionary(Dictionary::new()); let d=v.as_dictionary_mut().unwrap();
@@ -228,5 +245,56 @@ mod removal_tests {
         assert!(!removed(root,&root.join("Watch/A.app/main"),&o));
         assert!(!removed(root,&root.join("Frameworks/F.framework/main"),&o));
         assert!(!removed(root,Path::new("/other/PlugIns/A.appex"),&o));
+    }
+}
+
+#[cfg(test)]
+mod compatibility_entitlement_tests {
+    use super::*;
+    fn dict(v: serde_json::Value) -> Dictionary {
+        fn convert(v: serde_json::Value) -> Value {
+            match v {
+                serde_json::Value::Object(d) => { let mut out=Dictionary::new(); for (k,v) in d { out.insert(k,convert(v)); } Value::Dictionary(out) },
+                serde_json::Value::Array(a) => Value::Array(a.into_iter().map(convert).collect()),
+                serde_json::Value::String(s) => Value::String(s),
+                serde_json::Value::Bool(b) => Value::Boolean(b),
+                _ => panic!("unsupported fixture"),
+            }
+        }
+        convert(v).into_dictionary().unwrap()
+    }
+    #[test] fn compatibility_drops_missing_groups_cloud_push_main_and_extension() {
+        let request=dict(serde_json::json!({"com.apple.security.application-groups":["group.old"],
+            "com.apple.developer.icloud-container-identifiers":["iCloud.old"],"aps-environment":"production"}));
+        for id in ["com.lyftaios","com.kdt.livecontainer","com.lyftaios.widget"] {
+            let (out,dropped)=constrain(&request,&Dictionary::new(),"NEW",id,"TEAM",&BTreeMap::new(),false).unwrap();
+            assert_eq!(dropped.len(),3); assert_eq!(out.len(),2);
+            assert_eq!(out["application-identifier"].as_string(),Some(format!("NEW.{id}").as_str()));
+            assert!(constrain(&request,&Dictionary::new(),"NEW",id,"TEAM",&BTreeMap::new(),true).is_err());
+        }
+    }
+    #[test] fn partial_arrays_and_dictionary_intersect_without_adding_grants() {
+        let request=dict(serde_json::json!({"groups":["group.good","group.bad"],"nested":{"good":true,"bad":true},"flag":true}));
+        let allowed=dict(serde_json::json!({"groups":["group.good","group.extra"],"nested":{"good":true,"extra":true},"flag":false,"extra":true}));
+        let (out,dropped)=constrain(&request,&allowed,"P","com.test","T",&BTreeMap::new(),false).unwrap();
+        assert_eq!(out["groups"].as_array().unwrap().len(),1);
+        assert_eq!(out["nested"].as_dictionary().unwrap().len(),1);
+        assert!(!out.contains_key("extra")); assert!(!out.contains_key("flag")); assert_eq!(dropped.len(),3);
+    }
+    #[test] fn keychain_shared_groups_rebase_to_profile_prefix_and_filter() {
+        let request=dict(serde_json::json!({"keychain-access-groups":["OLD.com.old","OLD.shared","OLD.denied"]}));
+        let allowed=dict(serde_json::json!({"keychain-access-groups":["PREFIX.com.new","PREFIX.shared"]}));
+        let map=BTreeMap::from([("com.old".into(),"com.new".into())]);
+        let (out,dropped)=constrain(&request,&allowed,"PREFIX","com.new","TEAM",&map,false).unwrap();
+        let groups=out["keychain-access-groups"].as_array().unwrap();
+        assert_eq!(groups.len(),2); assert_eq!(groups[0].as_string(),Some("PREFIX.com.new"));
+        assert_eq!(groups[1].as_string(),Some("PREFIX.shared")); assert_eq!(dropped,vec!["keychain-access-groups"]);
+    }
+    #[test] fn authorized_values_preserved_and_wildcards_not_expanded() {
+        let request=dict(serde_json::json!({"aps-environment":"development","groups":["group.one"]}));
+        let allowed=dict(serde_json::json!({"aps-environment":"development","groups":["group.*"],"extra":true}));
+        let (out,dropped)=constrain(&request,&allowed,"P","com.test","T",&BTreeMap::new(),true).unwrap();
+        assert!(dropped.is_empty()); assert_eq!(out["groups"],request["groups"]); assert!(!out.contains_key("extra"));
+        assert!(intersection(&"*".into(),&"specific".into()).is_none());
     }
 }
