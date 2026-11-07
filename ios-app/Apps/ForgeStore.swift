@@ -116,8 +116,16 @@ struct ForgeProject: Codable, Identifiable {
         for _ in 0..<120 {
             try await Task.sleep(nanoseconds: 4_000_000_000)
             let st = try await ForgeClient.get(["action": "build-status", "job": job])
-            if st["state"] as? String == "failed" { throw ForgeClient.Failure.message((st["log"] as? String ?? "Build failed").suffix(600).description) }
-            if st["state"] as? String == "done" { data = try await ForgeClient.getData(["action": "build-status", "job": job, "fetch": "1"]); break }
+            let state = st["state"] as? String
+            if state == "failed" {
+                let (ct, key, _) = try await ForgeClient.getData(["action": "build-status", "job": job, "fetch": "1"])
+                let log = (try? ForgeClient.open(ct, masterB64: key, job: job, purpose: "err")).flatMap { String(data: $0, encoding: .utf8) } ?? "Build failed"
+                throw ForgeClient.Failure.message(String(log.suffix(600)))
+            }
+            if state == "done" {
+                let (ct, key, _) = try await ForgeClient.getData(["action": "build-status", "job": job, "fetch": "1"])
+                data = try ForgeClient.open(ct, masterB64: key, job: job, purpose: "out"); break
+            }
         }
         if data.count > 4 * 1024 * 1024 { throw ForgeClient.Failure.message("Library too large") }
         guard data.count > 1000, data.prefix(4) == Data([0xCF, 0xFA, 0xED, 0xFE]) || data.prefix(4) == Data([0xCA, 0xFE, 0xBA, 0xBE]) || data.prefix(4) == Data([0xBE, 0xBA, 0xFE, 0xCA]) else {
