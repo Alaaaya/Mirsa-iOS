@@ -22,6 +22,12 @@ export function validateLogos(code) {
   for (const r of FORBIDDEN) if (r.test(code)) return "forbidden:" + r.source;
   if (/%ctor|%dtor|%group|%end\s*\n.*%end/s.test(code) && /%group\s+Main/.test(code) === false && /%group/.test(code)) return "group";
   if (/%ctor|%dtor/.test(code)) return "ctor_reserved";
+  // Only plain Foundation/UIKit/objc imports; no other preprocessor, attributes, module imports or build escapes.
+  for (const line of code.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("#")) { if (!/^#\s*(import|include)\s*<(Foundation\/Foundation|UIKit\/UIKit|objc\/runtime|objc\/message)\.h>\s*$/.test(t)) return "directive"; }
+  }
+  if (/@import\b|__attribute__|\$\(|\\\s*$|%config|%subclass|%new\s*\(.*\)\s*\{.*system/m.test(code)) return "escape";
   return null;
 }
 export function settingsHeader(settings, values = {}) {
@@ -59,3 +65,9 @@ export function parseModelJSON(text) {
   o.settings = Array.isArray(o.settings) ? o.settings : [];
   return o;
 }
+
+export const TEMP_TTL_MS = 24 * 3600_000;   // built dylib/.deb results in private storage
+export const JOB_TTL_MS = 3600_000;         // queued source
+export const MAX_DYLIB_BYTES = 4 * 1024 * 1024;
+export const MAX_GALLERY_PER_USER = 20;
+export function isExpired(createdMs, nowMs, ttl) { return nowMs - createdMs >= ttl; }
