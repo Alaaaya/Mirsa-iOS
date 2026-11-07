@@ -12,13 +12,30 @@ import XCTest
         let id = try makeProject(store)
         let folder = ForgeStore.root.appendingPathComponent(id.uuidString)
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
-        store.delete(id)
+        try store.delete(id)
         XCTAssertNil(store.project(id))
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
         let data = try Data(contentsOf: ForgeStore.root.appendingPathComponent("projects.json"))
         XCTAssertFalse(try JSONDecoder().decode([ForgeProject].self, from: data).contains { $0.id == id })
     }
+    func testDeleteFailureKeepsEntry() throws {
+        let store = ForgeStore.shared
+        let id = try makeProject(store)
+        let folder = ForgeStore.root.appendingPathComponent(id.uuidString)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: ForgeStore.root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ForgeStore.root.path); try? store.delete(id) }
+        XCTAssertThrowsError(try store.delete(id))
+        XCTAssertNotNil(store.project(id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+    }
+    func testResolveNamePrefersLiveMetadataOverSnapshot() {
+        let n = ForgeStore.resolveName(bundleID: "a.b", drafts: [("a.b", "Draft")], library: [("a.b", "Lib")], managed: [("a.b", "Mgd")], downloads: [])
+        XCTAssertEqual(n, "Draft")
+        XCTAssertEqual(ForgeStore.resolveName(bundleID: "a.b", drafts: [("a.b", " ")], library: [("x", "No")], managed: [("a.b", "Mgd")], downloads: []), "Mgd")
+        XCTAssertNil(ForgeStore.resolveName(bundleID: "a.b", drafts: [], library: [], managed: [], downloads: []))
+    }
     func testConfirmationTextsAllLanguages() {
+        XCTAssertFalse(forgeDeleteFailed("X").isEmpty)
         XCTAssertTrue(forgeDeleteMessage("X").contains("X"))
         XCTAssertFalse(forgeDeleteTitle.isEmpty)
     }

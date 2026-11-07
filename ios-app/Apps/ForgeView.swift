@@ -30,6 +30,9 @@ private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () ->
 }
 
 let forgeDeleteTitle = tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe")
+func forgeDeleteFailed(_ name: String) -> String {
+    tr("Could not delete \(name). It was kept.", "ما قدرت احذف \(name). تم الإبقاء عليه.", ckb: "نەتوانرا \(name) بسڕدرێتەوە. هێڵرایەوە.", kmr: "\(name) nehat jêbirin. Hat hiştin.")
+}
 func forgeDeleteMessage(_ name: String) -> String {
     tr("Delete \(name) and all its versions and files? This cannot be undone.", "حذف \(name) مع كل نسخه وملفاته؟ ما فيك ترجع عنها.",
        ckb: "\(name) لەگەڵ هەموو وەشان و فایلەکانی بسڕدرێتەوە؟ ناتوانرێت پاشگەز ببیتەوە.", kmr: "\(name) bi hemû guhertin û pelên wê jê bibe? Vegerandin tune.")
@@ -79,7 +82,7 @@ struct ForgeView: View {
         }
         .task { await store.refreshNames() }
         .confirmationDialog(forgeDeleteMessage(toDelete?.appName ?? ""), isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
-            Button(forgeDeleteTitle, role: .destructive) { if let p = toDelete { store.delete(p.id) }; toDelete = nil }
+            Button(forgeDeleteTitle, role: .destructive) { if let p = toDelete { do { try store.delete(p.id); error = nil } catch { self.error = forgeDeleteFailed(p.appName) + " " + error.localizedDescription } }; toDelete = nil }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { toDelete = nil }
         }
         .sheet(isPresented: $gallery) { ForgeGalleryView() }
