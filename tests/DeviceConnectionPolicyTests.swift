@@ -2,6 +2,12 @@ import XCTest
 @testable import Mirsa
 
 final class DeviceConnectionPolicyTests: XCTestCase {
+    func testCertificateOTAPredicate() {
+        XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: true, wifi: true))
+        XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: true, wifi: false))
+        XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: false, wifi: false))
+        XCTAssertFalse(CertificateInstall.shouldUseOTA(ownCertificateMode: false, wifi: true))
+    }
     func testAppleIDRealAppGuardIsScoped() {
         XCTAssertFalse(DeviceConnectionPolicy.mayInstallRealApp(wifi: false, tunnelRoute: true, hasPairing: true))
         XCTAssertTrue(DeviceConnectionPolicy.mayInstallRealApp(wifi: true, tunnelRoute: true, hasPairing: true))

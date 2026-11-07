@@ -44,4 +44,10 @@ class ChoiceFirstCellular(unittest.TestCase):
   self.assertNotIn('networkReady',wrapper)
   self.assertNotIn('.wifi',wrapper)
   self.assertNotIn('vpnUp',wrapper)
+  signing=read('ios-app/Apps/PersonalSigningOperation.swift')
+  self.assertIn('CertificateInstall.shouldUseOTA(',signing)
+  ota=signing.split('if CertificateInstall.shouldUseOTA',1)[1].split('let result = try await Task.detached',1)[0]
+  self.assertIn('material:material,options:options',ota)
+  for forbidden in ['actual_udid','connect_tunnel','pairingFilePath','installSigned']:
+   self.assertNotIn(forbidden,ota)
 if __name__=='__main__': unittest.main()

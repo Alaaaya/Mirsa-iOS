@@ -76,7 +76,7 @@ final class PersonalSigningOperation: ObservableObject {
         // Deliberately NOT attached to SwiftUI .task; leaving the screen cannot cancel it.
         Task {
             do {
-                if MirsaInstallMode.ownCertificate {
+                if CertificateInstall.shouldUseOTA(ownCertificateMode: MirsaInstallMode.ownCertificate, wifi: NetworkStatus.summarize(deviceIP: "10.7.0.1").wifi) {
                     _ = try OwnCertificateDevice.require()
                     let staged = try CertificateInstall.stageSignedApp(ipa:input,in:FileManager.default.temporaryDirectory)
                     defer { try? FileManager.default.removeItem(at:staged.stage) }
