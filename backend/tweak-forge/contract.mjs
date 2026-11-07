@@ -78,7 +78,7 @@ export const b64 = u8 => btoa(String.fromCharCode(...u8));
 export const unb64 = s => Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
 export async function purposeKey(master, job, purpose) {
   const base = await crypto.subtle.importKey("raw", master, "HKDF", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: enc.encode("mirsa-forge-v1"), info: enc.encode(purpose + "|" + job) }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: enc.encode("cc-v1"), info: enc.encode(purpose + "|" + job) }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 export async function seal(master, job, purpose, plain) {
   const key = await purposeKey(master, job, purpose), nonce = crypto.getRandomValues(new Uint8Array(12));
