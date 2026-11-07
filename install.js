@@ -10,7 +10,7 @@
  if (!/^[a-f0-9]{64}$/.test(token) || !Number.isFinite(expires)) {
   status.textContent = "Invalid link / الرابط غير صحيح"; return;
  }
- const manifest = "https://hirebeofomiyumwysppj.supabase.co/functions/v1/certificate-ota?kind=manifest&token=" + token;
+ const manifest = "https://mirsa-manifest.onrender.com/manifest.plist?token=" + token;
  button.href = "itms-services://?action=download-manifest&url=" + encodeURIComponent(manifest);
  function update() {
   const expired = expires <= Date.now();
