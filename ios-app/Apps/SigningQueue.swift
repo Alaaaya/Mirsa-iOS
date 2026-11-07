@@ -118,6 +118,7 @@ struct SigningQueueView: View {
     @State private var clone = false
     @State private var stripRestrictions = false
     @State private var message: String?
+    @State private var pending: [PendingClone] = []
     @State private var sharing: SharedFile?
 
     var body: some View {
@@ -130,6 +131,22 @@ struct SigningQueueView: View {
                     .buttonStyle(.borderedProminent).disabled(identities.isEmpty)
                 if identities.isEmpty {
                     Text(sgText("Import a certificate first.", "استورد شهادة بالأول.", "سەرەتا شەهادەیەک هاوردە بکە.", "Pêşî sertîfîkayekê têxe.")).font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach($pending) { $p in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(p.file.lastPathComponent).font(.caption.bold()).lineLimit(1)
+                        TextField(sgText("New bundle ID", "المعرّف الجديد", "ناسنامەی نوێ", "Nasnameya nû"), text: $p.bundleID)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
+                        TextField(sgText("New app name", "الاسم الجديد", "ناوی نوێ", "Navê nû"), text: $p.name).textFieldStyle(.roundedBorder)
+                        if !IPAEditorService.validBundleID(p.bundleID) || p.bundleID == p.originalID {
+                            Text(sgText("Enter a valid bundle ID different from the original.", "اكتب معرّف صالح ومختلف عن الأصلي.", "ناسنامەیەکی دروست و جیاواز بنووسە.", "Nasnameyeke derbasdar û cuda binivîse.")).font(.caption2).foregroundStyle(.orange)
+                        }
+                    }.padding(12).appsGlass(cornerRadius: 16)
+                }
+                if !pending.isEmpty {
+                    Button(sgText("Start cloning", "ابدأ النسخ", "دەستپێکردنی کلۆن", "Klonê dest pê bike")) { startPending() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(pending.contains { !IPAEditorService.validBundleID($0.bundleID) || $0.bundleID == $0.originalID })
                 }
                 if let message { Text(message).font(.footnote).foregroundStyle(.orange) }
                 ForEach(queue.items) { row($0) }
@@ -145,8 +162,32 @@ struct SigningQueueView: View {
         .sheet(isPresented: $picking) { MultiIPAPicker { urls in picking = false; add(urls) } }
         .sheet(item: $sharing) { PersonalSignedShare(url: $0.url) }
     }
+    private var chosenIdentity: PersonalIdentityVault.SavedIdentity? {
+        (try? PersonalIdentityVault.selectedID()).flatMap({ id in identities.first { $0.id == id } }) ?? identities.first
+    }
+    private func startPending() {
+        guard let identity = chosenIdentity else { return }
+        var o = PersonalProjectOptions(); o.removeDeviceRestrictions = stripRestrictions
+        do {
+            for p in pending {
+                let opts = try AppClone.options(base: o, originalID: p.originalID, originalName: p.originalName,
+                                                newID: p.bundleID, newName: p.name, identity: identity)
+                try queue.enqueue([p.file], identity: identity, options: opts, cloneEach: false)
+            }
+            pending = []; message = nil
+        } catch { message = error.localizedDescription }
+    }
     private func add(_ urls: [URL]) {
-        guard let identity = (try? PersonalIdentityVault.selectedID()).flatMap({ id in identities.first { $0.id == id } }) ?? identities.first else { return }
+        guard let identity = chosenIdentity else { return }
+        if clone {
+            pending = urls.map { u in
+                let info = try? SigningQueue.appInfo(of: u)
+                let id = info?.id ?? ""
+                return PendingClone(file: u, originalID: id, originalName: info?.name ?? u.deletingPathExtension().lastPathComponent,
+                                    bundleID: AppClone.cloneID(from: id), name: (info?.name ?? "") + " 2")
+            }
+            return
+        }
         var o = PersonalProjectOptions(); o.removeDeviceRestrictions = stripRestrictions
         do { try queue.enqueue(urls, identity: identity, options: o, cloneEach: clone); message = nil }
         catch { message = error.localizedDescription }
@@ -182,4 +223,13 @@ private struct SigningQueueRow: View {
             }.font(.caption.weight(.semibold))
         }.padding(14).appsGlass(cornerRadius: 18)
     }
+}
+
+struct PendingClone: Identifiable {
+    let id = UUID()
+    let file: URL
+    let originalID: String
+    let originalName: String
+    var bundleID: String
+    var name: String
 }
