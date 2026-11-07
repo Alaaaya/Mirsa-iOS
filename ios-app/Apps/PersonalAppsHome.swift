@@ -87,7 +87,7 @@ struct PersonalAppsHome<Menu: View, Overlay: View>: View {
         }
         .rotationEffect(.degrees(editing ? (jiggle ? 1.6 : -1.6) : 0))
         .animation(editing ? .easeInOut(duration: 0.12).repeatForever(autoreverses: true) : .default, value: jiggle)
-        .onLongPressGesture(minimumDuration: 0.5) { startEditing() }
+        .modifier(MirsaEditLongPress(editing: editing) { startEditing() })
         .contextMenu {
             Button { startEditing() } label: {
                 Label(tr("Arrange apps", "ترتيب التطبيقات"), systemImage: "square.grid.3x3")
