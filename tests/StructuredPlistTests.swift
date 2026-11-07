@@ -1,8 +1,10 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Mirsa
 final class StructuredPlistTests: XCTestCase {
     func testAllTypesBothFormatsAndMutations() throws {
-        for format: PropertyListSerialization.PropertyListFormat in [.xml, .binary] {
+        for format in [PropertyListSerialization.PropertyListFormat.xml, .binary] {
             let values: [String: Any] = [
                 "text": "عربي < &", "integer": NSNumber(value: Int64.max),
                 "real": 1.25, "flag": true, "data": Data([0, 1, 255]),
@@ -44,4 +46,41 @@ final class StructuredPlistTests: XCTestCase {
         XCTAssertTrue(manager.overlay.isEmpty)
         XCTAssertEqual(try Data(contentsOf: file), bytes)
     }
+}
+
+@MainActor
+final class StructuredPlistScreenshotTests: XCTestCase {
+    func testRealEditorScreenAt430x932() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundle = root.appendingPathComponent("Example.app")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        let info: [String: Any] = ["CFBundleIdentifier": "com.example.myapp", "CFBundleDisplayName": "My App",
+            "CFBundleVersion": "1.0.0", "LSRequiresIPhoneOS": true,
+            "UIBackgroundModes": ["audio"], "UISupportedInterfaceOrientations": ["Portrait", "LandscapeLeft", "LandscapeRight"],
+            "UIAppFonts": ["Font.ttf", "Bold.ttf"], "NSCameraUsageDescription": "We need access to your camera.",
+            "NSPhotoLibraryUsageDescription": "Access your photos to share moments.",
+            "NSLocationWhenInUseUsageDescription": "Allow access to your location.",
+            "UIRequiredDeviceCapabilities": ["arm64": true], "CFBundleShortVersionString": "1.0"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0).write(to: bundle.appendingPathComponent("Info.plist"))
+        let manager = try BundleFileManager(root: bundle, stagingDirectory: root.appendingPathComponent("stage"))
+        let entry = try manager.list("").first { $0.name == "Info.plist" }.unwrap()
+        let controller = UIHostingController(rootView: NavigationStack { StructuredPlistEditor(manager: manager, entry: entry) })
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 430, height: 932))
+        window.rootViewController = controller; window.makeKeyAndVisible()
+        let ready = expectation(description: "render real editor task")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { ready.fulfill() }
+        wait(for: [ready], timeout: 5)
+        controller.view.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 430, height: 932)).image { _ in
+            controller.view.drawHierarchy(in: CGRect(x: 0, y: 0, width: 430, height: 932), afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Structured-plist-real-430x932"; attachment.lifetime = .keepAlways
+        add(attachment)
+        window.isHidden = true
+    }
+}
+private extension Optional {
+    func unwrap() throws -> Wrapped { try XCTUnwrap(self) }
 }
