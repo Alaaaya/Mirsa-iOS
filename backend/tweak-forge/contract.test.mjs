@@ -26,3 +26,6 @@ test("parse model json and names", () => {
   assert.throws(() => parseModelJSON("none"));
   assert.ok(validateName("My Tweak") && !validateName("../x"));
 });
+
+import { isExpired, TEMP_TTL_MS, MAX_DYLIB_BYTES } from "./contract.mjs";
+test("24h boundary", () => { assert.equal(isExpired(0, TEMP_TTL_MS - 1, TEMP_TTL_MS), false); assert.equal(isExpired(0, TEMP_TTL_MS, TEMP_TTL_MS), true); assert.equal(MAX_DYLIB_BYTES, 4194304); });
