@@ -118,50 +118,74 @@ final class PersonalAppsLibrary: ObservableObject {
         collect(info["CFBundleIcons~ipad"] as? [String: Any])
         (info["CFBundleIconFiles"] as? [String])?.forEach { names.insert($0) }
         if let n = info["CFBundleIconFile"] as? String { names.insert(n) }
-        // Asset-catalog-only IPAs have no loose PNG. Read their own compiled
-        // catalog through Bundle without loading or executing the app binary.
-        if let resourceBundle = Bundle(path: bundle.path) {
-            var assetNames = names
-            for key in ["CFBundleIcons", "CFBundleIcons~ipad"] {
-                if let dict = info[key] as? [String: Any],
-                   let primary = dict["CFBundlePrimaryIcon"] as? [String: Any],
-                   let name = primary["CFBundleIconName"] as? String { assetNames.insert(name) }
-            }
-            if let name = info["CFBundleIconName"] as? String { assetNames.insert(name) }
-            for name in assetNames.sorted() {
-                if let image = UIImage(named: name, in: resourceBundle, compatibleWith: nil),
-                   image.size.width > 0, image.size.height > 0,
-                   image.size.width <= 4096, image.size.height <= 4096 {
-                    let format = UIGraphicsImageRendererFormat(); format.scale = 1
-                    return UIGraphicsImageRenderer(size: CGSize(width: 180, height: 180), format: format).pngData { _ in
-                        image.draw(in: CGRect(x: 0, y: 0, width: 180, height: 180))
-                    }
-                }
-            }
+        // Foreign Assets.car catalogs must never enter UIKit's asset machinery.
+        // A missing/unsupported icon is cosmetic; returning nil uses the UI placeholder.
+        names.insert("AppIcon")
+        let prefixes = names.map { ($0 as NSString).lastPathComponent }
+            .map { ($0 as NSString).deletingPathExtension }.filter { !$0.isEmpty }
+        let root = bundle.resolvingSymlinksInPath().standardizedFileURL.path + "/"
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: bundle, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
+        ) else { return nil }
+        let candidates = files.compactMap { file -> (URL, Int)? in
+            guard file.pathExtension.lowercased() == "png",
+                  prefixes.contains(where: { file.lastPathComponent.hasPrefix($0) }),
+                  file.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(root),
+                  let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let size = values.fileSize, size > 0, size <= 2 * 1024 * 1024 else { return nil }
+            return (file, size)
+        }.sorted { $0.1 == $1.1 ? $0.0.lastPathComponent < $1.0.lastPathComponent : $0.1 > $1.1 }
+        for (file, _) in candidates.prefix(32) {
+            guard let data = try? Data(contentsOf: file),
+                  let png = validatedIconPNG(data) else { continue }
+            return png
         }
-        let prefixes = names.map { ($0 as NSString).deletingPathExtension }.filter { !$0.isEmpty }
-        guard !prefixes.isEmpty,
-              let files = try? FileManager.default.contentsOfDirectory(at: bundle, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) else { return nil }
-        let best = files.compactMap { f -> (URL, Int)? in
-            guard f.pathExtension.lowercased() == "png",
-                  prefixes.contains(where: { f.lastPathComponent.hasPrefix($0) }),
-                  let v = try? f.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
-                  v.isRegularFile == true, let s = v.fileSize, s > 0, s <= 2 * 1024 * 1024 else { return nil }
-            return (f, s)
-        }.max { $0.1 < $1.1 }
-        guard let best, let data = try? Data(contentsOf: best.0),
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
+        return nil
+    }
+
+    /// ImageIO only, safe to call from the import worker. No UIKit/Bundle asset lookups.
+    nonisolated static func validatedIconPNG(_ data: Data) -> Data? {
+        let signature: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
+        guard data.count >= 33, data.count <= 2 * 1024 * 1024,
+              Array(data.prefix(8)) == signature else { return nil }
+        // Apple's crushed PNG uses a nonstandard CgBI chunk. Do not feed it to
+        // UIKit or try to reinterpret premultiplied pixels. Use a placeholder.
+        var offset = 8
+        var sawHeader = false
+        while offset <= data.count - 12 {
+            let length = data[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) }
+            guard length <= data.count - offset - 12 else { return nil }
+            let kind = Array(data[(offset + 4)..<(offset + 8)])
+            if kind == Array("CgBI".utf8) { return nil }
+            if !sawHeader {
+                guard kind == Array("IHDR".utf8), length == 13 else { return nil }
+                sawHeader = true
+            }
+            offset += length + 12
+            if kind == Array("IEND".utf8) { break }
+        }
+        guard sawHeader, offset == data.count,
+              let source = CGImageSourceCreateWithData(data as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetStatus(source) == .statusComplete,
+              CGImageSourceGetCount(source) == 1,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.intValue > 0, height.intValue > 0,
+              width.intValue <= 4096, height.intValue <= 4096,
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceThumbnailMaxPixelSize: 180,
-                kCGImageSourceCreateThumbnailWithTransform: true
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
               ] as CFDictionary) else { return nil }
-        let image = UIImage(cgImage: thumbnail)
-        let format = UIGraphicsImageRendererFormat(); format.scale = 1
-        let side: CGFloat = 180
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).pngData { _ in
-            image.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
-        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, thumbnail, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
     }
 
     func add(_ input: URL, signed: Bool, onAdded: ((PersonalLibraryApp) -> Void)? = nil) async throws {
