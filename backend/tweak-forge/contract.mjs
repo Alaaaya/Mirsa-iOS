@@ -101,10 +101,10 @@ export function retryDelayMs(headerValue, bodyText) {
   return Math.min(Math.max(s, 1), 10) * 1000;
 }
 
-// Gallery ownership: server decides. Owner = same account AND same per-install device id (legacy rows without a bound device: account only, bound on first edit).
+// Gallery ownership: server decides. Owner = same account AND same per-install device id (rows without a bound device are admin-only).
 export function isGalleryOwner(row, uid, device) {
   if (!row || !uid || typeof row.user_id !== "string" || row.user_id !== uid) return false;
-  if (row.owner_device == null) return true;
+  if (row.owner_device == null) return false; // unbound legacy rows: admin only, never first-edit takeover
   return typeof device === "string" && /^[0-9a-f-]{36}$/.test(device) && row.owner_device === device;
 }
 export function galleryPatch(body) {
@@ -115,3 +115,11 @@ export function galleryPatch(body) {
   if (body.settings !== undefined) { if (!validateSettings(body.settings)) return null; p.settings = body.settings; }
   return Object.keys(p).length ? p : null;
 }
+
+// Admin: allowlist lives in the database (mirsa_forge_admins), joined by account + device. Claim codes are stored only as SHA-256 hashes.
+export const ADMIN_CODE_RE = /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/;
+export async function adminCodeHash(code) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("mirsa-admin-v1|" + String(code).trim().toUpperCase()));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+export function canManageGallery(row, uid, device, isAdmin) { return isAdmin === true || isGalleryOwner(row, uid, device); }

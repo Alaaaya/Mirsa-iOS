@@ -251,6 +251,12 @@ extension ForgeStore {
         _ = try await ForgeClient.json(["action": "publish", "name": p.name, "bundleID": p.bundleID, "description": v.prompt, "code": v.code,
             "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }])
     }
+    /// Uploads the project's current version as a new version of an existing gallery entry (server checks ownership/admin).
+    func updateGallery(entry: String, from id: UUID) async throws {
+        guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
+        _ = try await ForgeClient.json(["action": "gallery-update", "id": entry, "code": v.code,
+            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }])
+    }
     /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
     func injectInspector(_ id: UUID) async throws -> URL {
         guard let p = project(id), let prev = p.current, let pv = p.currentVersion else { throw ForgeClient.Failure.message("No project") }

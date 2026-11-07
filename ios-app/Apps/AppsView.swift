@@ -1124,10 +1124,21 @@ struct AppsSettingsSheet: View {
     @ObservedObject var store: AppsStore
     let onSignIn: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var adminCode = ""
+    @State private var adminNote: String?
+    private func claim() async {
+        do { _ = try await ForgeClient.json(["action": "admin-claim", "code": adminCode]); adminCode = ""; adminNote = tr("Admin access enabled on this device.", "تفعّلت صلاحية المشرف.", ckb: "چالاک کرا.", kmr: "Çalak bû.") }
+        catch { adminNote = tr("Invalid or expired code.", "الكود غلط أو منتهي.", ckb: "کۆدەکە هەڵەیە یان بەسەرچووە.", kmr: "Kod çewt an qediyaye.") }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section(tr("Admin access", "صلاحية المشرف", ckb: "دەسەڵاتی بەڕێوەبەر", kmr: "Gihîştina rêveber")) {
+                    SecureField(tr("One-time code", "كود لمرة وحدة", ckb: "کۆدی یەکجار", kmr: "Koda carekê"), text: $adminCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
+                    Button(tr("Claim", "تفعيل", ckb: "چالاک بکە", kmr: "Çalak bike")) { Task { await claim() } }.disabled(adminCode.count < 19)
+                    if let adminNote { Text(adminNote).font(.footnote) }
+                }
                 Section(L.t("settings.account")) {
                     if let a = store.account {
                         LabeledContent("Apple ID", value: a.email)

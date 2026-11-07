@@ -239,6 +239,7 @@ struct ForgeGalleryView: View {
     @State private var editName = ""
     @State private var editDesc = ""
     @State private var deleting: [String: Any]?
+    @State private var versioning: [String: Any]?
     var body: some View {
         NavigationView {
             List {
@@ -251,6 +252,7 @@ struct ForgeGalleryView: View {
                             Button(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne")) { Task { await use(it) } }.buttonStyle(.bordered)
                             if it["mine"] as? Bool == true {
                                 Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")) { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it }.buttonStyle(.bordered)
+                                Button(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû")) { versioning = it }.buttonStyle(.bordered)
                                 Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { deleting = it }.buttonStyle(.bordered)
                             } else {
                                 Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.bordered)
@@ -268,6 +270,11 @@ struct ForgeGalleryView: View {
             TextField(tr("Description", "الوصف", ckb: "وەسف", kmr: "Danasîn"), text: $editDesc)
             Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { let id = editing?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-update", "id": id, "name": editName, "description": editDesc]) } }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) {}
+        }
+        .confirmationDialog(tr("Upload which project?", "أي مشروع ترفع؟", ckb: "کام پڕۆژە؟", kmr: "Kîjan proje?"), isPresented: Binding(get: { versioning != nil }, set: { if !$0 { versioning = nil } }), titleVisibility: .visible) {
+            ForEach(ForgeStore.shared.projects.filter { $0.currentVersion != nil }) { p in
+                Button(p.name) { let e = versioning?["id"] as? String ?? ""; Task { do { try await ForgeStore.shared.updateGallery(entry: e, from: p.id); error = nil; note = tr("New version uploaded.", "انرفعت النسخة.", ckb: "وەشان بارکرا.", kmr: "Guhertoya nû hat barkirin."); await reload() } catch { self.error = error.localizedDescription } } }
+            }
         }
         .alert(tr("Delete this tweak?", "حذف هالتويك؟", ckb: "ئەم تویکە بسڕیتەوە؟", kmr: "Ev tweak jê bibe?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { let id = deleting?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-delete", "id": id]) } }

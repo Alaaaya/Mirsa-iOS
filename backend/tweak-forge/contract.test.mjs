@@ -51,7 +51,8 @@ test("429 classification and bounded retry delay", () => {
   assert.equal(retryDelayMs("2", ""), 2000);
   assert.equal(retryDelayMs(null, ""), 6000);
 });
-import { isGalleryOwner, galleryPatch } from "./contract.mjs";
+
+import { isGalleryOwner, galleryPatch, canManageGallery, adminCodeHash, ADMIN_CODE_RE } from "./contract.mjs";
 const D1 = "11111111-1111-1111-1111-111111111111", D2 = "22222222-2222-2222-2222-222222222222";
 test("gallery ownership", () => {
   const row = { user_id: "u1", owner_device: D1 };
@@ -62,7 +63,7 @@ test("gallery ownership", () => {
   assert.equal(isGalleryOwner(row, "u1", undefined), false);
   assert.equal(isGalleryOwner(row, "", D1), false);     // unauthenticated
   assert.equal(isGalleryOwner(null, "u1", D1), false);
-  assert.equal(isGalleryOwner({ user_id: "u1", owner_device: null }, "u1", D2), true);  // legacy
+  assert.equal(isGalleryOwner({ user_id: "u1", owner_device: null }, "u1", D2), false);  // unbound legacy: no takeover
   assert.equal(isGalleryOwner({ user_id: "u1", owner_device: null }, "u2", D1), false);
 });
 test("gallery patch validation", () => {
@@ -71,4 +72,17 @@ test("gallery patch validation", () => {
   assert.equal(galleryPatch({ name: "1bad" }), null);
   assert.equal(galleryPatch({ code: '%hook A\nsystem("id");\n%end' }), null);
   assert.equal(galleryPatch({ user_id: "evil" }), null); // cannot set owner
+});
+
+test("admin rules", async () => {
+  const row = { user_id: "u1", owner_device: D1 };
+  assert.equal(canManageGallery(row, "u9", D2, true), true);
+  assert.equal(canManageGallery(row, "u9", D2, false), false);
+  assert.equal(canManageGallery(row, "u9", D2, "true"), false); // only a real server boolean counts
+  assert.equal(canManageGallery({ user_id: "u1", owner_device: null }, "u1", D1, false), false);
+  assert.equal(canManageGallery({ user_id: "u1", owner_device: null }, "u9", D1, true), true);
+  assert.equal(canManageGallery(row, "u1", D1, false), true); // author preserved
+  assert.ok(ADMIN_CODE_RE.test("ABCD-EFGH-JKLM-NPQR")); assert.ok(!ADMIN_CODE_RE.test("abcd-1")); assert.ok(!ADMIN_CODE_RE.test("ABCD-EFGH-JKLM-NPQ0"));
+  assert.equal(await adminCodeHash(" abcd-efgh-jklm-npqr "), await adminCodeHash("ABCD-EFGH-JKLM-NPQR"));
+  assert.notEqual(await adminCodeHash("ABCD-EFGH-JKLM-NPQR"), await adminCodeHash("ABCD-EFGH-JKLM-NPQS"));
 });
