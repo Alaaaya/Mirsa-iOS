@@ -60,3 +60,17 @@ end $$;
 revoke all on function mirsa_forge_gate(text,uuid,text,text,int,int,int) from public, anon, authenticated;
 
 alter table mirsa_forge_gallery add column if not exists owner_device text;
+
+create table if not exists mirsa_forge_admins (device text primary key, user_id uuid not null, created_at timestamptz not null default now());
+create table if not exists mirsa_forge_admin_codes (code_hash text primary key, expires_at timestamptz not null, used_at timestamptz, used_device text, created_at timestamptz not null default now());
+alter table mirsa_forge_admins enable row level security; alter table mirsa_forge_admin_codes enable row level security;
+create or replace function mirsa_forge_admin_claim(p_hash text, p_device text, p_user uuid) returns boolean language plpgsql security definer as $$
+declare n int;
+begin
+  update mirsa_forge_admin_codes set used_at = now(), used_device = p_device where code_hash = p_hash and used_at is null and expires_at > now();
+  get diagnostics n = row_count;
+  if n <> 1 then return false; end if;
+  insert into mirsa_forge_admins(device, user_id) values (p_device, p_user) on conflict (device) do update set user_id = excluded.user_id;
+  return true;
+end $$;
+revoke all on function mirsa_forge_admin_claim(text,text,uuid) from public, anon, authenticated;
