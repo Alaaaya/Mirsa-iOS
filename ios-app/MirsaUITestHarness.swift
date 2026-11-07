@@ -39,6 +39,7 @@ struct MirsaUITestHarnessView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            VStack(spacing: 0) {
             HStack {
                 Button("Main") { which = 0; snapshot = layoutText("main") }.accessibilityIdentifier("uit.main")
                 Button("Personal") { which = 1; snapshot = layoutText("personal") }.accessibilityIdentifier("uit.personal")
@@ -47,6 +48,8 @@ struct MirsaUITestHarnessView: View {
             Text(snapshot).font(.system(size: 9))
                 .accessibilityIdentifier("uit.layout")
             Button("refresh") { snapshot = layoutText(which == 0 ? "main" : "personal"); tick += 1 }.accessibilityIdentifier("uit.refresh")
+            }
+            .zIndex(1)
             ZStack {
                 if which == 0 {
                     MirsaHomeScreen(apps: mainApps, allAppIDs: mainApps.map(\.id), onLaunch: { _ in }, onSettings: {},
@@ -57,6 +60,8 @@ struct MirsaUITestHarnessView: View {
                 }
             }
             .id(tick * 2 + which)
+            .clipped()
+            .zIndex(0)
         }
         .background(Color.black).preferredColorScheme(.dark)
     }
