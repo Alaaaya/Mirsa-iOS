@@ -26,7 +26,7 @@ struct MirsaTelemetryView: View {
                 .font(.footnote).foregroundStyle(.secondary)
             if let e = error { Text(e).font(.footnote).foregroundStyle(.red) }
             if launches.isEmpty && crashes.isEmpty {
-                Text(tr("Nothing recorded yet", "ما في تسجيلات بعد")).foregroundStyle(.secondary)
+                Text(MirsaTr.lit("No logs yet. Import a .ips crash report using the import button. Mirsa cannot read other apps’ system logs.")).foregroundStyle(.secondary)
             }
             ForEach(launches.prefix(5)) { l in
                 HStack {

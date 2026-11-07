@@ -117,13 +117,20 @@ enum PersonalCertificateLabel {
     static var fallback: String { personalText("Personal certificate", "شهادة شخصية") }
 }
 
+struct ProjectBrowserSource: Identifiable {
+    let title: String
+    let url: URL
+    var id: String { url.path }
+}
+
 struct PersonalProjectFolderBrowser: View {
     let root: URL
     let title: String
+    var sources: [ProjectBrowserSource] = []
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            ProjectFolderContents(root: root, directory: root)
+            ProjectFolderContents(root: root, directory: root, projectName: title, sources: sources)
                 .navigationTitle(title)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -139,26 +146,44 @@ struct PersonalProjectFolderBrowser: View {
 private struct ProjectFolderContents: View {
     let root: URL
     let directory: URL
+    var projectName: String = ""
+    var sources: [ProjectBrowserSource]? = nil
     @State private var files: [URL] = []
     @State private var error: String?
     @State private var shared: ProjectFolderLocation?
     var body: some View {
         List {
             Section {
-                Label("Mirsa / Projects / " + root.lastPathComponent, systemImage: "folder.fill")
+                Label("Mirsa / " + projectName + (directory == root ? "" : " / " + directory.lastPathComponent), systemImage: "folder.fill")
                     .font(.caption).foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
             if let error {
                 Text(error).foregroundStyle(.orange)
-            } else if files.isEmpty {
+            } else if files.isEmpty && (sources?.isEmpty ?? true) {
                 Text(personalText("This project folder is empty.", "مجلد هالمشروع فاضي."))
                     .foregroundStyle(.secondary)
+            }
+            if let sources {
+                Text(MirsaTr.lit("Existing project files from their actual storage locations."))
+                    .font(.caption).foregroundStyle(.secondary).listRowBackground(Color.clear)
+                ForEach(sources) { source in
+                    if (try? source.url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                        NavigationLink {
+                            ProjectFolderContents(root: source.url, directory: source.url, projectName: projectName)
+                                .navigationTitle(source.title)
+                        } label: { Label(source.title, systemImage: "folder.fill") }
+                    } else {
+                        Button { shared = ProjectFolderLocation(url: source.url) } label: {
+                            Label(source.title + " · " + source.url.lastPathComponent, systemImage: "doc")
+                        }.buttonStyle(.plain)
+                    }
+                }
             }
             ForEach(files, id: \.self) { file in
                 if (try? file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                     NavigationLink {
-                        ProjectFolderContents(root: root, directory: file).navigationTitle(file.lastPathComponent)
+                        ProjectFolderContents(root: root, directory: file, projectName: projectName).navigationTitle(file.lastPathComponent)
                     } label: {
                         Label(file.lastPathComponent, systemImage: "folder")
                     }
@@ -178,7 +203,14 @@ private struct ProjectFolderContents: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background {
+            LinearGradient(colors: [Color(red: 0.025, green: 0.04, blue: 0.09), .black],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        .listRowBackground(Color.white.opacity(0.045))
         .task {
+            guard sources == nil else { return }
             do { files = try PersonalProjectFolder.contents(of: directory, in: root); error = nil }
             catch { self.error = personalText("Could not read this project folder.", "ما قدرنا نقرأ مجلد هالمشروع.") }
         }
