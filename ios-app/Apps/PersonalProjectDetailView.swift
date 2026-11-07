@@ -349,7 +349,7 @@ struct PersonalProjectDetailView: View {
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
             toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }))
             toggle(personalText("Fix dark icon (iOS 18)", "إصلاح الأيقونة الداكنة (iOS 18)"), personalText("Unavailable: needs Assets.car rewriting.", "غير متاح: بدو تعديل Assets.car."), .constant(false)).disabled(true).opacity(0.5)
-            toggle(personalText("Direct injection (main executable)", "حقن مباشر بالملف الرئيسي"), personalText("Off uses Mirsa's own ordered loader (arm64 only, untested on device).", "إذا طفيته بيستخدم محمّل ميرسا المرتب (arm64 بس، ما انجرّب عالجهاز)."), Binding(get: { !loaderOn }, set: { draft.directInjection = $0 }))
+            toggle(personalText("Direct injection (main executable)", "حقن مباشر بالملف الرئيسي"), personalText("Off uses LoadControl (arm64 only).", "إذا طفيته بيستخدم LoadControl (arm64 بس)."), Binding(get: { !loaderOn }, set: { draft.directInjection = $0 }))
             toggle(personalText("New tweaks first", "الإضافات الجديدة أولاً"), personalText("Injected libraries load before the app's own.", "المكتبات المحقونة بتتحمّل قبل مكتبات التطبيق."), Binding(get: { draft.newTweaksFirst ?? false }, set: { draft.newTweaksFirst = $0 }))
             HStack {
                 Text(personalText("Game Mode", "وضع الألعاب")).font(.subheadline)
