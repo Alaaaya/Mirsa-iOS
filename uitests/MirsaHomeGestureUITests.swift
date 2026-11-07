@@ -21,7 +21,11 @@ final class MirsaHomeGestureUITests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         // long press enters edit mode
         first.press(forDuration: 1.0)
-        let done = app.buttons["Done"]
+        // Native context menus own long-press on non-editing tiles.
+        // Exercise the actual Arrange action rather than assuming the competing gesture won.
+        let arrange = app.buttons.matching(NSPredicate(format: "label IN %@", ["Arrange apps", "ترتيب التطبيقات"])).firstMatch
+        if arrange.waitForExistence(timeout: 3) { arrange.tap() }
+        let done = app.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "تم"])).firstMatch
         XCTAssertTrue(done.waitForExistence(timeout: 5), "edit mode not entered")
         Thread.sleep(forTimeInterval: 2.0)
         shot("\(tab)-jiggle-long-edit-mode")
