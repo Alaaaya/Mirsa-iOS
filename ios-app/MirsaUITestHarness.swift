@@ -15,6 +15,7 @@ enum MirsaUITestHarness {
 struct MirsaUITestHarnessView: View {
     @State private var which = 0
     @State private var tick = 0
+    @State private var snapshot = "none"
     private let mainApps: [ManagedApp] = (1...6).map { i in
         ManagedApp(id: "com.example.uit\(i)", name: "UIT Main \(i)", version: "1.0", sizeBytes: 1, location: .container,
                    installedBundleID: nil, expires: nil, signedSerial: nil, wantsNotifications: false,
@@ -39,14 +40,13 @@ struct MirsaUITestHarnessView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button("Main") { which = 0 }
-                Button("Personal") { which = 1 }
+                Button("Main") { which = 0; snapshot = layoutText("main") }.accessibilityIdentifier("uit.main")
+                Button("Personal") { which = 1; snapshot = layoutText("personal") }.accessibilityIdentifier("uit.personal")
             }
             .buttonStyle(.bordered)
-            .accessibilityIdentifier("uit.picker")
-            Text(layoutText(which == 0 ? "main" : "personal")).font(.system(size: 9))
+            Text(snapshot).font(.system(size: 9))
                 .accessibilityIdentifier("uit.layout")
-            Button("refresh") { tick += 1 }.accessibilityIdentifier("uit.refresh")
+            Button("refresh") { snapshot = layoutText(which == 0 ? "main" : "personal"); tick += 1 }.accessibilityIdentifier("uit.refresh")
             ZStack {
                 if which == 0 {
                     MirsaHomeScreen(apps: mainApps, allAppIDs: mainApps.map(\.id), onLaunch: { _ in }, onSettings: {},
