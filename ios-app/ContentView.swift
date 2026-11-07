@@ -708,6 +708,8 @@ struct ContentView: View {
             }
         }
         .sheet(item: $incoming, onDismiss: {
+            AppsStore.shared.cancelPending()
+            AppsStore.shared.explicitIncomingInstall = false
             if let leftover = presentedURL { OpenInIPA.remove(leftover); presentedURL = nil }
             if let handoff = incomingHandoff {
                 incomingHandoff = nil
@@ -717,36 +719,11 @@ struct ContentView: View {
                 presentNextIncoming()
             }
         }) { item in
-            IncomingIPAConfirmationSheet(
-                url: item.url,
-                filename: item.filename,
-                onCancel: { incoming = nil },
-                onImportProject: { source in
-                    consumeIncoming(source) {
-                        try await PersonalAppsLibrary.shared.add(source, signed: false) { app in
-                            incomingProject = app
-                        }
-                        vm.selectedTab = .personalHub
-                    }
-                },
-                onAppleID: { source in
-                    consumeIncoming(source) {
-                        vm.selectedTab = .apps
-                        try await AppsStore.shared.installIncomingWithAppleID(from: source, vm: vm)
-                    }
-                },
-                onSaveLibrary: { source in
-                    consumeIncoming(source) {
-                        try await PersonalAppsLibrary.shared.add(source, signed: false)
-                        vm.selectedTab = .personalHub
-                    }
-                },
-                onSignInstall: { source, identity in
-                    consumeIncoming(source) {
-                        _ = try await CertificateInstall.run(input: source, appID: nil, identity: identity, store: AppsStore.shared)
-                    }
-                }
-            )
+            IncomingIPAChoiceSheet(url: item.url, store: AppsStore.shared, vm: vm) {
+                incoming = nil
+            }
+            .presentationDetents([.large])
+            .presentationBackground(.ultraThinMaterial)
         }
         .sheet(item: $incomingProject, onDismiss: { presentNextIncoming() }) { app in
             PersonalProjectDetailView(app: app)
