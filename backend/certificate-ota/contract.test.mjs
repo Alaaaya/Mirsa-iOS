@@ -9,3 +9,17 @@ test("bundle identifier injection rejected",()=>assert.throws(()=>validateMetada
 test("manifest escapes XML",()=>{const m=manifest({...good,title:'A < B & "C"'},'https://example.test/ipa?x=1&y=2');assert.ok(m.includes("A &lt; B &amp; &quot;C&quot;"));assert.ok(m.includes("x=1&amp;y=2"));});
 test("HTTPS only without credentials",()=>{for(const u of ["http://x.test/a","https://user:pass@x.test/a","file:///tmp/x","https://x.test/a#secret"])assert.throws(()=>manifest(good,u));});
 test("expiry fails closed including exact deadline",()=>{assert.equal(isExpired("bad"),true);assert.equal(isExpired("2026-01-01T00:00:00Z",Date.parse("2026-01-01T00:00:00Z")),true);assert.equal(isExpired("2026-01-01T00:00:01Z",Date.parse("2026-01-01T00:00:00Z")),false);});
+
+import {lifetime,shareLink,SHARE_PAGE} from "./contract.mjs";
+test("only explicit short and 48h lifetimes allowed",()=>{
+ assert.equal(lifetime(null),900); assert.equal(lifetime("900"),900); assert.equal(lifetime("172800"),48*60*60);
+ for(const bad of ["0","-1","172801","Infinity","900.0",172800,""]) assert.throws(()=>lifetime(bad));
+});
+test("share URLs pin free static origin and keep bearer token in fragment",()=>{
+ const token="a".repeat(64);
+ const value=new URL(shareLink(SHARE_PAGE,token,"2026-01-03T00:00:00Z"));
+ assert.equal(value.search,""); assert.ok(value.hash.includes("token="+token));
+ for(const page of [undefined,"http://example.test","https://evil.test/install.html",SHARE_PAGE+"?x=1"]) assert.throws(()=>shareLink(page,token,"2026-01-01"));
+ assert.throws(()=>shareLink(SHARE_PAGE,"bad","2026-01-01"));
+ assert.throws(()=>shareLink(SHARE_PAGE,token,"bad"));
+});
