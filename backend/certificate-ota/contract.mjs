@@ -31,11 +31,10 @@ export function lifetime(value) {
   if (value === "172800") return 172800;
   throw new Error("lifetime");
 }
-export function linkPage(metadata, manifestURL, expiresAt) {
-  const m = validateMetadata(metadata);
-  manifest(m, manifestURL); // Same URL security policy as the manifest.
-  const expires = new Date(expiresAt);
-  if (!Number.isFinite(expires.getTime())) throw new Error("expiry");
-  const install = "itms-services://?action=download-manifest&url=" + encodeURIComponent(manifestURL);
-  return '<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mirsa installation</title><style>body{background:#10131c;color:#f8f8ff;font:17px system-ui;max-width:480px;margin:12vh auto;padding:28px}a{display:block;padding:20px;background:#96bfff;color:#10131c;text-decoration:none;text-align:center;border-radius:12px}p{line-height:1.6;color:#b8bfd1}</style><main><small>MIRSA</small><h1>' + xml(m.title) + '</h1><p>' + xml(m.bundleID) + ' · ' + xml(m.version) + '</p><a href="' + xml(install) + '">Install / تثبيت / دامەزراندن / Saz bike</a><p>Open in Safari on iPhone or iPad. A valid signing certificate and device-compatible profile are required. Sharing this link grants access to this IPA until expiry.</p><p>Expires ' + xml(expires.toISOString()) + '</p></main></html>';
+export const SHARE_PAGE = "https://alaaaya.github.io/Mirsa-iOS/install.html";
+export function shareLink(page, token, expiresAt) {
+  if (page !== SHARE_PAGE || !/^[a-f0-9]{64}$/.test(token)) throw new Error("share_page");
+  const date = new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) throw new Error("expiry");
+  return page + "#token=" + token + "&expires=" + encodeURIComponent(date.toISOString());
 }
