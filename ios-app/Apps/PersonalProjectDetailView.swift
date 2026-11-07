@@ -420,19 +420,24 @@ struct PersonalProjectDetailView: View {
                   (try? PersonalProjectFolder.validated(url, in: root)) != nil else { return }
             result.append(ProjectBrowserSource(title: title, url: url))
         }
-        add(personalText("Original IPA", "الـ IPA الأصلي"), library.url(app))
-        add(personalText("Project configuration", "إعدادات المشروع"), library.draftURL(app))
-        add(personalText("Project icon", "أيقونة المشروع"), library.iconURL(app))
-        add(personalText("Extracted app", "ملفات التطبيق المستخرجة"), bundleDirs.original)
-        add(personalText("Staged changes", "التعديلات المجهّزة"), bundleDirs.staging)
+        add(MirsaTr.lit("Original IPA"), library.url(app))
+        add(MirsaTr.lit("Project configuration"), library.draftURL(app))
+        add(MirsaTr.lit("Project icon"), library.iconURL(app))
+        add(MirsaTr.lit("Extracted app"), bundleDirs.original)
+        add(MirsaTr.lit("Staged changes"), bundleDirs.staging)
         for id in draft.tweakIDs {
             if let item = tweak(id) {
                 add(item.name, IPATweakLibrary.root.appendingPathComponent(id.uuidString))
             }
         }
-        if let output { add(personalText("Exported IPA", "الـ IPA المصدّر"), output) }
+        let signedBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
+        if let relative = UserDefaults.standard.string(forKey: "mirsa.project.signed." + app.id.uuidString),
+           let signed = try? PersonalProjectFolder.validated(signedBase.appendingPathComponent(relative), in: signedBase) {
+            add(MirsaTr.lit("Signed IPA"), signed)
+        }
+        if let output { add(MirsaTr.lit("Exported IPA"), output) }
         if let state = signing.state, state.projectID == app.id, let file = state.result?.url {
-            add(personalText("Signed IPA", "الـ IPA الموقّع"), file)
+            add(MirsaTr.lit("Signed IPA"), file)
         }
         return result
     }
