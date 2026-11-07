@@ -14,7 +14,7 @@ const TIERS = [
   { tier: "lite", model: LLM_MODEL, day: num("FORGE_LITE_DAY", 400), min: num("FORGE_LITE_MIN", 10) },
   { tier: "flash", model: FLASH_MODEL, day: num("FORGE_FLASH_DAY", 6), min: num("FORGE_FLASH_MIN", 4) },
 ];
-const USER_DAY = num("FORGE_USER_DAY", 30);
+const USER_DAY = num("FORGE_USER_DAY", 60);
 class Quota extends Error { constructor(public kind: "daily" | "busy", public retry = 0) { super(kind); } }
 const LIMITS: Record<string, number> = { translate: 30, generate: 20, build: 20, publish: 5 }; // per hour per user
 const H = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
