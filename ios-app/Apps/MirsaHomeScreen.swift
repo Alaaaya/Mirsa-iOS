@@ -10,6 +10,7 @@ struct MirsaHomeScreen<Menu: View>: View {
     let onLaunch: (ManagedApp) -> Void
     let onSettings: () -> Void
     let onImport: () -> Void
+    let onImportLink: () -> Void
     let onDownloads: () -> Void
     @ViewBuilder let menu: (ManagedApp) -> Menu
     @AppStorage("mirsa.home.wallpaper") private var wallpaper = "ocean"
@@ -84,7 +85,10 @@ struct MirsaHomeScreen<Menu: View>: View {
                                 .background(.white.opacity(0.2), in: Capsule())
                         }
                     }
-                    Button(action: onImport) { Image(systemName: "plus").frame(width: 44, height: 44) }
+                    SwiftUI.Menu {
+                        Button(tr("From Files", "من الملفات"), action: onImport)
+                        Button(tr("From link", "من رابط"), action: onImportLink)
+                    } label: { Image(systemName: "plus").frame(width: 44, height: 44) }
                         .accessibilityLabel(L.t("empty.import"))
                     LanguageGlobeMenu(size: 44)
                     Button(action: onSettings) { Image(systemName: "gearshape").frame(width: 44, height: 44) }
@@ -106,7 +110,10 @@ struct MirsaHomeScreen<Menu: View>: View {
                                 VStack(spacing: 16) {
                                     Image(systemName: "square.grid.3x3").font(.largeTitle)
                                     Text(apps.isEmpty ? L.t("empty.title") : tr("Your apps are in the dock", "تطبيقاتك بالدوك"))
-                                    Button(L.t("empty.import"), action: onImport).buttonStyle(.bordered)
+                                    SwiftUI.Menu {
+                                        Button(tr("From Files", "من الملفات"), action: onImport)
+                                        Button(tr("From link", "من رابط"), action: onImportLink)
+                                    } label: { Text(L.t("empty.import")) }.buttonStyle(.bordered)
                                 }.padding(.top, 40)
                             }
                             Spacer(minLength: 0)
