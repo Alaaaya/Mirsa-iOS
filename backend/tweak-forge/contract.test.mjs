@@ -42,3 +42,12 @@ test("AES-GCM roundtrip, tamper, swap, replay-binding", async () => {
   await assert.rejects(unseal(crypto.getRandomValues(new Uint8Array(32)), job, "src", s1));
   assert.ok(!Buffer.from(s1).includes(Buffer.from("secret")));
 });
+
+import { classify429, retryDelayMs } from "./contract.mjs";
+test("429 classification and bounded retry delay", () => {
+  assert.equal(classify429('{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}'), "daily");
+  assert.equal(classify429('{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}'), "temporary");
+  assert.equal(retryDelayMs(null, '{"retryDelay":"37s"}'), 10000);
+  assert.equal(retryDelayMs("2", ""), 2000);
+  assert.equal(retryDelayMs(null, ""), 6000);
+});

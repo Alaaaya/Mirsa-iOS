@@ -13,3 +13,23 @@ revoke all on function mirsa_forge_install(uuid), mirsa_forge_report(uuid) from 
 
 create table if not exists mirsa_forge_keys(job text primary key, user_id uuid not null, k text not null, fetched boolean not null default false, created_at timestamptz not null default now());
 alter table mirsa_forge_keys enable row level security;
+
+create table if not exists mirsa_forge_llm (id bigserial primary key, user_id uuid not null, tier text not null, created_at timestamptz not null default now());
+create index if not exists mirsa_forge_llm_time on mirsa_forge_llm (created_at desc);
+create table if not exists mirsa_forge_flags (tier text primary key, until timestamptz not null);
+alter table mirsa_forge_llm enable row level security; alter table mirsa_forge_flags enable row level security;
+create or replace function mirsa_forge_reserve(p_user uuid, p_tier text, p_user_day int, p_tier_day int, p_tier_min int) returns text language plpgsql security definer as $$
+declare dstart timestamptz := date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles';
+begin
+  perform pg_advisory_xact_lock(7771001);
+  if exists (select 1 from mirsa_forge_flags where tier = p_tier and until > now()) then return 'tier_day'; end if;
+  if (select count(*) from mirsa_forge_llm where user_id = p_user and created_at >= dstart) >= p_user_day then return 'user_day'; end if;
+  if (select count(*) from mirsa_forge_llm where tier = p_tier and created_at >= dstart) >= p_tier_day then return 'tier_day'; end if;
+  if (select count(*) from mirsa_forge_llm where tier = p_tier and created_at >= now() - interval '60 seconds') >= p_tier_min then return 'busy'; end if;
+  insert into mirsa_forge_llm(user_id, tier) values (p_user, p_tier);
+  delete from mirsa_forge_llm where created_at < now() - interval '3 days';
+  return 'ok';
+end $$;
+create or replace function mirsa_forge_flag(p_tier text) returns void language sql security definer as $$
+  insert into mirsa_forge_flags values (p_tier, date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles' + interval '1 day') on conflict (tier) do update set until = excluded.until $$;
+revoke all on function mirsa_forge_reserve(uuid,text,int,int,int), mirsa_forge_flag(text) from public, anon, authenticated;
