@@ -64,13 +64,18 @@ final class MirsaKeyboardTests: XCTestCase {
         let fields = descendants(host.view).compactMap { $0 as? UITextField }
         let field = try XCTUnwrap(fields.first)
         var keyboardFrame: CGRect?
+        let shown = expectation(description: "Real software keyboard finished showing")
+        shown.assertForOverFulfill = false
         let token = NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidShowNotification,
             object: nil, queue: .main) { note in
                 keyboardFrame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+                shown.fulfill()
             }
         defer { NotificationCenter.default.removeObserver(token) }
         XCTAssertTrue(field.becomeFirstResponder())
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        // Simulator keyboard presentation may exceed one second under full-suite load.
+        // Require the genuine didShow lifecycle, just as dismissal requires didHide.
+        await fulfillment(of: [shown], timeout: 10)
         XCTAssertTrue(field.isFirstResponder)
         let frame = try XCTUnwrap(keyboardFrame, "Requires real software keyboard, not synthetic notification")
         let visibleField = field.convert(field.bounds, to: window)
