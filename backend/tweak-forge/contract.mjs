@@ -100,3 +100,18 @@ export function retryDelayMs(headerValue, bodyText) {
   if (!(s > 0)) { const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(String(bodyText)); s = m ? Number(m[1]) : 6; }
   return Math.min(Math.max(s, 1), 10) * 1000;
 }
+
+// Gallery ownership: server decides. Owner = same account AND same per-install device id (legacy rows without a bound device: account only, bound on first edit).
+export function isGalleryOwner(row, uid, device) {
+  if (!row || !uid || typeof row.user_id !== "string" || row.user_id !== uid) return false;
+  if (row.owner_device == null) return true;
+  return typeof device === "string" && /^[0-9a-f-]{36}$/.test(device) && row.owner_device === device;
+}
+export function galleryPatch(body) {
+  const p = {};
+  if (body.name !== undefined) { if (!validateName(body.name)) return null; p.name = body.name; }
+  if (body.description !== undefined) { if (typeof body.description !== "string") return null; p.description = body.description.slice(0, 300); }
+  if (body.code !== undefined) { if (validateLogos(body.code)) return null; p.code = body.code; }
+  if (body.settings !== undefined) { if (!validateSettings(body.settings)) return null; p.settings = body.settings; }
+  return Object.keys(p).length ? p : null;
+}
