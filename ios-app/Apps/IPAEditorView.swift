@@ -198,8 +198,8 @@ struct IPAEditorView: View {
                 Toggle(editorText("I trust the selected code", "أنا واثق من هالملفات"), isOn: $trustsTweaks)
                     .tint(.purple).font(.subheadline)
             }
-            Text(editorText("Injected code runs inside the installed app and can read its data. Only thin arm64, unencrypted binaries with spare header space are supported. Jailbreak-only tweaks may not work. Missing hook libraries fail safely; no CydiaSubstrate or ElleKit is bundled.",
-                            "التويك بيشتغل جوّا التطبيق وبيقدر يقرأ بياناته. الدعم لملفات arm64 غير مشفّرة وفيها مساحة بالهيدر. تويكس الجيلبريك مو مضمونة، والمكتبات الناقصة بتوقف العملية بأمان. ما منرفق CydiaSubstrate أو ElleKit."))
+            Text(editorText("Injected code runs inside the installed app and can read its data. Unencrypted arm64 binaries with spare header space are supported. Universal binaries use their compatible arm64 slice in the installation copy; original files stay unchanged. Jailbreak-only tweaks may not work. Missing hook libraries fail safely; no CydiaSubstrate or ElleKit is bundled.",
+                            "التويك بيشتغل جوّا التطبيق وبيقدر يقرأ بياناته. الدعم لملفات arm64 غير مشفّرة وفيها مساحة بالهيدر. الملفات متعددة المعماريات منستخدم منها نسخة arm64 المتوافقة للتثبيت، والأصل بيضل متل ما هو. تويكس الجيلبريك مو مضمونة، والمكتبات الناقصة بتوقف العملية بأمان. ما منرفق CydiaSubstrate أو ElleKit."))
                 .font(.caption).foregroundStyle(.orange.opacity(0.9))
         }
         .padding(18).appsGlass(cornerRadius: 22)
