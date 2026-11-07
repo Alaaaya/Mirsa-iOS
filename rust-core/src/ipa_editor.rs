@@ -1,6 +1,8 @@
 //! Bounded pre-install archive tooling and conservative Mach-O injection.
 //! Never executes package scripts or loads user code into Mirsa.
 //! Mach-O rewriting only consumes verified zero header padding; no relocation.
+#[path = "fat_macho.rs"]
+mod fat_macho;
 #[path = "load_control.rs"]
 mod load_control;
 #[path = "tweak_targets.rs"]
@@ -363,10 +365,11 @@ fn read_macho(p: &Path) -> Result<Vec<u8>> {
     fs::read(p).map_err(err)
 }
 fn macho(d: Vec<u8>, dylib: bool) -> Result<Mach> {
-    // Thin arm64 only is intentional. Do not silently discard architecture slices.
+    // Thin only in the working model. Shared source dylibs remain universal.
+    let d = fat_macho::arm64(&d)?.to_vec();
     if d.len() < 32 || u32at(&d, 0)? != 0xfeedfacf || u32at(&d, 4)? != 0x0100000c {
         return Err(
-            "Only thin arm64 Mach-O is supported; FAT/32-bit binaries must be thinned first".into(),
+            "Only generic 64-bit little-endian arm64 Mach-O is supported".into(),
         );
     }
     let subtype = u32at(&d, 8)? & 0x00ffffff;
@@ -764,13 +767,7 @@ fn framework_executable(framework: &Path) -> Result<String> {
 /// Lists dylib load commands of a thin or FAT (first slice) 64-bit Mach-O. Read-only, bounded.
 fn dependencies(path: &Path) -> Result<Vec<String>> {
     let all = read_macho(path)?;
-    let mut d: &[u8] = &all;
-    if d.len() >= 8 && (u32at(d, 0)? == 0xcafebabe || u32at(d, 0)? == 0xbebafeca) {
-        // FAT header is big-endian; use first slice only.
-        let big = |o: usize| -> Result<usize> { Ok(u32::from_be_bytes(d.get(o..o + 4).ok_or("Truncated FAT header")?.try_into().unwrap()) as usize) };
-        let (off, size) = (big(16)?, big(20)?);
-        d = d.get(off..off.checked_add(size).ok_or("FAT overflow")?).ok_or("Invalid FAT slice")?;
-    }
+    let d = fat_macho::arm64(&all)?;
     if d.len() < 32 || u32at(d, 0)? != 0xfeedfacf { return Err("Only 64-bit little-endian Mach-O is supported".into()); }
     let count = u32at(d, 16)? as usize;
     let end = 32usize.checked_add(u32at(d, 20)? as usize).ok_or("Mach-O table overflow")?;
@@ -782,6 +779,7 @@ fn dependencies(path: &Path) -> Result<Vec<String>> {
         let size = u32at(d, at + 4)? as usize;
         if size < 8 || size % 8 != 0 || size > end - at { return Err("Malformed load command".into()); }
         if matches!(kind, 0xc | 0x18 | 0x1f | 0x80000018 | 0x8000001f) {
+            if size < 24 { return Err("Short dylib command".into()); }
             let name_off = u32at(d, at + 8)? as usize;
             if name_off < 24 || name_off >= size { return Err("Invalid dylib name".into()); }
             let raw = &d[at + name_off..at + size];
@@ -791,6 +789,7 @@ fn dependencies(path: &Path) -> Result<Vec<String>> {
         }
         at += size;
     }
+    if at != end { return Err("Invalid command count".into()); }
     if out.len() > 4096 { out.truncate(4096); }
     Ok(out)
 }
@@ -842,7 +841,9 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
         if f.read_exact(&mut head).is_ok()
             && (head == [0xcf, 0xfa, 0xed, 0xfe]
                 || head == [0xca, 0xfe, 0xba, 0xbe]
-                || head == [0xca, 0xfe, 0xba, 0xbf])
+                || head == [0xca, 0xfe, 0xba, 0xbf]
+                || head == [0xbe, 0xba, 0xfe, 0xca]
+                || head == [0xbf, 0xba, 0xfe, 0xca])
         {
             if ambiguous_names.contains(&base) {continue}
             if names.insert(base.clone(), p.clone()).is_some() {
@@ -1548,5 +1549,52 @@ mod integration_tests {
             assert!(std::panic::catch_unwind(|| unencrypted(&d)).is_ok());
             assert!(std::panic::catch_unwind(|| macho(d, false)).is_ok());
         }
+    }
+}
+
+#[cfg(test)]
+mod fat_injection_tests {
+    use super::*;
+    #[test]
+    fn oracle_fixture_direct_and_loadcontrol_universal_target() {
+        let original=include_bytes!("../tests/fixtures/fat/OracleBuilder.dylib");
+        assert!(dependencies_fixture(original).iter().any(|p|p.contains("CydiaSubstrate")));
+        for loader in [false,true] {
+            let root=integration_tests::temporary();
+            let app=root.join("Fat.app");fs::create_dir(&app).unwrap();
+            // Real compiled loader Mach-O as a safe file-backed MH_EXECUTE fixture.
+            let mut main=include_bytes!("../../loader/MirsaLoader.dylib").to_vec();
+            put32(&mut main,12,2);
+            let mut e=main.clone();put32(&mut e,8,2);
+            fs::write(app.join("Main"),fat_macho::tests::fat(&[e,main],true,true)).unwrap();
+            let info=plist::Value::Dictionary([(String::from("CFBundleExecutable"),plist::Value::String("Main".into()))].into_iter().collect());
+            info.to_file_xml(app.join("Info.plist")).unwrap();
+            let source=root.join("Oracle.dylib");fs::write(&source,original).unwrap();
+            let items:Vec<tweak_targets::Injection>=serde_json::from_value(serde_json::json!([{"id":"oracle","library":source,"target":"Main"}])).unwrap();
+            let before=fs::read(app.join("Main")).unwrap();
+            let failure=tweak_targets::inject_plan(&app,&items,&[],loader,false).unwrap_err();
+            assert!(failure.contains("Missing dependency") && failure.contains("CydiaSubstrate"),"{failure}");
+            assert_eq!(fs::read(app.join("Main")).unwrap(),before);
+            assert_eq!(fs::read(&source).unwrap(),original);
+            // A universal, real compiled, standalone library proves the complete path.
+            let generic=include_bytes!("../../loader/MirsaLoader.dylib").to_vec();
+            let mut e=generic.clone();put32(&mut e,8,2);
+            let standalone=fat_macho::tests::fat(&[e,generic],false,false);
+            fs::write(&source,&standalone).unwrap();
+            let items:Vec<tweak_targets::Injection>=serde_json::from_value(serde_json::json!([{"id":"oracle","library":source,"target":"Main"}])).unwrap();
+            tweak_targets::inject_plan(&app,&items,&[],loader,false).unwrap();
+            assert_eq!(fs::read(&source).unwrap(),standalone);
+            let main=read_macho(&app.join("Main")).unwrap();
+            assert_eq!(u32at(&main,0).unwrap(),0xfeedfacf);
+            let deps=dependencies(&app.join("Main")).unwrap();
+            assert!(deps.iter().any(|s|s.ends_with(if loader{"MirsaLoader.dylib"}else{"Oracle.dylib"})));
+            let patched=app.join("Frameworks/Oracle.dylib");
+            assert!(macho(read_macho(&patched).unwrap(),true).is_ok());
+            assert_eq!(u32at(&read_macho(&patched).unwrap(),0).unwrap(),0xfeedfacf);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+    fn dependencies_fixture(d:&[u8])->Vec<String> {
+        macho(d.to_vec(),true).unwrap().commands.into_iter().filter(|c|c.kind!=0xd).filter_map(|c|c.name).collect()
     }
 }
