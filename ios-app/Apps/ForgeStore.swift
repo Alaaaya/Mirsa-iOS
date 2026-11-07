@@ -70,9 +70,33 @@ struct ForgeProject: Codable, Identifiable {
         p.name = "Tweak" + String(info.name.filter { $0.isLetter || $0.isNumber }.prefix(24))
         projects.insert(p, at: 0); save(); return p.id
     }
+    /// Removes the entry with every version, dylib and the source IPA, then persists the removal.
     func delete(_ id: UUID) {
-        if let p = project(id) { try? FileManager.default.removeItem(at: dir(p)) }
+        let folder = Self.root.appendingPathComponent(id.uuidString, isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
         projects.removeAll { $0.id == id }; save()
+    }
+    /// Reads the live display name from the stored source IPA (the technical build name stays untouched).
+    nonisolated static func liveName(ipa: URL) async -> String? {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("forgename-" + UUID().uuidString, isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+        guard (try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)) != nil else { return nil }
+        let x = tmp.appendingPathComponent("x", isDirectory: true)
+        guard (try? IPAEditorService.run("extract", input: ipa, output: x)) != nil,
+              let app = try? IPAEditorService.app(in: x), let info = try? IPAEditorService.info(in: app) else { return nil }
+        return pickName(info)
+    }
+    nonisolated static func pickName(_ info: [String: Any]) -> String? {
+        for k in ["CFBundleDisplayName", "CFBundleName"] { if let v = info[k] as? String, !v.trimmingCharacters(in: .whitespaces).isEmpty { return v } }
+        return nil
+    }
+    func refreshNames() async {
+        for p in projects {
+            let src = dir(p).appendingPathComponent("source.ipa")
+            guard FileManager.default.fileExists(atPath: src.path), let n = await Self.liveName(ipa: src), n != p.appName else { continue }
+            update(p.id) { $0.appName = n }
+        }
     }
 
     // MARK: versions

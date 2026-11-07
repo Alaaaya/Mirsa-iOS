@@ -29,6 +29,11 @@ private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () ->
     }.buttonStyle(.plain)
 }
 
+let forgeDeleteTitle = tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe")
+func forgeDeleteMessage(_ name: String) -> String {
+    tr("Delete \(name) and all its versions and files? This cannot be undone.", "حذف \(name) مع كل نسخه وملفاته؟ ما فيك ترجع عنها.",
+       ckb: "\(name) لەگەڵ هەموو وەشان و فایلەکانی بسڕدرێتەوە؟ ناتوانرێت پاشگەز ببیتەوە.", kmr: "\(name) bi hemû guhertin û pelên wê jê bibe? Vegerandin tune.")
+}
 /// Tools > Tweaks. Solid cards, layout always starts from the left.
 struct ForgeView: View {
     @ObservedObject private var store = ForgeStore.shared
@@ -38,6 +43,7 @@ struct ForgeView: View {
     @State private var shareURL: URL?
     @State private var debID: UUID?
     @State private var gallery = false
+    @State private var toDelete: ForgeProject?
 
     var body: some View {
         ScrollView {
@@ -45,7 +51,7 @@ struct ForgeView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak")).font(.title2.bold()).foregroundStyle(.white)
-                        Text(tr("Describe it, Mirsa writes and injects it.", "اوصفه وميرسا بتكتبه وبتحقنه.", ckb: "وەسفی بکە، میرسا دەینووسێت و دەیچەسپێنێت.", kmr: "Vebêje, Mirsa dinivîse û dixe.")).font(.footnote).foregroundStyle(.white.opacity(0.6))
+                        Text(tr("Describe it, Mirsa writes and injects it.", "اوصفه ومرسى بتكتبه وبتحقنه.", ckb: "وەسفی بکە، میرسا دەینووسێت و دەیچەسپێنێت.", kmr: "Vebêje, Mirsa dinivîse û dixe.")).font(.footnote).foregroundStyle(.white.opacity(0.6))
                     }
                     Spacer()
                     Button { picking = true } label: { Image(systemName: "plus").font(.title3.bold()).foregroundStyle(.white).frame(width: 44, height: 44).background(Color.accentColor).cornerRadius(12) }
@@ -58,6 +64,8 @@ struct ForgeView: View {
                             Text(String(p.versions.count) + " " + tr("versions", "نسخ", ckb: "وەشان", kmr: "guhertin")).font(.caption2).foregroundStyle(.white.opacity(0.5))
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16)
                     }.buttonStyle(.plain)
+                    .contextMenu { Button(role: .destructive) { toDelete = p } label: { Label(forgeDeleteTitle, systemImage: "trash") } }
+                    .gesture(DragGesture(minimumDistance: 30).onEnded { g in if g.translation.width < -60 && abs(g.translation.height) < 40 { toDelete = p } })
                 }
                 forgeButton("person.2.fill", tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê")) { gallery = true }
                 if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
@@ -68,6 +76,11 @@ struct ForgeView: View {
         .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
             guard case .success(let url) = r else { return }
             Task { await handle(url) }
+        }
+        .task { await store.refreshNames() }
+        .confirmationDialog(forgeDeleteMessage(toDelete?.appName ?? ""), isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
+            Button(forgeDeleteTitle, role: .destructive) { if let p = toDelete { store.delete(p.id) }; toDelete = nil }
+            Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { toDelete = nil }
         }
         .sheet(isPresented: $gallery) { ForgeGalleryView() }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
