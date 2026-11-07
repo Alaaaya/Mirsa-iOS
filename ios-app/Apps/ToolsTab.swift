@@ -4,12 +4,13 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        case pairing, device
+        case pairing, device, tweaks
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .pairing: return "antenna.radiowaves.left.and.right"
             case .device: return "iphone.gen3"
+                case .tweaks: return "wand.and.stars"
             }
         }
     }
@@ -26,6 +27,7 @@ struct ToolsTab: View {
                 switch section {
                 case .pairing: SetupPairingSheet(showsClose: false)
                 case .device: DeviceToolsView()
+                case .tweaks: NavigationView { ForgeView() }.navigationViewStyle(.stack)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -41,7 +43,7 @@ struct ToolsTab: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold))
-                        Text(s == .device ? tr("Device", "الجهاز") : L.t("tools.\(s.rawValue)")).font(.caption2.weight(.semibold)).lineLimit(1)
+                        Text(s == .device ? tr("Device", "الجهاز") : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(.caption2.weight(.semibold)).lineLimit(1)
                     }
                     .foregroundStyle(section == s ? .white : .white.opacity(0.6))
                     .frame(maxWidth: .infinity)
