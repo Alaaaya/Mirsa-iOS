@@ -31,6 +31,7 @@ struct PersonalProjectDetailView: View {
     @State private var draftDestination: URL?
     @State private var scrolling = false
     @State private var workspace: ProjectFolderLocation?
+    @State private var showProjectLogs = false
 
     private var configOnly: Bool { selected == nil }
     private var selected: PersonalIdentityVault.SavedIdentity? {
@@ -61,10 +62,10 @@ struct PersonalProjectDetailView: View {
                     certificateCard
                     Button { openBundleFiles() } label: {
                         Label(bundleLoading ? personalText("Reading app…", "عم أقرأ التطبيق…") : personalText("Bundle files", "ملفات التطبيق"), systemImage: "doc.on.doc")
-                    }.buttonStyle(.bordered).disabled(bundleLoading)
-                    NavigationLink { MirsaTelemetryView(bundleID: app.bundleID) } label: {
+                    }.buttonStyle(.borderedProminent).tint(.cyan).disabled(bundleLoading)
+                    Button { showProjectLogs = true } label: {
                         Label(personalText("Launches & crash logs", "التشغيل وسجلات الأعطال"), systemImage: "waveform.path.ecg")
-                    }.buttonStyle(.bordered)
+                    }.buttonStyle(.borderedProminent).tint(.indigo)
                     Button { openWorkspace() } label: {
                         Label(personalText("Browse workspace folder", "تصفّح مجلد المشروع"), systemImage: "folder")
                     }.buttonStyle(.bordered)
@@ -127,7 +128,16 @@ struct PersonalProjectDetailView: View {
             }
         }
         .sheet(item: $workspace) { location in
-            PersonalProjectFolderBrowser(root: location.url, title: draft.name)
+            PersonalProjectFolderBrowser(root: location.url, title: draft.name, sources: projectSources)
+        }
+        .sheet(isPresented: $showProjectLogs) {
+            NavigationStack {
+                ScrollView { MirsaTelemetryView(bundleID: app.bundleID).padding() }
+                    .background(Color.black).navigationTitle(draft.name)
+                    .toolbar { ToolbarItem(placement: .topBarLeading) {
+                        Button(personalText("Close", "إغلاق")) { showProjectLogs = false }
+                    } }
+            }.preferredColorScheme(.dark).environment(\.layoutDirection, .leftToRight)
         }
         .alert(personalText("Result", "النتيجة"), isPresented: Binding(get: { resultAlert != nil }, set: { if !$0 { resultAlert = nil } })) {
             Button(personalText("OK", "تمام")) { resultAlert = nil }
@@ -402,14 +412,34 @@ struct PersonalProjectDetailView: View {
             if showDeps { LazyVStack(alignment: .leading, spacing: 8) { ForEach(deps ?? [], id: \.self) { Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(2) } } }
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: 24)
     }
+    private var projectSources: [ProjectBrowserSource] {
+        var result: [ProjectBrowserSource] = []
+        func add(_ title: String, _ url: URL) {
+            let root = url.deletingLastPathComponent()
+            guard FileManager.default.fileExists(atPath: url.path),
+                  (try? PersonalProjectFolder.validated(url, in: root)) != nil else { return }
+            result.append(ProjectBrowserSource(title: title, url: url))
+        }
+        add(personalText("Original IPA", "الـ IPA الأصلي"), library.url(app))
+        add(personalText("Project configuration", "إعدادات المشروع"), library.draftURL(app))
+        add(personalText("Project icon", "أيقونة المشروع"), library.iconURL(app))
+        add(personalText("Extracted app", "ملفات التطبيق المستخرجة"), bundleDirs.original)
+        add(personalText("Staged changes", "التعديلات المجهّزة"), bundleDirs.staging)
+        for id in draft.tweakIDs {
+            if let item = tweak(id) {
+                add(item.name, IPATweakLibrary.root.appendingPathComponent(id.uuidString))
+            }
+        }
+        if let output { add(personalText("Exported IPA", "الـ IPA المصدّر"), output) }
+        if let state = signing.state, state.projectID == app.id, let file = state.result?.url {
+            add(personalText("Signed IPA", "الـ IPA الموقّع"), file)
+        }
+        return result
+    }
     private func openWorkspace() {
         draftWriter.flush()
-        do {
-            workspace = ProjectFolderLocation(url: try library.browseDirectory(app))
-            draftDestination = library.draftURL(app)
-        } catch {
-            message = personalText("Could not open this project folder.", "ما قدرنا نفتح مجلد هالمشروع.")
-        }
+        // Logical view of existing project files. Browsing never creates or migrates an empty UUID folder.
+        workspace = ProjectFolderLocation(url: library.url(app).deletingLastPathComponent())
     }
     private func inspect() async {
         let input = library.url(app)

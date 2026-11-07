@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 /// Typed plist editing that preserves the original serialization (xml / binary) and value types.
 struct PlistDocument {
@@ -32,6 +33,20 @@ struct PlistDocument {
         let bytes = [UInt8](d)
         if bytes.starts(with: Array("bplist00".utf8)) { try preflightBinary(bytes); return }
         guard bytes.starts(with: Array("bplist".utf8)) == false else { throw BundleFileError.invalidPlist("unsupported binary version") }
+        // Refuse custom entities / internal DTD subsets. The standard Apple plist
+        // doctype emitted by Foundation is allowed but never fetched.
+        let xml = String(decoding: d, as: UTF8.self)
+        guard !xml.localizedCaseInsensitiveContains("<!ENTITY"),
+              !xml.contains("[") || !xml.localizedCaseInsensitiveContains("<!DOCTYPE") ||
+                !(xml.range(of: #"<!DOCTYPE[^>]*\["#, options: [.regularExpression, .caseInsensitive]) != nil)
+        else { throw BundleFileError.invalidPlist("XML entities are not allowed") }
+        let validator = PlistXMLValidator()
+        let parser = XMLParser(data: d)
+        parser.shouldResolveExternalEntities = false
+        parser.delegate = validator
+        guard parser.parse(), validator.failure == nil else {
+            throw BundleFileError.invalidPlist(validator.failure ?? "XML line \(parser.lineNumber): \(parser.parserError?.localizedDescription ?? "Invalid XML")")
+        }
         // XML: count <array>/<dict> opens and closes without building anything.
         var depth = 0, i = 0
         let n = bytes.count
@@ -129,7 +144,9 @@ struct PlistDocument {
         case "bool":
             switch t.lowercased() { case "true", "yes", "1": return true; case "false", "no", "0": return false
             default: throw BundleFileError.typeMismatch(expected: "bool") }
-        case "integer": guard let i = Int(t) else { throw BundleFileError.typeMismatch(expected: "integer") }; return i
+        case "integer": if let i = Int64(t) { return NSNumber(value: i) }
+            if let u = UInt64(t) { return NSNumber(value: u) }
+            throw BundleFileError.typeMismatch(expected: "integer")
         case "real": guard let d = Double(t), d.isFinite else { throw BundleFileError.typeMismatch(expected: "real") }; return d
         case "date": guard let d = ISO8601DateFormatter().date(from: t) else { throw BundleFileError.typeMismatch(expected: "date (ISO 8601)") }; return d
         case "data": guard let d = Data(base64Encoded: t) else { throw BundleFileError.typeMismatch(expected: "data (base64)") }; return d
@@ -163,6 +180,15 @@ struct PlistDocument {
         case let .key(k): guard var d = c as? [String: Any], d[k] != nil else { throw BundleFileError.notFound(k) }; d[k] = nil; try replace(at: parent, with: d)
         case let .index(i): guard var a = c as? [Any], a.indices.contains(i) else { throw BundleFileError.notFound("index") }; a.remove(at: i); try replace(at: parent, with: a)
         }
+    }
+    mutating func rename(at path: [Key], to name: String) throws {
+        guard case let .key(old)? = path.last, !name.isEmpty,
+              var dict = value(at: Array(path.dropLast())) as? [String: Any],
+              let value = dict[old] else { throw BundleFileError.invalidPath("key") }
+        if name == old { return }
+        guard dict[name] == nil else { throw BundleFileError.alreadyExists(name) }
+        dict.removeValue(forKey: old); dict[name] = value
+        try replace(at: Array(path.dropLast()), with: dict)
     }
     private mutating func replace(at path: [Key], with new: Any) throws {
         func go(_ cur: Any, _ rest: ArraySlice<Key>) throws -> Any {
@@ -199,4 +225,29 @@ enum InfoPlistGuard {
         w.append("Changing the bundle identifier can break entitlements, App Groups and keychain access.")
         return (e, w)
     }
+}
+
+/// Duplicate dictionary keys must not silently overwrite user data in raw mode.
+private final class PlistXMLValidator: NSObject, XMLParserDelegate {
+    struct Frame { var keys = Set<String>() }
+    var dictionaries: [Frame] = []
+    var keyText: String?
+    var failure: String?
+    func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String]) {
+        if name == "dict" { dictionaries.append(Frame()) }
+        if name == "key" { keyText = "" }
+        if dictionaries.count > BundleLimits.maxPlistDepth { failure = "Plist nesting is too deep"; parser.abortParsing() }
+    }
+    func parser(_ parser: XMLParser, foundCharacters string: String) { if keyText != nil { keyText! += string } }
+    func parser(_ parser: XMLParser, didEndElement name: String, namespaceURI: String?, qualifiedName: String?) {
+        if name == "key", let key = keyText, !dictionaries.isEmpty {
+            let index = dictionaries.count - 1
+            if !dictionaries[index].keys.insert(key).inserted {
+                failure = "Duplicate key: " + key + " (line \(parser.lineNumber))"; parser.abortParsing()
+            }
+            keyText = nil
+        }
+        if name == "dict", !dictionaries.isEmpty { dictionaries.removeLast() }
+    }
+    func parser(_ parser: XMLParser, resolveExternalEntityName name: String, systemID: String?) -> Data? { nil }
 }
