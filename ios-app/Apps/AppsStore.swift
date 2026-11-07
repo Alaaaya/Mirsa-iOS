@@ -224,6 +224,20 @@ final class AppsStore: ObservableObject {
         return DeviceConnectionPolicy.mayAttempt(tunnelRoute: s.vpn, hasPairing: hasPairing)
     }
 
+    /// This prerequisite belongs only to Apple ID real-app installs/renewals.
+    /// Import, editing, library and certificate OTA never call it.
+    func realAppNetworkReady(_ vm: AppViewModel?) -> Bool {
+        let ip = vm?.deviceIP ?? "10.7.0.1"
+        let status = NetworkStatus.summarize(deviceIP: ip)
+        guard status.wifi else {
+            error = tr("Real app installation needs Wi-Fi + LocalDevVPN",
+                       "التثبيت الحقيقي بدو واي فاي + LocalDevVPN")
+            return false
+        }
+        guard networkReady(vm) else { error = L.t("err.vpn"); return false }
+        return DeviceConnectionPolicy.mayInstallRealApp(wifi: status.wifi, tunnelRoute: status.vpn, hasPairing: true)
+    }
+
     // MARK: Account
 
     func signIn(email: String, password: String) async {
@@ -720,7 +734,7 @@ final class AppsStore: ObservableObject {
         }
         let alreadyReal = app.location == .real && apps.contains(where: { $0.id == app.id && $0.location == .real })
         if !alreadyReal && slotsLeft <= 0 { error = L.t("choice.full"); return false }
-        guard networkReady(vm) else { error = L.t("err.vpn"); return false }
+        guard realAppNetworkReady(vm) else { return false }
         guard await ensureSession() else { error = L.t("err.notSignedIn"); return false }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }
@@ -861,7 +875,7 @@ final class AppsStore: ObservableObject {
                     outcome: activitySucceeded ? .success : operationOutcome)
             }
         }
-        guard networkReady(vm) else { error = L.t("err.vpn"); return }
+        guard realAppNetworkReady(vm) else { return }
         guard await ensureSession() else { error = L.t("err.notSignedIn"); return }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }

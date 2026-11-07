@@ -49,67 +49,16 @@ enum CertificateInstall {
     static func run(input: URL, appID: String?, identity: PersonalIdentityVault.SavedIdentity,
                     store: AppsStore? = nil) async throws -> [String: Any] {
         guard !running, store?.busy == nil else { throw Failure.busy }
-        if MirsaInstallMode.ownCertificate {
-            _ = try OwnCertificateDevice.require()
-            let staged = try stageSignedApp(ipa:input,in:FileManager.default.temporaryDirectory)
-            defer { try? FileManager.default.removeItem(at:staged.stage) }
-            try await CertificateOTA.install(source:staged.app,material:identity.material,options:PersonalProjectOptions())
-            return ["otaInstallerOpened":true, "installed":false]
-        }
-        guard FileManager.default.fileExists(atPath: input.path) else { throw Failure.missingIPA }
+        // Selecting "Install with certificate" is an explicit OTA route. It
+        // must not inherit the Apple ID default or require a current VPN.
+        _ = try OwnCertificateDevice.require()
         running = true
-        // Reserve the shared busy slot so AppsStore operations cannot start meanwhile.
         store?.busy = personalText("Signing with certificate", "عم نوقّع بالشهادة")
-        let operation = MirsaOperationProgress.shared.begin(appID: nil, phase: .signing)
-        var outcome: MirsaCompletionFeedback.Outcome = .failure
-        defer {
-            running = false
-            store?.busy = nil
-            MirsaOperationProgress.shared.finish(operation)
-            MirsaCompletionFeedback.shared.finish(operationID: operation, outcome: outcome)
-        }
-        let options = PersonalProjectOptions()
-        let material = identity.material
-        let pairingPath = PairingController.pairingFilePath()
-        let signed = try await Task.detached(priority: .userInitiated) {
-            try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: pairingPath, options: options)
-        }.value
-        let exportDir = signed.url.deletingLastPathComponent()
-        let kept: URL
-        do { kept = try retain(signed.url) }
-        catch {
-            // Move failed: signed output stays where it is and is still reachable.
-            throw Failure.retained(retainedMessage(error, signed.url), signedURL: signed.url)
-        }
-        let staged: (stage: URL, app: URL)
-        do { staged = try stageSignedApp(ipa: kept, in: FileManager.default.temporaryDirectory) }
-        catch { throw Failure.retained(retainedMessage(error, kept), signedURL: kept) }
+        defer { running = false; store?.busy = nil }
+        let staged = try stageSignedApp(ipa: input, in: FileManager.default.temporaryDirectory)
         defer { try? FileManager.default.removeItem(at: staged.stage) }
-        // Associate only the validated, actually rewritten bundle ID.
-        if let info = try? IPAEditorService.info(in: staged.app),
-           let id = info["CFBundleIdentifier"] as? String, IPAEditorService.validBundleID(id) {
-            MirsaOperationProgress.shared.associate(operation, appID: id)
-        }
-        MirsaOperationProgress.shared.update(operation, phase: .installing)
-        do {
-            let appPath = staged.app.path
-            var result = try await Task.detached(priority: .userInitiated) {
-                try SideloadService.installSigned(appPath: appPath) { f, stage in
-                    // Fraction only from real transfer/install callbacks.
-                    let real: Double? = stage == "Installing" ? f : nil
-                    Task { @MainActor in MirsaOperationProgress.shared.update(operation, phase: .installing, fraction: real) }
-                }
-            }.value
-            result["profile_verification"] = signed.verification.profile_verification
-            result["warnings"] = signed.verification.warnings.map { ["code": $0.code, "message": $0.message] }
-            result["device_authorization"] = "checked"
-            outcome = .success
-            try? FileManager.default.removeItem(at: kept.deletingLastPathComponent())
-            try? FileManager.default.removeItem(at: exportDir)
-            return result
-        } catch {
-            throw Failure.retained(retainedMessage(error, kept), signedURL: kept)
-        }
+        try await CertificateOTA.install(source: staged.app, material: identity.material, options: PersonalProjectOptions())
+        return ["otaInstallerOpened": true, "installed": false]
     }
 
     /// Moves the signed IPA to a persistent, backup-excluded folder so a failed
