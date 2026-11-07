@@ -2,9 +2,9 @@ import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON } from "./contract.mjs";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
-const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://api.openai.com/v1";
-const LLM_KEY = Deno.env.get("LLM_API_KEY");
-const LLM_MODEL = Deno.env.get("LLM_MODEL") ?? "gpt-4.1";
+const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
+const LLM_KEY = Deno.env.get("LLM_API_KEY") ?? Deno.env.get("GEMINI_API_KEY");
+const LLM_MODEL = Deno.env.get("LLM_MODEL") ?? "gemini-flash-latest";
 const BUILDER_URL = Deno.env.get("TWEAK_BUILDER_URL");
 const BUILDER_SECRET = Deno.env.get("TWEAK_BUILDER_SECRET");
 const LIMITS: Record<string, number> = { translate: 30, generate: 20, build: 20, publish: 5 }; // per hour per user
