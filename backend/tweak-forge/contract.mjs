@@ -90,3 +90,13 @@ export async function open(master, job, purpose, blob) {
   const key = await purposeKey(master, job, purpose);
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.slice(0, 12), additionalData: enc.encode(purpose + "|" + job + "|v1") }, key, blob.slice(12)));
 }
+
+// Gemini 429: daily quota exhaustion (RPD) vs temporary per-minute limit (RPM).
+export function classify429(text) {
+  return /PerDay|per day|daily|RequestsPerDay/i.test(String(text)) ? "daily" : "temporary";
+}
+export function retryDelayMs(headerValue, bodyText) {
+  let s = Number(headerValue);
+  if (!(s > 0)) { const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(String(bodyText)); s = m ? Number(m[1]) : 6; }
+  return Math.min(Math.max(s, 1), 10) * 1000;
+}
