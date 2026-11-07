@@ -29,6 +29,8 @@ struct PersonalProjectOptions: Sendable {
     var useLoader = false
     var customEntitlements: Data? = nil
     var exportExtension = "ipa"
+    /// Explicit opt-in: strips UIDeviceFamily, MinimumOSVersion and UIRequiredDeviceCapabilities from the project COPY.
+    var removeDeviceRestrictions = false
 }
 
 enum PersonalGameMode: String, Codable, CaseIterable, Sendable { case keep, on, off }

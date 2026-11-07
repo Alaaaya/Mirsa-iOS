@@ -50,6 +50,7 @@ struct PersonalCertificateDetailsView: View {
                         Text(personalText("Local profile data. This is not an online validity or revocation check.", "بيانات البروفايل المحلي. هاد مو فحص أونلاين لصلاحية الشهادة أو إلغائها."))
                             .font(.caption).foregroundStyle(.secondary)
                     }.padding(18).appsGlass(cornerRadius: 24)
+                    CertificateRevocationBanner(identity: identity)
                     ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
                         VStack(alignment: .leading, spacing: 14) {
                             Text(group.0).font(.headline)
