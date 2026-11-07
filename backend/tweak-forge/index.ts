@@ -1,12 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
-import { MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON } from "./contract.mjs";
+import { isExpired, TEMP_TTL_MS, JOB_TTL_MS, MAX_DYLIB_BYTES, MAX_GALLERY_PER_USER, MAX_PROMPT, validateLogos, validateSettings, validateName, validateBundleID, assembleSource, parseModelJSON } from "./contract.mjs";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
 const LLM_KEY = Deno.env.get("LLM_API_KEY") ?? Deno.env.get("GEMINI_API_KEY");
 const LLM_MODEL = Deno.env.get("LLM_MODEL") ?? "gemini-flash-latest";
-const BUILDER_URL = Deno.env.get("TWEAK_BUILDER_URL");
-const BUILDER_SECRET = Deno.env.get("TWEAK_BUILDER_SECRET");
 const LIMITS: Record<string, number> = { translate: 30, generate: 20, build: 20, publish: 5 }; // per hour per user
 const H = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...H, "content-type": "application/json" } });
@@ -68,23 +66,84 @@ async function generate(body: any) {
   if (bad || !validateSettings(o.settings)) return json({ error: "unsafe_or_invalid_code", detail: bad }, 422);
   return json({ code: o.code, settings: o.settings, explain: String(o.explain ?? "").slice(0, 600) });
 }
-async function build(body: any) {
-  if (!BUILDER_URL || !BUILDER_SECRET) return json({ error: "builder_not_configured" }, 503);
+const BUCKET = "mirsa-ota-private";
+const GH_REPO = Deno.env.get("GH_BUILDER_REPO");
+const GH_TOKEN = Deno.env.get("GH_DISPATCH_TOKEN");
+const BSECRET = Deno.env.get("BUILDER_SECRET");
+const hex32 = (v: unknown) => typeof v === "string" && /^[0-9a-f]{32}$/.test(v);
+function builderReady() { return !!(GH_REPO && GH_TOKEN && BSECRET); }
+// Build = dispatch an ephemeral GitHub Actions run in a separate public repo. Only an opaque job id goes to GitHub.
+async function build(body: any, uid: string) {
+  if (!builderReady()) return json({ error: "builder_not_configured" }, 503);
   if (!validateName(body.name) || !validateBundleID(body.bundleID) || !/^[0-9a-f-]{36}$/.test(String(body.id)) || !validateSettings(body.settings ?? [])) return json({ error: "bad_request" }, 400);
   const bad = validateLogos(body.code); if (bad) return json({ error: "unsafe_or_invalid_code", detail: bad }, 422);
   const source = assembleSource({ id: body.id, bundleID: body.bundleID, code: body.code, settings: body.settings ?? [], values: body.values ?? {} });
-  const r = await fetch(BUILDER_URL + "/build", { method: "POST", headers: { authorization: "Bearer " + BUILDER_SECRET, "content-type": "application/json" },
-    body: JSON.stringify({ name: body.name.replace(/[^A-Za-z0-9]/g, ""), bundleID: body.bundleID, source }), signal: AbortSignal.timeout(170_000) });
-  if (!r.ok) return json({ error: "build_failed", log: (await r.text()).slice(0, 4000) }, 422);
-  const bytes = new Uint8Array(await r.arrayBuffer());
-  if (bytes.length < 1000 || bytes.length > 8 * 1024 * 1024) return json({ error: "bad_artifact" }, 502);
-  return new Response(bytes, { headers: { ...H, "content-type": "application/octet-stream" } });
+  const job = crypto.randomUUID().replaceAll("-", "");
+  const up = await db.storage.from(BUCKET).upload("forge/jobs/" + job + ".json", new Blob([JSON.stringify({ user: uid, source, created: Date.now() })], { type: "application/json" }), { upsert: false });
+  if (up.error) throw Error("storage");
+  const r = await fetch("https://api.github.com/repos/" + GH_REPO + "/actions/workflows/build.yml/dispatches", {
+    method: "POST", headers: { authorization: "Bearer " + GH_TOKEN, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "mirsa-forge" },
+    body: JSON.stringify({ ref: "main", inputs: { job } }) });
+  if (r.status !== 204) { await r.text(); await db.storage.from(BUCKET).remove(["forge/jobs/" + job + ".json"]); return json({ error: "builder_unavailable" }, 503); }
+  return json({ job });
+}
+async function cleanupForge() {
+  const old: string[] = [];
+  for (const [dir, ttl] of [["forge/jobs", JOB_TTL_MS], ["forge/out", TEMP_TTL_MS]] as const) {
+    const { data } = await db.storage.from(BUCKET).list(dir, { limit: 1000 });
+    for (const f of data ?? []) if (isExpired(new Date(f.created_at ?? 0).getTime(), Date.now(), ttl)) old.push(dir + "/" + f.name);
+  }
+  if (old.length) await db.storage.from(BUCKET).remove(old);
+  return old.length;
+}
+// Called only by the trusted workflow steps, authenticated with a shared secret held in the repo secrets.
+async function builderCall(req: Request, url: URL) {
+  if (!BSECRET || req.headers.get("x-builder-secret") !== BSECRET) return json({ error: "unauthorized" }, 401);
+  if (url.searchParams.get("action") === "builder-cleanup") return json({ removed: await cleanupForge() });
+  await cleanupForge().catch(() => {});
+  if (url.searchParams.get("action") === "builder-done") {
+    const job = url.searchParams.get("job"); if (!hex32(job)) return json({ error: "bad_request" }, 400);
+    const body = new Uint8Array(await req.arrayBuffer());
+    if (body.length > MAX_DYLIB_BYTES) return json({ error: "too_big" }, 413);
+    const ok = url.searchParams.get("ok") === "1";
+    if (ok && !(body.length > 1000 && ((body[0] === 0xcf && body[1] === 0xfa) || (body[0] === 0xca && body[1] === 0xfe)))) return json({ error: "bad_artifact" }, 422);
+    const key = ok ? "forge/out/" + job + ".dylib" : "forge/out/" + job + ".err";
+    await db.storage.from(BUCKET).upload(key, body.slice(0, ok ? body.length : 3000), { upsert: true, contentType: "application/octet-stream" });
+    return json({ ok: true });
+  }
+  const j = await req.json(); if (j.action !== "builder-fetch" || !hex32(j.job)) return json({ error: "bad_request" }, 400);
+  const path = "forge/jobs/" + j.job + ".json";
+  const { data, error } = await db.storage.from(BUCKET).download(path);
+  if (error || !data) return json({ error: "not_found" }, 404);
+  const rec = JSON.parse(await data.text());
+  // One use: remember owner, drop the source.
+  await db.storage.from(BUCKET).upload("forge/out/" + j.job + ".owner", new TextEncoder().encode(rec.user), { upsert: true, contentType: "text/plain" });
+  await db.storage.from(BUCKET).remove([path]);
+  return json({ source: rec.source });
+}
+async function buildStatus(url: URL, uid: string) {
+  const job = url.searchParams.get("job"); if (!hex32(job)) return json({ error: "bad_request" }, 400);
+  const own = async (p: string) => { const { data } = await db.storage.from(BUCKET).download(p); return data; };
+  // Ownership: queued source file or the owner marker must name this user.
+  const q = await own("forge/jobs/" + job + ".json"); const m = await own("forge/out/" + job + ".owner");
+  if (q) { if (JSON.parse(await q.text()).user !== uid) return json({ error: "not_found" }, 404); return json({ state: "queued" }); }
+  if (!m || (await m.text()) !== uid) return json({ error: "not_found" }, 404);
+  const d = await own("forge/out/" + job + ".dylib");
+  if (d) { if (url.searchParams.get("fetch") !== "1") return json({ state: "done" });
+    const bytes = new Uint8Array(await d.arrayBuffer());
+    await db.storage.from(BUCKET).remove(["forge/out/" + job + ".dylib", "forge/out/" + job + ".owner"]);
+    return new Response(bytes, { headers: { ...H, "content-type": "application/octet-stream" } }); }
+  const e = await own("forge/out/" + job + ".err");
+  if (e) { await db.storage.from(BUCKET).remove(["forge/out/" + job + ".err", "forge/out/" + job + ".owner"]); return json({ state: "failed", log: (await e.text()).slice(0, 3000) }); }
+  return json({ state: "running" });
 }
 Deno.serve(async req => {
   try {
-    const u = await user(req); if (!u) return json({ error: "unauthorized" }, 401);
     const url = new URL(req.url);
-    if (req.method === "GET" && url.searchParams.get("action") === "status") return json({ llm: !!LLM_KEY, builder: !!(BUILDER_URL && BUILDER_SECRET) });
+    if (req.method === "POST" && (url.searchParams.get("action") ?? "").startsWith("builder-")) return await builderCall(req, url);
+    const u = await user(req); if (!u) return json({ error: "unauthorized" }, 401);
+    if (req.method === "GET" && url.searchParams.get("action") === "status") return json({ llm: !!LLM_KEY, builder: builderReady() });
+    if (req.method === "GET" && url.searchParams.get("action") === "build-status") return await buildStatus(url, u.id);
     if (req.method === "GET" && url.searchParams.get("action") === "gallery") {
       const { data } = await db.from("mirsa_forge_gallery").select("id,name,target_bundle_id,description,installs,created_at").lt("reported", 3).order("installs", { ascending: false }).limit(50);
       return json({ items: data ?? [] });
@@ -107,10 +166,12 @@ Deno.serve(async req => {
     if (!(await allow(u.id, action))) return json({ error: "rate_limited" }, 429);
     if (action === "translate") return await translate(body);
     if (action === "generate") return await generate(body);
-    if (action === "build") return await build(body);
+    if (action === "build") return await build(body, u.id);
     // publish
     const bad = validateLogos(body.code);
     if (bad || !validateName(body.name) || !validateBundleID(body.bundleID) || !validateSettings(body.settings ?? [])) return json({ error: "unsafe_or_invalid_code" }, 422);
+    const { count: mine } = await db.from("mirsa_forge_gallery").select("id", { count: "exact", head: true }).eq("user_id", u.id);
+    if ((mine ?? 0) >= MAX_GALLERY_PER_USER) return json({ error: "rate_limited" }, 429);
     const { data, error } = await db.from("mirsa_forge_gallery").insert({ user_id: u.id, name: body.name, target_bundle_id: body.bundleID,
       description: String(body.description ?? "").slice(0, 300), code: body.code, settings: body.settings ?? [] }).select("id").single();
     if (error) return json({ error: "publish_failed" }, 500);

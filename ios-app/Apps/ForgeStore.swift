@@ -109,8 +109,17 @@ struct ForgeProject: Codable, Identifiable {
     func build(_ id: UUID) async throws -> URL {
         guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
         busy = tr("Building on the server…", "عم ببني عالسيرفر…", ckb: "لەسەر سێرڤەر دروست دەکرێت…", kmr: "Li ser serverê tê çêkirin…"); defer { busy = nil }
-        let data = try await ForgeClient.post(["action": "build", "id": v.id.uuidString.lowercased(), "name": p.name, "bundleID": p.bundleID, "code": v.code,
-            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }, "values": p.values], timeout: 175)
+        let started = try await ForgeClient.json(["action": "build", "id": v.id.uuidString.lowercased(), "name": p.name, "bundleID": p.bundleID, "code": v.code,
+            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }, "values": p.values])
+        guard let job = started["job"] as? String else { throw ForgeClient.Failure.message("Build did not start") }
+        var data = Data()
+        for _ in 0..<120 {
+            try await Task.sleep(nanoseconds: 4_000_000_000)
+            let st = try await ForgeClient.get(["action": "build-status", "job": job])
+            if st["state"] as? String == "failed" { throw ForgeClient.Failure.message((st["log"] as? String ?? "Build failed").suffix(600).description) }
+            if st["state"] as? String == "done" { data = try await ForgeClient.getData(["action": "build-status", "job": job, "fetch": "1"]); break }
+        }
+        if data.count > 4 * 1024 * 1024 { throw ForgeClient.Failure.message("Library too large") }
         guard data.count > 1000, data.prefix(4) == Data([0xCF, 0xFA, 0xED, 0xFE]) || data.prefix(4) == Data([0xCA, 0xFE, 0xBA, 0xBE]) || data.prefix(4) == Data([0xBE, 0xBA, 0xFE, 0xCA]) else {
             throw ForgeClient.Failure.message(tr("The server did not return a valid library.", "السيرفر ما رجّع مكتبة صالحة.", ckb: "سێرڤەر کتێبخانەیەکی دروستی نەگەڕاندەوە.", kmr: "Server pirtûkxaneyeke derbasdar venegerand."))
         }

@@ -2,7 +2,7 @@ import Foundation
 
 /// Talks to the tweak-forge edge function with the signed-in Mirsa session. No secrets live in the app.
 enum ForgeClient {
-    static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/tweak-forge")!
+    static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/mirsa-forge")!
 
     enum Failure: LocalizedError {
         case message(String)
@@ -52,6 +52,16 @@ enum ForgeClient {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200, let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure.message(message(status, data)) }
         return o
+    }
+
+    static func getData(_ query: [String: String]) async throws -> Data {
+        var c = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+        c.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+        var req = URLRequest(url: c.url!, timeoutInterval: 60)
+        req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession(configuration: .ephemeral).data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw Failure.message(message((resp as? HTTPURLResponse)?.statusCode ?? 0, data)) }
+        return data
     }
 
     static func json(_ body: [String: Any]) async throws -> [String: Any] {
