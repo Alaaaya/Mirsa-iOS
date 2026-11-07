@@ -36,20 +36,24 @@ class ChoiceFirstCellular(unittest.TestCase):
    text=read(file)
    self.assertNotIn('required to install',text)
    self.assertNotIn('مطلوب للتثبيت',text)
- def test_ota_remains_cached_and_vpn_free(self):
-  cert=read('ios-app/Apps/CertificateInstall.swift').split('if shouldUseOTA',1)[1].split('guard FileManager.default.fileExists',1)[0]
-  self.assertIn('OwnCertificateDevice.require()',cert)
-  self.assertNotIn('pairingFilePath',cert)
-  self.assertIn('ownCertificateMode || !wifi',read('ios-app/Apps/CertificateInstall.swift'))
-  self.assertNotIn('networkReady',cert)
-  wrapper=read('ios-app/Apps/IncomingIPAChoiceSheet.swift')
-  self.assertNotIn('networkReady',wrapper)
-  self.assertNotIn('.wifi',wrapper)
-  self.assertNotIn('vpnUp',wrapper)
-  signing=read('ios-app/Apps/PersonalSigningOperation.swift')
-  self.assertIn('CertificateInstall.shouldUseOTA(',signing)
-  ota=signing.split('if CertificateInstall.shouldUseOTA',1)[1].split('let result = try await Task.detached',1)[0]
-  self.assertIn('material:material,options:options',ota)
-  for forbidden in ['actual_udid','connect_tunnel','pairingFilePath','installSigned']:
-   self.assertNotIn(forbidden,ota)
+ def test_certificate_routes_are_always_ota(self):
+  for file in ['CertificateInstall.swift', 'PersonalSigningOperation.swift']:
+   code=read('ios-app/Apps/'+file)
+   self.assertIn('CertificateOTA.install(', code)
+   for forbidden in ['pairingFilePath(', 'installSigned(', 'OwnCertificateDevice.require()\n','NetworkStatus.summarize']:
+    self.assertNotIn(forbidden, code)
+  ota=read('ios-app/Apps/CertificateOTA.swift')
+  self.assertIn('(try? OwnCertificateDevice.require()) ?? ""',ota)
+  self.assertIn('CertificateInstall.retain(signed.url)',ota)
+  self.assertIn('CertificateInstall.Failure.retained',ota)
+  self.assertIn('install.scheme = "itms-services"',ota)
+  signer=read('ios-app/Apps/PersonalCertificateView.swift')
+  self.assertIn('"cached_only": true',signer)
+ def test_import_menu_anchored_to_actual_button(self):
+  apps=read('ios-app/Apps/AppsView.swift')
+  home=read('ios-app/Apps/MirsaHomeScreen.swift')
+  self.assertNotIn('showImportOptions',apps)
+  self.assertIn('onImportLink: { showURLImport = true }',apps)
+  self.assertIn('SwiftUI.Menu {',home)
+  self.assertNotIn('Button(action: onImport)',home)
 if __name__=='__main__': unittest.main()

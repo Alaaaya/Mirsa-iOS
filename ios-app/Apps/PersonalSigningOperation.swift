@@ -76,34 +76,19 @@ final class PersonalSigningOperation: ObservableObject {
         // Deliberately NOT attached to SwiftUI .task; leaving the screen cannot cancel it.
         Task {
             do {
-                if CertificateInstall.shouldUseOTA(ownCertificateMode: MirsaInstallMode.ownCertificate, wifi: NetworkStatus.summarize(deviceIP: "10.7.0.1").wifi) {
-                    _ = try OwnCertificateDevice.require()
+                do {
                     let staged = try CertificateInstall.stageSignedApp(ipa:input,in:FileManager.default.temporaryDirectory)
                     defer { try? FileManager.default.removeItem(at:staged.stage) }
                     try await CertificateOTA.install(source:staged.app,material:material,options:options)
                     self.state?.running = false
                     self.state?.stage = .completed
-                    self.state?.error = "تم فتح مثبّت iOS. هاد مو تأكيد نجاح التثبيت."
+                    self.state?.error = personalText("The iOS installer opened. Installation is not confirmed.", "تم فتح مثبّت iOS. هاد مو تأكيد نجاح التثبيت.") + ((try? OwnCertificateDevice.require()) == nil ? personalText(" Device inclusion is not verified.", " شمول هالجهاز بالبروفايل مو متحقق منه.") : "")
                     self.finishActivity(success:true)
                     MirsaOperationProgress.shared.finish(operation)
                     self.endBackgroundTime()
                     self.control = nil
                     return
                 }
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: pairingPath,
-                        options: options, install: true, control: control) { event in
-                            Task { @MainActor [weak self] in self?.receive(event, id: id, operation: operation) }
-                        }
-                }.value
-                guard self.state?.id == id else { return }
-                self.state?.result = result
-                self.state?.stage = result.installed ? .completed : .failed
-                self.state?.fraction = result.installed ? 1 : nil
-                self.state?.error = result.installError
-                self.state?.running = false
-                self.finishActivity(success: result.installed)
-                MirsaCompletionFeedback.shared.finish(operationID: operation, outcome: result.installed ? .success : .failure)
             } catch {
                 guard self.state?.id == id else { return }
                 self.state?.stage = .failed

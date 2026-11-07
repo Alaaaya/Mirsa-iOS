@@ -342,7 +342,7 @@ enum PersonalCertificateSigner {
                                       "profile": profile.path, "private_key": key.base64EncodedString(),
                                       "certificate": certificate.base64EncodedString(),
                                       "pairing_path": pairingPath,
-                                      "cached_only": cachedUDID != nil,
+                                      "cached_only": true,
                                       "cached_udid": cachedUDID ?? "",
                                       "bundle_id": options.bundleID ?? "",
                                       "remove_extensions": options.removeExtensions,

@@ -118,7 +118,6 @@ struct AppsTab: View {
     @State private var segment: AppsSegment = .container
     @State private var showPicker = false
     @State private var showURLImport = false
-    @State private var showImportOptions = false
     @State private var showLogin = false
     @State private var showSettings = false
     @State private var infoApp: ManagedApp?
@@ -144,7 +143,8 @@ struct AppsTab: View {
                                 allAppIDs: (store.containerApps + store.realApps).map(\.id),
                                 onLaunch: { launchIfIdle($0) },
                                 onSettings: { showSettings = true },
-                                onImport: { showImportOptions = true },
+                                onImport: { showPicker = true },
+                                onImportLink: { showURLImport = true },
                                 onDownloads: { segment = .downloads },
                                 menu: { app in menu(for: app) })
                 if segment == .downloads {
@@ -186,10 +186,6 @@ struct AppsTab: View {
             if let busy = store.busy, !(store.isDownloading && operationOnTile) { BusyOverlay(text: busy, progress: store.progress, isDownloading: store.isDownloading, hasKnownSize: store.downloadHasKnownSize, onCancel: { store.cancelDownload() }) }
         }
         .preferredColorScheme(.dark)
-        .confirmationDialog(tr("Import IPA", "استيراد IPA"), isPresented: $showImportOptions, titleVisibility: .visible) {
-            Button(tr("From Files", "من الملفات")) { showPicker = true }
-            Button(tr("From link", "من رابط")) { showURLImport = true }
-        }
         .sheet(isPresented: $showURLImport) {
             // Same downloader as the personal library; importIPA copies the file into
             // its own work folder, then the Container/Real App choice sheet follows.

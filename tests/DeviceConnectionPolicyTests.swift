@@ -6,7 +6,7 @@ final class DeviceConnectionPolicyTests: XCTestCase {
         XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: true, wifi: true))
         XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: true, wifi: false))
         XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: false, wifi: false))
-        XCTAssertFalse(CertificateInstall.shouldUseOTA(ownCertificateMode: false, wifi: true))
+        XCTAssertTrue(CertificateInstall.shouldUseOTA(ownCertificateMode: false, wifi: true))
     }
     func testAppleIDRealAppGuardIsScoped() {
         XCTAssertFalse(DeviceConnectionPolicy.mayInstallRealApp(wifi: false, tunnelRoute: true, hasPairing: true))
