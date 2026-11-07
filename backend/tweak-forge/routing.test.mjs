@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {routeOracle,splitSource} from './routing.mjs';
+import {assembleSource} from './contract.mjs';
+const r=(status,body)=>new Response(JSON.stringify(body),{status});
+const run=async responses=>{let calls=[];let result=await routeOracle('https://vm','secret','a'.repeat(32),async(u,i)=>{calls.push([u,i]);let x=responses.shift();if(x instanceof Error)throw x;return x;});return {result,calls};};
+test('accepted dispatch never calls fallback/status',async()=>{let x=await run([r(202,{accepted:true})]);assert.equal(x.result,'oracle');assert.equal(x.calls.length,1);});
+test('explicit queue rejection permits fallback',async()=>assert.equal((await run([r(503,{accepted:false})])).result,'github'));
+test('ambiguous timeout queries durable ownership before fallback',async()=>{let x=await run([Error('timeout'),r(200,{accepted:true,state:'queued'})]);assert.equal(x.result,'oracle');assert.equal(x.calls[1][1].method,'GET');});
+test('unknown after timeout permits fallback',async()=>assert.equal((await run([Error('timeout'),r(404,{accepted:false})])).result,'github'));
+test('ambiguous network never duplicates compile',async()=>assert.equal((await run([Error('timeout'),Error('timeout')])).result,'uncertain'));
+test('unauthorized or malformed success cannot trigger blind fallback',async()=>{for(const status of [200,400,401,500])assert.equal((await run([r(status,{}),r(500,{})])).result,'uncertain');});
+test('scaffold split and reconstruction preserves settings/crashguard',()=>{const code='%hook UIView\n- (void)test { %orig; }\n%end';const source=assembleSource({id:'id',bundleID:'a.b',code,settings:[{key:'dark',title:'d',default:true}],values:{}});const s=splitSource(source);assert.equal(s.code,code);assert.equal(s.prefix+s.code+s.suffix,source);assert.match(s.prefix,/#define MIRSA_SETTING_dark 1/);assert.match(s.prefix,/crashes >= 2/);assert.match(s.suffix,/%init\(Main\)/);assert.throws(()=>splitSource(code));});
