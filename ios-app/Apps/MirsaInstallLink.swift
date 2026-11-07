@@ -7,22 +7,30 @@ import CoreImage.CIFilterBuiltins
         let shareURL: URL
         let expiresAt: Date
     }
+    private struct Metadata: Sendable {
+        let bundleID: String
+        let version: String
+        let title: String
+        let bytes: Int
+    }
     static func create(signedIPA: URL) async throws -> Link {
-        let metadata: [String: Any] = try await Task.detached {
+        let unsignedMessage = linkText("Choose a signed IPA.", "اختار IPA موقّع.", "IPAی واژۆکراو هەڵبژێرە.", "IPA ya îmzekirî hilbijêre.")
+        let identityMessage = linkText("Missing application identity.", "معلومات هوية التطبيق ناقصة.", "ناسنامەی ئەپەکە کەمە.", "Nasnameya sepanê kêm e.")
+        let metadata: Metadata = try await Task.detached {
             let staged = try CertificateInstall.stageSignedApp(ipa: signedIPA, in: FileManager.default.temporaryDirectory)
             defer { try? FileManager.default.removeItem(at: staged.stage) }
             guard FileManager.default.fileExists(atPath: staged.app.appendingPathComponent("_CodeSignature/CodeResources").path) else {
-                throw SideloadError.message(linkText("Choose a signed IPA.", "اختار IPA موقّع.", "IPAی واژۆکراو هەڵبژێرە.", "IPA ya îmzekirî hilbijêre."))
+                throw SideloadError.message(unsignedMessage)
             }
             let info = try IPAEditorService.info(in: staged.app)
             guard let id = info["CFBundleIdentifier"] as? String, let version = info["CFBundleVersion"] as? String else {
-                throw SideloadError.message("Missing application identity.")
+                throw SideloadError.message(identityMessage)
             }
             let bytes = try signedIPA.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            return ["bundleID": id, "version": version, "title": (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? id, "bytes": bytes]
+            return Metadata(bundleID: id, version: version, title: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? id, bytes: bytes)
         }.value
         let bytes = try Data(contentsOf: signedIPA, options: .mappedIfSafe)
-        guard bytes.count <= 30 * 1024 * 1024 else { throw SideloadError.message("OTA: 30 MB maximum.") }
+        guard bytes.count <= 30 * 1024 * 1024 else { throw SideloadError.message(linkText("OTA: 30 MB maximum.", "أكبر حجم للرابط ٣٠ ميغابايت.", "زۆرترین قەبارە ٣٠ مێگابایتە.", "Mezinahiya herî zêde 30 MB e.")) }
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
@@ -33,7 +41,7 @@ import CoreImage.CIFilterBuiltins
         request.setValue(String(bytes.count), forHTTPHeaderField: "Content-Length")
         request.setValue("172800", forHTTPHeaderField: "x-mirsa-lifetime")
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
-        request.setValue(String(decoding: try JSONSerialization.data(withJSONObject: metadata), as: UTF8.self).addingPercentEncoding(withAllowedCharacters: allowed), forHTTPHeaderField: "x-mirsa-metadata")
+        request.setValue(String(decoding: try JSONSerialization.data(withJSONObject: ["bundleID": metadata.bundleID, "version": metadata.version, "title": metadata.title, "bytes": metadata.bytes]), as: UTF8.self).addingPercentEncoding(withAllowedCharacters: allowed), forHTTPHeaderField: "x-mirsa-metadata")
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil
         let session = URLSession(configuration: config, delegate: OTANoRedirect(), delegateQueue: nil)
@@ -84,7 +92,7 @@ struct MirsaInstallLinkView: View {
                     if link.expiresAt > context.date {
                         if let image = qr(link.shareURL) {
                             Image(uiImage: image).interpolation(.none).resizable().scaledToFit().frame(width: 220, height: 220).padding(12).background(.white)
-                                .accessibilityLabel("QR")
+                                .accessibilityLabel(linkText("Installation link QR code", "رمز QR لرابط التثبيت", "کۆدی QRی بەستەری دامەزراندن", "Koda QR ya girêdana sazkirinê"))
                         }
                         ShareLink(item: link.shareURL) { Label(linkText("Share link", "مشاركة الرابط", "هاوبەشکردنی بەستەر", "Girêdanê parve bike"), systemImage: "square.and.arrow.up") }
                         Text(link.expiresAt, style: .date).font(.caption)
