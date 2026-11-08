@@ -184,7 +184,7 @@ import ImageIO
                 let card = ForgeCommunityCard(
                     entry: ["name": "TweakryP0", "target_bundle_id": "com.ry0.ryP0",
                             "description": description, "mine": true],
-                    knownTargetIcon: icon, onUse: {}, onEdit: {}, onVersion: {}, onDelete: {}, onReport: {})
+                    knownTargetIcon: icon, onUse: {}, onEdit: {}, onVersion: {}, onDelete: {})
                 let view = VStack(alignment: .leading, spacing: 20) {
                     Text(ForgeCommunityCard.title).font(.system(size: 28, weight: .bold))
                         .foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .trailing)

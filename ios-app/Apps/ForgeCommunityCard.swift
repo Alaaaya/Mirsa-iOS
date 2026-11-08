@@ -37,7 +37,6 @@ struct ForgeCommunityCard: View {
     var onEdit: () -> Void
     var onVersion: () -> Void
     var onDelete: () -> Void
-    var onReport: () -> Void
     @ObservedObject private var library = PersonalAppsLibrary.shared
     @ObservedObject private var store = ForgeStore.shared
     @State private var extractedIcon: UIImage?
@@ -58,7 +57,7 @@ struct ForgeCommunityCard: View {
             tr("No description provided.", "ما انضاف وصف لهالتويك.", ckb: "وەسفێک نەدراوە.", kmr: "Danasîn nehatiye dayîn.")
     }
 
-    enum Action: CaseIterable { case use, edit, version, delete, report }
+    enum Action: CaseIterable { case use, edit, version, delete }
 
     static func explanation(_ action: Action, uploaded: Bool = false) -> String {
         switch action {
@@ -74,8 +73,6 @@ struct ForgeCommunityCard: View {
                 : tr("Upload your latest tweak version in place of the old one.", "ترفع آخر نسخة من تويكك بدل القديمة", ckb: "نوێترین وەشانی تویکەکەت لە جیاتی کۆنەکە بار بکە.", kmr: "Guhertoya herî nû ya tweaka xwe li şûna ya kevn bar bike.")
         case .delete:
             return tr("Remove it from the community for everyone, after confirmation.", "تشيله من المجتمع عند الكل، بعد تأكيدك.", ckb: "دوای پشتڕاستکردنەوە، بۆ هەموو لە کۆمەڵگا بیسڕەوە.", kmr: "Piştî piştrastkirinê, ji civakê ji bo herkesî jê bibe.")
-        case .report:
-            return tr("Send a report about this community tweak.", "تبعت بلاغ عن هالتويك بالمجتمع.", ckb: "ڕاپۆرتێک دەربارەی ئەم تویکە بنێرە.", kmr: "Derbarê vê tweaka civakê de raporekê bişîne.")
         }
     }
 
@@ -121,8 +118,6 @@ struct ForgeCommunityCard: View {
                     // Keep the equal-width slot but do not enable a code rebuild for uploaded binaries.
                     action("square.on.square", tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû"), onVersion, enabled: !item.uploaded)
                     action("trash", tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), onDelete, destructive: true)
-                } else {
-                    action("flag", tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne"), onReport)
                 }
             }
             // A compact, readable legend keeps all four equal action buttons unchanged.
@@ -132,8 +127,6 @@ struct ForgeCommunityCard: View {
                     helper(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne"), .edit)
                     helper(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû"), .version)
                     helper(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), .delete)
-                } else {
-                    helper(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne"), .report)
                 }
             }
         }
