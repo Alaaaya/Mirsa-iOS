@@ -50,39 +50,77 @@ import ImageIO
                             .environment(\.dynamicTypeSize, largeFont ? .accessibility5 : .large)
                             .environment(\.layoutDirection, .leftToRight)
                             .ignoresSafeArea()
-                        let host = UIHostingController(rootView: view)
-                        host.loadViewIfNeeded()
-                        let fit = host.sizeThatFits(in: CGSize(width: 320, height: 10000))
-                        XCTAssertTrue(fit.height.isFinite && fit.height > 0)
-                        XCTAssertLessThanOrEqual(fit.width, 321)
-                        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 2000))
+                        // Keep the render-server surface phone-sized even at AX5.
+                        // Capture the entire scrollable guide in tiles, never one giant window.
+                        let host = UIHostingController(rootView: ScrollView { view }
+                            .scrollIndicators(.hidden).ignoresSafeArea())
+                        let scene = UIApplication.shared.connectedScenes
+                            .compactMap { $0 as? UIWindowScene }.first
+                        let window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow(frame: .zero)
+                        window.frame = CGRect(x: 0, y: 0, width: 320, height: 852)
                         window.rootViewController = host
-                        window.isHidden = false
                         window.makeKeyAndVisible()
                         host.view.frame = window.bounds
                         host.view.setNeedsLayout()
                         host.view.layoutIfNeeded()
                         RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-                        // Re-measure inside the live window so wrapped text is fully counted.
-                        let live = host.sizeThatFits(in: CGSize(width: 320, height: 10000))
-                        let finalHeight = ceil(max(fit.height, live.height)) + 8
-                        window.frame = CGRect(x: 0, y: 0, width: 320, height: finalHeight)
-                        host.view.frame = window.bounds
-                        host.view.setNeedsLayout()
+                        let name = "guide-\(feature.rawValue)-\(language.rawValue)-\(seen ? "seen" : "first")-\(largeFont ? "AX5" : "normal")"
+                        guard let scroll = Self.scrollView(in: host.view) else {
+                            XCTFail("Missing guide scroll viewport: " + name)
+                            window.isHidden = true; window.rootViewController = nil
+                            continue
+                        }
+                        scroll.contentInsetAdjustmentBehavior = .never
                         host.view.layoutIfNeeded()
-                        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-                        let image = Self.snapshot(host.view)
-                        XCTAssertTrue(Self.hasVisiblePixels(image), "blank guide snapshot")
-                        window.isHidden = true
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                        let height = ceil(scroll.contentSize.height)
+                        XCTAssertTrue(height.isFinite && height > 0, name)
+                        XCTAssertLessThanOrEqual(scroll.contentSize.width, 321, name)
+                        XCTAssertEqual(host.view.effectiveUserInterfaceLayoutDirection, .leftToRight, name)
+                        let format = UIGraphicsImageRendererFormat()
+                        format.scale = 1
+                        format.opaque = true
+                        var tiles: [(UIImage, CGFloat, CGFloat, CGFloat)] = []
+                        var y: CGFloat = 0
+                        while y < height {
+                            let offset = min(y, max(0, height - scroll.bounds.height))
+                            scroll.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+                            scroll.layoutIfNeeded()
+                            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                            let tile = Self.snapshot(host.view)
+                            XCTAssertTrue(Self.hasVisiblePixels(tile), "blank guide tile: " + name + " y=\(y)")
+                            let count = min(scroll.bounds.height, height - y)
+                            tiles.append((tile, y, y - offset, count))
+                            y += count
+                        }
+                        let image = UIGraphicsImageRenderer(size: CGSize(width: 320, height: height), format: format).image { ctx in
+                            UIColor.black.setFill()
+                            ctx.fill(CGRect(x: 0, y: 0, width: 320, height: height))
+                            for (tile, top, crop, count) in tiles {
+                                ctx.cgContext.saveGState()
+                                ctx.cgContext.clip(to: CGRect(x: 0, y: top, width: 320, height: count))
+                                tile.draw(at: CGPoint(x: 0, y: top - crop))
+                                ctx.cgContext.restoreGState()
+                            }
+                        }
+                        XCTAssertTrue(Self.hasVisiblePixels(image), "blank guide snapshot: " + name)
                         XCTAssertEqual(image.size.width, 320)
+                        XCTAssertEqual(image.size.height, height, "Incomplete guide capture: " + name)
+                        window.isHidden = true
+                        window.rootViewController = nil
                         let attachment = XCTAttachment(image: image)
-                        attachment.name = "guide-\(feature.rawValue)-\(language.rawValue)-\(seen ? "seen" : "first")-\(largeFont ? "AX5" : "normal")"
+                        attachment.name = name
                         attachment.lifetime = .keepAlways
                         add(attachment)
                     }
                 }
             }
         }
+    }
+
+    private static func scrollView(in view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView { return scroll }
+        return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
     }
 
     /// Retries the window snapshot (the simulator render server can transiently fail) and
