@@ -174,7 +174,7 @@ struct ForgeProjectView: View {
                     TextEditor(text: $prompt).frame(height: 90).scrollContentBackground(.hidden).padding(6).background(Color.black.opacity(0.3)).cornerRadius(10).foregroundStyle(.white)
                     HStack {
                         forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run { try await store.generate(id, prompt: prompt); prompt = "" } }
-                        forgeButton("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) { run { shareURL = try await store.injectInspector(id) } }
+                        forgeButton("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) { run { let ipa = try await store.injectInspector(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                     }
                 }.padding(14).background(forgeCard).cornerRadius(16)
@@ -191,7 +191,7 @@ struct ForgeProjectView: View {
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
                     if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, exporting the dylib and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
                     HStack {
-                        forgeButton("syringe.fill", tr("Inject", "احقن", ckb: "بچەسپێنە", kmr: "Bixe")) { run { shareURL = try await store.inject(id) } }
+                        forgeButton("syringe.fill", tr("Inject", "احقن", ckb: "بچەسپێنە", kmr: "Bixe")) { run { let ipa = try await store.inject(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                         forgeButton("square.and.arrow.up", ".dylib") { run { shareURL = try await store.exportDylib(id); debID = id } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
