@@ -23,6 +23,10 @@ struct ForgeShareSheet: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
 }
+private func forgeLabel(_ icon: String, _ title: String) -> some View {
+    VStack(spacing: 4) { Image(systemName: icon); Text(title).font(.caption.bold()).lineLimit(1) }
+        .frame(maxWidth: .infinity).padding(.vertical, 10).background(Color.white.opacity(0.12)).foregroundStyle(.white).cornerRadius(12)
+}
 private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () -> Void) -> some View {
     Button(action: run) {
         VStack(spacing: 4) { Image(systemName: icon); Text(title).font(.caption.bold()).lineLimit(1) }
@@ -186,6 +190,14 @@ struct ForgeProjectView: View {
     @State private var draft = ""
     @State private var updating = false
     @State private var fullLog: String?
+    @State private var showInspector = false
+    @State private var actionVersion: ForgeVersion?
+    @State private var renameDraft = ""
+    @State private var versionMenu = false
+    @State private var renaming = false
+    @State private var codeEditing = false
+    @State private var confirmDelete = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
@@ -193,28 +205,36 @@ struct ForgeProjectView: View {
 
     @ViewBuilder private func content(_ p: ForgeProject) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(p.appName).font(.title2.bold()).foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Button { dismiss() } label: { Image(systemName: "chevron.left").font(.title3.weight(.semibold)).frame(width: 36, height: 36) }
+                    Text(p.appName).font(.title2.bold()).lineLimit(1)
+                    Spacer()
+                }.foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: $prompt).frame(height: 90).scrollContentBackground(.hidden).padding(6).background(Color.black.opacity(0.3)).cornerRadius(10).foregroundStyle(.white)
+                        .overlay(alignment: .topLeading) { if prompt.isEmpty { Text(tr("Describe the tweak you want…", "اوصف التويك اللي بدك ياه…", ckb: "تویکەکە باس بکە…", kmr: "Tweaka xwe vebêje…")).foregroundStyle(.white.opacity(0.4)).padding(.horizontal, 12).padding(.vertical, 14).allowsHitTesting(false) } }
                     HStack {
                         forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run { try await store.generate(id, prompt: prompt); prompt = "" } }
-                        forgeButton("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) { run { let ipa = try await store.injectInspector(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
-                            .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
+                        Menu {
+                            Button(tr("Inject inspector", "احقن المفتش", ckb: "پشکنەر بچەسپێنە", kmr: "Lêkolîner bixe")) { run { let ipa = try await store.injectInspector(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
+                                .disabled(!store.builderReady)
+                            Button(tr("Capture / import", "التقاط / استيراد", ckb: "وەرگرتن / هاوردە", kmr: "Girtin / import")) { showInspector = true }
+                        } label: { forgeLabel("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) }
                     }
                 }.padding(14).background(forgeCard).cornerRadius(16)
-                ForgeFeaturesView(id: id, prompt: $prompt)
+                ForgeFeaturesView(id: id, prompt: $prompt, showInspector: $showInspector)
                 if let pending = store.pendingGalleryCode {
                     forgeButton("square.and.arrow.down", tr("Use community tweak", "استخدم تويك المجتمع", ckb: "تویکی کۆمەڵگا بەکاربهێنە", kmr: "Tweaka civakê bi kar bîne")) { store.editCode(id, code: pending); store.pendingGalleryCode = nil }
                 }
                 if let v = p.currentVersion {
-                    VStack(alignment: .leading, spacing: 8) {
+                    if !v.settings.isEmpty { VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Settings", "الإعدادات", ckb: "ڕێکخستنەکان", kmr: "Mîheng")).font(.headline).foregroundStyle(.white)
                         ForEach(v.settings) { s in
                             Toggle(s.title, isOn: Binding(get: { p.values[s.key] ?? s.default }, set: { store.setValue(id, key: s.key, $0) })).foregroundStyle(.white)
                         }
                         if store.needsRebuild(p) { Text(tr("Toggles apply on the next build.", "الخيارات بتنطبق بالبناء الجاي.", ckb: "گۆڕانکاریەکان لە دروستکردنی داهاتوو جێبەجێ دەبن.", kmr: "Vebijark di çêkirina din de têne bicihanîn.")).font(.caption).foregroundStyle(.orange) }
-                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
+                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16) }
                     if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, exporting the dylib and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
                     HStack {
                         forgeButton("syringe.fill", tr("Inject", "احقن", ckb: "بچەسپێنە", kmr: "Bixe")) { run { let ipa = try await store.inject(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
@@ -233,12 +253,8 @@ struct ForgeProjectView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Versions", "النسخ", ckb: "وەشانەکان", kmr: "Guhertin")).font(.headline).foregroundStyle(.white)
                         ForEach(Array(p.versions.enumerated().reversed()), id: \.element.id) { i, ver in
-                            HStack {
-                                Text("v\(i + 1) · " + ver.prompt).font(.footnote).foregroundStyle(.white).lineLimit(2)
-                                Spacer()
-                                if ver.id == p.currentVersion?.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                                else { Button(tr("Revert", "ارجع", ckb: "بگەڕێوە", kmr: "Vegere")) { store.revert(id, to: ver.id) }.font(.caption.bold()) }
-                            }
+                            ForgeVersionRow(label: "v\(i + 1) · " + (ver.title ?? ver.prompt), active: ver.id == p.currentVersion?.id,
+                                onRevert: { store.revert(id, to: ver.id) }, onEdit: { actionVersion = ver; renameDraft = ver.title ?? ""; versionMenu = true }, onDelete: { actionVersion = ver; confirmDelete = true })
                         }
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
                 }
@@ -249,12 +265,30 @@ struct ForgeProjectView: View {
                         ScrollView(.horizontal) { Text(fullLog).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                     }.foregroundStyle(.white).padding(14).background(forgeCard).cornerRadius(16)
                 }
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(14).padding(.bottom, 110).frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
         .task { await store.refreshStatus() }
-        .toolbarBackground(forgeBG, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline)
+        .navigationBarHidden(true)
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
+        .confirmationDialog(tr("Edit version", "تعديل النسخة", ckb: "دەستکاری وەشان", kmr: "Guhertoyê biguherîne"), isPresented: $versionMenu) {
+            Button(tr("Rename", "تغيير الاسم", ckb: "ناو بگۆڕە", kmr: "Nav biguherîne")) { renaming = true }
+            Button(tr("Edit code (new version)", "تعديل الكود (نسخة جديدة)", ckb: "کۆد (وەشانی نوێ)", kmr: "Kod (guhertoya nû)")) { draft = actionVersion?.code ?? ""; codeEditing = true }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {}
+        }
+        .alert(tr("Rename", "تغيير الاسم", ckb: "ناو بگۆڕە", kmr: "Nav biguherîne"), isPresented: $renaming) {
+            TextField("", text: $renameDraft)
+            Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { if let v = actionVersion { store.renameVersion(id, v.id, to: renameDraft) } }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {}
+        }
+        .alert(tr("Delete this version?", "حذف هالنسخة؟", ckb: "ئەم وەشانە بسڕدرێتەوە؟", kmr: "Ev guhertoyê jê bibe?"), isPresented: $confirmDelete) {
+            Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { if let v = actionVersion { do { try store.deleteVersion(id, v.id) } catch { self.error = error.localizedDescription } } }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {}
+        } message: { Text(tr("Only this version's files are deleted. The app and other versions stay.", "بتنحذف ملفات هالنسخة بس. التطبيق والنسخ التانية بتضل.", ckb: "تەنها فایلەکانی ئەم وەشانە دەسڕدرێنەوە.", kmr: "Tenê pelên vê guhertoyê tên jêbirin.")) }
+        .sheet(isPresented: $codeEditing) {
+            NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { if let v = actionVersion { store.editVersionCode(id, v.id, code: draft) }; codeEditing = false } } } }
+        }
         .sheet(isPresented: $editing) {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { store.editCode(id, code: draft); editing = false } } } }
@@ -377,5 +411,34 @@ private struct ForgeLibraryTargetPicker: View {
             .overlay { if working { ProgressView() } }
             .mirsaScreen()
         }.environment(\.layoutDirection, .leftToRight).interactiveDismissDisabled(working)
+    }
+}
+
+
+struct ForgeVersionRow: View {
+    let label: String; let active: Bool
+    let onRevert: () -> Void; let onEdit: () -> Void; let onDelete: () -> Void
+    @State private var offset: CGFloat = 0
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                Button(action: { offset = 0; onEdit() }) { Text(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")).font(.caption.bold()).frame(width: 70, height: 44).background(Color.blue) }
+                Button(action: { offset = 0; onDelete() }) { Text(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe")).font(.caption.bold()).frame(width: 70, height: 44).background(Color.red) }
+            }.foregroundStyle(.white).cornerRadius(10)
+            HStack {
+                Text(label).font(.footnote).foregroundStyle(.white).lineLimit(2)
+                Spacer()
+                if active { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                else { Button(tr("Revert", "ارجع", ckb: "بگەڕێوە", kmr: "Vegere"), action: onRevert).font(.caption.bold()) }
+            }
+            .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 44).background(forgeCard)
+            .offset(x: offset)
+            .contextMenu {
+                Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne"), action: onEdit)
+                Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive, action: onDelete)
+            }
+            .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { g in if abs(g.translation.width) > abs(g.translation.height) { offset = max(-140, min(0, g.translation.width)) } }
+                .onEnded { g in withAnimation(.easeOut(duration: 0.15)) { offset = g.translation.width < -60 ? -140 : 0 } })
+        }.clipped()
     }
 }
