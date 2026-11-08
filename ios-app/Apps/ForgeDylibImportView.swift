@@ -31,7 +31,7 @@ extension ForgeStore {
     /// Companion tweak: a NEW tweak made by the AI from a bounded summary. The binary itself is never modified.
     func generateCompanion(_ id: UUID, from v: ForgeVersion, request: String) async throws {
         guard let info = v.importedInfo else { return }
-        let prompt = tr("Create a NEW companion tweak (do not modify the binary). Request: ", "اعمل تويك مرافق جديد (بدون تعديل الباينري). الطلب: ", ckb: "تویکێکی هاوەڵی نوێ دروست بکە. داواکاری: ", kmr: "Tweakeke nû ya hevalbend çêke. Daxwaz: ") + request + "\n\nBinary summary (not guaranteed exact):\n" + String(info.summary.prefix(4000))
+        let prompt = tr("Create a NEW companion tweak (do not modify the binary). Request: ", "اعمل تويك مرافق جديد (بدون تعديل الباينري). الطلب: ", ckb: "تویکێکی هاوەڵی نوێ دروست بکە. داواکاری: ", kmr: "Tweakeke nû ya hevalbend çêke. Daxwaz: ") + request + "\n\nBinary summary (not guaranteed exact):\n" + ForgeDylibInspector.companionSummary(info)
         try await generate(id, prompt: prompt)
     }
 }

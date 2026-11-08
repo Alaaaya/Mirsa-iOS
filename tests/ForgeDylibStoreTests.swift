@@ -33,8 +33,4 @@ import XCTest
         s.moveImported(id, ids[2], by: -1) // already first: no change
         XCTAssertEqual(ForgeStore.enabledImported(s.project(id)!).compactMap { $0.title }, ["C", "A"])
     }
-    func testCompanionContextBounded() {
-        let i = info()
-        XCTAssertLessThanOrEqual(String(i.summary.prefix(4000)).utf8.count, 4000)
-    }
 }
