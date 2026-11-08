@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct ForgeFeaturesView: View {
     let id: UUID
     @Binding var prompt: String
+    @Binding var showInspector: Bool
     @ObservedObject private var store = ForgeStore.shared
     @ObservedObject private var library = PersonalAppsLibrary.shared
     @State private var suggestions: [String] = []
@@ -40,7 +41,6 @@ struct ForgeFeaturesView: View {
             imageSection
             mergeSection
             multiAppSection
-            inspectorSection
             repairSection
             if !message.isEmpty { Text(message).font(.footnote).textSelection(.enabled).foregroundStyle(.orange) }
             if busy { ProgressView() }
@@ -61,6 +61,18 @@ struct ForgeFeaturesView: View {
                 cleanJPEG = try ForgeFeaturePolicy.jpeg(data)
             }
         }
+        .sheet(isPresented: $showInspector) { inspectorSheet }
+    }
+
+    private var inspectorSheet: some View {
+        NavigationStack {
+            ScrollView { inspectorBody.padding(14).frame(maxWidth: .infinity, alignment: .leading) }
+                .background(forgeCard.ignoresSafeArea())
+                .navigationTitle(text("Inspector", "المفتش")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(text("Done", "تم")) { showInspector = false } } }
+        }
+        .foregroundStyle(.white).font(.subheadline)
+        .environment(\.layoutDirection, .leftToRight)
         .fileImporter(isPresented: $importingCapture, allowedContentTypes: [.json]) { result in
             guard case .success(let url) = result, let p = store.project(id) else { return }
             do {
@@ -171,8 +183,8 @@ struct ForgeFeaturesView: View {
             }.padding(.top, 8)
         }
     }
-    private var inspectorSection: some View {
-        DisclosureGroup(text("Inspector", "المفتش")) {
+    private var inspectorBody: some View {
+        Group {
             VStack(alignment: .leading, spacing: 8) {
                 Text(text("Inject the inspector above, install your app copy, then long-press inside it. Only the active foreground UIKit scene is captured, with sensitive text redacted. Preview before copying. Save that JSON to Files and import it here.", "احقن المفتش من فوق وثبّت نسخة التطبيق، بعدها اضغط مطوّل داخله. بيلتقط UIKit للشاشة المفتوحة بس وبخفي النصوص الحساسة. عاين قبل النسخ، احفظ JSON بالملفات واستورده هون.")).font(.caption)
                 Text(text("SwiftUI/WebView internals may be unavailable. No other-app container access. Live tweak log streaming is unavailable; imported logs are only the inspector's actual local events.", "تفاصيل SwiftUI وWebView ممكن ما تظهر. ما في وصول لملفات تطبيقات ثانية. البث المباشر لسجل التويك مو متاح؛ السجل المستورد بس أحداث المفتش الفعلية.")).font(.caption).foregroundStyle(.orange)

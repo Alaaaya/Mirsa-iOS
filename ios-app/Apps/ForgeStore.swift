@@ -6,6 +6,7 @@ struct ForgeVersion: Codable, Identifiable, Hashable {
     var id = UUID(); var created = Date(); var prompt: String; var code: String
     var settings: [ForgeSetting]; var explain: String; var builtWithValues: [String: Bool]?
     var guardID: UUID?
+    var title: String?
     var repairChainID: UUID?
     var tweakID: UUID { guardID ?? id }
     var hasBuild: Bool { builtWithValues != nil }
@@ -151,6 +152,35 @@ struct ForgeProject: Codable, Identifiable {
     func revert(_ id: UUID, to version: UUID) {
         update(id) { p in p.current = version
             if let v = p.versions.first(where: { $0.id == version }) { p.values = Dictionary(uniqueKeysWithValues: v.settings.map { ($0.key, p.values[$0.key] ?? $0.default) }) } }
+    }
+    func renameVersion(_ id: UUID, _ versionID: UUID, to title: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        update(id) { p in if let i = p.versions.firstIndex(where: { $0.id == versionID }) { p.versions[i].title = t.isEmpty ? nil : t } }
+    }
+    /// Code edit of any version: appends a NEW version, the original stays untouched.
+    func editVersionCode(_ id: UUID, _ versionID: UUID, code: String) {
+        guard let p = project(id), let src = p.versions.first(where: { $0.id == versionID }) else { return }
+        var v = ForgeVersion(prompt: src.prompt, code: code, settings: src.settings, explain: src.explain)
+        v.title = src.title.map { $0 + " *" }
+        addVersion(id, v)
+    }
+    /// Deletes only this version's own dylib (never a file another version uses). Files are removed first; on failure nothing changes.
+    /// If it was active, falls back to the previous version, else the next one, else none (project and IPA are kept).
+    func deleteVersion(_ id: UUID, _ versionID: UUID) throws {
+        guard let p = project(id), let idx = p.versions.firstIndex(where: { $0.id == versionID }) else { return }
+        let fm = FileManager.default
+        let lib = dylibURL(p, p.versions[idx])
+        let shared = p.versions.enumerated().contains { $0.offset != idx && dylibURL(p, $0.element) == lib }
+        if !shared && fm.fileExists(atPath: lib.path) { try fm.removeItem(at: lib) }
+        update(id) { p in
+            let wasCurrent = p.currentVersion?.id == versionID
+            p.versions.remove(at: idx)
+            if wasCurrent || p.current == versionID {
+                let next = p.versions.isEmpty ? nil : p.versions[max(0, idx - 1)]
+                p.current = next?.id
+                if let n = next { p.values = Dictionary(uniqueKeysWithValues: n.settings.map { ($0.key, p.values[$0.key] ?? $0.default) }) } else { p.values = [:] }
+            }
+        }
     }
     func setValue(_ id: UUID, key: String, _ on: Bool) { update(id) { $0.values[key] = on } }
 
