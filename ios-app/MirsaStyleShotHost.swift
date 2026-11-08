@@ -17,16 +17,26 @@ struct MirsaStyleShotHost: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var pendingHide: String?
 
-    private static let fixtureApps: [ManagedApp] = (1...8).map { i in
-        ManagedApp(id: "com.example.style\(i)", name: ["Telegram", "Spotify", "YouTube", "Notes Pro", "Camera+", "Weather", "Reader", "Music Studio"][i - 1],
-                   version: "2.\(i).0", sizeBytes: Int64(i) * 21_000_000, location: i % 3 == 0 ? .real : .container,
-                   installedBundleID: nil, expires: i % 3 == 0 ? Date().addingTimeInterval(5 * 86_400) : nil, signedSerial: nil,
-                   wantsNotifications: false, hasExtensions: false, addedAt: Date(timeIntervalSince1970: Double(i)))
+    private static let appNames = ["Telegram", "Spotify", "YouTube", "Notes Pro", "Camera+", "Weather", "Reader", "Music Studio"]
+    private static let personalNames = ["Instagram", "WhatsApp", "Snapchat", "Twitch", "Discord", "Reddit"]
+
+    private static func fixtureApp(_ i: Int) -> ManagedApp {
+        let real: Bool = i % 3 == 0
+        let size: Int64 = Int64(i) * 21_000_000
+        let expiry: Date? = real ? Date().addingTimeInterval(5 * 86_400) : nil
+        let location: AppLocation = real ? .real : .container
+        return ManagedApp(id: "com.example.style\(i)", name: appNames[i - 1], version: "2.\(i).0", sizeBytes: size,
+                          location: location, installedBundleID: nil, expires: expiry, signedSerial: nil,
+                          wantsNotifications: false, hasExtensions: false, addedAt: Date(timeIntervalSince1970: Double(i)))
     }
-    private static let fixturePersonal: [PersonalLibraryApp] = (1...6).map { i in
-        PersonalLibraryApp(id: UUID(uuidString: "00000000-0000-0000-0000-00000000010\(i)")!, name: ["Instagram", "WhatsApp", "Snapchat", "Twitch", "Discord", "Reddit"][i - 1],
-                           bundleID: "com.example.personal\(i)", version: "1.\(i)", signed: i % 2 == 0, date: Date(timeIntervalSince1970: Double(i)))
+    private static func fixturePersonalApp(_ i: Int) -> PersonalLibraryApp {
+        let id: UUID = UUID(uuidString: "00000000-0000-0000-0000-00000000010\(i)") ?? UUID()
+        let signed: Bool = i % 2 == 0
+        return PersonalLibraryApp(id: id, name: personalNames[i - 1], bundleID: "com.example.personal\(i)",
+                                  version: "1.\(i)", signed: signed, date: Date(timeIntervalSince1970: Double(i)))
     }
+    private static let fixtureApps: [ManagedApp] = (1...8).map(fixtureApp)
+    private static let fixturePersonal: [PersonalLibraryApp] = (1...6).map(fixturePersonalApp)
 
     var body: some View {
         switch page {
