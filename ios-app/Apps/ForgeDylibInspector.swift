@@ -96,6 +96,10 @@ enum ForgeDylibInspector {
             guard set.count < maximumItems, !text.isEmpty else { return }
             set.insert(text)
         }
+        var commandBudget = 8192
+        var sectionBudget = 4096
+        var symbolBudget = 20_000
+        var stringBudget = 1024 * 1024
         for slice in slices {
             let base = slice.offset, end = base + slice.size
             guard try r.u32(base) == 0xfeedfacf else { throw ForgeDylibImportError.invalidBinary }
@@ -107,6 +111,8 @@ enum ForgeDylibInspector {
             guard try r.u32(base + 12) == 6 else { throw ForgeDylibImportError.invalidBinary } // MH_DYLIB only
             let count = Int(try r.u32(base + 16)), commandBytes = Int(try r.u32(base + 20))
             guard count <= 4096, commandBytes <= slice.size - 32, count <= commandBytes / 8 else { throw ForgeDylibImportError.invalidBinary }
+            guard count <= commandBudget else { throw ForgeDylibImportError.invalidBinary }
+            commandBudget -= count
             let commandsEnd = base + 32 + commandBytes
             var cursor = base + 32
             for _ in 0..<count {
@@ -124,7 +130,8 @@ enum ForgeDylibInspector {
                 } else if cmd == 0x19 { // LC_SEGMENT_64
                     guard length >= 72 else { throw ForgeDylibImportError.invalidBinary }
                     let sectionCount = Int(try r.u32(cursor + 64))
-                    guard sectionCount <= (length - 72) / 80 else { throw ForgeDylibImportError.invalidBinary }
+                    guard sectionCount <= (length - 72) / 80, sectionCount <= sectionBudget else { throw ForgeDylibImportError.invalidBinary }
+                    sectionBudget -= sectionCount
                     let segmentOffset = try r.integer64(cursor + 40), segmentSize = try r.integer64(cursor + 48)
                     guard segmentOffset <= slice.size, segmentSize <= slice.size - segmentOffset else { throw ForgeDylibImportError.invalidBinary }
                     for i in 0..<sectionCount {
@@ -136,7 +143,10 @@ enum ForgeDylibInspector {
                         guard sectionOffset <= slice.size, sectionSize <= slice.size - sectionOffset else { throw ForgeDylibImportError.invalidBinary }
                         if name == "__objc_classname" || name == "__objc_methname" {
                             // Iterate with a strict byte budget as even valid binaries may contain enormous string sections.
-                            let start = base + sectionOffset, stop = start + min(sectionSize, 256 * 1024)
+                            let start = base + sectionOffset
+                            let scanBytes = min(sectionSize, min(256 * 1024, stringBudget))
+                            stringBudget -= scanBytes
+                            let stop = start + scanBytes
                             var p = start
                             while p < stop {
                                 let scanEnd = min(stop, p + maximumStringBytes + 1)
@@ -154,7 +164,9 @@ enum ForgeDylibInspector {
                     let strings = Int(try r.u32(cursor + 16)), stringsSize = Int(try r.u32(cursor + 20))
                     guard offset <= slice.size, n <= (slice.size - offset) / 16,
                           strings <= slice.size, stringsSize <= slice.size - strings else { throw ForgeDylibImportError.invalidBinary }
-                    for i in 0..<min(n, 20_000) {
+                    let inspectedSymbols = min(n, symbolBudget)
+                    symbolBudget -= inspectedSymbols
+                    for i in 0..<inspectedSymbols {
                         let symbol = base + offset + i * 16
                         let strx = Int(try r.u32(symbol))
                         guard strx < stringsSize else { if strx == 0 { continue }; throw ForgeDylibImportError.invalidBinary }
