@@ -140,6 +140,28 @@ import ImageIO
         XCTAssertNil(ForgeCommunityEntry(own).groundedDescription(projects: [project]))
     }
 
+    func testCommunityActionExplanationsInEveryLanguageMatchHandlers() {
+        let previous = AppLanguageStore.shared.current
+        defer { AppLanguageStore.shared.set(previous) }
+        var versions = Set<String>()
+        for language in AppLanguage.allCases {
+            AppLanguageStore.shared.set(language)
+            let explanations = ForgeCommunityCard.Action.allCases.map {
+                ForgeCommunityCard.explanation($0)
+            }
+            XCTAssertEqual(Set(explanations).count, 5)
+            XCTAssertTrue(explanations.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            XCTAssertNotEqual(ForgeCommunityCard.explanation(.use), ForgeCommunityCard.explanation(.use, uploaded: true))
+            XCTAssertNotEqual(ForgeCommunityCard.explanation(.version), ForgeCommunityCard.explanation(.version, uploaded: true))
+            versions.insert(ForgeCommunityCard.explanation(.version))
+        }
+        XCTAssertEqual(versions.count, 4)
+        AppLanguageStore.shared.set(.arabic)
+        XCTAssertEqual(ForgeCommunityCard.explanation(.version), "ترفع آخر نسخة من تويكك بدل القديمة")
+        XCTAssertTrue(ForgeCommunityCard.explanation(.edit).contains("اسم"))
+        XCTAssertTrue(ForgeCommunityCard.explanation(.delete).contains("المجتمع"))
+    }
+
     func testCommunityOriginalApprovedCardSnapshotsInFourLanguages() throws {
         let previous = AppLanguageStore.shared.current
         let savedProjects = ForgeStore.shared.projects
