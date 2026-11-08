@@ -335,6 +335,7 @@ final class PersonalAppsLibrary: ObservableObject {
             try? FileManager.default.removeItem(at: iconURL(app))
             throw error
         }
+        MirsaVersionArchive.shared.archive(url(app), bundleID: app.bundleID, name: app.name, version: app.version, signed: app.signed)
         onAdded?(app)
     }
 }
