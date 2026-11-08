@@ -35,7 +35,7 @@ struct MirsaApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if MirsaUITestHarness.active { MirsaUITestHarnessView() } else if AppsStore.isSetupMode { SetupView() } else { ContentView() }
+                if let page = MirsaStyleShots.page { MirsaStyleShotHost(page: page) } else if MirsaUITestHarness.active { MirsaUITestHarnessView() } else if AppsStore.isSetupMode { SetupView() } else { ContentView() }
             }
             .environmentObject(vm)
             .environment(\.layoutDirection, .leftToRight)
