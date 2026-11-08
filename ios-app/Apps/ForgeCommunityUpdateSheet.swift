@@ -1,8 +1,39 @@
 import SwiftUI
 
+/// Pure, testable decisions behind the update sheet and the consumer badge.
+enum ForgeCommunityUpdateLogic {
+    /// Facts only. Returns nil when the published code could not be fetched: never a misleading zero.
+    static func changeLines(publishedCode: String?, publishedSettings: Int?, local: ForgeVersion?) -> [String]? {
+        guard let pub = publishedCode, let lv = local else { return nil }
+        let a = pub.split(separator: "\n", omittingEmptySubsequences: false), b = lv.code.split(separator: "\n", omittingEmptySubsequences: false)
+        var add = 0, rem = 0
+        for c in b.difference(from: a) { if case .insert = c { add += 1 } else { rem += 1 } }
+        if add == 0 && rem == 0 && (publishedSettings == nil || publishedSettings == lv.settings.count) {
+            return [tr("Code is identical to the published version.", "الكود نفس المنشور.", ckb: "کۆدەکە وەک بڵاوکراوە.", kmr: "Kod wekî ya weşandî ye.")]
+        }
+        var out = [tr("\(add) lines added, \(rem) removed", "انضاف \(add) سطر، انحذف \(rem)", ckb: "\(add) دێڕ زیادکرا، \(rem) سڕایەوە", kmr: "\(add) rêz hat zêdekirin, \(rem) hat jêbirin")]
+        if let ps = publishedSettings, ps != lv.settings.count {
+            out.append(tr("Settings: \(ps) to \(lv.settings.count)", "الإعدادات: \(ps) إلى \(lv.settings.count)", ckb: "ڕێکخستنەکان: \(ps) → \(lv.settings.count)", kmr: "Mîheng: \(ps) → \(lv.settings.count)"))
+        }
+        return out
+    }
+    static func canPublish(uploaded: Bool, publishedVersion: Int?, local: ForgeLocalVersion?, changelog: String, publishedLoaded: Bool, working: Bool) -> Bool {
+        !working && !uploaded && publishedVersion != nil && local != nil && publishedLoaded
+            && !changelog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    /// Badge only for another user's entry and a local copy really created from THIS entry at an older published version.
+    static func usedOlderVersion(entryID: String, published: Int?, mine: Bool, projects: [ForgeProject]) -> Int? {
+        guard !mine, !entryID.isEmpty, let pub = published else { return nil }
+        let used = projects.flatMap(\.versions).filter { $0.communitySourceID == entryID }.compactMap(\.usedPublishedVersion)
+        guard let m = used.max(), m < pub else { return nil }
+        return m
+    }
+}
+
 /// تحديث بالمجتمع: compares the ACTUAL published version with the latest LOCAL version of the author's linked original project.
 struct ForgeCommunityUpdateSheet: View {
     let entry: [String: Any]
+    var preloaded: (code: String, settings: Int?)? = nil
     var onPublished: () -> Void
     @ObservedObject private var store = ForgeStore.shared
     @Environment(\.dismiss) private var dismiss
@@ -24,26 +55,16 @@ struct ForgeCommunityUpdateSheet: View {
     private var localVersion: ForgeVersion? { local.flatMap { l in linked?.versions.first { $0.id == l.versionID } } }
     private var nextNumber: Int? { item.version.map { $0 + 1 } }
     private var canPublish: Bool {
-        !working && local != nil && !item.uploaded && !changelog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && item.version != nil
+        ForgeCommunityUpdateLogic.canPublish(uploaded: item.uploaded, publishedVersion: item.version, local: local, changelog: changelog, publishedLoaded: publishedLoaded, working: working)
     }
 
     private func dateText(_ d: Date?) -> String { d?.formatted(date: .abbreviated, time: .shortened) ?? tr("unknown", "غير معروف", ckb: "نەزانراو", kmr: "nenas") }
 
-    /// Facts only: counted from the real published code and the real local code, nothing inferred.
-    private var changes: [String] {
-        guard let lv = localVersion, let pub = publishedCode else { return [] }
-        let a = pub.split(separator: "\n", omittingEmptySubsequences: false), b = lv.code.split(separator: "\n", omittingEmptySubsequences: false)
-        let diff = b.difference(from: a)
-        var add = 0, rem = 0
-        for c in diff { if case .insert = c { add += 1 } else { rem += 1 } }
-        var out = [tr("\(add) lines added, \(rem) removed", "انضاف \(add) سطر، انحذف \(rem)", ckb: "\(add) دێڕ زیادکرا، \(rem) سڕایەوە", kmr: "\(add) rêz hat zêdekirin, \(rem) hat jêbirin")]
-        let ps = publishedSettings
-        if let ps, ps != lv.settings.count { out.append(tr("Settings: \(ps) to \(lv.settings.count)", "الإعدادات: \(ps) إلى \(lv.settings.count)", ckb: "ڕێکخستنەکان: \(ps) → \(lv.settings.count)", kmr: "Mîheng: \(ps) → \(lv.settings.count)")) }
-        if add == 0 && rem == 0 { out = [tr("Code is identical to the published version.", "الكود نفس المنشور.", ckb: "کۆدەکە وەک بڵاوکراوە.", kmr: "Kod wekî ya weşandî ye.")] }
-        return out
-    }
+    private var changes: [String]? { ForgeCommunityUpdateLogic.changeLines(publishedCode: publishedCode, publishedSettings: publishedSettings, local: localVersion) }
     @State private var publishedCode: String?
     @State private var publishedSettings: Int?
+    @State private var publishedLoaded = false
+    @State private var loadFailed = false
 
     var body: some View {
         ScrollView {
@@ -73,10 +94,12 @@ struct ForgeCommunityUpdateSheet: View {
                     Text(tr("What's new", "شو الجديد", ckb: "چی نوێیە", kmr: "Çi nû ye")).font(.system(size: 15, weight: .semibold))
                     TextEditor(text: $changelog).frame(minHeight: 90).scrollContentBackground(.hidden).padding(8)
                         .background(Color(red: 34/255, green: 41/255, blue: 58/255), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    if !changes.isEmpty {
-                        Text(tr("Changes", "التغييرات", ckb: "گۆڕانکاری", kmr: "Guhertin")).font(.system(size: 15, weight: .semibold))
+                    Text(tr("Changes", "التغييرات", ckb: "گۆڕانکاری", kmr: "Guhertin")).font(.system(size: 15, weight: .semibold))
+                    if let changes {
                         ForEach(changes, id: \.self) { Text("• " + $0).font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)) }
-                    }
+                    } else if loadFailed {
+                        note(tr("Couldn't load the published version, so changes can't be shown and publishing is disabled.", "ما قدرنا نحمّل النسخة المنشورة، فما فينا نعرض التغييرات والنشر معطّل.", ckb: "وەشانی بڵاوکراو بار نەبوو، بۆیە نابینرێت و بڵاوکردنەوە ناچالاکە.", kmr: "Guhertoya weşandî nehat barkirin, ji ber vê weşandin neçalak e."))
+                    } else { ProgressView().tint(.white) }
                 }
                 if let failure { Text(failure).font(.system(size: 13)).foregroundStyle(.red) }
                 HStack(spacing: 10) {
@@ -91,7 +114,10 @@ struct ForgeCommunityUpdateSheet: View {
         }
         .foregroundStyle(.white).background(ForgeCommunityCard.sheetColor.ignoresSafeArea())
         .environment(\.layoutDirection, .leftToRight)
-        .task { await loadPublished() }
+        .task {
+            if let p = preloaded { publishedCode = p.code; publishedSettings = p.settings; publishedLoaded = true }
+            else { await loadPublished() }
+        }
     }
 
     private func note(_ t: String) -> some View {
@@ -106,10 +132,14 @@ struct ForgeCommunityUpdateSheet: View {
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(red: 34/255, green: 41/255, blue: 58/255), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
+    /// Owner-only read that must NOT count as an install and returns only the author's own published code/settings.
     private func loadPublished() async {
-        guard !item.id.isEmpty, let d = try? await ForgeClient.get(["action": "gallery-item", "id": item.id]) else { return }
-        publishedCode = d["code"] as? String
+        guard !item.id.isEmpty, item.mine, !item.uploaded,
+              let d = try? await ForgeClient.get(["action": "gallery-source", "id": item.id]),
+              let code = d["code"] as? String else { loadFailed = true; return }
+        publishedCode = code
         publishedSettings = (d["settings"] as? [Any])?.count
+        publishedLoaded = true
     }
     private func publish() async {
         guard let p = linked, let l = local else { return }

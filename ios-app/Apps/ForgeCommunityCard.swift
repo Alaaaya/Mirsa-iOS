@@ -82,12 +82,7 @@ struct ForgeCommunityCard: View {
         return "v\(v) · " + tr("updated ", "آخر تحديث ", ckb: "نوێکراوەتەوە ", kmr: "nûkirî ") + d.formatted(date: .abbreviated, time: .omitted)
     }
     /// Consumer badge only when a local copy really came from this entry at an older published version.
-    private var usedOlder: Int? {
-        guard !item.mine, let pub = item.version else { return nil }
-        let used = store.projects.flatMap(\.versions).filter { $0.communitySourceID == item.id }.compactMap(\.usedPublishedVersion)
-        guard let m = used.max(), m < pub else { return nil }
-        return m
-    }
+    private var usedOlder: Int? { ForgeCommunityUpdateLogic.usedOlderVersion(entryID: item.id, published: item.version, mine: item.mine, projects: store.projects) }
 
     enum Action: CaseIterable { case use, edit, version, delete }
 
