@@ -20,6 +20,25 @@ import ImageIO
         }
     }
 
+    func testEncryptionWarningPolicyAndFourLanguageConsent() throws {
+        let clean = PersonalEncryptionWarning(main_encrypted: false, embedded_encrypted: 0)
+        let extensionOnly = PersonalEncryptionWarning(main_encrypted: false, embedded_encrypted: 1)
+        let main = PersonalEncryptionWarning(main_encrypted: true, embedded_encrypted: 0)
+        XCTAssertFalse(clean.requiresConsent)
+        XCTAssertTrue(extensionOnly.requiresConsent)
+        XCTAssertTrue(main.requiresConsent)
+        XCTAssertNotEqual(main.message(.english), extensionOnly.message(.english))
+        XCTAssertTrue(extensionOnly.message(.english).contains("not encrypted"))
+        XCTAssertEqual(Set(AppLanguage.allCases.map { main.message($0) }).count, 4)
+        XCTAssertEqual(Set(AppLanguage.allCases.map { PersonalEncryptionWarning.proceed($0) }).count, 4)
+        XCTAssertEqual(Set(AppLanguage.allCases.map { PersonalEncryptionWarning.title($0) }).count, 4)
+        for language in AppLanguage.allCases {
+            XCTAssertFalse(main.message(language).isEmpty)
+            XCTAssertFalse(PersonalEncryptionWarning.cancel(language).isEmpty)
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(PersonalEncryptionWarning.self, from: Data("{}".utf8)))
+    }
+
     private func project(_ bundle: String = "com.test.target") -> ForgeProject {
         ForgeProject(name: "Test", bundleID: bundle, appName: "Test", appVersion: "1", executable: "Test", classes: ["UIView"])
     }
