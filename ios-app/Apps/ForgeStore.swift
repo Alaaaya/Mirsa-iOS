@@ -8,6 +8,8 @@ struct ForgeVersion: Codable, Identifiable, Hashable {
     var guardID: UUID?
     var title: String?
     var repairChainID: UUID?
+    var fixSourceSHA256: String?
+    var fixDylibSHA256: String?
     var tweakID: UUID { guardID ?? id }
     var hasBuild: Bool { builtWithValues != nil }
 }
@@ -25,6 +27,8 @@ struct ForgeProject: Codable, Identifiable {
     @Published var busy: String?
     @Published var builderReady = false
     @Published var pendingGalleryCode: String?
+    @Published var fixNotice: String?
+    var fixSyncing = false
     nonisolated static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaForge", isDirectory: true)
     }
