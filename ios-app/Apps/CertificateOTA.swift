@@ -43,9 +43,6 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)
         }
         do {
-        guard !signed.verification.warnings.contains(where: { $0.code == "profile_id_compat" }) else {
-            throw SideloadError.message(personalText("This profile belongs to another app. Choose a matching profile or explicitly change the bundle ID before installing.", "البروفايل لتطبيق تاني. اختار بروفايل مطابق أو غيّر معرّف التطبيق من الخيارات قبل التثبيت."))
-        }
         let info = try IPAEditorService.info(in: app)
         guard let bundleID = info["CFBundleIdentifier"] as? String,
               let version = info["CFBundleVersion"] as? String else { throw SideloadError.message(personalText("Missing application identity.", "هوية التطبيق ناقصة.")) }
