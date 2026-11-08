@@ -26,6 +26,30 @@ import ImageIO
         XCTAssertThrowsError(try ForgeFeaturePolicy.mergeSelection([(p, a), (project("com.other.app"), b)], bundleID: p.bundleID))
         XCTAssertThrowsError(try ForgeFeaturePolicy.mergeSelection((0..<6).map { _ in (p, version()) }, bundleID: p.bundleID))
     }
+    func testMergeCandidatesOnlyBuiltSameBundleWithLocalDylib() {
+        func built(_ code: String = "%hook UIView\n%end") -> ForgeVersion { var v = version(); v.code = code; v.builtWithValues = [:]; return v }
+        var p1 = project(), p2 = project(), other = project("com.other.app")
+        let a = built(), b = built(), unbuilt = version(), missing = built(), empty = built(), noCode = built("")
+        let foreign = built()
+        p1.versions = [a, unbuilt, missing, noCode]; p2.versions = [b, empty]; other.versions = [foreign]
+        let sizes: [UUID: Int] = [a.id: 10, b.id: 5, empty.id: 0, noCode.id: 3, foreign.id: 9, unbuilt.id: 4]
+        let c = ForgeFeaturePolicy.mergeCandidates([p1, p2, other], bundleID: "com.test.target") { _, v in sizes[v.id] }
+        XCTAssertEqual(Set(c.map { $0.1.id }), [a.id, b.id])
+    }
+    func testSelectionPruningAndCountValidation() {
+        let p = project(); var vs: [ForgeVersion] = []
+        for _ in 0..<7 { var v = version(); v.builtWithValues = [:]; vs.append(v) }
+        let cands = vs.map { (p, $0) }
+        XCTAssertFalse(ForgeFeaturePolicy.canMerge([], candidates: cands))
+        XCTAssertFalse(ForgeFeaturePolicy.canMerge([vs[0].id], candidates: cands))
+        XCTAssertTrue(ForgeFeaturePolicy.canMerge(Set(vs[0..<2].map { $0.id }), candidates: cands))
+        XCTAssertTrue(ForgeFeaturePolicy.canMerge(Set(vs[0..<5].map { $0.id }), candidates: cands))
+        XCTAssertFalse(ForgeFeaturePolicy.canMerge(Set(vs[0..<6].map { $0.id }), candidates: cands))
+        let stale = Set(vs[0..<2].map { $0.id })
+        XCTAssertEqual(ForgeFeaturePolicy.prunedSelection(stale, candidates: [cands[0]]), [vs[0].id])
+        XCTAssertFalse(ForgeFeaturePolicy.canMerge(stale, candidates: [cands[0]]))
+        XCTAssertFalse(ForgeFeaturePolicy.canMerge([UUID(), UUID()], candidates: cands))
+    }
     func testVersionGuardIdentityRoundtripAndLegacyDecoding() throws {
         var v = version(); let original = v.id; v.guardID = original; v.repairChainID = UUID(); v.id = UUID()
         let copy = try JSONDecoder().decode(ForgeVersion.self, from: JSONEncoder().encode(v))
