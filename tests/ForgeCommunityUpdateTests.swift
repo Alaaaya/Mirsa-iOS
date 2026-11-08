@@ -126,6 +126,15 @@ final class ForgeCommunityUpdateTests: XCTestCase {
         XCTAssertNotNil(e.updatedAt); XCTAssertNotNil(e.authorVersionCreatedAt)
     }
 
+    func testConflictIsTypedFailure() {
+        let body = Data(#"{"error":"version_conflict","currentVersion":3}"#.utf8)
+        XCTAssertTrue(ForgeClient.failure(409, body).isVersionConflict)
+        XCTAssertFalse(ForgeClient.failure(409, Data(#"{"error":"other"}"#.utf8)).isVersionConflict)
+        XCTAssertFalse(ForgeClient.failure(500, body).isVersionConflict)
+        XCTAssertFalse(ForgeClient.failure(429, Data(#"{"error":"daily_limit"}"#.utf8)).isVersionConflict)
+        XCTAssertFalse(ForgeClient.failure(409, body).localizedDescription.isEmpty)
+    }
+
     func testSourceVersionMustMatchEntry() {
         XCTAssertTrue(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 2, entryVersion: 2))
         XCTAssertFalse(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 3, entryVersion: 2))

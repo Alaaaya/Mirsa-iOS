@@ -148,7 +148,7 @@ struct ForgeCommunityUpdateSheet: View {
     /// Owner-only read that must NOT count as an install and returns only the author's own published code/settings.
     private func loadPublished() async {
         guard !item.id.isEmpty, item.mine, !item.uploaded,
-              let d = try? await ForgeClient.get(["action": "gallery-source", "id": item.id]),
+              let d = try? await ForgeClient.get(item.version.map { ["action": "gallery-source", "id": item.id, "expectedVersion": String($0)] } ?? ["action": "gallery-source", "id": item.id]),
               let code = d["code"] as? String,
               ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: d["version"] as? Int, entryVersion: item.version) else { loadFailed = true; return }
         publishedCode = code
