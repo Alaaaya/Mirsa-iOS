@@ -455,6 +455,7 @@ struct PersonalAppsHub: View {
                     }
                 }.padding(.horizontal, MirsaSpacing.page).padding(.top, MirsaSpacing.xs).padding(.bottom, MirsaSpacing.xl)
             }.scrollIndicators(.hidden)
+            .mirsaStatusBarScrim()
         }
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)

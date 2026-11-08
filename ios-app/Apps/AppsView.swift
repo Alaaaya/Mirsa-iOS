@@ -144,6 +144,7 @@ struct AppsTab: View {
                 .padding(.bottom, 96)
             }
             .scrollIndicators(.hidden)
+            .mirsaStatusBarScrim()
 
             fab
                 .padding(.trailing, MirsaSpacing.page)

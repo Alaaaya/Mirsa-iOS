@@ -49,6 +49,7 @@ struct SetupView: View {
                 .padding(.bottom, 60)
             }
             .scrollIndicators(.hidden)
+            .mirsaStatusBarScrim()
 
             if let busy = store.busy { BusyOverlay(text: busy, progress: store.progress, isDownloading: store.isDownloading, hasKnownSize: store.downloadHasKnownSize, onCancel: { store.cancelDownload() }) }
         }
