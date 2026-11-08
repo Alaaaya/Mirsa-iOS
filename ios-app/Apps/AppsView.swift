@@ -844,7 +844,7 @@ struct InstallChoiceSheet: View {
         HStack(spacing: 14) {
             Group {
                 if let i = current.icon { Image(uiImage: i).resizable().scaledToFill() }
-                else { Color.purple.overlay(Text(String(current.name.prefix(1))).font(.title.bold()).foregroundStyle(.white)) }
+                else { Color.purple.overlay(Text(String(current.name.prefix(1))).font(MirsaFont.sheetTitle).foregroundStyle(.white)) }
             }
             .frame(width: 72, height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
@@ -906,10 +906,10 @@ struct LoginSheet: View {
             AuroraBackground()
             VStack(spacing: 18) {
                 Image(systemName: "apple.logo")
-                    .font(.system(size: 44))
+                    .font(.system(size: 40))
                     .foregroundStyle(.white)
                     .padding(.top, 30)
-                Text(L.t("login.title")).font(.title2.bold()).foregroundStyle(.white)
+                Text(L.t("login.title")).font(MirsaFont.sheetTitle).foregroundStyle(.white)
                 Text(L.t("login.sub"))
                     .font(.subheadline).multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.7))
@@ -995,7 +995,7 @@ struct PromptSheet: View {
     private var twoFactor: some View {
         VStack(spacing: 16) {
             Image(systemName: "lock.shield.fill").font(.system(size: 40)).foregroundStyle(.white).padding(.top, 20)
-            Text(L.t("twofa.title")).font(.title2.bold()).foregroundStyle(.white)
+            Text(L.t("twofa.title")).font(MirsaFont.sheetTitle).foregroundStyle(.white)
             Text(prompt.sms ? L.t("twofa.subSMS") : L.t("twofa.sub"))
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.7))
             if let e = prompt.lastError, !e.isEmpty {
@@ -1072,7 +1072,7 @@ struct AppsSettingsSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 Section(tr("Admin access", "صلاحية المشرف", ckb: "دەسەڵاتی بەڕێوەبەر", kmr: "Gihîştina rêveber")) {
                     SecureField(tr("One-time code", "كود لمرة وحدة", ckb: "کۆدی یەکجار", kmr: "Koda carekê"), text: $adminCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
                     Button(tr("Claim", "تفعيل", ckb: "چالاک بکە", kmr: "Çalak bike")) { Task { await claim() } }.disabled(adminCode.count < 19)
@@ -1177,7 +1177,8 @@ struct AppsSettingsSheet: View {
                 Section {
                     NavigationLink(L.t("settings.licenses")) { LicensesView() }
                 }
-            }
+            }.listRowBackground(MirsaPalette.row) }
+            .mirsaScreen()
             .onChange(of: store.pending?.id) { _, new in if new != nil { dismiss() } }
             .navigationTitle(L.t("settings.title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -1196,7 +1197,7 @@ struct AppInfoSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 LabeledContent(L.t("info.version"), value: app.version)
                 LabeledContent(L.t("info.bundle"), value: app.installedBundleID ?? app.id)
                 LabeledContent(L.t("info.location"), value: app.location == .container ? L.t("seg.container") : L.t("seg.real"))
@@ -1207,7 +1208,8 @@ struct AppInfoSheet: View {
                 if let s = app.signedSerial {
                     LabeledContent(L.t("info.signedWith"), value: s)
                 }
-            }
+            }.listRowBackground(MirsaPalette.row) }
+            .mirsaScreen()
             .navigationTitle(app.name)
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -1245,14 +1247,14 @@ struct LicensesView: View {
     }
 
     var body: some View {
-        List {
+        List { Group {
             Section {
                 VStack(spacing: 10) {
                     if let img = appIcon {
                         Image(uiImage: img).resizable().frame(width: 84, height: 84)
                             .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
                     }
-                    Text("Mirsa").font(.title.bold())
+                    Text("Mirsa").font(MirsaFont.sheetTitle)
                     Text(tr("Version ", "الإصدار ") + version).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 8)
@@ -1264,7 +1266,8 @@ struct LicensesView: View {
             Section(tr("Open-source licenses", "تراخيص المكتبات المفتوحة")) {
                 ForEach(items) { i in licenseRow(i) }
             }
-        }
+        }.listRowBackground(MirsaPalette.row) }
+        .mirsaScreen()
         .navigationTitle(tr("About", "حول التطبيق"))
     }
 

@@ -42,7 +42,7 @@ struct IncomingIPAConfirmationSheet: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 5) {
                             Text("MIRSA").font(.caption.weight(.bold)).tracking(5).foregroundStyle(gold)
-                            Text(tr("Confirm IPA", "تأكيد ملف IPA")).font(.title2.weight(.bold))
+                            Text(tr("Confirm IPA", "تأكيد ملف IPA")).font(MirsaFont.sheetTitle)
                         }
                     }.foregroundStyle(.white)
                     if loading {
@@ -140,7 +140,7 @@ struct IncomingIPAConfirmationSheet: View {
             }.frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 19))
                 .overlay(RoundedRectangle(cornerRadius: 19).stroke(gold.opacity(0.5), lineWidth: 1))
             VStack(alignment: .leading, spacing: 8) {
-                Text(p.name).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
+                Text(p.name).font(MirsaFont.sheetTitle).fixedSize(horizontal: false, vertical: true)
                 Text(p.bundleID).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 HStack(spacing: 8) {
                     chip(p.version, color: violet)

@@ -57,7 +57,7 @@ struct ForgeView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak")).font(.title2.bold()).foregroundStyle(.white)
+                        Text(tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak")).font(MirsaFont.sheetTitle).foregroundStyle(.white)
                         Text(tr("Describe it, Mirsa writes and injects it.", "اوصفه ومرسى بتكتبه وبتحقنه.", ckb: "وەسفی بکە، میرسا دەینووسێت و دەیچەسپێنێت.", kmr: "Vebêje, Mirsa dinivîse û dixe.")).font(.footnote).foregroundStyle(.white.opacity(0.6))
                     }
                     Spacer()
@@ -194,7 +194,7 @@ struct ForgeProjectView: View {
     @ViewBuilder private func content(_ p: ForgeProject) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(p.appName).font(.title2.bold()).foregroundStyle(.white)
+                Text(p.appName).font(MirsaFont.sheetTitle).foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: $prompt).frame(height: 90).scrollContentBackground(.hidden).padding(6).background(Color.black.opacity(0.3)).cornerRadius(10).foregroundStyle(.white)
                     HStack {

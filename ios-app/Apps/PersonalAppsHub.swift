@@ -249,7 +249,7 @@ private struct PersonalAppIcon: View {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Text(String(app.name.prefix(1)).uppercased())
-                    .font(.title2.bold()).foregroundStyle(Color.white.opacity(0.8))
+                    .font(MirsaFont.sheetTitle).foregroundStyle(Color.white.opacity(0.8))
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white.opacity(0.08))
             }
         }

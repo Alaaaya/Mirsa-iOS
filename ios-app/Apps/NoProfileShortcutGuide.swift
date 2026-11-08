@@ -16,7 +16,7 @@ struct NoProfileShortcutGuide: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                Text(app.name).font(.title2.bold())
+                Text(app.name).font(MirsaFont.sheetTitle)
                 Text(guide).textSelection(.enabled)
                 Button(tr("Share guide and icon", "شارك التعليمات والأيقونة")) { sharing = true }
                     .buttonStyle(.mirsaPrimary)

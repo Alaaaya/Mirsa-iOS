@@ -153,7 +153,7 @@ struct PersonalURLImportSheet: View {
             ZStack {
                 AuroraBackground()
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(personalText("Import from link", "استيراد من رابط")).font(.title2.bold())
+                    Text(personalText("Import from link", "استيراد من رابط")).font(MirsaFont.sheetTitle)
                     Text(personalText("Paste a direct https link to an .ipa file. The app is checked before it is added; nothing is installed.",
                                       "الصق رابط https مباشر لملف .ipa. التطبيق بينفحص قبل ما ينضاف، وما بينثبت شي."))
                         .font(.footnote).foregroundStyle(.secondary)

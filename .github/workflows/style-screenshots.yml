@@ -66,12 +66,16 @@ jobs:
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY
           fi
+          mkdir -p build/crashes
+          cp ~/Library/Logs/DiagnosticReports/*Mirsa* build/crashes/ 2>/dev/null || true
+          ls build/crashes
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: style-shots
           path: |
             build/shots
+            build/crashes
             build/style-ui.log
           if-no-files-found: warn
 

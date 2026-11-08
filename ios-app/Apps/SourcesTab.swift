@@ -521,7 +521,7 @@ private struct RepoAppInfo: View {
                     HStack(spacing: 14) {
                         RemoteIcon(url: app.iconURL, size: 72, corner: MirsaRadius.m)
                         VStack(alignment: .leading) {
-                            Text(app.name).font(.title2.bold())
+                            Text(app.name).font(MirsaFont.sheetTitle)
                             Text(app.developer).foregroundStyle(.secondary)
                         }
                     }

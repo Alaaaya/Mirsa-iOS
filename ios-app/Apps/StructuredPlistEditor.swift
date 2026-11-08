@@ -260,7 +260,7 @@ private struct PlistValueSheet: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 if showsKey {
                     TextField(MirsaTr.lit("Key"), text: $key).autocorrectionDisabled().textInputAutocapitalization(.never)
                 }
@@ -280,7 +280,7 @@ private struct PlistValueSheet: View {
                     if type == "date" { Text("ISO 8601 · 2026-11-07T12:00:00Z").font(.caption).foregroundStyle(.secondary) }
                 }
                 if let error { Text(error).foregroundStyle(.orange) }
-            }
+            }.listRowBackground(MirsaPalette.row) }
             .navigationTitle(MirsaTr.lit(item.adding ? "Add value" : "Edit"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button(MirsaTr.lit("Cancel")) { dismiss() } }

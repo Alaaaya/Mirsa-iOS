@@ -210,7 +210,7 @@ struct MirsaHomeScreen<Menu: View>: View {
                     if let icon = MirsaIconCache.image(id: app.id, path: AppsStore.iconURL(app.id).path) {
                         Image(uiImage: icon).resizable().scaledToFill()
                     } else {
-                        Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.title2.bold()))
+                        Color.indigo.overlay(Text(String(app.name.prefix(1))).font(MirsaFont.sheetTitle))
                     }
                 }
                 .frame(width: compact ? 48 : 64, height: compact ? 48 : 64)

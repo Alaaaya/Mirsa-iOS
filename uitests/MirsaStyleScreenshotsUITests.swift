@@ -29,13 +29,17 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     }
 
     private func shot(_ app: XCUIApplication, _ name: String) {
+        guard alive(app) else { print("STYLE-SHOT-SKIPPED \(name): app not running"); return }
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         a.name = name
         a.lifetime = .keepAlways
         add(a)
     }
 
+    private func alive(_ app: XCUIApplication) -> Bool { app.state == .runningForeground }
+
     private func tap(_ app: XCUIApplication, _ labels: [String]) -> Bool {
+        guard alive(app) else { return false }
         for l in labels {
             let b = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", l)).firstMatch
             if b.waitForExistence(timeout: 3), b.isHittable { b.tap(); Thread.sleep(forTimeInterval: 1.5); return true }
@@ -44,7 +48,8 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     }
 
     private func scrollToBottom(_ app: XCUIApplication) {
-        for _ in 0..<4 { app.swipeUp(velocity: .fast) }
+        guard alive(app) else { return }
+        for _ in 0..<4 where alive(app) { app.swipeUp(velocity: .fast) }
         Thread.sleep(forTimeInterval: 1.2)
     }
 
@@ -52,7 +57,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         for page in Self.pages {
             let app = launch(page, lang: lang)
             shot(app, "\(lang)_\(page)")
-            if Self.scrolled.contains(page) {
+            if Self.scrolled.contains(page) && alive(app) {
                 scrollToBottom(app)
                 shot(app, "\(lang)_\(page)-bottom")
             }
@@ -67,7 +72,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 app.terminate()
                 let a = launch(page, lang: lang)
                 if tap(a, ["Device", "الجهاز"]) { shot(a, "\(lang)_tools-device") }
-                if tap(a, ["Tweaks", "التويكس"]) { shot(a, "\(lang)_tools-tweaks"); scrollToBottom(a); shot(a, "\(lang)_tools-tweaks-bottom") }
+                if tap(a, ["Tweaks", "التويكس"]) { shot(a, "\(lang)_tools-tweaks"); if alive(a) { scrollToBottom(a); shot(a, "\(lang)_tools-tweaks-bottom") } }
                 if tap(a, ["Translation", "الترجمة"]) { shot(a, "\(lang)_tools-translate") }
                 a.terminate()
             default:

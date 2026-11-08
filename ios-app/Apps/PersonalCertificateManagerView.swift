@@ -14,7 +14,7 @@ struct PersonalCertificateManagerView: View {
                 AuroraBackground()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text(personalText("Signing certificates", "شهادات التوقيع")).font(.title2.bold())
+                        Text(personalText("Signing certificates", "شهادات التوقيع")).font(MirsaFont.sheetTitle)
                         Text(personalText("The selected certificate is used for signing. Dates come from the files on this device; they do not prove the certificate is valid or unrevoked.",
                                           "الشهادة المحددة هي اللي بتوقّع. التواريخ من الملفات على جهازك، وما بتثبت إنو الشهادة صالحة أو مو ملغاة."))
                             .font(.footnote).foregroundStyle(.secondary)

@@ -221,7 +221,7 @@ struct SupportPopupSheet: View {
                             .foregroundStyle(.pink)
 
                         Text(MirsaTr.lit("Welcome to Mirsa!"))
-                            .font(.title2.bold())
+                            .font(MirsaFont.sheetTitle)
 
                         Text(MirsaTr.lit("Free & Open Source • Developed by @mak5er"))
                             .font(.caption)
@@ -299,7 +299,7 @@ struct PairingGuideSheet: View {
                     // Header
                     VStack(alignment: .leading, spacing: 6) {
                         Text(MirsaTr.lit("Where to find your pairing file"))
-                            .font(.title2.bold())
+                            .font(MirsaFont.sheetTitle)
                         Text(MirsaTr.lit("Mirsa can import pairing files exported by SideStore, LiveContainer, iLoader, or your computer."))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -757,7 +757,7 @@ struct PairingTab: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 // Header
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
@@ -766,7 +766,7 @@ struct PairingTab: View {
                                 .font(.title2)
                                 .foregroundStyle(.blue)
                             Text("Mirsa")
-                                .font(.title2.bold())
+                                .font(MirsaFont.sheetTitle)
                             Spacer()
                             Text("iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) · v1.3.2")
                                 .font(.caption.monospaced().bold())
@@ -1035,7 +1035,7 @@ struct PairingTab: View {
                         )
                     }
                 }
-            }
+            }.listRowBackground(MirsaPalette.row) }
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 60)
             }
