@@ -17,6 +17,18 @@ enum ForgeFeaturePolicy {
             throw ForgeClient.Failure.message("Choose 2–5 different versions for the same app.")
         }
     }
+    /// Same-bundle saved versions that were built, have source code and a non-empty local dylib.
+    static func mergeCandidates(_ projects: [ForgeProject], bundleID: String, dylibSize: (ForgeProject, ForgeVersion) -> Int?) -> [(ForgeProject, ForgeVersion)] {
+        projects.filter { $0.bundleID == bundleID }.flatMap { project in
+            project.versions.filter { $0.hasBuild && !$0.code.isEmpty && (dylibSize(project, $0) ?? 0) > 0 }.map { (project, $0) }
+        }
+    }
+    static func prunedSelection(_ selected: Set<UUID>, candidates: [(ForgeProject, ForgeVersion)]) -> Set<UUID> {
+        selected.intersection(Set(candidates.map { $0.1.id }))
+    }
+    static func canMerge(_ selected: Set<UUID>, candidates: [(ForgeProject, ForgeVersion)]) -> Bool {
+        (2...5).contains(prunedSelection(selected, candidates: candidates).count)
+    }
     static func sanitizedLog(_ input: String) -> String {
         var s = String(input.prefix(24000))
         for pattern in [

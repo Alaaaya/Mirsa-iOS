@@ -33,7 +33,10 @@ struct ForgeFeaturesView: View {
     private func text(_ en: String, _ ar: String) -> String { MirsaTr.pick(en, ar) }
     private var candidates: [(ForgeProject, ForgeVersion)] {
         guard let p = store.project(id) else { return [] }
-        return store.projects.filter { $0.bundleID == p.bundleID }.flatMap { project in project.versions.map { (project, $0) } }
+        return ForgeFeaturePolicy.mergeCandidates(store.projects, bundleID: p.bundleID) { project, version in
+            let attrs = try? FileManager.default.attributesOfItem(atPath: store.dylibURL(project, version).path)
+            return (attrs?[.size] as? NSNumber)?.intValue
+        }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -51,6 +54,9 @@ struct ForgeFeaturesView: View {
         .environment(\.layoutDirection, .leftToRight)
         .disabled(busy || store.busy != nil)
         .onAppear { repairOptIn = UserDefaults.standard.bool(forKey: "forge.repair.optin." + id.uuidString) }
+        .onChange(of: candidates.map { $0.1.id }) { _, _ in
+            selectedVersions = ForgeFeaturePolicy.prunedSelection(selectedVersions, candidates: candidates)
+        }
         .onChange(of: repairOptIn) { _, value in
             UserDefaults.standard.set(value, forKey: "forge.repair.optin." + id.uuidString)
             if !value { proposal = nil; logConsent = false }
@@ -143,15 +149,15 @@ struct ForgeFeaturesView: View {
                             Image(systemName: selectedVersions.contains(version.id) ? "checkmark.square.fill" : "square")
                             VStack(alignment: .leading) {
                                 Text(project.name)
-                                Text(version.prompt).lineLimit(2).font(.caption)
+                                Text(version.title ?? version.prompt).lineLimit(2).font(.caption)
                                 Text(version.created.formatted()).font(.caption2)
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.mirsaPress)
                 }
                 Button(text("Merge selected", "دمج المحدّد")) {
-                    run { try await store.merge(id, selected: candidates.filter { selectedVersions.contains($0.1.id) }); selectedVersions.removeAll(); message = text("Merged version saved. Originals kept.", "انحفظت النسخة المدموجة والأصلية موجودة.") }
-                }.disabled(!(2...5).contains(selectedVersions.count))
+                    run { try await store.merge(id, selected: candidates.filter { ForgeFeaturePolicy.prunedSelection(selectedVersions, candidates: candidates).contains($0.1.id) }); selectedVersions.removeAll(); message = text("Merged version saved. Originals kept.", "انحفظت النسخة المدموجة والأصلية موجودة.") }
+                }.disabled(!ForgeFeaturePolicy.canMerge(selectedVersions, candidates: candidates))
             }.padding(.top, 8)
         }
     }
