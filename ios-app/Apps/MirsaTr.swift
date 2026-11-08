@@ -5,8 +5,8 @@ enum MirsaTr {
         switch AppLanguageStore.shared.current {
         case .english: return en
         case .arabic: return ar
-        case .sorani: return ckb[en] ?? extraCkb[en] ?? ar
-        case .kurmanji: return kmr[en] ?? extraKmr[en] ?? ar
+        case .sorani: return ckb[en] ?? extraCkb[en] ?? forgeCkb[en] ?? ar
+        case .kurmanji: return kmr[en] ?? extraKmr[en] ?? forgeKmr[en] ?? ar
         }
     }
 

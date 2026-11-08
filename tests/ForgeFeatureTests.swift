@@ -87,4 +87,20 @@ import ImageIO
         let second = try store.repairChain(p.id, versionID: repair.id)
         XCTAssertEqual(first.0, second.0); XCTAssertEqual(first.1, second.1)
     }
+
+    func testForgeFeatureUIHasSoraniAndKurmanjiForEveryKey() throws {
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("ios-app/Apps/ForgeFeaturesView.swift")
+        let source = try String(contentsOf: path, encoding: .utf8)
+        let regex = try NSRegularExpression(pattern: "text\\(\"((?:[^\"\\\\]|\\\\.)*)\"")
+        let ns = source as NSString
+        let keys = Set(regex.matches(in: source, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) })
+        XCTAssertGreaterThan(keys.count, 30)
+        for k in keys {
+            let ckb = MirsaTr.ckb[k] ?? MirsaTr.extraCkb[k] ?? MirsaTr.forgeCkb[k]
+            let kmr = MirsaTr.kmr[k] ?? MirsaTr.extraKmr[k] ?? MirsaTr.forgeKmr[k]
+            XCTAssertNotNil(ckb, "missing ckb: \(k)"); XCTAssertNotNil(kmr, "missing kmr: \(k)")
+            XCTAssertFalse((ckb ?? "").isEmpty); XCTAssertFalse((kmr ?? "").isEmpty)
+        }
+        XCTAssertEqual(Set(MirsaTr.forgeCkb.keys), Set(MirsaTr.forgeKmr.keys))
+    }
 }
