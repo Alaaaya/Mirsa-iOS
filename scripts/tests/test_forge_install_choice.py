@@ -7,6 +7,16 @@ class ForgeInstallChoiceTests(unittest.TestCase):
         for operation in ("inject", "injectInspector"):
             self.assertIn(f"let ipa = try await store.{operation}(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa)", source)
             self.assertNotIn(f"shareURL = try await store.{operation}(id)", source)
+    def test_target_sources_reuse_safe_importers(self):
+        source = (ROOT / "ios-app/Apps/ForgeView.swift").read_text()
+        for label in ("من الملفات", "مكتبتي", "المشاريع", "من رابط", "من السورسات"):
+            self.assertIn(label, source)
+        self.assertIn("PersonalURLImportSheet", source)
+        self.assertIn("SourcesTab(onSelectIPA:", source)
+        self.assertIn("try await ForgeStore.inspect(ipa: local)", source)
+        sources = (ROOT / "ios-app/Apps/SourcesTab.swift").read_text()
+        self.assertIn("try await onSelectIPA(url)", sources)
+        self.assertIn("downloader.download(app.downloadURL.absoluteString)", sources)
     def test_dylib_and_deb_remain_share_actions(self):
         source = (ROOT / "ios-app/Apps/ForgeView.swift").read_text()
         self.assertIn("shareURL = try await store.exportDylib(id)", source)
