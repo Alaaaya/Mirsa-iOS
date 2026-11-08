@@ -213,7 +213,7 @@ struct IncomingIPAConfirmationSheet: View {
             }.font(.subheadline.weight(.semibold))
             if let onSaveLibrary {
                 Button { submit(onSaveLibrary) } label: {
-                    Label(tr("Save to my library", "حفظ بمكتبتي"), systemImage: "square.stack.3d.up")
+                    Label(tr("Save to Certificate Library", "حفظ في مكتبة الشهادة", ckb: "هەڵگرتن لە کتێبخانەی بڕوانامە", kmr: "Di pirtûkxaneya sertîfîkayê de tomar bike"), systemImage: "square.stack.3d.up")
                         .frame(maxWidth: .infinity).padding(.vertical, 11)
                 }.font(.subheadline.weight(.semibold)).appsGlass(cornerRadius: 13, tint: violet)
                     .accessibilityIdentifier("mirsa.incoming.library")
