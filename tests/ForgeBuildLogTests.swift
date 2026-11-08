@@ -12,10 +12,15 @@ final class ForgeBuildLogTests: XCTestCase {
     }
     func testSummaryUsesFirstErrorLineAndKeepsFullLog() {
         let f = ForgeBuildFailure(rawLog: raw)
-        XCTAssertTrue(f.summary.contains("Tweak.xm:28:16"))
         XCTAssertFalse(f.summary.contains("make:"))
+        XCTAssertFalse(f.summary.contains("Tweak.xm"))
+        XCTAssertTrue(f.summary.contains("UIAlertView"))
         XCTAssertTrue(f.log.contains("make: *** Error 2"))
         XCTAssertEqual(f.errorDescription, f.summary)
+    }
+    func testStripsOSC() {
+        XCTAssertEqual(ForgeBuildLog.sanitize("\u{1B}]0;title\u{07}ok"), "ok")
+        XCTAssertEqual(ForgeBuildLog.sanitize("\u{1B}]8;;http://x\u{1B}\\link"), "link")
     }
     func testGenericSummaryWithoutErrorLine() {
         XCTAssertFalse(ForgeBuildLog.summary("something odd").isEmpty)

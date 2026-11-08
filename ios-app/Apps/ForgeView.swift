@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private let forgeCard = Color(red: 0.11, green: 0.12, blue: 0.16)
+private let forgeBG = Color(red: 0.05, green: 0.06, blue: 0.09)
 struct ForgeShareItem: Identifiable { let url: URL; var id: String { url.path } }
 /// Secondary share action: the same tweak as a .deb. Only offered inside the share menu.
 final class DebActivity: UIActivity {
@@ -76,6 +77,7 @@ struct ForgeView: View {
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
+        .toolbarBackground(forgeBG, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline)
         .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
             guard case .success(let url) = r else { return }
             Task { await handle(url) }
@@ -221,10 +223,11 @@ struct ForgeProjectView: View {
                         ScrollView(.horizontal) { Text(fullLog).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                     }.foregroundStyle(.white).padding(14).background(forgeCard).cornerRadius(16)
                 }
-            }.padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 60).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
         .task { await store.refreshStatus() }
+        .toolbarBackground(forgeBG, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline)
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
         .sheet(isPresented: $editing) {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
