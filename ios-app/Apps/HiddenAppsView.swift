@@ -23,7 +23,7 @@ struct HiddenPINPad: View {
     var body: some View {
         VStack(spacing: 28) {
             Image(systemName: "lock.fill").font(.system(size: 34, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-            Text(title).font(.title2.weight(.bold)).foregroundStyle(.white)
+            Text(title).font(MirsaFont.sheetTitle).foregroundStyle(.white)
             HStack(spacing: 14) {
                 ForEach(0..<6, id: \.self) { i in
                     Circle().fill(i < pin.count ? Color.white : Color.white.opacity(0.18)).frame(width: 14, height: 14)

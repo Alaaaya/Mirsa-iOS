@@ -283,7 +283,8 @@ enum MirsaChrome {
         UINavigationBar.appearance().standardAppearance = solid
         UINavigationBar.appearance().compactAppearance = solid
         UINavigationBar.appearance().scrollEdgeAppearance = clear
-        forceWindowsLeftToRight()
+        // Windows do not exist yet when this runs from App.init (UIApplication.shared
+        // is not created); mirsaLeftToRightChrome() applies the window override later.
     }
 
     /// Trait override on every window, so presented sheets, alerts and menus (which
