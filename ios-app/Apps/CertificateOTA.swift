@@ -43,7 +43,16 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)
         }
         do {
-        let info = try IPAEditorService.info(in: app)
+        // Signing can change bundle ID, version and display name. The manifest
+        // must describe the exact retained archive sent to either upload host.
+        let signedInfo = try await Task.detached {
+            let inspected = try CertificateInstall.stageSignedApp(ipa: kept, in: fm.temporaryDirectory)
+            defer { try? FileManager.default.removeItem(at: inspected.stage) }
+            return try Data(contentsOf: inspected.app.appendingPathComponent("Info.plist"))
+        }.value
+        guard let info = try PropertyListSerialization.propertyList(from: signedInfo, format: nil) as? [String: Any] else {
+            throw SideloadError.message(personalText("Signed app metadata is invalid.", "معلومات التطبيق الموقّع غير صالحة."))
+        }
         guard let bundleID = info["CFBundleIdentifier"] as? String,
               let version = info["CFBundleVersion"] as? String else { throw SideloadError.message(personalText("Missing application identity.", "هوية التطبيق ناقصة.")) }
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
