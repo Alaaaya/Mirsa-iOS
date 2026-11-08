@@ -324,8 +324,8 @@ struct PersonalAppsHub: View {
             VStack(spacing: 8) {
                 PersonalAppIcon(app: app, library: library)
                 Text(app.name).font(.caption.weight(.semibold)).lineLimit(1)
-            }.frame(maxWidth: .infinity).padding(.vertical, 12).appsGlass(cornerRadius: 20)
-        }.buttonStyle(.plain)
+            }.frame(maxWidth: .infinity).padding(.vertical, MirsaSpacing.s).appsGlass(cornerRadius: MirsaRadius.l)
+        }.buttonStyle(.mirsaPress)
     }
     private func reloadDrafts() {
         drafts = Dictionary(uniqueKeysWithValues: library.apps.compactMap { app in
@@ -363,51 +363,49 @@ struct PersonalAppsHub: View {
                     }
                     Spacer(minLength: 0)
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            }.buttonStyle(.mirsaPress)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     Button { detail = app } label: { chip("v" + (draft?.version.isEmpty == false ? draft!.version : app.version), blue: true) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.mirsaPress)
                     ForEach(selected) { item in
                         HStack(spacing: 5) {
                             Button { detail = app } label: {
                                 Text(item.name).lineLimit(1).truncationMode(.middle)
                                     .frame(maxWidth: 150, alignment: .leading)
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.mirsaPress)
                             Button { removeTweak(item.id, from: app) } label: {
                                 Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                                     .frame(width: 28, height: 28).contentShape(Rectangle())
-                            }.buttonStyle(.plain).accessibilityLabel(personalText("Remove ", "إزالة ") + item.name)
+                            }.buttonStyle(.mirsaPress).accessibilityLabel(personalText("Remove ", "إزالة ") + item.name)
                         }.font(.caption2).padding(.horizontal, 9).padding(.vertical, 5)
                             .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                     Button { detail = app } label: {
                         chip(MirsaTr.p("addons", ids.count))
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.mirsaPress)
                 }
             }
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: 24)
+        }.padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: MirsaRadius.l)
     }
 
     var body: some View {
         ZStack {
             AuroraBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack {
+                VStack(alignment: .leading, spacing: MirsaSpacing.l) {
+                    MirsaPageHeader(title: personalText("Projects", "المشاريع")) {
                         Menu {
                             Button { importing = true } label: { Label(personalText("From Files", "من الملفات"), systemImage: "folder") }
                             Button { importingURL = true } label: { Label(personalText("From link", "من رابط"), systemImage: "link") }
                             Button { showBrowser = true } label: { Label(personalText("Browser", "المتصفح"), systemImage: "safari") }
                         } label: {
-                            Image(systemName: "plus").font(.title3.weight(.semibold)).frame(width: 42, height: 42).appsGlass(cornerRadius: 21)
+                            MirsaRoundIcon(systemName: "plus")
                         }.disabled(busy || library.loadError != nil)
-                        Spacer()
-                        Text(personalText("Projects", "المشاريع")).font(.title2.bold())
-                        Spacer()
                         Button { gridMode.toggle() } label: {
-                            Image(systemName: gridMode ? "list.bullet" : "square.grid.2x2").font(.title3).frame(width: 42, height: 42).appsGlass(cornerRadius: 21)
-                        }.accessibilityLabel(personalText("Toggle list and grid", "تبديل القائمة والشبكة"))
+                            MirsaRoundIcon(systemName: gridMode ? "list.bullet" : "square.grid.2x2")
+                        }.buttonStyle(.mirsaPress)
+                        .accessibilityLabel(personalText("Toggle list and grid", "تبديل القائمة والشبكة"))
                         Menu {
                             Picker(personalText("Sort projects", "ترتيب المشاريع"), selection: $sort) {
                                 Text(personalText("Newest first", "الأحدث أولاً")).tag("newest")
@@ -415,26 +413,32 @@ struct PersonalAppsHub: View {
                                 Text(personalText("Name", "الاسم")).tag("name")
                             }
                         } label: {
-                            Image(systemName: "line.3.horizontal.decrease").font(.title3).frame(width: 42, height: 42).appsGlass(cornerRadius: 21)
+                            MirsaRoundIcon(systemName: "line.3.horizontal.decrease")
                         }
                     }
                     Button { showCertificates = true } label: {
-                        HStack {
-                            Image(systemName: "signature").font(.title2)
-                            Text(personalText("Signing certificates", "شهادات التوقيع")).font(.headline)
+                        HStack(spacing: MirsaSpacing.s) {
+                            Image(systemName: "signature")
+                                .font(.system(size: MirsaIconSize.m, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: MirsaIconSize.well, height: MirsaIconSize.well)
+                                .background(MirsaPalette.accentGradient, in: RoundedRectangle(cornerRadius: MirsaRadius.s, style: .continuous))
+                            Text(personalText("Signing certificates", "شهادات التوقيع")).font(MirsaFont.cardTitle)
                             Spacer()
-                            Image(systemName: "chevron.right")
-                        }.padding(18).appsGlass(cornerRadius: 24)
-                    }.buttonStyle(.plain)
+                            Image(systemName: "chevron.right").font(.system(size: MirsaIconSize.s, weight: .bold)).foregroundStyle(MirsaPalette.textTertiary)
+                        }.padding(MirsaSpacing.card).appsGlass(cornerRadius: MirsaRadius.l)
+                    }.buttonStyle(.mirsaPress)
+                    .mirsaAppear()
                     if busy { ProgressView() }
                     if library.apps.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "square.stack.3d.up").font(.largeTitle)
-                            Text(personalText("Your personal library starts here", "مكتبتك الخاصة بتبدأ هون")).font(.headline)
+                        VStack(spacing: MirsaSpacing.s) {
+                            Image(systemName: "square.stack.3d.up").font(.system(size: 40, weight: .regular)).foregroundStyle(MirsaPalette.accentSoft)
+                            Text(personalText("Your personal library starts here", "مكتبتك الخاصة بتبدأ هون")).font(MirsaFont.cardTitle).multilineTextAlignment(.center)
                             Text(personalText("Import an IPA, then open it to edit and sign. Nothing is installed automatically.",
                                       "استورد IPA وافتحه لتعدّله وتوقّعه. ما بينثبت شي تلقائياً."))
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity).padding(24).appsGlass()
+                                .font(.footnote).foregroundStyle(MirsaPalette.textSecondary).multilineTextAlignment(.center)
+                        }.frame(maxWidth: .infinity).padding(MirsaSpacing.xl).appsGlass(cornerRadius: MirsaRadius.l)
+                        .mirsaAppear(delay: 0.05)
                     }
                     if gridMode {
                         PersonalAppsHome(apps: sortedApps, allAppIDs: library.apps.map(\.id), library: library,
@@ -449,7 +453,7 @@ struct PersonalAppsHub: View {
                     if let error = library.loadError ?? message {
                         Text(error).font(.footnote).foregroundStyle(.secondary)
                     }
-                }.padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 120)
+                }.padding(.horizontal, MirsaSpacing.page).padding(.top, MirsaSpacing.xs).padding(.bottom, MirsaSpacing.xl)
             }.scrollIndicators(.hidden)
         }
         .preferredColorScheme(.dark)

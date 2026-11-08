@@ -30,6 +30,7 @@ struct MirsaApp: App {
         // before launch finishes.
         AppsStore.registerBackgroundTask()
         AppsStore.importHandoffIfNeeded()
+        MirsaChrome.apply()
     }
 
     var body: some Scene {
@@ -42,6 +43,7 @@ struct MirsaApp: App {
             .environment(\.locale, language.current.locale)
             .id(language.current)
             .mirsaKeyboardDismissal()
+            .mirsaLeftToRightChrome()
         }
     }
 }

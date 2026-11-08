@@ -76,8 +76,7 @@ struct CryptoDonationRow: View {
                 .textSelection(.enabled)
         }
         .padding(12)
-        .background(Color(uiColor: .secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .mirsaCard(radius: MirsaRadius.snap(12))
     }
 }
 
@@ -140,8 +139,7 @@ struct DonateView: View {
                 }
             }
             .padding(14)
-            .background(Color(uiColor: .secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .mirsaCard(radius: MirsaRadius.snap(14))
 
             // Payment Methods
             VStack(alignment: .leading, spacing: 10) {
@@ -166,16 +164,9 @@ struct DonateView: View {
                         Image(systemName: "arrow.up.right.square.fill")
                             .font(.subheadline)
                     }
-                    .padding(14)
+                    .padding(MirsaSpacing.card)
                     .foregroundStyle(.white)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.blue, Color(red: 0.05, green: 0.35, blue: 0.85)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .background(MirsaPalette.accentGradient, in: RoundedRectangle(cornerRadius: MirsaRadius.m, style: .continuous))
                 }
 
                 // TON
@@ -245,13 +236,10 @@ struct SupportPopupSheet: View {
                             dismiss()
                         } label: {
                             Text(MirsaTr.lit("Continue to Mirsa"))
-                                .font(.headline)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(Color.blue)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
+                        .buttonStyle(.mirsaPrimary)
+                        .controlSize(.large)
 
                         Toggle(isOn: $dontShowOnLaunch) {
                             Text(MirsaTr.lit("Don't show this popup on startup"))
@@ -346,13 +334,11 @@ struct PairingGuideSheet: View {
                                 .font(.caption.monospaced())
                                 .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(uiColor: .systemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(MirsaPalette.sheet, in: RoundedRectangle(cornerRadius: MirsaRadius.xs, style: .continuous))
                         }
                     }
                     .padding(14)
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .mirsaCard(radius: MirsaRadius.snap(14))
 
                     // LiveContainer Card
                     VStack(alignment: .leading, spacing: 10) {
@@ -376,13 +362,11 @@ struct PairingGuideSheet: View {
                                 .font(.caption.monospaced())
                                 .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(uiColor: .systemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(MirsaPalette.sheet, in: RoundedRectangle(cornerRadius: MirsaRadius.xs, style: .continuous))
                         }
                     }
                     .padding(14)
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .mirsaCard(radius: MirsaRadius.snap(14))
 
                     // iLoader / Jitterbug / AltStore Card
                     VStack(alignment: .leading, spacing: 10) {
@@ -399,8 +383,7 @@ struct PairingGuideSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(14)
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .mirsaCard(radius: MirsaRadius.snap(14))
 
                     // Direct Placement Card
                     VStack(alignment: .leading, spacing: 10) {
@@ -420,16 +403,14 @@ struct PairingGuideSheet: View {
                             .font(.caption.monospaced())
                             .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(uiColor: .systemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .background(MirsaPalette.sheet, in: RoundedRectangle(cornerRadius: MirsaRadius.xs, style: .continuous))
 
                         Text(MirsaTr.lit("It will immediately appear under 'Discovered in Documents' in Mirsa."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .padding(14)
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .mirsaCard(radius: MirsaRadius.snap(14))
 
                     // Action Button
                     Button {
@@ -445,7 +426,7 @@ struct PairingGuideSheet: View {
                         .font(.headline)
                         .frame(height: 48)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.mirsaPrimary)
                     .padding(.top, 4)
                 }
                 .padding()
@@ -532,8 +513,8 @@ struct CompactLogView: View {
                     .padding(8)
                 }
                 .frame(maxHeight: 180)
-                .background(Color(uiColor: .tertiarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(MirsaPalette.sheet)
+                .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.s, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
@@ -723,7 +704,7 @@ struct ContentView: View {
                 incoming = nil
             }
             .presentationDetents([.large])
-            .presentationBackground(.ultraThinMaterial)
+            .mirsaSheetBackground()
         }
         .sheet(item: $incomingProject, onDismiss: { presentNextIncoming() }) { app in
             PersonalProjectDetailView(app: app)
@@ -908,7 +889,7 @@ struct PairingTab: View {
                             .font(.footnote)
                             .foregroundStyle(.blue)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.mirsaPress)
 
                         Text(MirsaTr.lit("Supports .mobiledevicepairing, .plist, or .mobilepair exported from SideStore, iLoader, AltStore, Jitterbug, or Mac/PC."))
                             .font(.caption)
@@ -933,7 +914,7 @@ struct PairingTab: View {
                                     Button(MirsaTr.lit("Use")) {
                                         vm.selectPairingFile(filename: filename)
                                     }
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(.mirsaSecondary)
                                     .controlSize(.small)
                                 }
                             }
@@ -972,8 +953,7 @@ struct PairingTab: View {
                                                 Label(MirsaTr.lit("Copy"), systemImage: "doc.on.doc")
                                                     .font(.caption.bold())
                                             }
-                                            .buttonStyle(.bordered)
-                                            .tint(.orange)
+                                            .buttonStyle(.mirsaSecondary)
                                         }
 
                                         Text(MirsaTr.lit("Settings › Privacy & Security › Developer Mode › Pair with Mirsa"))
@@ -989,8 +969,7 @@ struct PairingTab: View {
                                                 .bold()
                                                 .frame(maxWidth: .infinity, alignment: .center)
                                         }
-                                        .buttonStyle(.borderedProminent)
-                                        .tint(.orange)
+                                        .buttonStyle(.mirsaPrimary)
                                     }
                                     .padding(14)
                                     .background(Color.orange.opacity(0.12))
@@ -1010,8 +989,7 @@ struct PairingTab: View {
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 44)
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
+                                .buttonStyle(.mirsaSecondary)
                             }
                         } else {
                             VStack(spacing: 12) {
@@ -1041,7 +1019,7 @@ struct PairingTab: View {
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 48)
                                 }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(.mirsaPrimary)
                             }
                             .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                         }
@@ -1181,7 +1159,7 @@ struct VPNStatusRow: View {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption.bold())
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.mirsaSecondary)
                 .controlSize(.mini)
             }
 
@@ -1205,7 +1183,7 @@ struct LiquidTabChrome: ViewModifier {
         if liquid {
             content
                 .toolbar(.hidden, for: .tabBar)
-                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 76) }
+                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: MirsaTabBarMetrics.clearance) }
         } else {
             content
         }

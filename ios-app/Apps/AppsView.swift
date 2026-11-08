@@ -1,56 +1,19 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Glass helpers (Liquid Glass on iOS 26, material fallback)
+// MARK: - Card helpers (solid since the style unification; no blur or glass effect)
 
 extension View {
-    @ViewBuilder
     func appsGlassClassic(cornerRadius: CGFloat = 24, tint: Color? = nil, interactive: Bool = false) -> some View {
-        #if compiler(>=6.2)
-        if #available(iOS 26.0, *) {
-            let g: Glass = tint.map { Glass.regular.tint($0.opacity(0.25)) } ?? .regular
-            self.glassEffect(interactive ? g.interactive() : g, in: .rect(cornerRadius: cornerRadius))
-        } else {
-            self.appsGlassFallback(cornerRadius: cornerRadius, tint: tint)
-        }
-        #else
-        self.appsGlassFallback(cornerRadius: cornerRadius, tint: tint)
-        #endif
+        appsGlass(cornerRadius: cornerRadius, tint: tint, interactive: interactive)
     }
 
-    @ViewBuilder
     func appsGlassCapsuleClassic(tint: Color? = nil) -> some View {
-        #if compiler(>=6.2)
-        if #available(iOS 26.0, *) {
-            let g: Glass = tint.map { Glass.regular.tint($0.opacity(0.35)) } ?? .regular
-            self.glassEffect(g.interactive(), in: .capsule)
-        } else {
-            self.background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.6))
-        }
-        #else
-        self.background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.6))
-        #endif
+        appsGlassCapsule(tint: tint)
     }
 
     func appsGlassFallback(cornerRadius: CGFloat, tint: Color?) -> some View {
-        self
-            .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill((tint ?? .clear).opacity(0.12))
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.05)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 0.8)
-            )
+        appsGlass(cornerRadius: cornerRadius, tint: tint)
     }
 }
 
@@ -159,27 +122,31 @@ struct AppsTab: View {
                         }
                         Spacer()
                     }
-                    .padding(20)
-                    .background(.ultraThinMaterial)
+                    .padding(MirsaSpacing.page)
+                    .background(MirsaPalette.sheet.ignoresSafeArea())
                 }
             } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: MirsaSpacing.l) {
                     header
                     HeroCard(store: store, onSignIn: { showLogin = true }, onRefresh: refreshAll)
+                        .mirsaAppear()
                     statusWarnings
                     segmentControl
+                        .mirsaAppear(delay: 0.05)
                     grid
+                        .mirsaAppear(delay: 0.1)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 120)
+                .padding(.horizontal, MirsaSpacing.page)
+                .padding(.top, MirsaSpacing.xs)
+                // Keeps the last row clear of the floating + button.
+                .padding(.bottom, 96)
             }
             .scrollIndicators(.hidden)
 
             fab
-                .padding(.trailing, 22)
-                .padding(.bottom, theme == MirsaTheme.liquid.rawValue ? 18 : 26)
+                .padding(.trailing, MirsaSpacing.page)
+                .padding(.bottom, MirsaSpacing.m)
 
             }
 
@@ -218,17 +185,17 @@ struct AppsTab: View {
                 Task { await store.commitPending(to: location, vm: vm) }
             }
             .presentationDetents([.large])
-            .presentationBackground(.ultraThinMaterial)
+            .mirsaSheetBackground()
         }
         .sheet(isPresented: $showLogin) {
             LoginSheet(store: store)
                 .presentationDetents([.large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .sheet(item: $store.prompt) { p in
             PromptSheet(prompt: p) { store.prompt = nil }
                 .presentationDetents([.medium, .large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
                 .interactiveDismissDisabled()
         }
         .sheet(isPresented: $showSettings) {
@@ -248,7 +215,7 @@ struct AppsTab: View {
         .sheet(item: $updater.available) { rel in
             MirsaUpdateSheet(release: rel, updater: updater) { Task { await updater.install(rel, vm: vm) } }
                 .presentationDetents([.large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .sheet(item: $backupApp) { a in BackupsSheet(app: a) }
         .alert(tr("Home Screen", "الشاشة الرئيسية"), isPresented: Binding(get: { shortcutError != nil }, set: { if !$0 { shortcutError = nil } })) {
@@ -257,7 +224,7 @@ struct AppsTab: View {
         .sheet(item: $infoApp) { a in
             AppInfoSheet(app: a, store: store)
                 .presentationDetents([.medium])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .alert(L.t("tab"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button(MirsaTr.lit("OK")) { store.error = nil }
@@ -302,28 +269,16 @@ struct AppsTab: View {
     }
 
     private var header: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(greeting)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.65))
-                Text(L.t("title"))
-                    .font(.system(size: 38, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            Spacer()
+        MirsaPageHeader(title: L.t("title"), subtitle: greeting) {
             LanguageGlobeMenu()
                 .appsGlassCapsule()
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
+                MirsaIconButtonLabel(systemName: "gearshape.fill")
             }
+            .buttonStyle(.mirsaPress)
             .appsGlassCapsule()
             .accessibilityLabel(L.t("settings.title"))
         }
-        .padding(.top, 12)
     }
 
     @ViewBuilder
@@ -364,15 +319,14 @@ struct AppsTab: View {
             .background {
                 if segment == s {
                     Capsule()
-                        .fill(LinearGradient(colors: [Color(red: 0.48, green: 0.36, blue: 1.0).opacity(0.75),
-                                                      Color(red: 0.18, green: 0.56, blue: 0.95).opacity(0.6)],
-                                             startPoint: .leading, endPoint: .trailing))
+                        .fill(MirsaPalette.accentGradient)
+                        .opacity(0.9)
                         .matchedGeometryEffect(id: "seg", in: segNS)
-                        .shadow(color: Color(red: 0.45, green: 0.4, blue: 1).opacity(0.5), radius: 10)
+                        .shadow(color: MirsaPalette.accent.opacity(0.45), radius: 8, y: 3)
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.mirsaPress)
         .frame(minWidth: 0, maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
@@ -407,9 +361,7 @@ struct AppsTab: View {
                         .font(.headline)
                         .padding(.horizontal, 8)
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .tint(Color(red: 0.45, green: 0.38, blue: 1.0))
+                .buttonStyle(.mirsaPrimary)
             }
             .padding(.vertical, 30)
             .frame(maxWidth: .infinity)
@@ -466,15 +418,11 @@ struct AppsTab: View {
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 64, height: 64)
-                .background(
-                    Circle().fill(LinearGradient(colors: [Color(red: 0.55, green: 0.38, blue: 1.0),
-                                                          Color(red: 0.16, green: 0.62, blue: 0.95)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                )
-                .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1))
-                .shadow(color: Color(red: 0.45, green: 0.45, blue: 1).opacity(0.7), radius: 18, y: 6)
+                .background(Circle().fill(MirsaPalette.accentGradient))
+                .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1))
+                .shadow(color: MirsaPalette.accent.opacity(0.5), radius: 14, y: 6)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.mirsaPress)
         .accessibilityLabel(L.t("empty.import"))
     }
 
@@ -564,7 +512,7 @@ struct HeroCard: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.mirsaPress)
                 .appsGlassCapsule(tint: Color(red: 0.45, green: 0.4, blue: 1))
             }
         }
@@ -661,7 +609,7 @@ struct AppTile: View {
                     Button { progress.cancel(e.id) } label: {
                         Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                             .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel(tr("Cancel download", "إلغاء التنزيل")).accessibilityAddTraits(.isButton)
+                    }.buttonStyle(.mirsaPress).accessibilityLabel(tr("Cancel download", "إلغاء التنزيل")).accessibilityAddTraits(.isButton)
                 }
             }
             .environment(\.layoutDirection, .leftToRight)
@@ -747,7 +695,7 @@ struct BusyOverlay: View {
                             .frame(width: 160).padding(.vertical, 10)
                             .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.mirsaPress)
                 }
             }
             .padding(28)
@@ -792,7 +740,7 @@ struct InstallChoiceSheet: View {
                         }
                         .foregroundStyle(.white).padding(16).appsGlass(cornerRadius: 22, tint: .purple)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.mirsaPress)
                     .disabled(store.busy != nil)
 
 
@@ -879,7 +827,7 @@ struct InstallChoiceSheet: View {
             }
         }) {
             LoginSheet(store: store)
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
     }
 
@@ -939,7 +887,7 @@ struct InstallChoiceSheet: View {
                     .strokeBorder(selected ? iconTint.opacity(0.8) : .clear, lineWidth: 1.5)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.mirsaPress)
         .disabled(disabled)
         .opacity(disabled ? 0.45 : 1)
     }
@@ -989,9 +937,7 @@ struct LoginSheet: View {
                 } label: {
                     Text(L.t("login.button")).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .tint(Color(red: 0.45, green: 0.38, blue: 1.0))
+                .buttonStyle(.mirsaPrimary)
                 .disabled(email.isEmpty || password.isEmpty || store.busy != nil)
 
                 if store.busy != nil { ProgressView().tint(.white) }
@@ -1007,7 +953,7 @@ struct LoginSheet: View {
         .sheet(item: $store.prompt) { p in
             PromptSheet(prompt: p) { store.prompt = nil }
                 .presentationDetents([.medium, .large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
                 .interactiveDismissDisabled()
         }
     }
@@ -1066,9 +1012,7 @@ struct PromptSheet: View {
             Button { answer("code:" + code) } label: {
                 Text(L.t("twofa.submit")).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .tint(Color(red: 0.45, green: 0.38, blue: 1.0))
+            .buttonStyle(.mirsaPrimary)
             .disabled(code.count < 6)
 
             HStack(spacing: 10) {
@@ -1098,7 +1042,7 @@ struct PromptSheet: View {
                     }
                     Spacer()
                     Button(L.t("certs.revoke"), role: .destructive) { answer(c.serial) }
-                        .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .buttonStyle(.mirsaSecondary)
                 }
                 .padding(14)
                 .appsGlass(cornerRadius: 18)
