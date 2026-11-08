@@ -197,7 +197,7 @@ struct ForgeProjectView: View {
                     }.foregroundStyle(.green).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 }
                 if let pending = store.pendingGalleryCode {
-                    forgeButton("square.and.arrow.down", tr("Use community tweak", "استخدم تويك المجتمع", ckb: "تویکی کۆمەڵگا بەکاربهێنە", kmr: "Tweaka civakê bi kar bîne")) { store.editCode(id, code: pending); store.pendingGalleryCode = nil }
+                    forgeButton("square.and.arrow.down", tr("Use community tweak", "استخدم تويك المجتمع", ckb: "تویکی کۆمەڵگا بەکاربهێنە", kmr: "Tweaka civakê bi kar bîne")) { store.editCode(id, code: pending, source: store.pendingGallerySource); store.pendingGalleryCode = nil; store.pendingGallerySource = nil }
                 }
                 if let v = p.currentVersion {
                     Button { reportTarget = ForgeFixReportTarget(versionID: v.id, kind: "crash", diagnostic: "") } label: {
@@ -337,9 +337,9 @@ struct ForgeGalleryView: View {
             Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { let id = editing?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-update", "id": id, "name": editName, "description": editDesc]) } }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) {}
         }
-        .confirmationDialog(tr("Upload which project?", "أي مشروع ترفع؟", ckb: "کام پڕۆژە؟", kmr: "Kîjan proje?"), isPresented: Binding(get: { versioning != nil }, set: { if !$0 { versioning = nil } }), titleVisibility: .visible) {
-            ForEach(ForgeStore.shared.projects.filter { $0.currentVersion != nil }) { p in
-                Button(p.name) { let e = versioning?["id"] as? String ?? ""; Task { do { try await ForgeStore.shared.updateGallery(entry: e, from: p.id); error = nil; note = tr("New version uploaded.", "انرفعت النسخة.", ckb: "وەشان بارکرا.", kmr: "Guhertoya nû hat barkirin."); await reload() } catch { self.error = error.localizedDescription } } }
+        .sheet(isPresented: Binding(get: { versioning != nil }, set: { if !$0 { versioning = nil } })) {
+            if let e = versioning {
+                ForgeCommunityUpdateSheet(entry: e) { note = tr("Update published.", "اننشر التحديث.", ckb: "نوێکردنەوە بڵاوکرایەوە.", kmr: "Nûkirin hat weşandin."); error = nil; Task { await reload() } }
             }
         }
         .alert(tr("Delete this tweak?", "حذف هالتويك؟", ckb: "ئەم تویکە بسڕیتەوە؟", kmr: "Ev tweak jê bibe?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
@@ -377,6 +377,7 @@ struct ForgeGalleryView: View {
         do {
             let d = try await ForgeClient.get(["action": "gallery-item", "id": id])
             ForgeStore.shared.pendingGalleryCode = d["code"] as? String
+            ForgeStore.shared.pendingGallerySource = (id: id, version: (d["version"] as? Int) ?? (it["version"] as? Int))
             note = tr("Open one of your tweak projects and tap Use community tweak.", "افتح مشروع تويك وكبس استخدم تويك المجتمع.", ckb: "پڕۆژەیەکی تویک بکەرەوە.", kmr: "Projeyekê veke.")
         } catch { self.error = error.localizedDescription }
     }

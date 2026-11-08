@@ -12,6 +12,8 @@ struct ForgeVersion: Codable, Identifiable, Hashable {
     var fixDylibSHA256: String?
     var importedInfo: ForgeDylibInfo?
     var importEnabled: Bool?
+    var communitySourceID: String?
+    var usedPublishedVersion: Int?
     var tweakID: UUID { guardID ?? id }
     var hasBuild: Bool { builtWithValues != nil }
 }
@@ -29,6 +31,7 @@ struct ForgeProject: Codable, Identifiable {
     @Published var busy: String?
     @Published var builderReady = false
     @Published var pendingGalleryCode: String?
+    @Published var pendingGallerySource: (id: String, version: Int?)?
     @Published var fixNotice: String?
     var fixSyncing = false
     nonisolated static var root: URL {
@@ -153,9 +156,11 @@ struct ForgeProject: Codable, Identifiable {
         update(id) { $0.versions.append(v); $0.current = v.id
             $0.values = Dictionary(uniqueKeysWithValues: v.settings.map { ($0.key, $0.default) }) }
     }
-    func editCode(_ id: UUID, code: String) {
+    func editCode(_ id: UUID, code: String, source: (id: String, version: Int?)? = nil) {
         guard let p = project(id), let cur = p.currentVersion else { return }
-        addVersion(id, ForgeVersion(prompt: tr("Manual edit", "تعديل يدوي", ckb: "دەستکاری دەستی", kmr: "Guhertina destan"), code: code, settings: cur.settings, explain: ""))
+        var nv = ForgeVersion(prompt: tr("Manual edit", "تعديل يدوي", ckb: "دەستکاری دەستی", kmr: "Guhertina destan"), code: code, settings: cur.settings, explain: "")
+        nv.communitySourceID = source?.id; nv.usedPublishedVersion = source?.version
+        addVersion(id, nv)
     }
     func revert(_ id: UUID, to version: UUID) {
         update(id) { p in p.current = version
@@ -308,11 +313,17 @@ extension ForgeStore {
         _ = try await ForgeClient.json(["action": "publish", "name": p.name, "bundleID": p.bundleID, "description": v.prompt, "code": v.code,
             "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }])
     }
-    /// Uploads the project's current version as a new version of an existing gallery entry (server checks ownership/admin).
-    func updateGallery(entry: String, from id: UUID) async throws {
+    /// Publishes a new community version. Author identity is proven by the server session; local fields only describe the source.
+    func updateGallery(entry: String, from id: UUID, changelog: String, expectedVersion: Int?, local: ForgeLocalVersion?) async throws {
         guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
-        _ = try await ForgeClient.json(["action": "gallery-update", "id": entry, "code": v.code,
-            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }])
+        var body: [String: Any] = ["action": "gallery-update", "id": entry, "code": v.code, "changelog": changelog,
+            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }]
+        if let e = expectedVersion { body["expectedVersion"] = e }
+        if let l = local {
+            body["projectID"] = l.projectID.uuidString; body["localVersionID"] = l.versionID.uuidString
+            body["localVersionNumber"] = l.number; body["localVersionCreatedAt"] = ISO8601DateFormatter().string(from: l.created)
+        }
+        _ = try await ForgeClient.json(body)
     }
     /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
     func injectInspector(_ id: UUID) async throws -> URL {
@@ -329,4 +340,15 @@ extension ForgeStore {
 
 extension ForgeStore {
     func refreshStatus() async { builderReady = ((try? await ForgeClient.get(["action": "status"]))?["builder"] as? Bool) ?? false }
+}
+
+/// Real identity of a local tweak version: the linked original project, never another project with the same bundle ID.
+struct ForgeLocalVersion: Equatable {
+    let projectID: UUID, versionID: UUID, number: Int, created: Date
+    /// Latest non-imported, non-fix version of the project (selected current wins only if it is that latest one or newer).
+    static func latest(in p: ForgeProject) -> ForgeLocalVersion? {
+        guard let i = p.versions.lastIndex(where: { $0.importedInfo == nil && $0.fixSourceSHA256 == nil }) else { return nil }
+        let v = p.versions[i]
+        return ForgeLocalVersion(projectID: p.id, versionID: v.id, number: i + 1, created: v.created)
+    }
 }
