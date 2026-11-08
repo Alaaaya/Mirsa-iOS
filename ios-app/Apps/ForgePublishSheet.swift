@@ -10,6 +10,7 @@ struct ForgePublishSheet: View {
     @ObservedObject private var library = PersonalAppsLibrary.shared
     @State private var name = ""
     @State private var what = ""
+    @State private var targetBundleID = ""
     @State private var uploaded = false
     @State private var uploadURLText = ""
     @State private var importing = false
@@ -21,9 +22,9 @@ struct ForgePublishSheet: View {
 
     static var title: String { tr("Publish to community", "انشر للمجتمع", ckb: "بڵاوکردنەوە بۆ کۆمەڵگا", kmr: "Ji civakê re biweşîne") }
     private var project: ForgeProject? { store.project(id) }
-    private var targetApp: PersonalLibraryApp? { library.apps.first { $0.bundleID == project?.bundleID } }
+    private var targetApp: PersonalLibraryApp? { library.apps.first { $0.bundleID == targetBundleID } }
     private var canPublish: Bool {
-        !busy && !describing && name.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
+        !busy && !describing && !targetBundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
             && what.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 && (!uploaded || uploadFile != nil)
     }
 
@@ -43,10 +44,18 @@ struct ForgePublishSheet: View {
                                 else { Image(systemName: "app.dashed") }
                             }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 10))
                             VStack(alignment: .leading) {
-                                Text(project?.appName ?? "")
-                                Text(project?.bundleID ?? "").font(.caption).foregroundStyle(.white.opacity(0.55))
+                                Text(targetApp?.name ?? project?.appName ?? "")
+                                Text(targetBundleID).font(.caption).foregroundStyle(.white.opacity(0.55))
                             }
                         }
+                        if !library.apps.isEmpty {
+                            Picker(tr("Choose target app", "اختار التطبيق المستهدف", ckb: "ئەپی ئامانج هەڵبژێرە", kmr: "Sepana armanc hilbijêre"), selection: $targetBundleID) {
+                                if let project, !library.apps.contains(where: { $0.bundleID == project.bundleID }) { Text(project.appName).tag(project.bundleID) }
+                                ForEach(library.apps) { app in Text(app.name).tag(app.bundleID) }
+                            }.pickerStyle(.menu)
+                        }
+                        TextField("com.example.app", text: $targetBundleID).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .padding(10).background(Color.black.opacity(0.3)).cornerRadius(10)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -84,6 +93,7 @@ struct ForgePublishSheet: View {
         .task {
             guard let p = project, let v = p.currentVersion else { return }
             if name.isEmpty { name = p.name }
+            if targetBundleID.isEmpty { targetBundleID = p.bundleID }
             if what.isEmpty {
                 describing = true; defer { describing = false }
                 let suggested = (try? await store.describeForPublish(id)) ?? String((v.title ?? v.prompt).prefix(120))
@@ -132,7 +142,7 @@ struct ForgePublishSheet: View {
         Task { @MainActor in
             defer { busy = false }
             do {
-                try await store.publish(id, name: n, what: w, uploadedDylib: file)
+                try await store.publish(id, name: n, what: w, uploadedDylib: file, targetBundleID: targetBundleID.trimmingCharacters(in: .whitespacesAndNewlines))
                 if let file { try? FileManager.default.removeItem(at: file) }
                 onDone(tr("Published to the community.", "اننشر للمجتمع.", ckb: "بڵاوکرایەوە بۆ کۆمەڵگا.", kmr: "Ji civakê re hat weşandin."))
                 dismiss()
@@ -149,9 +159,9 @@ extension ForgeStore {
         let d = (out["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return d.isEmpty ? nil : String(d.prefix(200))
     }
-    func publish(_ id: UUID, name: String, what: String, uploadedDylib: URL?) async throws {
+    func publish(_ id: UUID, name: String, what: String, uploadedDylib: URL?, targetBundleID: String? = nil) async throws {
         guard let p = project(id), let v = p.currentVersion else { return }
-        var body: [String: Any] = ["action": "publish", "name": name, "bundleID": p.bundleID, "description": what, "code": v.code,
+        var body: [String: Any] = ["action": "publish", "name": name, "bundleID": targetBundleID ?? p.bundleID, "description": what, "code": v.code,
             "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }]
         if let file = uploadedDylib {
             let data = try Data(contentsOf: file, options: [.mappedIfSafe])
