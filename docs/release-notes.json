@@ -58,5 +58,9 @@
   "1.3.193": {
     "ar": "صلّحنا رابط فتح مثبّت iOS بعد التوقيع بالشهادة، وصار رابط التثبيت ياخد بياناته من ملف IPA الموقّع نفسه بدون تغيير معرّف التطبيق. أضفنا إعادة محاولة محدودة لما السيرفر يطلب الانتظار. خلفية أيقونات التطبيقات صارت صغيرة وملاصقة للأيقونة. هالتحديث لسا مو مجرّب على جهاز فعلي.",
     "en": "Fixed the iOS installer handoff after certificate signing. The installation manifest now reads metadata from the signed IPA itself without changing the app bundle ID. Added bounded retries when the server asks to wait. Home app icons keep their compact, snug backgrounds. This update has not yet been tested on a physical device."
+  },
+  "1.3.196": {
+    "ar": "أضفنا دمج 2 إلى 5 تويكات لنفس التطبيق مع حفظ النسخ الأصلية، واقتراحات ذكية وصنع تويك من صورة بعد المعاينة والموافقة، وتطبيق الطلب على تطبيقات مختارة كل واحد لحاله ضمن الحد اليومي. إصلاح الكراش مساعد وبموافقتك، بحد 3 محاولات، وما بيعيد تفعيل تويك وقّفته الحماية. المفتش بيعرض بيانات محدودة ومخفية النصوص والمعرّفات، ونقلها لمرسى يدوي بملف JSON؛ مو التقاط كامل للشاشة ولا نقل تلقائي. سجل حي مباشر غير متاح. غيّرنا الاسم إلى مكتبة الشهادة بدون تغيير الملفات أو التوقيع. هالتحديث لسا مو مجرّب على جهاز فعلي.",
+    "en": "Added merging of 2 to 5 tweaks for the same app while keeping originals, smart suggestions, image-guided tweak generation with preview and consent, and separate generation for selected apps within daily limits. Crash repair is assisted and consent-based, capped at 3 attempts, and never re-enables a crash-guard-disabled tweak. Inspector output is bounded with text and identifiers redacted; transfer to Mirsa requires manual JSON import, not full-screen text capture or automatic cross-app transfer. Live streaming logs are unavailable. Renamed the library to Certificate Library without changing storage or signing. Not yet tested on a physical device."
   }
 }
