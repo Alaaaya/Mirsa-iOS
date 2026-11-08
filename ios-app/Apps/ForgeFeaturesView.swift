@@ -14,6 +14,7 @@ struct ForgeFeaturesView: View {
     @State private var selectedApps: Set<UUID> = []
     @State private var photo: PhotosPickerItem?
     @State private var cleanJPEG: Data?
+    @State private var markRegion: CGRect?
     @State private var capture: ForgeCapture?
     @State private var capturePreview = ""
     @State private var importingCapture = false
@@ -123,13 +124,17 @@ struct ForgeFeaturesView: View {
                 Label(text("Image to tweak", "صورة لتويك"), systemImage: "photo")
             }
             if let jpeg = cleanJPEG, let image = UIImage(data: jpeg) {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 130)
+                ForgeImageMarkView(image: image, region: $markRegion)
                 Text(text("Only this cleaned JPEG and your request are sent after pressing Generate. No photo metadata.", "بس هالصورة المنظّفة وطلبك بينبعتوا بعد ضغط توليد. بدون بيانات الصورة."))
                     .font(.caption).foregroundStyle(.white.opacity(0.55))
                 Button(text("Generate from this image", "توليد من هالصورة")) {
-                    run { try await store.imageGenerate(id, jpeg: jpeg, prompt: prompt); cleanJPEG = nil; photo = nil }
+                    run {
+                        if let region = markRegion { try await store.imageGenerate(id, jpeg: jpeg, region: region, prompt: prompt) }
+                        else { try await store.imageGenerate(id, jpeg: jpeg, prompt: prompt) }
+                        cleanJPEG = nil; photo = nil; markRegion = nil
+                    }
                 }.disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button(text("Remove image", "إزالة الصورة")) { cleanJPEG = nil; photo = nil }
+                Button(text("Remove image", "إزالة الصورة")) { cleanJPEG = nil; photo = nil; markRegion = nil }
             }
         }
     }
