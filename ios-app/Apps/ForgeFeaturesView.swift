@@ -131,6 +131,9 @@ struct ForgeFeaturesView: View {
         DisclosureGroup(text("Merge tweaks", "دمج تويكات")) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(text("Choose 2–5 local versions for this same app. Originals remain unchanged. A new dylib version is created; no auto-install.", "اختر ٢–٥ نسخ محلية لنفس التطبيق. الأصلي بيضل. بتنضاف نسخة dylib جديدة بدون تثبيت تلقائي.")).font(.caption)
+                if candidates.isEmpty {
+                    Text(text("No saved tweaks for this app", "ما في تويكات محفوظة لهالتطبيق")).font(.caption).foregroundStyle(.white.opacity(0.55))
+                }
                 ForEach(candidates, id: \.1.id) { project, version in
                     Button {
                         if selectedVersions.contains(version.id) { selectedVersions.remove(version.id) }
