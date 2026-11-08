@@ -822,7 +822,7 @@ struct InstallChoiceSheet: View {
                     }
                     if let onPersonal {
                         optionCard(selected: false, icon: "square.stack.3d.up.fill", iconTint: .teal,
-                                   title: tr("Personal library", "المكتبة الخاصة"),
+                                   title: tr("Certificate Library", "مكتبة الشهادة", ckb: "کتێبخانەی بڕوانامە", kmr: "Pirtûkxaneya sertîfîkayê"),
                                    sub: tr("Save only. No Apple ID or installation.", "حفظ فقط، بدون Apple ID أو تثبيت."),
                                    trailing: "+", disabled: store.busy != nil || savingPersonal) {
                             store.error = nil
