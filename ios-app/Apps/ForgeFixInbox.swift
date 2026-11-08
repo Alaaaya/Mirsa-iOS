@@ -103,7 +103,9 @@ enum ForgeFixDiagnostic {
         let lower = String(input.prefix(24000)).lowercased()
         let signals = ["error:", "warning:", "undefined symbol", "undeclared identifier", "no known", "unavailable", "deprecated", "killed", "memory", "layout", "recursion", "sigabrt", "sigsegv", "exception", "crash", "guard disabled", "guard enabled"]
         let found = signals.filter { lower.contains($0) }
-        return "mirsa.fix-report.v1\nkind=" + (kind == "build" ? "build" : "crash") + "\nsignals=" + (found.isEmpty ? "unspecified failure" : found.joined(separator: ", "))
+        let summary = found.isEmpty ? "unspecified failure" : found.joined(separator: ", ")
+        if kind == "build" { return "error: user-reported tweak build failure; signals=" + summary }
+        return "Exception Type: not provided\nApplication Specific Information: user-reported tweak failure; signals=" + summary
     }
 }
 
