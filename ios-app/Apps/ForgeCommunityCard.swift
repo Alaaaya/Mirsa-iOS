@@ -24,7 +24,7 @@ struct ForgeCommunityEntry {
         mine = entry["mine"] as? Bool == true
         id = entry["id"] as? String ?? ""
         version = entry["version"] as? Int
-        func date(_ k: String) -> Date? { (entry[k] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } }
+        func date(_ k: String) -> Date? { (entry[k] as? String).flatMap(ForgeCommunityUpdateLogic.parseDate) }
         updatedAt = date("updated_at")
         changelog = (entry["changelog"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         authorProjectID = (entry["author_project_id"] as? String).flatMap(UUID.init)
