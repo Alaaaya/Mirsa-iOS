@@ -35,7 +35,7 @@ final class FakeOTAServer {
         StubProtocol.handler = { [self] req, body in
             switch req.httpMethod! {
             case "POST" where req.url!.path.hasSuffix("finalize"):
-                return (200, json(["manifestURL": "https://mirsa-app.mooo.com/ota/m?kind=manifest&token=abc"]))
+                return (200, json(["manifestURL": "https://mirsa-app.mooo.com/ota/download/0123456789abcdef0123456789abcdef?token=eyJhIjoxfQ.c2ln&kind=manifest"]))
             case "POST": return (200, json(["offset": committed.count, "total": 20]))
             case "GET":
                 if failGETOnce { failGETOnce = false; throw URLError(.networkConnectionLost) }
@@ -127,10 +127,16 @@ final class OTATransportTests: XCTestCase {
         }
     }
     func testManifestValidation() {
-        XCTAssertTrue(OTAHostPolicy.acceptsManifest(URL(string: "https://mirsa-app.mooo.com/ota/m?kind=manifest&token=a")!))
-        for bad in ["https://mirsa-app.mooo.com/other?kind=manifest&token=a", "https://mirsa-app.mooo.com/ota/m?token=a",
-                    "https://mirsa-app.mooo.com/ota/m?kind=manifest", "https://evil.com/ota/m?kind=manifest&token=a",
-                    "https://mirsa-app.mooo.com/ota/m?kind=manifest&token=a#x"] {
+        XCTAssertTrue(OTAHostPolicy.acceptsManifest(URL(string: "https://mirsa-app.mooo.com/ota/download/0123456789abcdef0123456789abcdef?token=eyJhIjoxfQ.c2ln&kind=manifest")!))
+        let b="https://mirsa-app.mooo.com/ota/download/0123456789abcdef0123456789abcdef"
+        for bad in ["\(b)?token=eyJhIjoxfQ.c2ln", "\(b)?kind=manifest", "\(b)?token=x.y&kind=manifest&kind=manifest",
+                    "\(b)?token=x.y&token=x.y&kind=manifest", "\(b)?token=nodot&kind=manifest", "\(b)?token=x.y&kind=manifest&z=1",
+                    "\(b)?token=x.y&kind=ipa", "\(b)?token=x.y&kind=manifest#f",
+                    "https://mirsa-app.mooo.com/ota/download/abc?token=x.y&kind=manifest",
+                    "https://mirsa-app.mooo.com/ota/download/0123456789abcdef0123456789abcdef/x?token=x.y&kind=manifest",
+                    "https://mirsa-app.mooo.com/ota/m?token=x.y&kind=manifest",
+                    "https://evil.com/ota/download/0123456789abcdef0123456789abcdef?token=x.y&kind=manifest",
+                    "http://mirsa-app.mooo.com/ota/download/0123456789abcdef0123456789abcdef?token=x.y&kind=manifest"] {
             XCTAssertFalse(OTAHostPolicy.acceptsManifest(URL(string: bad)!), bad)
         }
     }
