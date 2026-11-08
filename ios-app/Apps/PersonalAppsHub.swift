@@ -1,4 +1,5 @@
 import SwiftUI
+import Compression
 import UniformTypeIdentifiers
 import ImageIO
 
@@ -80,10 +81,17 @@ final class PersonalAppsLibrary: ObservableObject {
     /// Cached icon. Never decodes anything bigger than the 180px PNG we wrote ourselves.
     func icon(for app: PersonalLibraryApp) -> UIImage? {
         let key = app.id.uuidString as NSString
-        if let hit = iconCache.object(forKey: key) { return hit }
+        let stamp = Self.stamp(url(app))
+        if let hit = iconCache.object(forKey: key), iconStamps[app.id] == stamp { return hit }
+        iconCache.removeObject(forKey: key)
         guard let image = UIImage(contentsOfFile: iconURL(app).path) else { return nil }
-        iconCache.setObject(image, forKey: key)
+        iconCache.setObject(image, forKey: key); iconStamps[app.id] = stamp
         return image
+    }
+    private var iconStamps: [UUID: String] = [:]
+    nonisolated static func stamp(_ u: URL) -> String {
+        let v = try? u.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        return "\(v?.fileSize ?? 0)-\(v?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
     }
     /// Legacy apps imported before icons were stored. Tried once per launch, bounded to 512 MB.
     func ensureIcon(for app: PersonalLibraryApp) async -> UIImage? {
@@ -144,20 +152,85 @@ final class PersonalAppsLibrary: ObservableObject {
         return nil
     }
 
+    /// Converts Xcode's CgBI PNG (raw deflate, BGRA premultiplied) to a normal 180px PNG. Pure Compression/CoreGraphics/ImageIO.
+    nonisolated static func cgbiIconPNG(_ data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 33, bytes.count <= 2 * 1024 * 1024 else { return nil }
+        func be(_ o: Int) -> Int { bytes[o..<(o + 4)].reduce(0) { ($0 << 8) | Int($1) } }
+        var offset = 8, width = 0, height = 0, idat = [UInt8](), ok = false
+        while offset <= bytes.count - 12 {
+            let length = be(offset)
+            guard length >= 0, length <= bytes.count - offset - 12 else { return nil }
+            let kind = String(decoding: bytes[(offset + 4)..<(offset + 8)], as: UTF8.self)
+            let body = offset + 8
+            if kind == "IHDR" {
+                guard length == 13 else { return nil }
+                width = be(body); height = be(body + 4)
+                // only 8-bit RGBA, non-interlaced (what Xcode emits)
+                guard bytes[body + 8] == 8, bytes[body + 9] == 6, bytes[body + 12] == 0 else { return nil }
+            } else if kind == "IDAT" { idat += bytes[body..<(body + length)] }
+            else if kind == "IEND" { ok = true; break }
+            offset += length + 12
+        }
+        guard ok, width > 0, height > 0, width <= 4096, height <= 4096, !idat.isEmpty else { return nil }
+        let stride = width * 4, rawSize = height * (stride + 1)
+        var raw = [UInt8](repeating: 0, count: rawSize)
+        let got = idat.withUnsafeBufferPointer { src in raw.withUnsafeMutableBufferPointer { dst in
+            compression_decode_buffer(dst.baseAddress!, rawSize, src.baseAddress!, idat.count, nil, COMPRESSION_ZLIB) } }
+        guard got == rawSize else { return nil }
+        var pix = [UInt8](repeating: 0, count: stride * height)
+        for y in 0..<height {
+            let f = raw[y * (stride + 1)]
+            let rs = y * (stride + 1) + 1
+            for x in 0..<stride {
+                let a = x >= 4 ? Int(pix[y * stride + x - 4]) : 0
+                let b = y > 0 ? Int(pix[(y - 1) * stride + x]) : 0
+                let c = (x >= 4 && y > 0) ? Int(pix[(y - 1) * stride + x - 4]) : 0
+                let r = Int(raw[rs + x])
+                let v: Int
+                switch f {
+                case 0: v = r
+                case 1: v = r + a
+                case 2: v = r + b
+                case 3: v = r + (a + b) / 2
+                case 4:
+                    let pp = a + b - c, pa = abs(pp - a), pb = abs(pp - b), pc = abs(pp - c)
+                    v = r + ((pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c))
+                default: return nil
+                }
+                pix[y * stride + x] = UInt8(truncatingIfNeeded: v)
+            }
+        }
+        let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let provider = CGDataProvider(data: Data(pix) as CFData),
+              let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: stride,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider,
+                                  decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return nil }
+        let side = min(180, max(width, height))
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let out = ctx.makeImage() else { return nil }
+        let output = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, out, nil)
+        return CGImageDestinationFinalize(dest) ? output as Data : nil
+    }
+
     /// ImageIO only, safe to call from the import worker. No UIKit/Bundle asset lookups.
     nonisolated static func validatedIconPNG(_ data: Data) -> Data? {
         let signature: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
         guard data.count >= 33, data.count <= 2 * 1024 * 1024,
               Array(data.prefix(8)) == signature else { return nil }
-        // Apple's crushed PNG uses a nonstandard CgBI chunk. Do not feed it to
-        // UIKit or try to reinterpret premultiplied pixels. Use a placeholder.
+        // Apple's crushed (CgBI) PNG is converted by cgbiIconPNG with ImageIO/CoreGraphics only, never UIKit.
         var offset = 8
         var sawHeader = false
         while offset <= data.count - 12 {
             let length = data[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) }
             guard length <= data.count - offset - 12 else { return nil }
             let kind = Array(data[(offset + 4)..<(offset + 8)])
-            if kind == Array("CgBI".utf8) { return nil }
+            if kind == Array("CgBI".utf8) { return cgbiIconPNG(data) }
             if !sawHeader {
                 guard kind == Array("IHDR".utf8), length == 13 else { return nil }
                 sawHeader = true
