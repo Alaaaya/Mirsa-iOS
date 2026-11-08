@@ -186,7 +186,7 @@ import ImageIO
         XCTAssertTrue(FileManager.default.fileExists(atPath: a.path), "Deleting archive copies must preserve input")
     }
     func testBig3InterruptedMarkerKeepsHonestAttribution() {
-        let report = ForgeFixDiagnostic.sanitized("Termination Reason: Mirsa launch marker reports an interrupted launch; attribution unconfirmed. Counter 2.")
+        let report = ForgeFixDiagnostic.sanitized("Termination Reason: Mirsa launch marker reports an interrupted launch; attribution unconfirmed. Counter 2.", kind: "crash")
         XCTAssertTrue(report.contains("attribution unconfirmed"))
         XCTAssertFalse(report.contains("Counter"))
     }
