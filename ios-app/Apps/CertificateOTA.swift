@@ -45,7 +45,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         do {
         let info = try IPAEditorService.info(in: app)
         guard let bundleID = info["CFBundleIdentifier"] as? String,
-              let version = info["CFBundleVersion"] as? String else { throw SideloadError.message("Missing application identity.") }
+              let version = info["CFBundleVersion"] as? String else { throw SideloadError.message(personalText("Missing application identity.", "هوية التطبيق ناقصة.")) }
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
         let plan = try OTAChunkPlan(total: size)
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
@@ -55,11 +55,13 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let manifestURL: URL
         do {
             manifestURL = try await oracleUpload(file: kept, plan: plan, token: token, bundleID: bundleID, version: version, title: title, progress: progress)
-        } catch let e as OTAChunkError where e == .cancelled || e == .tooLarge { throw e }
-        catch is CancellationError { throw OTAChunkError.cancelled }
-        catch {
-            guard size <= 30 * 1024 * 1024 else {
-                throw SideloadError.message(personalText("Upload server unavailable. Large apps need it; try again later.", "سيرفر الرفع مو متاح. التطبيقات الكبيرة بتحتاجه، جرب بعدين."))
+        } catch {
+            guard OTAFallbackPolicy.allows(error, size: size) else {
+                let down = error is URLError || { if case OTAChunkError.server(let c)? = error as? OTAChunkError { return c >= 500 }; return false }()
+                if down && size > OTAFallbackPolicy.limit {
+                    throw SideloadError.message(personalText("Upload server unavailable. Large apps need it; try again later.", "سيرفر الرفع مو متاح. التطبيقات الكبيرة بتحتاجه، جرب بعدين."))
+                }
+                throw error
             }
             manifestURL = try await legacyUpload(file: kept, size: size, token: token, bundleID: bundleID, version: version, title: title)
         }
@@ -94,19 +96,9 @@ extension CertificateOTA {
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw OTAChunkError.server(code) }
         let session = try OTAOracleWire.session(from: d)
-        let up = OTAChunkUploader()
-        return try await withTaskCancellationHandler {
-            do {
-                let start = try await up.open(session)
-                try await up.upload(file: file, total: plan.total, session: session, from: start) { f in
-                    DispatchQueue.main.async { progress?(f) }
-                }
-                return try await up.finalize(session)
-            } catch {
-                if error as? OTAChunkError == .cancelled { await up.abort(session) }
-                throw error
-            }
-        } onCancel: { up.cancel() }
+        return try await OTAChunkUploader.run(file: file, total: plan.total, session: session) { f in
+            DispatchQueue.main.async { progress?(f) }
+        }
     }
     static func legacyUpload(file: URL, size: Int64, token: String, bundleID: String, version: String, title: String) async throws -> URL {
         let bytes = try Data(contentsOf: file, options: .mappedIfSafe)
