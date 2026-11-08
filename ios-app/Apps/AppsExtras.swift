@@ -442,7 +442,7 @@ struct GitHubSourcesView: View {
     @ObservedObject var gh = GitHubWatcher.shared
     @State private var input = ""
     var body: some View {
-        Form {
+        Form { Group {
             Section {
                 HStack {
                     TextField("owner/repo", text: $input)
@@ -479,7 +479,7 @@ struct GitHubSourcesView: View {
                 .disabled(gh.checking || gh.sources.isEmpty)
                 if let r = gh.lastResult { Text(r).font(.footnote).foregroundStyle(.secondary) }
             }
-        }
+        }.listRowBackground(MirsaPalette.row) }
         .mirsaScreen()
         .navigationTitle(tr("GitHub Updates", "تحديثات GitHub"))
     }
@@ -488,7 +488,7 @@ struct GitHubSourcesView: View {
 struct WebUploadView: View {
     @ObservedObject var server = WebUploadServer.shared
     var body: some View {
-        Form {
+        Form { Group {
             Section {
                 Toggle(tr("Receive from computer", "استقبل من الكمبيوتر"), isOn: Binding(
                     get: { server.running }, set: { $0 ? server.start() : server.stop() }))
@@ -509,7 +509,7 @@ struct WebUploadView: View {
                 Text(tr("Keep Mirsa open. Drop an .ipa on the page and choose Container or Real App here.",
                         "خلّي Mirsa مفتوح. اسحب ملف ‎.ipa عالصفحة، وبعدين اختار Container أو تطبيق حقيقي من هون."))
             }
-        }
+        }.listRowBackground(MirsaPalette.row) }
         .mirsaScreen()
         .navigationTitle(tr("Upload from Computer", "رفع من الكمبيوتر"))
     }
@@ -587,7 +587,7 @@ final class MirsaUpdater: ObservableObject {
     @Published var checking = false
 
     func check(force: Bool = false) async {
-        guard !AppsStore.isSetupMode, available == nil, !installing else { return }
+        guard !AppsStore.isSetupMode, !MirsaUITestHarness.active, available == nil, !installing else { return }
         if !force, let u = snoozedUntil, u > Date() { return }
         // Cheap check through the shared ordered feed chain first; skip the IPA download when the feed says we are current.
         if let feed = try? await MirsaSourceFeed.fetch(), let b = MirsaSourceFeed.latestBuild(in: feed.root),
@@ -687,39 +687,48 @@ struct MirsaUpdateSheet: View {
         VStack(spacing: 18) {
             HStack(spacing: 14) {
                 Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 40)).foregroundStyle(.green)
+                    .font(.system(size: 40)).foregroundStyle(MirsaPalette.success)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(tr("New version available", "في نسخة جديدة")).font(.title3.bold())
+                    Text(tr("New version available", "في نسخة جديدة")).font(MirsaFont.sheetTitle)
                     Text(MirsaTr.f("build", "\(release.build)")).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(tr("What's new", "شو الجديد")).font(.headline)
-                    Text(UpdaterMetadata.notes(body: release.body, language: L.isArabic ? "ar" : "en") ?? tr("Release notes are not available for this version.", "تفاصيل التغييرات مو متوفرة لهالنسخة."))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding()
+            // Short notes hug their content; long notes scroll inside the card.
+            ViewThatFits(in: .vertical) {
+                releaseNotes
+                ScrollView { releaseNotes }
             }
-            .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.06)))
+            .mirsaCard(radius: MirsaRadius.m)
             Text(tr("Enable LocalDevVPN and check your pairing file.",
                     "فعّل LocalDevVPN وتأكد من صحة ملف الاقتران."))
-                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(.footnote).foregroundStyle(MirsaPalette.textSecondary).multilineTextAlignment(.center)
+            Spacer(minLength: 0)
             Button(action: onUpdate) {
-                Text(tr("Update now", "حدّث هلّق")).font(.headline).frame(maxWidth: .infinity).padding()
-                    .background(RoundedRectangle(cornerRadius: 16).fill(.green.opacity(0.8)))
-                    .foregroundStyle(.white)
+                Text(tr("Update now", "حدّث هلّق")).frame(maxWidth: .infinity)
             }
+            .buttonStyle(.mirsaPrimary)
+            .controlSize(.large)
             if let ipa = release.ipa {
                 Button { openURL(ipa) } label: {
                     Label(tr("Download IPA manually", "نزّل الـ IPA يدوياً"), systemImage: "arrow.down.circle")
                 }.font(.subheadline)
             }
             Button(tr("Later", "لاحقاً")) { updater.later(release) }
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(MirsaPalette.textSecondary)
         }
-        .padding(24)
+        .padding(MirsaSpacing.xl)
+        .preferredColorScheme(.dark)
+    }
+
+    private var releaseNotes: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(tr("What's new", "شو الجديد")).font(MirsaFont.cardTitle)
+            Text(UpdaterMetadata.notes(body: release.body, language: L.isArabic ? "ar" : "en") ?? tr("Release notes are not available for this version.", "تفاصيل التغييرات مو متوفرة لهالنسخة."))
+                .font(.subheadline).foregroundStyle(MirsaPalette.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MirsaSpacing.card)
     }
 }

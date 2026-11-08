@@ -31,10 +31,10 @@ struct StructuredPlistEditor: View {
                         selection = PlistEditSelection(path: [], key: "", type: "string", text: "", adding: true,
                                                        container: document?.root is [String: Any])
                     } label: { Image(systemName: "plus").font(.headline).frame(width: 34, height: 34).background(.purple, in: Circle()) }
-                        .buttonStyle(.plain).accessibilityLabel(label("Add value"))
+                        .buttonStyle(.mirsaPress).accessibilityLabel(label("Add value"))
                 }
                 Button(label(rawMode ? "Tree" : "Raw XML")) { toggleMode() }
-                    .buttonStyle(.bordered).tint(.cyan)
+                    .buttonStyle(.mirsaSecondary)
             }.padding(.horizontal)
             Text(label("Changes are staged. Sign the app again before installing."))
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
@@ -71,7 +71,7 @@ struct StructuredPlistEditor: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(label(editing ? "Save" : "Edit")) {
                     if editing { save() } else { editing = true }
-                }.buttonStyle(.borderedProminent).tint(.blue).accessibilityIdentifier("mirsa.plist.edit")
+                }.buttonStyle(.mirsaPrimary).accessibilityIdentifier("mirsa.plist.edit")
             }
         }
         .sheet(item: $selection) { item in
@@ -167,7 +167,7 @@ struct StructuredPlistEditor: View {
                             .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                     }
                 }
-            }.buttonStyle(.plain)
+            }.buttonStyle(.mirsaPress)
             if row.type == "bool" {
                 Toggle("", isOn: Binding(get: { (row.value as? NSNumber)?.boolValue == true }, set: { value in
                     do { var doc = document; try doc?.setScalar(at: row.path, text: value ? "true" : "false"); document = doc }
@@ -177,7 +177,7 @@ struct StructuredPlistEditor: View {
             if row.container && editing {
                 Button {
                     selection = PlistEditSelection(path: row.path, key: "", type: "string", text: "", adding: true, container: row.type == "dictionary")
-                } label: { Image(systemName: "plus").frame(width: 30, height: 36) }.buttonStyle(.plain).tint(.cyan)
+                } label: { Image(systemName: "plus").frame(width: 30, height: 36) }.buttonStyle(.mirsaPress).tint(.cyan)
             }
         }
         .padding(.leading, CGFloat(min(row.depth, 8)) * 13)
@@ -260,7 +260,7 @@ private struct PlistValueSheet: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 if showsKey {
                     TextField(MirsaTr.lit("Key"), text: $key).autocorrectionDisabled().textInputAutocapitalization(.never)
                 }
@@ -280,7 +280,7 @@ private struct PlistValueSheet: View {
                     if type == "date" { Text("ISO 8601 · 2026-11-07T12:00:00Z").font(.caption).foregroundStyle(.secondary) }
                 }
                 if let error { Text(error).foregroundStyle(.orange) }
-            }
+            }.listRowBackground(MirsaPalette.row) }
             .navigationTitle(MirsaTr.lit(item.adding ? "Add value" : "Edit"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button(MirsaTr.lit("Cancel")) { dismiss() } }

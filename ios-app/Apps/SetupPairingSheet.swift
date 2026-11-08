@@ -14,24 +14,21 @@ struct SetupPairingSheet: View {
         ZStack {
             AuroraBackground()
             ScrollView {
-                VStack(spacing: 16) {
-                    HStack {
-                        Text(L.t("setup.pairing")).font(.largeTitle.bold()).foregroundStyle(.white)
-                        Spacer()
+                VStack(spacing: MirsaSpacing.m) {
+                    MirsaPageHeader(title: L.t("setup.pairing")) {
                         if showsClose { Button { dismiss() } label: {
-                            Image(systemName: "xmark").font(.headline).foregroundStyle(.white)
-                                .frame(width: 38, height: 38)
+                            MirsaRoundIcon(systemName: "xmark")
                         }
-                        .appsGlassCapsule() }
+                        .buttonStyle(.mirsaPress) }
                     }
-                    .padding(.bottom, 4)
+                    .padding(.bottom, MirsaSpacing.xxs)
 
-                    networkCard
-                    statusCard
-                    pairCard
-                    importCard
+                    networkCard.mirsaAppear()
+                    statusCard.mirsaAppear(delay: 0.04)
+                    pairCard.mirsaAppear(delay: 0.08)
+                    importCard.mirsaAppear(delay: 0.12)
                 }
-                .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 50)
+                .padding(.horizontal, MirsaSpacing.page).padding(.top, showsClose ? MirsaSpacing.xl : MirsaSpacing.xxs).padding(.bottom, MirsaSpacing.xl)
             }
             .scrollIndicators(.hidden)
         }
@@ -52,12 +49,13 @@ struct SetupPairingSheet: View {
     private func row(icon: String, ok: Bool, title: String, sub: String) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(ok ? Color.green.opacity(0.85) : Color.orange.opacity(0.8)).frame(width: 40, height: 40)
-                Image(systemName: ok ? "checkmark" : icon).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                Circle().fill(ok ? MirsaPalette.success : MirsaPalette.warning).frame(width: MirsaIconSize.button, height: MirsaIconSize.button)
+                Image(systemName: ok ? "checkmark" : icon).font(.system(size: MirsaIconSize.m, weight: .bold)).foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline).foregroundStyle(.white)
-                Text(sub).font(.subheadline).foregroundStyle(.white.opacity(0.65))
+                Text(title).font(MirsaFont.cardTitle).foregroundStyle(.white)
+                Text(sub).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
@@ -73,25 +71,24 @@ struct SetupPairingSheet: View {
                         if let u = URL(string: "localdevvpn://") { UIApplication.shared.open(u) }
                     } label: {
                         Label(L.t("pair.openVPN"), systemImage: "arrow.up.forward.app")
-                            .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                            .lineLimit(1)
                     }
-                    .foregroundStyle(.white).appsGlassCapsule(tint: .orange)
+                    .buttonStyle(.mirsaSecondary)
                 }
                 Spacer()
                 Button { vm.refreshNetworkStatus() } label: {
-                    Image(systemName: "arrow.clockwise").font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white).frame(width: 36, height: 36)
+                    MirsaRoundIcon(systemName: "arrow.clockwise")
                 }
-                .appsGlassCapsule()
+                .buttonStyle(.mirsaPress)
             }
         }
-        .padding(16).appsGlass(cornerRadius: 22)
+        .padding(MirsaSpacing.card).appsGlass(cornerRadius: MirsaRadius.l)
     }
 
     private var statusCard: some View {
         row(icon: "link", ok: vm.hasPairingFile, title: L.t("setup.pairing"),
             sub: vm.hasPairingFile ? L.t("setup.pairingOK") : L.t("setup.pairingOff"))
-            .padding(16).appsGlass(cornerRadius: 22)
+            .padding(MirsaSpacing.card).appsGlass(cornerRadius: MirsaRadius.l)
     }
 
     private var pairCard: some View {
@@ -111,20 +108,20 @@ struct SetupPairingSheet: View {
                         Button {
                             UIPasteboard.general.string = pin
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        } label: { Image(systemName: "doc.on.doc").foregroundStyle(.white).frame(width: 40, height: 40) }
-                        .appsGlassCapsule(tint: .orange)
+                        } label: { MirsaRoundIcon(systemName: "doc.on.doc") }
+                        .buttonStyle(.mirsaPress)
                     }
                     Text(L.t("pair.where")).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.8))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
                         if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
                     } label: {
-                        Text(L.t("pair.openSettings")).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
+                        Text(L.t("pair.openSettings")).frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).tint(.orange)
+                    .buttonStyle(.mirsaPrimary)
                 }
-                Button(L.t("choice.cancel")) { vm.cancelPairing() }
-                    .foregroundStyle(.red)
+                Button(L.t("choice.cancel"), role: .destructive) { vm.cancelPairing() }
+                    .buttonStyle(.mirsaSecondary)
             } else {
                 if !vm.pairingStatus.isEmpty && vm.pairingStatus != "idle" {
                     Text(vm.pairingStatus).font(.subheadline).multilineTextAlignment(.center)
@@ -133,29 +130,34 @@ struct SetupPairingSheet: View {
                 Button { vm.startPairing() } label: {
                     Label(vm.hasPairingFile ? L.t("pair.repair") : L.t("pair.start"),
                           systemImage: "antenna.radiowaves.left.and.right")
-                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-                .tint(Color(red: 0.45, green: 0.38, blue: 1.0))
+                .buttonStyle(.mirsaPrimary)
+                .controlSize(.large)
                 .disabled(!networkOK)
             }
         }
-        .padding(16).appsGlass(cornerRadius: 22)
+        .padding(MirsaSpacing.card).appsGlass(cornerRadius: MirsaRadius.l)
     }
 
     private var importCard: some View {
         Button { showFilePicker = true } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "square.and.arrow.down").font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L.t("pair.import")).font(.headline)
-                    Text(L.t("pair.importSub")).font(.caption).foregroundStyle(.white.opacity(0.6))
+            HStack(spacing: 14) {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: MirsaIconSize.m, weight: .bold))
+                    .frame(width: MirsaIconSize.button, height: MirsaIconSize.button)
+                    .background(MirsaPalette.cardRaised, in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L.t("pair.import")).font(MirsaFont.cardTitle)
+                    Text(L.t("pair.importSub")).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))
+                Image(systemName: "chevron.right").font(.system(size: MirsaIconSize.s, weight: .bold)).foregroundStyle(MirsaPalette.textTertiary)
             }
-            .foregroundStyle(.white).padding(16)
+            .foregroundStyle(.white).padding(MirsaSpacing.card)
+            .appsGlass(cornerRadius: MirsaRadius.l)
         }
-        .appsGlass(cornerRadius: 22)
+        .buttonStyle(.mirsaPress)
     }
 }

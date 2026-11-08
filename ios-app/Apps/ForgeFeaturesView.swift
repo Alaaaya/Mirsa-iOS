@@ -47,7 +47,7 @@ struct ForgeFeaturesView: View {
         }
         .font(.subheadline)
         .foregroundStyle(.white)
-        .padding(14).background(forgeCard).cornerRadius(16)
+        .padding(14).appsGlass(cornerRadius: MirsaRadius.l)
         .environment(\.layoutDirection, .leftToRight)
         .disabled(busy || store.busy != nil)
         .onAppear { repairOptIn = UserDefaults.standard.bool(forKey: "forge.repair.optin." + id.uuidString) }
@@ -106,7 +106,7 @@ struct ForgeFeaturesView: View {
                 Button { prompt = suggestion } label: {
                     Text(suggestion).font(.caption).multilineTextAlignment(.leading).padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading).background(Color.white.opacity(0.08)).cornerRadius(8)
-                }.buttonStyle(.plain)
+                }.buttonStyle(.mirsaPress)
             }
         }
     }
@@ -144,7 +144,7 @@ struct ForgeFeaturesView: View {
                                 Text(version.created.formatted()).font(.caption2)
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.mirsaPress)
                 }
                 Button(text("Merge selected", "دمج المحدّد")) {
                     run { try await store.merge(id, selected: candidates.filter { selectedVersions.contains($0.1.id) }); selectedVersions.removeAll(); message = text("Merged version saved. Originals kept.", "انحفظت النسخة المدموجة والأصلية موجودة.") }

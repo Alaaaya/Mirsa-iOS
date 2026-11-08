@@ -459,12 +459,12 @@ struct PersonalCertificateView: View {
                 .foregroundStyle(.white)
                 .background(LinearGradient(colors: [Color.green, Color.teal], startPoint: .leading, endPoint: .trailing)
                     .opacity(canSave ? 1 : 0.3), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }.buttonStyle(.plain).disabled(!canSave)
+            }.buttonStyle(.mirsaPress).disabled(!canSave)
             if let latest { savedCard(latest) }
             Button { showQueue = true } label: {
                 Label(sgText("Signing queue and app clone", "طابور التوقيع ونسخ التطبيقات", "ڕیزی واژووکردن و کلۆنی ئەپ", "Rêzika îmzekirinê û klona sepanê"), systemImage: "square.stack.3d.up.fill")
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
-            }.buttonStyle(.bordered).accessibilityIdentifier("open-signing-queue")
+            }.buttonStyle(.mirsaSecondary).accessibilityIdentifier("open-signing-queue")
             Text(personalText("The IPA must be unencrypted. Each retained app or extension needs a matching Development or Ad Hoc profile that includes the connected device. Device authorization is checked through pairing when signing.",
                               "لازم ملف IPA يكون غير مشفّر. كل تطبيق أو إضافة بتحتفظ فيها بدها بروفايل Development أو Ad Hoc مطابق ومضاف فيه الجهاز المتصل. تطابق الجهاز بينفحص عبر الاقتران وقت التوقيع."))
                 .font(.caption).foregroundStyle(.secondary)
@@ -509,7 +509,7 @@ struct PersonalCertificateView: View {
             }
             .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(border(done))
-        }.buttonStyle(.plain)
+        }.buttonStyle(.mirsaPress)
     }
     private var passwordField: some View {
         HStack(spacing: 10) {
@@ -525,7 +525,7 @@ struct PersonalCertificateView: View {
             .autocorrectionDisabled().textInputAutocapitalization(.never)
             Button { showPassword.toggle() } label: {
                 Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill").foregroundStyle(.secondary)
-            }.buttonStyle(.plain)
+            }.buttonStyle(.mirsaPress)
         }
         .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(border(passwordFocused))

@@ -107,7 +107,7 @@ struct BackupsSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 Section {
                     Button {
                         Task { await store.backupData(app); list = store.backups(for: app) }
@@ -133,7 +133,7 @@ struct BackupsSheet: View {
                         }
                     }
                 }
-            }
+            }.listRowBackground(MirsaPalette.row) }
             .navigationTitle(app.name)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(tr("Done", "تم")) { dismiss() } } }
             .confirmationDialog(tr("Restore this backup? The current data is backed up first.",
