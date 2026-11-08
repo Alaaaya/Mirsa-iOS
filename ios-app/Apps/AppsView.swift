@@ -23,11 +23,12 @@ struct AuroraBackground: View {
     var paused = false
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     var body: some View {
-        if theme == MirsaTheme.liquid.rawValue { LiquidBackground(paused: paused) } else { classic }
+        // The UI-test harness freezes the drifting light so XCUITest can reach idle.
+        if theme == MirsaTheme.liquid.rawValue { LiquidBackground(paused: paused || MirsaUITestHarness.active) } else { classic }
     }
 
     private var classic: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused)) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused || MirsaUITestHarness.active)) { ctx in
             let t = Float(ctx.date.timeIntervalSinceReferenceDate)
             let s = sin(t * 0.25) * 0.08
             let c = cos(t * 0.21) * 0.08

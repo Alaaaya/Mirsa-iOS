@@ -34,6 +34,8 @@ struct ToolsTab: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // One continuous page background behind the picker and every section.
+        .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
 
