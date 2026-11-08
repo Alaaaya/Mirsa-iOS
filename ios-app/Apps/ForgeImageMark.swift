@@ -44,11 +44,12 @@ struct ForgeImageMarkView: View {
 
 enum ForgeImageMark {
     static func normalize(_ rect: CGRect, in size: CGSize) -> CGRect {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return .zero }
         let x = max(0, min(rect.minX, size.width)), y = max(0, min(rect.minY, size.height))
         let w = max(0, min(rect.maxX, size.width) - x), h = max(0, min(rect.maxY, size.height) - y)
         return CGRect(x: x / size.width, y: y / size.height, width: w / size.width, height: h / size.height)
     }
-    /// Draws a red ellipse onto a copy of the JPEG. The crop around the mark is sent by the server-side vision step.
+    /// Draws a red ellipse onto a copy of the JPEG. The normalized region accompanies this marked copy for vision; coordinates stay relative to the full image.
     static func marked(_ jpeg: Data, region: CGRect) -> Data? {
         guard let image = UIImage(data: jpeg) else { return nil }
         let size = image.size

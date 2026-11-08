@@ -92,6 +92,36 @@ enum ForgeClient {
         return (data, h.value(forHTTPHeaderField: "x-forge-key") ?? "", h.value(forHTTPHeaderField: "x-forge-kind") ?? "")
     }
 
+    /// Explicit community download only. No redirects, bounded bytes, and a SHA-256 match before writing.
+    static func communityDylib(id: String, sha256: String) async throws -> URL {
+        guard UUID(uuidString: id) != nil, sha256.count == 64,
+              sha256.allSatisfy({ $0.isHexDigit }) else { throw ForgeDylibImportError.invalidBinary }
+        var c = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "action", value: "gallery-download"), URLQueryItem(name: "id", value: id)]
+        var req = URLRequest(url: c.url!, timeoutInterval: 60)
+        req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
+        req.setValue(deviceID(), forHTTPHeaderField: "x-mirsa-device")
+        let cfg = URLSessionConfiguration.ephemeral; cfg.httpCookieStorage = nil
+        let session = URLSession(configuration: cfg, delegate: OTANoRedirect(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (stream, response) = try await session.bytes(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw Failure.message(tr("The community download failed.", "تنزيل تويك المجتمع فشل.", ckb: "داگرتنی تویک شکستی هێنا.", kmr: "Daxistina tweakê têk çû."))
+        }
+        let maximum = 4 * 1024 * 1024
+        guard response.expectedContentLength <= Int64(maximum) else { throw ForgeDylibImportError.tooLarge }
+        var data = Data()
+        for try await byte in stream {
+            guard data.count < maximum else { throw ForgeDylibImportError.tooLarge }
+            data.append(byte)
+        }
+        guard !data.isEmpty, ForgeFixItem.sha(data) == sha256.lowercased() else { throw ForgeDylibImportError.invalidBinary }
+        _ = try ForgeDylibInspector.inspect(data)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mirsa-community-" + UUID().uuidString + ".dylib")
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        return url
+    }
+
     /// AES-256-GCM, per-job master key, HKDF-SHA256 per purpose, AAD = purpose|job|v1. Layout nonce||ciphertext||tag. Throws on any tampering.
     static func open(_ blob: Data, masterB64: String, job: String, purpose: String) throws -> Data {
         guard let m = Data(base64Encoded: masterB64), m.count == 32, blob.count >= 28 else { throw Failure.message("Invalid encrypted result") }
