@@ -10,7 +10,10 @@ enum ForgeClient {
         case message(String)
         /// Server refusal that needs inspector data; UI offers to open the existing Inspector for this app.
         case inspectorNeeded(String)
-        var errorDescription: String? { switch self { case .message(let m), .inspectorNeeded(let m): return m } }
+        /// 409 version_conflict: the community entry changed since the client last loaded it.
+        case versionConflict(String)
+        var errorDescription: String? { switch self { case .message(let m), .inspectorNeeded(let m), .versionConflict(let m): return m } }
+        var isVersionConflict: Bool { if case .versionConflict = self { return true }; return false }
     }
 
     private static func token() async throws -> String {
@@ -32,7 +35,10 @@ enum ForgeClient {
         return id
     }
 
-    private static func failure(_ status: Int, _ data: Data) -> Failure {
+    static func failure(_ status: Int, _ data: Data) -> Failure {
+        if status == 409, (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String == "version_conflict" {
+            return .versionConflict(tr("This tweak was updated elsewhere. The list was reloaded, try again.", "التويك انحدث من مكان ثاني. حدّثنا القائمة، جرّب مرة ثانية.", ckb: "ئەم تویکە لە شوێنێکی تر نوێکراوەتەوە. لیستەکە نوێکرایەوە.", kmr: "Ev tweak li cihekî din hat nûkirin. Lîste nû bû."))
+        }
         let m = message(status, data)
         return ForgeServerMessage.needsInspector(data) ? .inspectorNeeded(m) : .message(m)
     }
@@ -77,7 +83,8 @@ enum ForgeClient {
         req.setValue(deviceID(), forHTTPHeaderField: "x-mirsa-device")
         let (data, resp) = try await URLSession(configuration: .ephemeral).data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200, let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure.message(message(status, data)) }
+        guard status == 200 else { throw failure(status, data) }
+        guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure.message(message(status, data)) }
         return o
     }
 

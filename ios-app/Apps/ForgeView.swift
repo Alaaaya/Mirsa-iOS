@@ -352,11 +352,8 @@ struct ForgeGalleryView: View {
     }
     private func mutate(_ body: [String: Any]) async {
         do { _ = try await ForgeClient.json(body); error = nil; await reload() } catch {
-            let m = error.localizedDescription
-            if m.contains("version_conflict") || m.contains("409") {
-                self.error = tr("This tweak was updated elsewhere. The list was reloaded, try again.", "التويك انحدث من مكان ثاني. حدّثنا القائمة، جرّب مرة ثانية.", ckb: "ئەم تویکە لە شوێنێکی تر نوێکراوەتەوە. لیستەکە نوێکرایەوە.", kmr: "Ev tweak li cihekî din hat nûkirin. Lîste nû bû.")
-                await reload()
-            } else { self.error = m }
+            self.error = error.localizedDescription
+            if (error as? ForgeClient.Failure)?.isVersionConflict == true { await reload() }
         }
     }
     private func importUpload(_ it: [String: Any], into project: UUID) async {
