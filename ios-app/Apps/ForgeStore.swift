@@ -236,8 +236,15 @@ struct ForgeProject: Codable, Identifiable {
     /// Real injection: copies the source IPA, injects the dylib into the main binary, repacks. Returns the new IPA.
     func inject(_ id: UUID) async throws -> URL {
         guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
-        var lib = dylibURL(p, v)
-        if needsRebuild(p) || !FileManager.default.fileExists(atPath: lib.path) { lib = try await build(id) }
+        // Imported dylibs are injected as-is, in list order, only if enabled. Nothing is injected unless the user taps Inject.
+        let imported = p.versions.filter { $0.importedInfo != nil && ($0.importEnabled ?? true) && FileManager.default.fileExists(atPath: dylibURL(p, $0).path) }
+        var libs = imported.map { dylibURL(p, $0) }
+        if v.importedInfo == nil {
+            var lib = dylibURL(p, v)
+            if needsRebuild(p) || !FileManager.default.fileExists(atPath: lib.path) { lib = try await build(id) }
+            libs.append(lib)
+        }
+        if libs.isEmpty { throw ForgeClient.Failure.message(tr("No enabled dylib to inject.", "ما في dylib مفعّل للحقن.", ckb: "هیچ dylibێکی چالاک نییە.", kmr: "dylibeke çalak tune.")) }
         busy = tr("Injecting…", "عم أحقن…", ckb: "دەچەسپێنرێت…", kmr: "Tê xistin…"); defer { busy = nil }
         let source = dir(p).appendingPathComponent("source.ipa"), exe = p.executable, name = p.appName
         let out = FileManager.default.temporaryDirectory.appendingPathComponent(name.filter { $0.isLetter || $0.isNumber } + "-Tweaked-" + UUID().uuidString.prefix(6) + ".ipa")
@@ -248,7 +255,7 @@ struct ForgeProject: Codable, Identifiable {
             let x = tmp.appendingPathComponent("x", isDirectory: true)
             try IPAEditorService.run("extract", input: source, output: x)
             let app = try IPAEditorService.app(in: x)
-            try IPAEditorService.run("inject", input: app, executable: exe, libraries: [lib])
+            try IPAEditorService.run("inject", input: app, executable: exe, libraries: libs)
             try IPAEditorService.run("pack", input: x, output: out)
         }.value
         return out
