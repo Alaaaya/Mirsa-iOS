@@ -621,6 +621,9 @@ struct AppTile: View {
     }
 
     private func progressLabel(_ e: MirsaOperationProgress.Entry) -> String {
+        if let stageLabel = e.stageLabel {
+            return stageLabel + (e.fraction.map { " \(Int($0 * 100))%" } ?? "")
+        }
         let phase: String
         switch e.phase {
         case .downloading: phase = tr("Downloading", "جاري التنزيل")

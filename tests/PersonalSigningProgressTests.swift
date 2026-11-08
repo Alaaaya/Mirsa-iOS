@@ -22,6 +22,65 @@ final class PersonalSigningProgressTests: XCTestCase {
         XCTAssertFalse(state.apply(PersonalSigningEvent(stage: .installing, fraction: 0.99)))
     }
 
+    func testOverallProgressIsMonotonicAcrossStagesAndResetPerOperation() {
+        var state = PersonalSigningOperation.State(id: UUID(), projectID: UUID())
+        XCTAssertEqual(state.overallFraction, 0)
+        let events: [PersonalSigningEvent] = [
+            .signing(completed: 0, total: 4), .signing(completed: 2, total: 4),
+            .signing(completed: 4, total: 4), .init(stage: .packaging),
+            .init(stage: .packaging, fraction: 1), .init(stage: .uploading),
+            .init(stage: .uploading, fraction: 0.25), .init(stage: .uploading, fraction: 1),
+            .init(stage: .connecting), .init(stage: .handedOff)
+        ]
+        var previous = state.overallFraction
+        for event in events {
+            XCTAssertTrue(state.apply(event))
+            XCTAssertGreaterThanOrEqual(state.overallFraction, previous)
+            XCTAssertLessThan(state.overallFraction, 1, "A handoff does not confirm installation")
+            previous = state.overallFraction
+        }
+        XCTAssertEqual(state.overallFraction, 0.99)
+        XCTAssertFalse(state.apply(.init(stage: .uploading, fraction: 0.7)))
+        let next = PersonalSigningOperation.State(id: UUID(), projectID: state.projectID)
+        XCTAssertEqual(next.overallFraction, 0)
+    }
+
+    func testOverallSigningAndUploadUseMeasuredUnitsWithoutTicking() {
+        var state = PersonalSigningOperation.State(id: UUID(), projectID: UUID())
+        XCTAssertTrue(state.apply(.signing(completed: 2, total: 4)))
+        XCTAssertEqual(state.overallFraction, 0.375, accuracy: 0.00001)
+        XCTAssertTrue(state.apply(.init(stage: .uploading, fraction: 0.5)))
+        XCTAssertEqual(state.overallFraction, 0.85, accuracy: 0.00001)
+        XCTAssertFalse(state.apply(.init(stage: .uploading, fraction: .nan)))
+        XCTAssertFalse(state.apply(.init(stage: .uploading, fraction: 0.25)))
+        XCTAssertEqual(state.overallFraction, 0.85, accuracy: 0.00001)
+    }
+
+    func testCertificateOTAHandoffIsInlineWithoutSuccessModal() {
+        var state = PersonalSigningOperation.State(id: UUID(), projectID: UUID())
+        state.stage = .handedOff
+        state.running = false
+        XCTAssertTrue(state.showsInlineProgress)
+        XCTAssertFalse(state.shouldPresentResultAlert)
+        XCTAssertNil(state.error)
+        XCTAssertEqual(state.overallFraction, 0.99)
+        XCTAssertEqual(PersonalSigningLabels.stage(.handedOff, language: .arabic), "في انتظار تثبيت النظام")
+        state.stage = .failed
+        state.error = "Network failed"
+        XCTAssertTrue(state.shouldPresentResultAlert)
+        XCTAssertFalse(state.showsInlineProgress)
+    }
+
+    func testAllProgressStageLabelsHaveFourLanguageTranslations() {
+        let stages: [PersonalSigningOperation.Stage] = [.preparing, .signing, .packaging, .uploading, .connecting, .installing, .handedOff, .completed, .failed]
+        for stage in stages {
+            let languages: [AppLanguage] = [.english, .arabic, .sorani, .kurmanji]
+            let labels = languages.map { PersonalSigningLabels.stage(stage, language: $0) }
+            XCTAssertEqual(Set(labels).count, 4)
+            XCTAssertFalse(labels.contains(where: { $0.isEmpty }))
+        }
+    }
+
     func testMeasuredBundleProgressAndUnknownTotals() {
         XCTAssertNil(PersonalSigningEvent.signing(completed: 0, total: 0).fraction)
         XCTAssertEqual(PersonalSigningEvent.signing(completed: 1, total: 4).fraction, 0.25)

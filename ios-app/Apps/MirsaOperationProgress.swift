@@ -9,6 +9,7 @@ final class MirsaOperationProgress: ObservableObject {
         let id: UUID
         var appID: String?
         var phase: Phase
+        var stageLabel: String? = nil
         var fraction: Double?
         var canCancel: Bool
     }
@@ -36,9 +37,10 @@ final class MirsaOperationProgress: ObservableObject {
         entries[id] = value
     }
 
-    func update(_ id: UUID, phase: Phase, fraction: Double? = nil) {
+    func update(_ id: UUID, phase: Phase, fraction: Double? = nil, stageLabel: String? = nil) {
         guard var value = entries[id] else { return }
         value.phase = phase
+        value.stageLabel = stageLabel
         value.fraction = fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
         if phase != .downloading { cancellations[id] = nil; value.canCancel = false }
         entries[id] = value

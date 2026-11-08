@@ -90,6 +90,9 @@ final class MirsaInstallActivity {
         else { finish(success: false) }
     }
 
+    /// OTA opening is only a handoff. End without the installed/100% completion badge.
+    func handoffToInstaller() { end(phase: .installing, immediate: true, progress: 0.99) }
+
     func finish(success: Bool) { end(phase: success ? .completed : .failed, immediate: false) }
     func cancel() { end(phase: .cancelled, immediate: true) }
 
@@ -115,11 +118,11 @@ final class MirsaInstallActivity {
         }
     }
 
-    private func end(phase: Phase, immediate: Bool) {
+    private func end(phase: Phase, immediate: Bool, progress: Double? = nil) {
         guard let activity, var finalState = state else { return }
         endedIDs.insert(activity.attributes.operationID)
         finalState.phase = phase
-        finalState.progress = phase == .completed || phase == .ready ? 1 : nil
+        finalState.progress = progress ?? (phase == .completed || phase == .ready ? 1 : nil)
         let previous = updates
         updates = Task {
             await previous?.value

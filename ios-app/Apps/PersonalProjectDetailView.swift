@@ -79,7 +79,7 @@ struct PersonalProjectDetailView: View {
             if !keyboard.isVisible {
             Button { sign() } label: {
                 HStack(spacing: 8) {
-                    if let state = signing.state, state.projectID == app.id, state.running {
+                    if let state = signing.state, state.projectID == app.id, state.showsInlineProgress {
                         PersonalSigningProgressView(state: state)
                     } else {
                         if configBusy { ProgressView() } else { Image(systemName: "hammer.fill") }
@@ -500,7 +500,7 @@ struct PersonalProjectDetailView: View {
     private func load() async {
         reloadIdentities()
         icon = library.icon(for: app)
-        if icon == nil { icon = await library.ensureIcon(for: app) }
+        if let refreshed = await library.ensureIcon(for: app) { icon = refreshed }
         var d = PersonalProjectDraft(name: app.name, bundleID: app.bundleID, version: app.version,
                                      outputFilename: app.name.replacingOccurrences(of: "/", with: "-") + "-signed")
         if let data = try? Data(contentsOf: library.draftURL(app)),
@@ -582,6 +582,13 @@ struct PersonalProjectDetailView: View {
         guard let state = signing.state, state.projectID == app.id, !state.running,
               consumedResult != state.id else { return }
         consumedResult = state.id
+        guard state.shouldPresentResultAlert else {
+            // Opening itms-services is a system handoff, never verified installation.
+            // Keep this inline in the bottom bar instead of showing a success/failure modal.
+            resultAlert = nil
+            message = nil
+            return
+        }
         guard let result = state.result else {
             let text = state.error?.trimmingCharacters(in: .whitespacesAndNewlines)
             message = (text?.isEmpty == false) ? text : personalText("Signing stopped before it finished. Try again.", "توقف التوقيع قبل ما يكتمل. جرّب من جديد.")

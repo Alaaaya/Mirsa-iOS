@@ -42,6 +42,39 @@ final class PersonalLibraryIconTests: XCTestCase {
         }.value
         XCTAssertNotNil(result)
     }
+    func testActualLiveContainerPrimaryIconExtractedFromIPA() throws {
+        let bundle = try directory()
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/LiveContainer-primary-CgBI.png")
+        let bytes = try Data(contentsOf: fixture)
+        try bytes.write(to: bundle.appendingPathComponent("AppIcon60x60@2x.png"))
+        // A generic or alternate icon must not replace the declared primary.
+        try png().write(to: bundle.appendingPathComponent("DefaultIcon.png"))
+        try png().write(to: bundle.appendingPathComponent("AppIconGrey60x60@2x.png"))
+        let info: [String: Any] = ["CFBundleIcons": ["CFBundlePrimaryIcon":
+            ["CFBundleIconFiles": ["AppIcon60x60"], "CFBundleIconName": "AppIcon"]]]
+        let result = try XCTUnwrap(PersonalAppsLibrary.iconPNG(bundle: bundle, info: info))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(result as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 120)
+        XCTAssertEqual((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 120)
+    }
+
+    func testDeclaredIconNameAndNestedPrimaryPNG() throws {
+        let bundle = try directory()
+        let folder = bundle.appendingPathComponent("Artwork")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try png().write(to: folder.appendingPathComponent("Primary@3x.png"))
+        XCTAssertNotNil(PersonalAppsLibrary.iconPNG(bundle: bundle, info: ["CFBundleIconName": "Artwork/Primary"]))
+        XCTAssertNil(PersonalAppsLibrary.iconPNG(bundle: bundle, info: ["CFBundleIconName": "../Primary"]))
+    }
+
+    func testGenericAppIconDoesNotSelectAlternateGreyIcon() throws {
+        let bundle = try directory()
+        try png().write(to: bundle.appendingPathComponent("AppIconGrey60@3x.png"))
+        XCTAssertNil(PersonalAppsLibrary.iconPNG(bundle: bundle, info: ["CFBundleIconName": "AppIcon"]))
+    }
+
     func testMalformedAndCrushedPNGsFailClosed() throws {
         XCTAssertNil(PersonalAppsLibrary.validatedIconPNG(Data()))
         XCTAssertNil(PersonalAppsLibrary.validatedIconPNG(Data(repeating: 0, count: 100)))
