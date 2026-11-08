@@ -260,3 +260,19 @@ final class OTAChunkUploader {
         } onCancel: { up.cancel() }
     }
 }
+
+/// iOS requires an empty authority (://), not an opaque scheme (:).
+/// Encode the entire manifest value so its signed query cannot escape into
+/// the outer itms-services query. URLQueryItem alone leaves nested '+' intact.
+enum OTAInstallLink {
+    static func make(manifestURL: URL) throws -> URL {
+        guard manifestURL.scheme == "https", manifestURL.host != nil,
+              manifestURL.user == nil, manifestURL.password == nil,
+              manifestURL.fragment == nil else { throw OTAChunkError.badHost }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let encoded = manifestURL.absoluteString.addingPercentEncoding(withAllowedCharacters: allowed),
+              let url = URL(string: "itms-services://?action=download-manifest&url=" + encoded)
+        else { throw OTAChunkError.badResponse }
+        return url
+    }
+}

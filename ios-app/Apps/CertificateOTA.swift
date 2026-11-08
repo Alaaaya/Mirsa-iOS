@@ -65,12 +65,9 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             }
             manifestURL = try await legacyUpload(file: kept, size: size, token: token, bundleID: bundleID, version: version, title: title)
         }
-        let manifest = manifestURL.absoluteString
-        var install = URLComponents()
-        install.scheme = "itms-services"
-        install.queryItems = [.init(name: "action", value: "download-manifest"), .init(name: "url", value: manifest)]
-        guard let target = install.url, await UIApplication.shared.open(target) else {
-            throw SideloadError.message(personalText("iOS could not open OTA installation.", "iOS ما قدر يفتح تثبيت OTA."))
+        let target = try OTAInstallLink.make(manifestURL: manifestURL)
+        guard await UIApplication.shared.open(target) else {
+            throw SideloadError.message(personalText("iOS could not open installation. Try again.", "iOS ما فتح التثبيت. جرب مرة تانية."))
         }
         return signed.verification
         // Opening the installer is not evidence of successful device installation.
