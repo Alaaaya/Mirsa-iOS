@@ -589,6 +589,10 @@ final class MirsaUpdater: ObservableObject {
     func check(force: Bool = false) async {
         guard !AppsStore.isSetupMode, available == nil, !installing else { return }
         if !force, let u = snoozedUntil, u > Date() { return }
+        // Cheap check through the shared ordered feed chain first; skip the IPA download when the feed says we are current.
+        if let feed = try? await MirsaSourceFeed.fetch(), let b = MirsaSourceFeed.latestBuild(in: feed.root),
+           !UpdaterMetadata.isNewer(remote: b, installed: Self.currentBuild) { return }
+        if Task.isCancelled { return }
         var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("Mirsa", forHTTPHeaderField: "User-Agent")
