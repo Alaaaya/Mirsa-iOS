@@ -66,5 +66,9 @@
   "1.3.197": {
     "ar": "رتّبنا صفحة التويكات وخفّفنا ازدحامها، ونقلنا بيانات المفتش لنافذة منفصلة. أضفنا تعديل أسماء النسخ وتعديل كودها كنسخة جديدة وحذف نسخة محددة، وتحسين قراءة أيقونات التطبيقات الحقيقية. حذفنا بطاقة رابط التثبيت لمدة 48 ساعة وميزة ترجمة التطبيقات بالكامل، مع بقاء لغات واجهة مرسى الأربع. المصدر الأساسي صار رابط مباشر على سيرفر مرسى مع مصادر احتياطية ونقل روابط المصدر القديمة تلقائياً. هالتحديث لسا مو مجرّب على جهاز فعلي.",
     "en": "Reorganized the tweak page and moved inspector details into a separate sheet. Added version renaming, code editing as a new version, and deletion of individual versions. Improved real app icon decoding. Removed the 48-hour installation-link card and the app translation feature while keeping Mirsa's four interface languages. The primary source now uses Mirsa's direct server feed with fallback sources and automatic legacy-source migration. Not yet tested on a physical device."
+  },
+  "1.3.199": {
+    "ar": "صلّحنا قائمة دمج التويكات: بتعرض التويكات ونسخها المحفوظة لهالتطبيق مع تحديد من 2 لـ5، ورسالة واضحة إذا ما في تويكات محفوظة. حسّنا استيراد ملفات IPA الكبيرة لاختيار تطبيق التويك مع حدود آمنة ورسائل أخطاء باللغات الأربع. حافظنا على التصميم الحالي. هالتحديث لسا مو مجرّب على جهاز فعلي.",
+    "en": "Fixed tweak merging to show this app’s saved tweaks and versions, with selection of 2–5 items and a clear empty state. Improved large IPA import for tweak targets with bounded processing and errors in all four languages. Preserved the current design. This update has not yet been tested on a physical device."
   }
 }
