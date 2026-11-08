@@ -622,85 +622,110 @@ fn macho(d: Vec<u8>, dylib: bool) -> Result<Mach> {
         subtype,
     })
 }
-/// Inspect encrypted slices without changing architecture or deployment targets.
-/// This also protects metadata-only edits of universal IPAs.
+/// Read-only encryption inspection. Encryption is a warning for re-signing,
+/// not structural corruption. Editing/injection retains its separate refusal.
+pub(crate) fn encryption_status(d: &[u8]) -> Result<bool> {
+    fn word(d: &[u8], at: usize, big: bool) -> Result<u32> {
+        let bytes: [u8;4] = d.get(at..at.checked_add(4).ok_or("Mach-O overflow")?)
+            .ok_or("Truncated Mach-O")?.try_into().map_err(err)?;
+        Ok(if big {u32::from_be_bytes(bytes)} else {u32::from_le_bytes(bytes)})
+    }
+    fn inspect(d: &[u8], nested: bool) -> Result<bool> {
+        let magic = word(d, 0, true)?;
+        let fat = matches!(magic, 0xcafebabe | 0xcafebabf | 0xbebafeca | 0xbfbafeca);
+        if fat {
+            if nested {return Err("Nested FAT container".into())}
+            let big = matches!(magic, 0xcafebabe | 0xcafebabf);
+            let wide = matches!(magic, 0xcafebabf | 0xbfbafeca);
+            let count = word(d,4,big)? as usize;
+            let stride = if wide {32} else {20};
+            let table = 8 + count.checked_mul(stride).ok_or("FAT overflow")?;
+            if count == 0 || count > 128 || table > d.len() {return Err("Invalid FAT table".into())}
+            let mut ranges = Vec::new();
+            let mut encrypted = false;
+            for i in 0..count {
+                let at = 8+i*stride+8;
+                let read64 = |at| -> Result<u64> {
+                    let bytes = d.get(at..at+8).ok_or("Truncated FAT table")?.try_into().map_err(err)?;
+                    Ok(if big {u64::from_be_bytes(bytes)} else {u64::from_le_bytes(bytes)})
+                };
+                let (off,len) = if wide {(read64(at)?,read64(at+8)?)} else {(word(d,at,big)? as u64,word(d,at+4,big)? as u64)};
+                let off = usize::try_from(off).map_err(err)?;
+                let len = usize::try_from(len).map_err(err)?;
+                let end = off.checked_add(len).ok_or("FAT overflow")?;
+                if off < table || len < 28 || end > d.len() || ranges.iter().any(|&(a,b)| off < b && end > a) {
+                    return Err("Invalid FAT slice bounds".into())
+                }
+                ranges.push((off,end));
+                // Do not short-circuit. An encrypted first slice must not hide a corrupt later slice.
+                encrypted |= inspect(&d[off..end],true)?;
+            }
+            return Ok(encrypted)
+        }
+        let (big,wide) = match magic {
+            0xfeedface => (true,false), 0xcefaedfe => (false,false),
+            0xfeedfacf => (true,true), 0xcffaedfe => (false,true),
+            _ => return Err("Unsupported Mach-O format".into()),
+        };
+        let header: usize = if wide {32} else {28};
+        let count = word(d,16,big)? as usize;
+        let end = header.checked_add(word(d,20,big)? as usize).ok_or("Mach-O table overflow")?;
+        if d.len() < header || count > 65536 || end > d.len() {return Err("Invalid load table".into())}
+        let mut at = header;
+        let mut encrypted = false;
+        for _ in 0..count {
+            if at+8 > end {return Err("Truncated load command".into())}
+            let kind = word(d,at,big)?;
+            let size = word(d,at+4,big)? as usize;
+            if size < 8 || size % (if wide {8} else {4}) != 0 || size > end-at {return Err("Malformed load command".into())}
+            if kind == 0x21 || kind == 0x2c {
+                if size < (if kind == 0x2c {24} else {20}) {return Err("Short encryption command".into())}
+                encrypted |= word(d,at+16,big)? != 0;
+                let off = word(d,at+8,big)? as u64;
+                let len = word(d,at+12,big)? as u64;
+                if off + len > d.len() as u64 {return Err("Invalid encryption range".into())}
+            }
+            at += size;
+        }
+        if at != end {return Err("Invalid command count".into())}
+        Ok(encrypted)
+    }
+    inspect(d,false)
+}
 pub(crate) fn unencrypted(d: &[u8]) -> Result<()> {
-    if d.len() < 32 {
-        return Err("Truncated Mach-O".into());
-    }
-    let magic = u32::from_be_bytes(d[0..4].try_into().map_err(err)?);
-    if magic == 0xcafebabe || magic == 0xcafebabf {
-        let count = u32::from_be_bytes(d[4..8].try_into().map_err(err)?) as usize;
-        let stride = if magic == 0xcafebabf { 32 } else { 20 };
-        if count == 0 || count > 128 || 8 + count * stride > d.len() {
-            return Err("Invalid FAT table".into());
-        }
-        let mut ranges = Vec::new();
-        for i in 0..count {
-            let a = 8 + i * stride;
-            let (off, len) = if stride == 32 {
-                (
-                    u64::from_be_bytes(d[a + 8..a + 16].try_into().map_err(err)?),
-                    u64::from_be_bytes(d[a + 16..a + 24].try_into().map_err(err)?),
-                )
-            } else {
-                (
-                    u32::from_be_bytes(d[a + 8..a + 12].try_into().map_err(err)?) as u64,
-                    u32::from_be_bytes(d[a + 12..a + 16].try_into().map_err(err)?) as u64,
-                )
-            };
-            let off = usize::try_from(off).map_err(err)?;
-            let len = usize::try_from(len).map_err(err)?;
-            let end = off.checked_add(len).ok_or("FAT overflow")?;
-            if off < 8 + count * stride
-                || len < 32
-                || end > d.len()
-                || ranges.iter().any(|&(a, b)| off < b && end > a)
-            {
-                return Err("Invalid FAT slice bounds".into());
-            }
-            ranges.push((off, end));
-            // Nested FAT containers are not valid architecture slices.
-            if u32at(d, off)? != 0xfeedfacf {
-                return Err("Unsupported FAT slice format".into());
-            }
-            unencrypted(&d[off..end])?;
-        }
-        return Ok(());
-    }
-    if u32at(d, 0)? != 0xfeedfacf {
-        return Err("Only 64-bit little-endian Mach-O is supported".into());
-    }
-    let count = u32at(d, 16)? as usize;
-    let end = 32usize
-        .checked_add(u32at(d, 20)? as usize)
-        .ok_or("Mach-O table overflow")?;
-    if count > 65536 || end > d.len() {
-        return Err("Invalid load table".into());
-    }
-    let mut at = 32;
-    for _ in 0..count {
-        if at + 8 > end {
-            return Err("Truncated load command".into());
-        }
-        let kind = u32at(d, at)?;
-        let size = u32at(d, at + 4)? as usize;
-        if size < 8 || size % 8 != 0 || size > end - at {
-            return Err("Malformed load command".into());
-        }
-        if kind == 0x21 || kind == 0x2c {
-            if size < 20 || u32at(d, at + 16)? != 0 {
-                return Err(
-                    "Encrypted App Store binaries cannot be edited. Import a decrypted IPA.".into(),
-                );
-            }
-        }
-        at += size;
-    }
-    if at != end {
-        return Err("Invalid command count".into());
-    }
+    if encryption_status(d)? {return Err("Encrypted App Store binaries cannot be edited. Import a decrypted IPA.".into())}
     Ok(())
+}
+#[derive(serde::Serialize)]
+pub(crate) struct SigningEncryption {
+    pub main_encrypted: bool,
+    pub embedded_encrypted: usize,
+}
+pub(crate) fn signing_encryption(app: &Path, opts: &crate::personal_sign::Options) -> Result<SigningEncryption> {
+    let info = plist::Value::from_file(app.join("Info.plist")).map_err(err)?;
+    let name = info.as_dictionary().and_then(|d| d.get("CFBundleExecutable")).and_then(plist::Value::as_string)
+        .ok_or("Missing main executable")?;
+    if name.is_empty() || name.contains(['/', '\\', ':']) || name == "." || name == ".." {return Err("Unsafe main executable".into())}
+    let main = app.join(name);
+    let read = |p: &Path| -> Result<Vec<u8>> {
+        if fs::metadata(p).map_err(err)?.len() > IPA_EXECUTABLE_LIMIT {return Err("Mach-O exceeds inspection limit".into())}
+        fs::read(p).map_err(err)
+    };
+    let mut report = SigningEncryption {main_encrypted: encryption_status(&read(&main)?)?, embedded_encrypted:0};
+    let mut files = Vec::new(); walk(app,&mut files)?;
+    for file in files {
+        let relative = file.strip_prefix(app).map_err(err)?;
+        if file == main || !file.is_file() || relative.components().any(|c| {
+            let s = c.as_os_str().to_str().unwrap_or("");
+            (opts.remove_extensions && s == "PlugIns") || (opts.remove_watch && s == "Watch") || (opts.remove_app_clips && s == "AppClips")
+        }) {continue}
+        let mut magic = [0;4];
+        if File::open(&file).map_err(err)?.read_exact(&mut magic).is_err() {continue}
+        if matches!(u32::from_be_bytes(magic),0xfeedface|0xcefaedfe|0xfeedfacf|0xcffaedfe|0xcafebabe|0xcafebabf|0xbebafeca|0xbfbafeca) {
+            if encryption_status(&read(&file)?)? {report.embedded_encrypted += 1}
+        }
+    }
+    Ok(report)
 }
 fn dylib_command(kind: u32, name: &str, original: Option<&[u8]>) -> Result<Vec<u8>> {
     if name.contains('\0') || name.len() > 4096 {
@@ -1029,6 +1054,10 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
         "__test_worker_panic" => panic!("synthetic worker panic"),
         "personal_sign" => return crate::personal_sign::sign_with_options(Path::new(&r.input), Path::new(&r.profile), &r.private_key, &r.certificate, &r.signing_options),
         "read_device_once" => crate::personal_sign::actual_udid(&r.input).and_then(|id| std::fs::write(&r.output,id).map_err(err)),
+        "signing_encryption" => {
+            let report = signing_encryption(Path::new(&r.input), &r.signing_options)?;
+            fs::write(&r.output, serde_json::to_vec(&report).map_err(err)?).map_err(err)
+        },
         "validate" => unencrypted(&read_macho(Path::new(&r.input))?),
         "extract" => extract_zip(Path::new(&r.input), Path::new(&r.output)),
         "extract_inspection" => extract_inspection(Path::new(&r.input), Path::new(&r.output)),
@@ -1810,5 +1839,86 @@ mod archive_inspection_tests {
         assert_eq!(IPA_TOTAL_LIMIT,6*1024*1024*1024);
         assert_eq!(IPA_EXECUTABLE_LIMIT,1_500_000_000);
         assert_eq!(FILE_LIMIT,512*1024*1024);
+    }
+}
+
+
+#[cfg(test)]
+mod signing_encryption_tests {
+    use super::*;
+    fn thin(cryptid: u32) -> Vec<u8> {
+        let mut d = vec![0u8;64];
+        for (at,value) in [(0,0xfeedfacfu32),(4,0x0100000c),(12,2),(16,1),(20,24),(32,0x2c),(36,24),(48,cryptid)] {
+            d[at..at+4].copy_from_slice(&value.to_le_bytes());
+        }
+        d
+    }
+    #[test] fn only_encryption_command_cryptid_counts() {
+        let mut d = thin(0);
+        d[60..64].copy_from_slice(&1u32.to_le_bytes());
+        assert_eq!(encryption_status(&d),Ok(false));
+        assert_eq!(encryption_status(&thin(1)),Ok(true));
+        assert!(unencrypted(&thin(1)).is_err()); // injection still refuses
+        d[36..40].copy_from_slice(&16u32.to_le_bytes());
+        assert!(encryption_status(&d).is_err());
+    }
+    fn fat(first: Vec<u8>, second: Vec<u8>, wide: bool) -> Vec<u8> {
+        let stride = if wide {32} else {20};
+        let table = 8+2*stride;
+        let mut d = vec![0;table+first.len()+second.len()];
+        d[..4].copy_from_slice(&(if wide {0xcafebabfu32} else {0xcafebabeu32}).to_be_bytes());
+        d[4..8].copy_from_slice(&2u32.to_be_bytes());
+        for (i,(off,len)) in [(table,first.len()),(table+first.len(),second.len())].into_iter().enumerate() {
+            let at=8+i*stride;
+            d[at..at+4].copy_from_slice(&0x0100000cu32.to_be_bytes());
+            if wide {
+                d[at+8..at+16].copy_from_slice(&(off as u64).to_be_bytes());
+                d[at+16..at+24].copy_from_slice(&(len as u64).to_be_bytes());
+            } else {
+                d[at+8..at+12].copy_from_slice(&(off as u32).to_be_bytes());
+                d[at+12..at+16].copy_from_slice(&(len as u32).to_be_bytes());
+            }
+        }
+        d[table..table+first.len()].copy_from_slice(&first);
+        d[table+first.len()..].copy_from_slice(&second);
+        d
+    }
+    #[test] fn fat32_and_fat64_check_all_slices_and_corruption() {
+        for wide in [false,true] {
+            assert_eq!(encryption_status(&fat(thin(0),thin(1),wide)),Ok(true));
+            assert_eq!(encryption_status(&fat(thin(0),thin(0),wide)),Ok(false));
+            let mut bad = thin(0); bad[20..24].copy_from_slice(&1000u32.to_le_bytes());
+            assert!(encryption_status(&fat(thin(1),bad,wide)).is_err());
+        }
+    }
+    #[test] fn command21_and_big_endian_are_supported_readonly() {
+        let mut d = thin(1);
+        d[32..36].copy_from_slice(&0x21u32.to_le_bytes());
+        assert_eq!(encryption_status(&d),Ok(true));
+        for off in (0..56).step_by(4) {d[off..off+4].reverse()}
+        assert_eq!(encryption_status(&d),Ok(true));
+    }
+    #[test] fn embedded_encryption_never_marks_main_and_removals_are_explicit() {
+        let root = std::env::temp_dir().join(format!("mirsa-encryption-{}",std::process::id()));
+        let app=root.join("Main.app");
+        fs::create_dir_all(app.join("PlugIns/Optional.appex")).unwrap();
+        fs::create_dir_all(app.join("Frameworks")).unwrap();
+        let mut info = plist::Dictionary::new(); info.insert("CFBundleExecutable".into(),"Main".into());
+        plist::Value::Dictionary(info).to_file_xml(app.join("Info.plist")).unwrap();
+        fs::write(app.join("Main"),thin(0)).unwrap();
+        let extension=app.join("PlugIns/Optional.appex/Extension");
+        fs::write(&extension,thin(1)).unwrap();
+        fs::write(app.join("Frameworks/Library.dylib"),thin(0)).unwrap();
+        let o = crate::personal_sign::Options::default();
+        let report = signing_encryption(&app,&o).unwrap();
+        assert!(!report.main_encrypted); assert_eq!(report.embedded_encrypted,1);
+        let o = crate::personal_sign::Options {remove_extensions:true,..Default::default()};
+        assert_eq!(signing_encryption(&app,&o).unwrap().embedded_encrypted,0);
+        assert_eq!(fs::read(&extension).unwrap(),thin(1)); // read only, no stripping
+        fs::write(app.join("Main"),fat(thin(0),thin(1),false)).unwrap();
+        assert!(signing_encryption(&app,&o).unwrap().main_encrypted);
+        fs::write(&extension,[0xcf,0xfa,0xed,0xfe]).unwrap();
+        assert!(signing_encryption(&app,&crate::personal_sign::Options::default()).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 }

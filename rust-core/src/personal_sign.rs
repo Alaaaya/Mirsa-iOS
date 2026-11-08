@@ -96,6 +96,7 @@ pub(crate) fn profile_with_verification(bytes: &[u8], index: usize) -> Result<(P
 }
 #[derive(Default, serde::Deserialize)]
 pub(crate) struct Options {
+    #[serde(default)] pub allow_encrypted_signing: bool,
     #[serde(default)] pub profiles: Vec<String>,
     /// Explicit user override only. Empty preserves the IPA identity.
     #[serde(default)] pub bundle_id: String,
@@ -254,6 +255,11 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         status.warnings.extend(verification.warnings);
         validate_profile_device(&parsed, &cert, if target_udid.is_empty() { None } else { Some(&target_udid) }, now)?;
         profiles.push(Profile { data, parsed });
+    }
+    let encryption = crate::ipa_editor::signing_encryption(app, opts)?;
+    if encryption.main_encrypted || encryption.embedded_encrypted > 0 {
+        if !opts.allow_encrypted_signing {return Err("Encryption warning requires explicit consent before signing.".into())}
+        status.warnings.push(serde_json::json!({"code":"encryption_accepted","message":"Encrypted code was kept unchanged. Signing does not decrypt it; iOS may reject installation or launch."}));
     }
     let mut nodes = nested::inventory(app, opts)?;
     let main = nodes.iter().position(|n| n.path == app).ok_or("التطبيق الرئيسي مو موجود.")?;

@@ -12,7 +12,8 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 @MainActor enum CertificateOTA {
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
     @discardableResult
-    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil) async throws -> PersonalProfileVerification {
+    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
+        signingProgress?(PersonalSigningEvent(stage: .preparing))
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }
         else if let identity = try PersonalIdentityVault.savedIdentities().first { selectedMaterial = identity.material }
@@ -23,17 +24,23 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         try fm.createDirectory(at: stage.appendingPathComponent("Payload"), withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: stage) }
         let app = stage.appendingPathComponent("Payload/Mirsa.app", isDirectory: true)
-        try fm.copyItem(at: source, to: app)
         let input = stage.appendingPathComponent("input.ipa")
-        try await Task.detached { try IPAEditorService.run("pack", input: stage, output: input) }.value
+        try await Task.detached {
+            try fm.copyItem(at: source, to: app)
+            try IPAEditorService.run("pack", input: stage, output: input)
+        }.value
         let material = selectedMaterial
 
         var options = explicitOptions ?? PersonalProjectOptions()
         if explicitOptions == nil { options.strictProfile = true }
         _ = options.strictProfile // Self-install requires a profile that actually covers this identity.
-        let signed = try await Task.detached {
-            try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: "", options: options, cachedUDID: device)
-        }.value
+        let signingOptions = options
+        let signed = try await PersonalEncryptionWarning.signWithConsent { consent in
+            try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: "", options: signingOptions, cachedUDID: device, allowEncryptedSigning: consent) { event in
+                Task { @MainActor in signingProgress?(event) }
+            }
+        }
+        signingProgress?(PersonalSigningEvent(stage: .packaging, fraction: 1))
         let kept: URL
         do { kept = try CertificateInstall.retain(signed.url) }
         catch { throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, signed.url), signedURL: signed.url) }
@@ -61,9 +68,14 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
         let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
+        signingProgress?(PersonalSigningEvent(stage: .uploading))
+        let uploadProgress: (Double) -> Void = { fraction in
+            progress?(fraction)
+            signingProgress?(PersonalSigningEvent(stage: .uploading, fraction: fraction))
+        }
         let manifestURL: URL
         do {
-            manifestURL = try await oracleUpload(file: kept, plan: plan, token: token, bundleID: bundleID, version: version, title: title, progress: progress)
+            manifestURL = try await oracleUpload(file: kept, plan: plan, token: token, bundleID: bundleID, version: version, title: title, progress: uploadProgress)
         } catch {
             guard OTAFallbackPolicy.allows(error, size: size) else {
                 let down = error is URLError || { if case OTAChunkError.server(let c)? = error as? OTAChunkError { return c >= 500 }; return false }()
@@ -74,10 +86,13 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             }
             manifestURL = try await legacyUpload(file: kept, size: size, token: token, bundleID: bundleID, version: version, title: title)
         }
+        signingProgress?(PersonalSigningEvent(stage: .uploading, fraction: 1))
+        signingProgress?(PersonalSigningEvent(stage: .connecting))
         let target = try OTAInstallLink.make(manifestURL: manifestURL)
         guard await UIApplication.shared.open(target) else {
             throw SideloadError.message(personalText("iOS could not open installation. Try again.", "iOS ما فتح التثبيت. جرب مرة تانية."))
         }
+        signingProgress?(PersonalSigningEvent(stage: .handedOff))
         return signed.verification
         // Opening the installer is not evidence of successful device installation.
         // Keep the signed artifact even after handing off to iOS.

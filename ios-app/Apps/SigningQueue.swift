@@ -73,13 +73,13 @@ final class SigningQueue: ObservableObject {
             let material = identity.material
             let options = item.options, input = item.ipa, control = item.control
             do {
-                let result = try await Task.detached {
+                let result = try await PersonalEncryptionWarning.signWithConsent { consent in
                     try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: "", options: options,
-                                                       cachedUDID: device, control: control) { event in
+                                                       cachedUDID: device, control: control, allowEncryptedSigning: consent) { event in
                         guard event.stage == .signing, let f = event.fraction else { return }
                         Task { @MainActor in item.fraction = max(item.fraction ?? 0, f) }
                     }
-                }.value
+                }
                 if item.cancelRequested { try? FileManager.default.removeItem(at: result.url.deletingLastPathComponent()); item.state = .cancelled }
                 else {
                     item.output = try CertificateInstall.retain(result.url)

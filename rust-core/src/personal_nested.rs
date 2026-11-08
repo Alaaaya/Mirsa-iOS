@@ -175,7 +175,7 @@ fn signature_entitlements(d: &[u8]) -> Result<Dictionary> {
     Ok(result.unwrap_or_default())
 }
 pub(super) fn read_entitlements(d: &[u8]) -> Result<Dictionary> {
-    crate::ipa_editor::unencrypted(d).map_err(|_| "ملف IPA مشفّر أو ملف Mach-O غير مدعوم. استخدم IPA غير مشفّر.")?;
+    crate::ipa_editor::encryption_status(d)?;
     let magic = be(d,0)?;
     if magic == 0xcafebabe || magic == 0xcafebabf {
         let stride = if magic == 0xcafebabf {32} else {20}; let count = be(d,4)? as usize;
@@ -210,8 +210,7 @@ pub(super) fn check_macho_file(path: &Path) -> Result<()> {
     if file.read_exact(&mut magic).is_ok() && matches!(magic,
         [0xcf,0xfa,0xed,0xfe] | [0xfe,0xed,0xfa,0xcf] | [0xce,0xfa,0xed,0xfe] | [0xfe,0xed,0xfa,0xce] |
         [0xca,0xfe,0xba,0xbe] | [0xbe,0xba,0xfe,0xca] | [0xca,0xfe,0xba,0xbf] | [0xbf,0xba,0xfe,0xca]) {
-        crate::ipa_editor::unencrypted(&fs::read(path).map_err(error)?)
-            .map_err(|_| "ملف IPA مشفّر أو غير مدعوم. استخدم نسخة غير مشفّرة، ما منقدر نفك التشفير.".to_string())?;
+        crate::ipa_editor::encryption_status(&fs::read(path).map_err(error)?)?;
     }
     Ok(())
 }

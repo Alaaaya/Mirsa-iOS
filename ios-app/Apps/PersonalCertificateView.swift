@@ -49,6 +49,14 @@ struct PersonalProfileVerification: Codable, Equatable {
     }
     var warningText: String { warnings.map(Self.localizedWarning).joined(separator: "\n") }
     static func localizedWarning(_ warning: Warning) -> String {
+        if warning.code == "encryption_accepted" {
+            return PersonalEncryptionWarning.localized(AppLanguageStore.snapshot, [
+                "Encrypted code was kept unchanged. Signing does not decrypt it; installation or launch may fail.",
+                "الكود المشفّر بقي متل ما هو. التوقيع ما بيفك التشفير؛ التثبيت أو فتح التطبيق ممكن يفشل.",
+                "کۆدی ڕەمزکراو نەگۆڕاوە. واژۆکردن ڕەمز ناکاتەوە؛ دامەزراندن یان کردنەوە لەوانەیە شکست بهێنێت.",
+                "Koda şîfrekirî neguherî. Îmzekirin şîfreyê venake; dibe ku sazkirin an vekirin têk biçe."
+            ])
+        }
         guard warning.code == "entitlements_dropped" else { return warning.message }
         let title: String
         switch AppLanguageStore.shared.current {
@@ -224,6 +232,64 @@ enum PersonalIconFixer {
     }
 }
 
+/// Encryption status is distinct from malformed/unsupported Mach-O errors.
+/// Consent is per operation, never saved. No decryption or encryption-header changes.
+struct PersonalEncryptionWarning: Error, Decodable {
+    let main_encrypted: Bool
+    let embedded_encrypted: Int
+    var requiresConsent: Bool { main_encrypted || embedded_encrypted > 0 }
+    static func localized(_ language: AppLanguage, _ values: [String]) -> String {
+        switch language {
+        case .english: return values[0]
+        case .arabic: return values[1]
+        case .sorani: return values[2]
+        case .kurmanji: return values[3]
+        }
+    }
+    static func title(_ language: AppLanguage) -> String {
+        localized(language, ["Encryption warning", "تحذير التشفير", "ئاگاداری ڕەمزکردن", "Hişyariya şîfrekirinê"])
+    }
+    static func proceed(_ language: AppLanguage) -> String {
+        localized(language, ["Continue signing", "متابعة التوقيع", "بەردەوامبوون لە واژۆکردن", "Îmzekirinê bidomîne"])
+    }
+    static func cancel(_ language: AppLanguage) -> String {
+        localized(language, ["Cancel", "إلغاء", "پاشگەزبوونەوە", "Betal bike"])
+    }
+    func message(_ language: AppLanguage) -> String {
+        let scope = Self.localized(language, main_encrypted
+            ? ["The main app executable contains encrypted code.", "الملف التنفيذي الرئيسي للتطبيق فيه كود مشفّر.", "فایلی سەرەکی ئەپ کۆدی ڕەمزکراوی تێدایە.", "Di pela sereke ya appê de koda şîfrekirî heye."]
+            : ["The main executable is not encrypted, but embedded code is.", "الملف التنفيذي الرئيسي مو مشفّر، بس فيه كود مضمّن مشفّر.", "فایلی سەرەکی ڕەمزکراو نییە، بەڵام کۆدی ناوخۆیی ڕەمزکراوە.", "Pela sereke ne şîfrekirî ye, lê koda hundir şîfrekirî ye."])
+        return scope + "\n\n" + Self.localized(language, [
+            "Signing keeps encrypted code unchanged and does not decrypt it. iOS may reject installation or the app may not launch. Continue anyway?",
+            "التوقيع بيخلّي الكود المشفّر متل ما هو وما بيفك التشفير. iOS ممكن يرفض التثبيت أو التطبيق ما يفتح. بدك تكمّل؟",
+            "واژۆکردن کۆدی ڕەمزکراو ناگۆڕێت و ڕەمزەکە ناکاتەوە. لەوانەیە iOS دامەزراندن ڕەت بکاتەوە یان ئەپ نەکرێتەوە. بەردەوام دەبیت؟",
+            "Îmzekirin koda şîfrekirî naguherîne û şîfreyê venake. Dibe ku iOS sazkirinê red bike an app venebe. Dîsa bidomînî?"
+        ])
+    }
+    @MainActor static func signWithConsent(_ operation: @escaping (Bool) throws -> PersonalCertificateSigner.Result) async throws -> PersonalCertificateSigner.Result {
+        do { return try await Task.detached { try operation(false) }.value }
+        catch let warning as PersonalEncryptionWarning {
+            guard await warning.confirm() else { throw CancellationError() }
+            try Task.checkCancellation()
+            return try await Task.detached { try operation(true) }.value
+        }
+    }
+    @MainActor private func confirm() async -> Bool {
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
+              var controller = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return false }
+        while let presented = controller.presentedViewController { controller = presented }
+        guard !controller.isBeingDismissed, !(controller is UIAlertController) else { return false }
+        let language = AppLanguageStore.snapshot
+        return await withCheckedContinuation { continuation in
+            let alert = UIAlertController(title: Self.title(language), message: message(language), preferredStyle: .alert)
+            alert.view.semanticContentAttribute = .forceLeftToRight
+            alert.addAction(UIAlertAction(title: Self.cancel(language), style: .cancel) { _ in continuation.resume(returning: false) })
+            alert.addAction(UIAlertAction(title: Self.proceed(language), style: .default) { _ in continuation.resume(returning: true) })
+            controller.present(alert, animated: true)
+        }
+    }
+}
+
 enum PersonalCertificateSigner {
     struct Result {
         let url: URL
@@ -338,7 +404,7 @@ enum PersonalCertificateSigner {
         return url.path
     }
     static func sign(ipa: URL, material: PersonalIdentityVault.Material, pairingPath: String, options: PersonalProjectOptions = .init(), cachedUDID: String? = nil, install: Bool = false,
-                     control: PersonalSigningControl = PersonalSigningControl(),
+                     control: PersonalSigningControl = PersonalSigningControl(), allowEncryptedSigning: Bool = false,
                      progress: @escaping (PersonalSigningEvent) -> Void = { _ in }) throws -> Result {
         try control.checkpoint()
         progress(PersonalSigningEvent(stage: .preparing))
@@ -348,9 +414,10 @@ enum PersonalCertificateSigner {
                                attributes: [.protectionKey: FileProtectionType.complete])
         defer { try? fm.removeItem(at: stage) }
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options, applyBundleID: false)
-        // Reject FairPlay/encrypted code, including embedded libraries, before signing.
-        let executable = app.appendingPathComponent(info["CFBundleExecutable"] as! String)
-        try IPAEditorService.run("validate", input: executable)
+        let reportURL = stage.appendingPathComponent("encryption.json")
+        try IPAEditorService.run("signing_encryption", input: app, output: reportURL, signingOptions: options)
+        let encryption = try JSONDecoder().decode(PersonalEncryptionWarning.self, from: Data(contentsOf: reportURL))
+        if encryption.requiresConsent && !allowEncryptedSigning { throw encryption }
         let profile = stage.appendingPathComponent("profile.mobileprovision")
         try material.profile.write(to: profile, options: [.atomic, .completeFileProtection])
         let (key, certificate) = try PersonalIdentityVault.identity(material)
@@ -361,6 +428,7 @@ enum PersonalCertificateSigner {
                                       "cached_only": true,
                                       "cached_udid": cachedUDID ?? "",
                                       "bundle_id": options.bundleID ?? "",
+                                      "allow_encrypted_signing": allowEncryptedSigning,
                                       "remove_extensions": options.removeExtensions,
                                       "remove_watch": options.removeWatchApp,
                                       "remove_app_clips": options.removeAppClips,
@@ -465,8 +533,12 @@ struct PersonalCertificateView: View {
                 Label(sgText("Signing queue and app clone", "طابور التوقيع ونسخ التطبيقات", "ڕیزی واژووکردن و کلۆنی ئەپ", "Rêzika îmzekirinê û klona sepanê"), systemImage: "square.stack.3d.up.fill")
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
             }.buttonStyle(.mirsaSecondary).accessibilityIdentifier("open-signing-queue")
-            Text(personalText("The IPA must be unencrypted. Each retained app or extension needs a matching Development or Ad Hoc profile that includes the connected device. Device authorization is checked through pairing when signing.",
-                              "لازم ملف IPA يكون غير مشفّر. كل تطبيق أو إضافة بتحتفظ فيها بدها بروفايل Development أو Ad Hoc مطابق ومضاف فيه الجهاز المتصل. تطابق الجهاز بينفحص عبر الاقتران وقت التوقيع."))
+            Text(PersonalEncryptionWarning.localized(AppLanguageStore.snapshot, [
+                "Encrypted code shows a warning before signing; signing does not decrypt it. The certificate and profile must be valid. iOS decides whether installation and launch are allowed.",
+                "الكود المشفّر بيظهر تحذير قبل التوقيع؛ التوقيع ما بيفك التشفير. لازم الشهادة والبروفايل يكونوا صالحين. iOS بيقرر قبول التثبيت وفتح التطبيق.",
+                "کۆدی ڕەمزکراو پێش واژۆکردن ئاگاداری پیشان دەدات؛ واژۆکردن ڕەمز ناکاتەوە. بڕوانامە و پرۆفایل دەبێت دروست بن. iOS بڕیار دەدات لەسەر دامەزراندن و کردنەوە.",
+                "Koda şîfrekirî berî îmzekirinê hişyarî nîşan dide; îmzekirin şîfreyê venake. Sertîfîka û profîl divê derbasdar bin. iOS li ser sazkirin û vekirinê biryar dide."
+            ]))
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
