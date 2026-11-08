@@ -5,6 +5,9 @@ struct ForgeSetting: Codable, Hashable, Identifiable { var key: String; var titl
 struct ForgeVersion: Codable, Identifiable, Hashable {
     var id = UUID(); var created = Date(); var prompt: String; var code: String
     var settings: [ForgeSetting]; var explain: String; var builtWithValues: [String: Bool]?
+    var guardID: UUID?
+    var repairChainID: UUID?
+    var tweakID: UUID { guardID ?? id }
     var hasBuild: Bool { builtWithValues != nil }
 }
 struct ForgeProject: Codable, Identifiable {
@@ -34,7 +37,7 @@ struct ForgeProject: Codable, Identifiable {
         let d = Self.root.appendingPathComponent(p.id.uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true); return d
     }
-    private func update(_ id: UUID, _ f: (inout ForgeProject) -> Void) {
+    func update(_ id: UUID, _ f: (inout ForgeProject) -> Void) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
         f(&projects[i]); save()
     }
@@ -128,8 +131,8 @@ struct ForgeProject: Codable, Identifiable {
     func generate(_ id: UUID, prompt: String) async throws {
         guard let p = project(id) else { return }
         busy = tr("Writing the tweak…", "عم أكتب التويك…", ckb: "تویک دەنووسم…", kmr: "Tweak tê nivîsandin…"); defer { busy = nil }
-        let r = try await ForgeClient.json(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": p.name,
-                                            "classes": p.classes, "previousCode": p.currentVersion?.code as Any])
+        let r = try await ForgeClient.json(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": ForgeFeaturePolicy.name(p.name),
+                                            "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](), "previousCode": p.currentVersion?.code ?? ""])
         guard let code = r["code"] as? String else { throw ForgeClient.Failure.message("Bad response") }
         let settings = ((r["settings"] as? [[String: Any]]) ?? []).compactMap { s -> ForgeSetting? in
             guard let k = s["key"] as? String, let t = s["title"] as? String, let d = s["default"] as? Bool else { return nil }
@@ -158,9 +161,16 @@ struct ForgeProject: Codable, Identifiable {
     func build(_ id: UUID) async throws -> URL {
         guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
         busy = tr("Building on the server…", "عم ببني عالسيرفر…", ckb: "لەسەر سێرڤەر دروست دەکرێت…", kmr: "Li ser serverê tê çêkirin…"); defer { busy = nil }
-        let started = try await ForgeClient.json(["action": "build", "id": v.id.uuidString.lowercased(), "name": p.name, "bundleID": p.bundleID, "code": v.code,
+        let started = try await ForgeClient.json(["action": "build", "id": v.tweakID.uuidString.lowercased(), "name": p.name, "bundleID": p.bundleID, "code": v.code,
             "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }, "values": p.values])
         guard let job = started["job"] as? String else { throw ForgeClient.Failure.message("Build did not start") }
+        let data = try await fetchBuild(job: job)
+        let url = dylibURL(p, v)
+        try data.write(to: url, options: .atomic)
+        update(id) { pr in if let i = pr.versions.firstIndex(where: { $0.id == v.id }) { pr.versions[i].builtWithValues = pr.values } }
+        return url
+    }
+    func fetchBuild(job: String) async throws -> Data {
         var data = Data()
         for _ in 0..<120 {
             try await Task.sleep(nanoseconds: 4_000_000_000)
@@ -180,10 +190,7 @@ struct ForgeProject: Codable, Identifiable {
         guard data.count > 1000, data.prefix(4) == Data([0xCF, 0xFA, 0xED, 0xFE]) || data.prefix(4) == Data([0xCA, 0xFE, 0xBA, 0xBE]) || data.prefix(4) == Data([0xBE, 0xBA, 0xFE, 0xCA]) else {
             throw ForgeClient.Failure.message(tr("The server did not return a valid library.", "السيرفر ما رجّع مكتبة صالحة.", ckb: "سێرڤەر کتێبخانەیەکی دروستی نەگەڕاندەوە.", kmr: "Server pirtûkxaneyeke derbasdar venegerand."))
         }
-        let url = dylibURL(p, v)
-        try data.write(to: url, options: .atomic)
-        update(id) { pr in if let i = pr.versions.firstIndex(where: { $0.id == v.id }) { pr.versions[i].builtWithValues = pr.values } }
-        return url
+        return data
     }
     /// A toggle changed after the last build: the dylib has the old values compiled in.
     func needsRebuild(_ p: ForgeProject) -> Bool { guard let v = p.currentVersion else { return false }; return v.builtWithValues != p.values }
@@ -259,44 +266,15 @@ extension ForgeStore {
     }
     /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
     func injectInspector(_ id: UUID) async throws -> URL {
-        guard let p = project(id), let prev = p.current, let pv = p.currentVersion else { throw ForgeClient.Failure.message("No project") }
+        guard let p = project(id) else { throw ForgeClient.Failure.message("No project") }
+        let prev = p.current; let pv = p.currentVersion
         let savedValues = p.values
-        let iv = ForgeVersion(prompt: "Inspector", code: ForgeInspector.code, settings: [], explain: "")
+        let iv = ForgeVersion(prompt: "Inspector", code: ForgeInspector.code(tweakID: pv?.tweakID ?? p.id), settings: [], explain: "")
         addVersion(id, iv)
         defer { update(id) { $0.versions.removeAll { $0.id == iv.id }; $0.current = prev; $0.values = savedValues }
                 try? FileManager.default.removeItem(at: dylibURL(p, iv)); _ = pv }
         return try await inject(id)
     }
-}
-enum ForgeInspector {
-    static let code = """
-    %hook UIWindow
-    - (void)becomeKeyWindow {
-      %orig;
-      static char key;
-      if (!objc_getAssociatedObject(self, &key)) {
-        objc_setAssociatedObject(self, &key, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(mirsaInspect:)];
-        g.minimumPressDuration = 0.8; g.cancelsTouchesInView = NO;
-        [self addGestureRecognizer:g];
-      }
-    }
-    %new
-    - (void)mirsaInspect:(UILongPressGestureRecognizer *)g {
-      if (g.state != UIGestureRecognizerStateBegan) return;
-      UIView *v = [self hitTest:[g locationInView:self] withEvent:nil];
-      NSMutableArray *chain = [NSMutableArray array];
-      for (UIView *c = v; c; c = c.superview) [chain addObject:NSStringFromClass([c class])];
-      NSString *text = [chain componentsJoinedByString:@" < "];
-      [UIPasteboard generalPasteboard].string = text;
-      UIViewController *top = self.rootViewController;
-      while (top.presentedViewController) top = top.presentedViewController;
-      UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Mirsa Inspector (copied)" message:text preferredStyle:UIAlertControllerStyleAlert];
-      [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-      [top presentViewController:a animated:YES completion:nil];
-    }
-    %end
-    """
 }
 
 extension ForgeStore {
