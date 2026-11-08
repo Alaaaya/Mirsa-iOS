@@ -17,7 +17,7 @@ struct ForgeProject: Codable, Identifiable {
     var id = UUID(); var name: String; var bundleID: String; var appName: String; var appVersion: String
     var executable: String; var classes: [String]; var versions: [ForgeVersion] = []; var current: UUID?
     var values: [String: Bool] = [:]
-    var currentVersion: ForgeVersion? { versions.first { $0.id == current } ?? versions.last }
+    var currentVersion: ForgeVersion? { versions.first { $0.id == current } ?? versions.last { $0.fixSourceSHA256 == nil } }
 }
 
 /// Persistence, AI generation, remote build, injection and export for tweak projects.

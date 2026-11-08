@@ -33,6 +33,17 @@ import XCTest
         let disk = try JSONDecoder().decode([ForgeProject].self, from: Data(contentsOf: root.appendingPathComponent("projects.json")))
         XCTAssertEqual(disk[0].versions, saved[0].versions)
     }
+    func testLegacyMissingOrStaleSelectionNeverSelectsImportedFix() throws {
+        let (item, bytes, original) = try fixture()
+        for selection in [nil, UUID()] as [UUID?] {
+            var project = original
+            project.current = selection
+            let previous = project.currentVersion?.id
+            let saved = try ForgeFixPersistence.commit(item, bytes: bytes, projects: [project], root: root())
+            XCTAssertEqual(saved[0].current, selection)
+            XCTAssertEqual(saved[0].currentVersion?.id, previous)
+        }
+    }
     func testReplayAfterRelaunchAndMissingFileRestoresWithoutDuplicate() throws {
         let (item, bytes, project) = try fixture()
         let root = try root()
