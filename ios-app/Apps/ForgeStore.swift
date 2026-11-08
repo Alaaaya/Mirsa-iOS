@@ -169,7 +169,7 @@ struct ForgeProject: Codable, Identifiable {
             if state == "failed" {
                 let (ct, key, _) = try await ForgeClient.getData(["action": "build-status", "job": job, "fetch": "1"])
                 let log = (try? ForgeClient.open(ct, masterB64: key, job: job, purpose: "err")).flatMap { String(data: $0, encoding: .utf8) } ?? "Build failed"
-                throw ForgeClient.Failure.message(String(log.suffix(600)))
+                throw ForgeBuildFailure(rawLog: log)
             }
             if state == "done" {
                 let (ct, key, _) = try await ForgeClient.getData(["action": "build-status", "job": job, "fetch": "1"])
