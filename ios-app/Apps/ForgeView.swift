@@ -224,6 +224,7 @@ struct ForgeProjectView: View {
                         forgeButton("arrow.triangle.2.circlepath", tr("App updated", "التطبيق تحدّث", ckb: "ئەپ نوێبوو", kmr: "App nû bû")) { updating = true }
                         forgeButton("globe", ForgePublishSheet.title) { publishing = true }
                     }
+                    ForgeGuideSubtitle(feature: .publish)
                     if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     if p.versions.contains(where: { $0.importedInfo != nil }) { ForgeImportedDylibsView(id: id, versions: p.versions.filter { $0.importedInfo != nil }, openInspector: { showInspector = true }).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     VStack(alignment: .leading, spacing: 8) {

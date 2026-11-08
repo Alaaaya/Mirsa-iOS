@@ -1,9 +1,76 @@
 import XCTest
 import UIKit
+import SwiftUI
 import ImageIO
 @testable import Mirsa
 
 @MainActor final class ForgeFeatureTests: XCTestCase {
+    func testGuideCopyInExistingFourLanguagesAndUniqueSeenKeys() {
+        let previous = AppLanguageStore.shared.current
+        defer { AppLanguageStore.shared.set(previous) }
+        XCTAssertEqual(Set(ForgeGuide.allCases.map(\.seenKey)).count, 4)
+        var subtitles: [ForgeGuide: Set<String>] = [:]
+        for language in AppLanguage.allCases {
+            AppLanguageStore.shared.set(language)
+            for feature in ForgeGuide.allCases {
+                XCTAssertFalse(feature.subtitle.isEmpty)
+                XCTAssertFalse(feature.subtitle.contains("\n"))
+                XCTAssertEqual(feature.steps.count, 3)
+                XCTAssertTrue(feature.steps.allSatisfy { !$0.isEmpty })
+                subtitles[feature, default: []].insert(feature.subtitle)
+            }
+        }
+        XCTAssertTrue(subtitles.values.allSatisfy { $0.count == 4 })
+        AppLanguageStore.shared.set(.english)
+        XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("cannot read system crash logs"))
+        XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("not prove"))
+        XCTAssertTrue(ForgeGuide.publish.steps.joined().contains("HTTPS"))
+        XCTAssertTrue(ForgeGuide.publish.steps.joined().contains(".dylib or .deb"))
+        XCTAssertTrue(ForgeGuide.archive.steps.joined().contains("signing"))
+    }
+
+    func testGuideLTRLayoutAndSnapshotsAcrossLanguagesAndSeenState() {
+        let previous = AppLanguageStore.shared.current
+        let defaults = UserDefaults.standard
+        let saved = ForgeGuide.allCases.map { ($0.seenKey, defaults.object(forKey: $0.seenKey)) }
+        defer {
+            AppLanguageStore.shared.set(previous)
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        for language in AppLanguage.allCases {
+            AppLanguageStore.shared.set(language)
+            for feature in ForgeGuide.allCases {
+                for seen in [false, true] {
+                    defaults.set(seen, forKey: feature.seenKey)
+                    let view = ForgeFeatureGuide(feature)
+                        .padding(14).background(Color.black)
+                        .environment(\.layoutDirection, .rightToLeft)
+                    let host = UIHostingController(rootView: view)
+                    host.loadViewIfNeeded()
+                    let fit = host.sizeThatFits(in: CGSize(width: 320, height: 10000))
+                    XCTAssertTrue(fit.height.isFinite && fit.height > 0)
+                    XCTAssertLessThanOrEqual(fit.width, 321)
+                    host.view.frame = CGRect(x: 0, y: 0, width: 320, height: ceil(fit.height))
+                    host.view.layoutIfNeeded()
+                    let renderer = UIGraphicsImageRenderer(size: host.view.bounds.size)
+                    let image = renderer.image { ctx in host.view.layer.render(in: ctx.cgContext) }
+                    XCTAssertEqual(image.size.width, 320)
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "guide-\(feature.rawValue)-\(language.rawValue)-\(seen ? "seen" : "first")"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+                let large = ForgeFeatureGuide(feature).environment(\.dynamicTypeSize, .accessibility3)
+                let host = UIHostingController(rootView: large)
+                let fit = host.sizeThatFits(in: CGSize(width: 320, height: 20000))
+                XCTAssertTrue(fit.height.isFinite && fit.height > 0)
+                XCTAssertLessThanOrEqual(fit.width, 321)
+            }
+        }
+    }
+
     func testArchiveErrorsLocalizedInAllFourLanguagesAndDoNotLeakPaths() {
         let errors = ["Archive size limit exceeded", "Archive compression ratio limit exceeded",
                       "Too many archive entries", "Unsafe archive path: /private/secret",

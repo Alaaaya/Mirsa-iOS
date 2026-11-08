@@ -123,6 +123,7 @@ struct ForgeFeaturesView: View {
             PhotosPicker(selection: $photo, matching: .images) {
                 Label(text("Image to tweak", "صورة لتويك"), systemImage: "photo")
             }
+            ForgeFeatureGuide(.image)
             if let jpeg = cleanJPEG, let image = UIImage(data: jpeg) {
                 ForgeImageMarkView(image: image, region: $markRegion)
                 Text(text("Only this cleaned JPEG and your request are sent after pressing Generate. No photo metadata.", "بس هالصورة المنظّفة وطلبك بينبعتوا بعد ضغط توليد. بدون بيانات الصورة."))
@@ -220,39 +221,42 @@ struct ForgeFeaturesView: View {
         }
     }
     private var repairSection: some View {
-        DisclosureGroup(text("Crash repair", "إصلاح بعد الكراش")) {
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(text("Opt in to assisted crash repair", "تفعيل إصلاح الكراش بموافقتي"), isOn: $repairOptIn)
-                Text(text("No automatic crash access or guard reset. Import a fresh inspector capture for this exact tweak with known enabled guard. Paste your crash diagnostic, review redaction, and explicitly send. Maximum 3 server attempts per stable chain. Repairs require review and never auto-install.", "ما في قراءة كراش تلقائية ولا إعادة تفعيل للحماية. استورد التقاط جديد لنفس التويك وحمايته شغّالة. الصق سجل الكراش، راجع إخفاء البيانات ووافق عالإرسال. أقصى شي ٣ محاولات للسلسلة. الإصلاح للمراجعة وبدون تثبيت تلقائي.")).font(.caption).foregroundStyle(.white.opacity(0.6))
-                if repairOptIn {
-                    TextEditor(text: $crashLog).frame(height: 90).scrollContentBackground(.hidden).background(Color.black.opacity(0.2))
-                    Button(text("Preview sanitized diagnostic", "معاينة السجل بعد إخفاء البيانات")) {
-                        safeCrashLog = ForgeFeaturePolicy.sanitizedLog(crashLog); logConsent = false
-                    }
-                    if !safeCrashLog.isEmpty {
-                        Text(safeCrashLog).font(.system(.caption2, design: .monospaced)).lineLimit(24).textSelection(.enabled)
-                        Toggle(text("I reviewed the diagnostic and consent to send it", "راجعت السجل وبوافق عإرساله"), isOn: $logConsent)
-                    }
-                    if let p = store.project(id), let version = p.currentVersion {
-                        Button(text("Request repair for review", "طلب إصلاح للمراجعة")) {
-                            guard let capture else { return }
-                            run { proposal = try await store.repairProposal(id, versionID: version.id, capture: capture, crashLog: safeCrashLog, optedIn: repairOptIn, consent: logConsent) }
-                        }.disabled(!logConsent || safeCrashLog.isEmpty || capture?.repairAllowed(tweakID: version.tweakID) != true)
-                        if capture?.repairAllowed(tweakID: version.tweakID) != true {
-                            Text(text("Guard unknown, disabled, or capture belongs to another tweak. Repair is unavailable.", "حالة الحماية مو معروفة أو مطفّية أو الالتقاط لتويك ثاني. الإصلاح مو متاح.")).font(.caption).foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 8) {
+            DisclosureGroup(text("Crash repair", "إصلاح بعد الكراش")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(text("Opt in to assisted crash repair", "تفعيل إصلاح الكراش بموافقتي"), isOn: $repairOptIn)
+                    Text(text("No automatic crash access or guard reset. Import a fresh inspector capture for this exact tweak with known enabled guard. Paste your crash diagnostic, review redaction, and explicitly send. Maximum 3 server attempts per stable chain. Repairs require review and never auto-install.", "ما في قراءة كراش تلقائية ولا إعادة تفعيل للحماية. استورد التقاط جديد لنفس التويك وحمايته شغّالة. الصق سجل الكراش، راجع إخفاء البيانات ووافق عالإرسال. أقصى شي ٣ محاولات للسلسلة. الإصلاح للمراجعة وبدون تثبيت تلقائي.")).font(.caption).foregroundStyle(.white.opacity(0.6))
+                    if repairOptIn {
+                        TextEditor(text: $crashLog).frame(height: 90).scrollContentBackground(.hidden).background(Color.black.opacity(0.2))
+                        Button(text("Preview sanitized diagnostic", "معاينة السجل بعد إخفاء البيانات")) {
+                            safeCrashLog = ForgeFeaturePolicy.sanitizedLog(crashLog); logConsent = false
+                        }
+                        if !safeCrashLog.isEmpty {
+                            Text(safeCrashLog).font(.system(.caption2, design: .monospaced)).lineLimit(24).textSelection(.enabled)
+                            Toggle(text("I reviewed the diagnostic and consent to send it", "راجعت السجل وبوافق عإرساله"), isOn: $logConsent)
+                        }
+                        if let p = store.project(id), let version = p.currentVersion {
+                            Button(text("Request repair for review", "طلب إصلاح للمراجعة")) {
+                                guard let capture else { return }
+                                run { proposal = try await store.repairProposal(id, versionID: version.id, capture: capture, crashLog: safeCrashLog, optedIn: repairOptIn, consent: logConsent) }
+                            }.disabled(!logConsent || safeCrashLog.isEmpty || capture?.repairAllowed(tweakID: version.tweakID) != true)
+                            if capture?.repairAllowed(tweakID: version.tweakID) != true {
+                                Text(text("Guard unknown, disabled, or capture belongs to another tweak. Repair is unavailable.", "حالة الحماية مو معروفة أو مطفّية أو الالتقاط لتويك ثاني. الإصلاح مو متاح.")).font(.caption).foregroundStyle(.orange)
+                            }
+                        }
+                        if let proposal {
+                            Text(proposal.explain).font(.caption)
+                            ScrollView { Text(proposal.code).font(.system(.caption2, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 220)
+                            Button(text("Save reviewable version, keep current active", "حفظ نسخة للمراجعة وترك الحالية")) {
+                                store.acceptRepair(id, proposal: proposal); self.proposal = nil
+                                message = text("Saved without switching or enabling. Select it in Versions to review or return to your original.", "انحفظت بدون تبديل ولا تفعيل. اختارها من النسخ للمراجعة أو ارجع للأصلية.")
+                            }
+                            Button(text("Discard proposal", "تجاهل الاقتراح")) { self.proposal = nil }
                         }
                     }
-                    if let proposal {
-                        Text(proposal.explain).font(.caption)
-                        ScrollView { Text(proposal.code).font(.system(.caption2, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 220)
-                        Button(text("Save reviewable version, keep current active", "حفظ نسخة للمراجعة وترك الحالية")) {
-                            store.acceptRepair(id, proposal: proposal); self.proposal = nil
-                            message = text("Saved without switching or enabling. Select it in Versions to review or return to your original.", "انحفظت بدون تبديل ولا تفعيل. اختارها من النسخ للمراجعة أو ارجع للأصلية.")
-                        }
-                        Button(text("Discard proposal", "تجاهل الاقتراح")) { self.proposal = nil }
-                    }
-                }
-            }.padding(.top, 8)
+                }.padding(.top, 8)
+            }
+        ForgeFeatureGuide(.crash)
         }
     }
     private func run(_ action: @escaping @MainActor () async throws -> Void) {
