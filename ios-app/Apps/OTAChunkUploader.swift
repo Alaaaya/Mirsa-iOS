@@ -45,6 +45,24 @@ final class OTAProgressDelegate: NSObject, URLSessionTaskDelegate {
     func urlSession(_ s: URLSession, task: URLSessionTask, didSendBodyData b: Int64, totalBytesSent t: Int64, totalBytesExpectedToSend e: Int64) { onBytes?(t) }
 }
 
+struct OTASession { let url: URL; let token: String; let maxChunk: Int64 }
+
+enum OTAOracleWire {
+    static let basePrefix = "/ota/sessions/"
+    static func offset(from data: Data) -> Int64? {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["offset"] as? Int64
+            ?? (((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["offset"] as? Int).map(Int64.init)
+    }
+    static func session(from data: Data) throws -> OTASession {
+        guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let s = o["uploadURL"] as? String, let url = URL(string: s), OTAHostPolicy.accepts(url),
+              url.path.hasPrefix(basePrefix), url.query == nil,
+              let token = o["uploadToken"] as? String, !token.isEmpty else { throw OTAChunkError.badHost }
+        let m = (o["maxChunkBytes"] as? NSNumber)?.int64Value ?? 8 * 1024 * 1024
+        return OTASession(url: url, token: token, maxChunk: min(max(m, 1), 8 * 1024 * 1024))
+    }
+}
+
 final class OTAChunkUploader {
     private let session: URLSession
     private let delegate = OTAProgressDelegate()
@@ -54,27 +72,71 @@ final class OTAChunkUploader {
         session = URLSession(configuration: c, delegate: delegate, delegateQueue: nil)
     }
     func cancel() { session.invalidateAndCancel() }
-    /// Sends chunks from `start` (resume point). Progress is 0...1 of total bytes.
-    func upload(file: URL, plan: OTAChunkPlan, startingAt start: Int = 0,
-                requestBuilder: (Int, Range<Int64>) throws -> URLRequest,
+
+    private func request(_ s: OTASession, _ url: URL, _ method: String) -> URLRequest {
+        var r = URLRequest(url: url, timeoutInterval: 120)
+        r.httpMethod = method
+        r.setValue("Bearer " + s.token, forHTTPHeaderField: "Authorization")
+        return r
+    }
+    private func map(_ e: Error) -> Error {
+        if e is CancellationError { return OTAChunkError.cancelled }
+        if let u = e as? URLError, u.code == .cancelled { return OTAChunkError.cancelled }
+        return e
+    }
+
+    /// Creates (idempotent) and returns the server's committed offset.
+    func open(_ s: OTASession) async throws -> Int64 {
+        guard OTAHostPolicy.accepts(s.url) else { throw OTAChunkError.badHost }
+        do {
+            let (d, resp) = try await session.data(for: request(s, s.url, "POST"))
+            let c = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(c), let off = OTAOracleWire.offset(from: d) else { throw OTAChunkError.server(c) }
+            return off
+        } catch { throw map(error) }
+    }
+
+    /// Streams chunks from the server-acknowledged offset, trusting 409 offsets.
+    func upload(file: URL, total: Int64, session s: OTASession, from startOffset: Int64,
                 progress: @escaping (Double) -> Void) async throws {
+        let plan = try OTAChunkPlan(total: total, chunkSize: s.maxChunk)
         guard let handle = try? FileHandle(forReadingFrom: file) else { throw OTAChunkError.emptyFile }
         defer { try? handle.close() }
-        for i in start..<plan.count {
+        var offset = startOffset, conflicts = 0
+        progress(Double(offset) / Double(total))
+        while offset < total {
             try Task.checkCancellation()
-            let r = plan.range(i)
-            let request = try requestBuilder(i, r)
-            guard let url = request.url, OTAHostPolicy.accepts(url) else { throw OTAChunkError.badHost }
-            try handle.seek(toOffset: UInt64(r.lowerBound))
-            guard let body = try handle.read(upToCount: Int(r.count)), Int64(body.count) == r.count else { throw OTAChunkError.emptyFile }
-            delegate.onBytes = { sent in progress(Double(r.lowerBound + sent) / Double(plan.total)) }
+            let len = min(plan.chunkSize, total - offset)
+            try handle.seek(toOffset: UInt64(offset))
+            guard let body = try handle.read(upToCount: Int(len)), Int64(body.count) == len else { throw OTAChunkError.emptyFile }
+            var r = request(s, s.url, "PUT")
+            r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            r.setValue(String(offset), forHTTPHeaderField: "X-Mirsa-Offset")
+            let base = offset
+            delegate.onBytes = { sent in progress(Double(base + sent) / Double(total)) }
             do {
-                let (_, resp) = try await session.upload(for: request, from: body)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                guard (200..<300).contains(code) else { throw OTAChunkError.server(code) }
-            } catch is CancellationError { throw OTAChunkError.cancelled }
-            catch let e as URLError where e.code == .cancelled { throw OTAChunkError.cancelled }
-            progress(Double(r.upperBound) / Double(plan.total))
+                let (d, resp) = try await session.upload(for: r, from: body)
+                let c = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                if c == 409, let auth = OTAOracleWire.offset(from: d), auth >= 0, auth <= total, conflicts < 5 {
+                    conflicts += 1; offset = auth; continue
+                }
+                guard (200..<300).contains(c), let next = OTAOracleWire.offset(from: d), next > offset, next <= total else { throw OTAChunkError.server(c) }
+                offset = next
+            } catch { throw map(error) }
+            progress(Double(offset) / Double(total))
         }
     }
+
+    func finalize(_ s: OTASession) async throws -> URL {
+        let url = s.url.appendingPathComponent("finalize")
+        do {
+            let (d, resp) = try await session.data(for: request(s, url, "POST"))
+            let c = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard c == 200, let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+                  let m = o["manifestURL"] as? String, let mu = URL(string: m), OTAHostPolicy.accepts(mu) else { throw OTAChunkError.server(c) }
+            return mu
+        } catch { throw map(error) }
+    }
+
+    func abort(_ s: OTASession) async { _ = try? await session.data(for: request(s, s.url, "DELETE")) }
 }
