@@ -31,6 +31,7 @@ jobs:
       - name: Run OTA tests
         run: |
           set -o pipefail
+          mkdir -p build
           brew install xcodegen
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
