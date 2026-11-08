@@ -52,11 +52,19 @@ import ImageIO
                     let fit = host.sizeThatFits(in: CGSize(width: 320, height: 10000))
                     XCTAssertTrue(fit.height.isFinite && fit.height > 0)
                     XCTAssertLessThanOrEqual(fit.width, 321)
-                    host.view.frame = CGRect(x: 0, y: 0, width: 320, height: ceil(fit.height))
-                    let window = UIWindow(frame: host.view.frame)
+                    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 2000))
                     window.rootViewController = host
                     window.isHidden = false
                     window.makeKeyAndVisible()
+                    host.view.frame = window.bounds
+                    host.view.setNeedsLayout()
+                    host.view.layoutIfNeeded()
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+                    // Re-measure inside the live window so wrapped text is fully counted.
+                    let live = host.sizeThatFits(in: CGSize(width: 320, height: 10000))
+                    let finalHeight = ceil(max(fit.height, live.height)) + 8
+                    window.frame = CGRect(x: 0, y: 0, width: 320, height: finalHeight)
+                    host.view.frame = window.bounds
                     host.view.setNeedsLayout()
                     host.view.layoutIfNeeded()
                     RunLoop.current.run(until: Date().addingTimeInterval(0.25))
