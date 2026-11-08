@@ -90,8 +90,11 @@ final class PersonalAppsLibrary: ObservableObject {
     }
     private var iconStamps: [UUID: String] = [:]
     nonisolated static func stamp(_ u: URL) -> String {
-        let v = try? u.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-        return "\(v?.fileSize ?? 0)-\(v?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+        // URL resource values are cached per URL instance; query fresh filesystem attributes.
+        let v = try? FileManager.default.attributesOfItem(atPath: u.path)
+        let size = (v?[.size] as? NSNumber)?.int64Value ?? 0
+        let modified = (v?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(size)-\(modified)"
     }
     /// Legacy apps imported before icons were stored. Tried once per launch, bounded to 512 MB.
     func ensureIcon(for app: PersonalLibraryApp) async -> UIImage? {

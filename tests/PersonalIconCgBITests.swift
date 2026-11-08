@@ -47,7 +47,7 @@ final class PersonalIconCgBITests: XCTestCase {
         XCTAssertNotNil(PersonalAppsLibrary.iconPNG(bundle: dir, info: [:]))
     }
     func testNoForeignBundleLookupInSource() throws {
-        let src = try String(contentsOfFile: #filePath.replacingOccurrences(of: "tests/PersonalIconCgBITests.swift", with: "ios-app/Apps/PersonalAppsLibrary.swift"))
+        let src = try String(contentsOfFile: #filePath.replacingOccurrences(of: "tests/PersonalIconCgBITests.swift", with: "ios-app/Apps/PersonalAppsHub.swift"))
         XCTAssertFalse(src.contains("UIImage(named"))
         XCTAssertFalse(src.contains("imageNamed"))
     }
