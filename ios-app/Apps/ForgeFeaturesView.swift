@@ -256,7 +256,7 @@ struct ForgeFeaturesView: View {
                     }
                 }.padding(.top, 8)
             }
-        ForgeFeatureGuide(.crash)
+            ForgeFeatureGuide(.crash)
         }
     }
     private func run(_ action: @escaping @MainActor () async throws -> Void) {
