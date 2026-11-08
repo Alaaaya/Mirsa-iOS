@@ -54,5 +54,9 @@
   "1.3.192": {
     "ar": "أيقونات التطبيقات بالصفحة الرئيسية صار خلفيتها صغيرة وملاصقة للأيقونة بهامش خفيف من كل الجهات، والاسم تحتها، وبقي الضغط المطوّل وإعادة الترتيب مثل ما هم.",
     "en": "App icons on the home screen now sit on a compact background that hugs the icon with a small margin on every side, with the name below. Long-press and reorder are unchanged."
+  },
+  "1.3.193": {
+    "ar": "صلّحنا رابط فتح مثبّت iOS بعد التوقيع بالشهادة، وصار رابط التثبيت ياخد بياناته من ملف IPA الموقّع نفسه بدون تغيير معرّف التطبيق. أضفنا إعادة محاولة محدودة لما السيرفر يطلب الانتظار. خلفية أيقونات التطبيقات صارت صغيرة وملاصقة للأيقونة. هالتحديث لسا مو مجرّب على جهاز فعلي.",
+    "en": "Fixed the iOS installer handoff after certificate signing. The installation manifest now reads metadata from the signed IPA itself without changing the app bundle ID. Added bounded retries when the server asks to wait. Home app icons keep their compact, snug backgrounds. This update has not yet been tested on a physical device."
   }
 }
