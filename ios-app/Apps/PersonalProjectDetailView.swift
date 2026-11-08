@@ -48,7 +48,7 @@ struct PersonalProjectDetailView: View {
                         Button { dismiss() } label: {
                             Image(systemName: "chevron.left").font(.headline).frame(width: 40, height: 40)
                                 .appsGlass(cornerRadius: 20)
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.mirsaPress)
                         Spacer()
                         Text(personalText("Project details", "تفاصيل المشروع")).font(.headline)
                         Spacer()
@@ -63,13 +63,13 @@ struct PersonalProjectDetailView: View {
                     certificateCard
                     Button { openBundleFiles() } label: {
                         Label(bundleLoading ? personalText("Reading app…", "عم أقرأ التطبيق…") : personalText("Bundle files", "ملفات التطبيق"), systemImage: "doc.on.doc")
-                    }.buttonStyle(.borderedProminent).tint(.cyan).disabled(bundleLoading)
+                    }.buttonStyle(.mirsaPrimary).disabled(bundleLoading)
                     Button { showProjectLogs = true } label: {
                         Label(personalText("Launches & crash logs", "التشغيل وسجلات الأعطال"), systemImage: "waveform.path.ecg")
-                    }.buttonStyle(.borderedProminent).tint(.indigo)
+                    }.buttonStyle(.mirsaPrimary)
                     Button { openWorkspace() } label: {
                         Label(personalText("Browse workspace folder", "تصفّح مجلد المشروع"), systemImage: "folder")
-                    }.buttonStyle(.bordered)
+                    }.buttonStyle(.mirsaSecondary)
                     if let message { Text(message).font(.footnote).textSelection(.enabled) }
                 }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 32)
             }.scrollIndicators(.hidden)
@@ -88,11 +88,12 @@ struct PersonalProjectDetailView: View {
                     }
                 }.frame(maxWidth: .infinity).padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent).tint(.green)
+            .buttonStyle(.mirsaPrimary)
             .accessibilityIdentifier("mirsa.project.sign")
             .disabled(busy)
-            .padding(.horizontal, 20).padding(.bottom, 12).padding(.top, 12)
-            .background(.ultraThinMaterial)
+            .padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.s).padding(.top, MirsaSpacing.s)
+            .background(MirsaPalette.sheet.ignoresSafeArea(edges: .bottom))
+            .overlay(alignment: .top) { Rectangle().fill(MirsaPalette.stroke).frame(height: 1) }
             }
         }
         .preferredColorScheme(.dark)
@@ -220,7 +221,7 @@ struct PersonalProjectDetailView: View {
                 HStack(spacing: 10) {
                     Button { removeComponent(comp) } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.mirsaPress)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(comp.title).font(.subheadline).lineLimit(1)
                         if comp.subtitle != comp.title { Text(comp.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
@@ -236,7 +237,7 @@ struct PersonalProjectDetailView: View {
                     ShareLink(item: comp.url) { Image(systemName: "square.and.arrow.up") }
                     Button { moveComponent(comp.id, -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0)
                     Button { moveComponent(comp.id, 1) } label: { Image(systemName: "arrow.down") }.disabled(index == comps.count - 1)
-                }.buttonStyle(.plain).padding(10).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }.buttonStyle(.mirsaPress).padding(10).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }.padding(16).appsGlass(cornerRadius: 24)
     }
@@ -389,7 +390,7 @@ struct PersonalProjectDetailView: View {
                     Button { draft.customEntitlements = nil; draft.customEntitlementsName = nil } label: { Image(systemName: "trash") }
                 }
                 Button { pickingEntitlements = true } label: { Image(systemName: "square.and.arrow.down") }
-            }.buttonStyle(.plain)
+            }.buttonStyle(.mirsaPress)
         }.padding(16).appsGlass(cornerRadius: 24)
     }
     private func toggle(_ title: String, _ sub: String, _ value: Binding<Bool>) -> some View {
@@ -409,7 +410,7 @@ struct PersonalProjectDetailView: View {
                     Text(deps.map { "\($0.count)" } ?? "…").foregroundStyle(.secondary)
                     Image(systemName: showDeps ? "chevron.up" : "chevron.down")
                 }
-            }.buttonStyle(.plain)
+            }.buttonStyle(.mirsaPress)
             if showDeps { LazyVStack(alignment: .leading, spacing: 8) { ForEach(deps ?? [], id: \.self) { Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(2) } } }
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: 24)
     }

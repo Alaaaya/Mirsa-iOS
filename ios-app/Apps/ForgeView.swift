@@ -27,7 +27,7 @@ private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () ->
     Button(action: run) {
         VStack(spacing: 4) { Image(systemName: icon); Text(title).font(.caption.bold()).lineLimit(1) }
             .frame(maxWidth: .infinity).padding(.vertical, 10).background(Color.white.opacity(0.12)).foregroundStyle(.white).cornerRadius(12)
-    }.buttonStyle(.plain)
+    }.buttonStyle(.mirsaPress)
 }
 
 let forgeDeleteTitle = tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe")
@@ -76,7 +76,7 @@ struct ForgeView: View {
                             Text(p.bundleID + " · v" + p.appVersion).font(.caption).foregroundStyle(.white.opacity(0.55))
                             Text(String(p.versions.count) + " " + tr("versions", "نسخ", ckb: "وەشان", kmr: "guhertin")).font(.caption2).foregroundStyle(.white.opacity(0.5))
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.mirsaPress)
                     .contextMenu { Button(role: .destructive) { toDelete = p } label: { Label(forgeDeleteTitle, systemImage: "trash") } }
                     .gesture(DragGesture(minimumDistance: 30).onEnded { g in if g.translation.width < -60 && abs(g.translation.height) < 40 { toDelete = p } })
                 }
@@ -145,7 +145,7 @@ struct ForgeTranslateView: View {
                         Button { if langs.contains(t.code) { langs.remove(t.code) } else { langs.insert(t.code) } } label: {
                             Text(t.label).font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 6)
                                 .background(langs.contains(t.code) ? Color.accentColor : Color.white.opacity(0.1)).foregroundStyle(.white).cornerRadius(8)
-                        }.buttonStyle(.plain) } }
+                        }.buttonStyle(.mirsaPress) } }
                     forgeButton("doc.badge.gearshape", tr("Choose IPA", "اختر IPA", ckb: "IPA هەڵبژێرە", kmr: "IPA hilbijêre")) { picking = true }
                 }.padding(14).background(forgeCard).cornerRadius(16)
                 if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
@@ -284,13 +284,13 @@ struct ForgeGalleryView: View {
                         Text(it["name"] as? String ?? "").font(.headline)
                         Text(it["target_bundle_id"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
                         HStack {
-                            Button(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne")) { Task { await use(it) } }.buttonStyle(.bordered)
+                            Button(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne")) { Task { await use(it) } }.buttonStyle(.mirsaSecondary)
                             if it["mine"] as? Bool == true {
-                                Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")) { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it }.buttonStyle(.bordered)
-                                Button(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû")) { versioning = it }.buttonStyle(.bordered)
-                                Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { deleting = it }.buttonStyle(.bordered)
+                                Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")) { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it }.buttonStyle(.mirsaSecondary)
+                                Button(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû")) { versioning = it }.buttonStyle(.mirsaSecondary)
+                                Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { deleting = it }.buttonStyle(.mirsaSecondary)
                             } else {
-                                Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.bordered)
+                                Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.mirsaSecondary)
                             }
                         }
                     }

@@ -392,30 +392,27 @@ private struct SourceRow: View {
     var body: some View {
         let tint = Color(hex: source.tint) ?? Color(red: 0.45, green: 0.38, blue: 0.95)
         HStack(spacing: 14) {
-            if theme == MirsaTheme.liquid.rawValue {
-                RemoteIcon(url: source.iconURL.flatMap(URL.init(string:)), size: 36, corner: 9)
-                    .frame(width: 58, height: 58)
-                    .appsGlass(cornerRadius: 18)
-            } else {
-                RemoteIcon(url: source.iconURL.flatMap(URL.init(string:)), size: 48, corner: 24)
-            }
+            RemoteIcon(url: source.iconURL.flatMap(URL.init(string:)), size: 48, corner: MirsaRadius.icon)
             VStack(alignment: .leading, spacing: 3) {
-                Text(source.name).font(.title3.weight(.semibold)).foregroundStyle(.white)
+                Text(source.name).font(MirsaFont.cardTitle).foregroundStyle(.white)
+                    .lineLimit(2)
                 if let d = source.updated {
                     Text(tr("Last updated: ", "آخر تحديث: ") + d.formatted(date: .numeric, time: .omitted))
-                        .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                        .lineLimit(1)
                 }
             }
-            Spacer()
+            Spacer(minLength: MirsaSpacing.xs)
             if loading { ProgressView().tint(.white) }
             else {
-                Text("\(source.appCount)").font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                Text("\(source.appCount)").font(MirsaFont.badge.monospacedDigit()).foregroundStyle(.white)
                     .lineLimit(1).fixedSize()
-                    .padding(.horizontal, 10).frame(minWidth: 36, minHeight: 36)
-                    .background(.white.opacity(0.2), in: Capsule())
+                    .padding(.horizontal, 10).frame(minWidth: 32, minHeight: 28)
+                    .background(MirsaPalette.cardRaised, in: Capsule())
+                    .overlay(Capsule().strokeBorder(MirsaPalette.strokeStrong, lineWidth: 1))
             }
         }
-        .padding(16)
+        .padding(MirsaSpacing.card)
         .modifier(SourceRowBackground(liquid: theme == MirsaTheme.liquid.rawValue, tint: tint))
     }
 }
@@ -461,9 +458,9 @@ private struct RepoAppRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteIcon(url: app.iconURL, size: 52, corner: 12)
+            RemoteIcon(url: app.iconURL, size: 52, corner: MirsaRadius.icon)
             VStack(alignment: .leading, spacing: 2) {
-                Text(app.name).font(.headline).lineLimit(1)
+                Text(app.name).font(MirsaFont.cardTitle).lineLimit(1)
                 Text([app.developer, app.version.isEmpty ? nil : "v" + app.version]
                         .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -473,11 +470,10 @@ private struct RepoAppRow: View {
             }
             Spacer()
             Button { install() } label: {
-                Text(buttonTitle).font(.subheadline.weight(.bold))
-                    .padding(.horizontal, 14).padding(.vertical, 6)
-                    .background(.white.opacity(0.15), in: Capsule())
+                Text(buttonTitle).lineLimit(1).fixedSize()
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.mirsaSecondary)
+            .controlSize(.small)
             .disabled(selecting || AppsStore.shared.busy != nil)
         }
         .contentShape(Rectangle())
@@ -523,16 +519,16 @@ private struct RepoAppInfo: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 14) {
-                        RemoteIcon(url: app.iconURL, size: 72, corner: 16)
+                        RemoteIcon(url: app.iconURL, size: 72, corner: MirsaRadius.m)
                         VStack(alignment: .leading) {
                             Text(app.name).font(.title2.bold())
                             Text(app.developer).foregroundStyle(.secondary)
                         }
                     }
                     Button(action: install) {
-                        Text(tr("Install", "ثبّت")).bold().frame(maxWidth: .infinity).padding(.vertical, 10)
+                        Text(tr("Install", "ثبّت")).frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.mirsaPrimary)
                     HStack {
                         if !app.version.isEmpty { Label("v" + app.version, systemImage: "tag") }
                         if let s = app.size { Label(ByteCountFormatter.string(fromByteCount: s, countStyle: .file), systemImage: "internaldrive") }
@@ -557,8 +553,9 @@ struct RemoteIcon: View {
         AsyncImage(url: url) { img in img.resizable().scaledToFill() }
             placeholder: { Image(systemName: "app.dashed").font(.system(size: size * 0.45)).foregroundStyle(.secondary) }
             .frame(width: size, height: size)
-            .background(.white.opacity(0.08))
+            .background(MirsaPalette.cardRaised)
             .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(MirsaPalette.stroke, lineWidth: 0.5))
     }
 }
 
@@ -568,10 +565,8 @@ private struct SourceRowBackground: ViewModifier {
     let tint: Color
     @ViewBuilder
     func body(content: Content) -> some View {
-        if liquid {
-            content.appsGlass(cornerRadius: 30, tint: tint)
-        } else {
-            content.background(tint.opacity(0.85), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        }
+        // One solid card for both themes; the source colour is a light wash.
+        content.appsGlass(cornerRadius: MirsaRadius.l, tint: tint)
+            .mirsaAppear()
     }
 }

@@ -19,7 +19,7 @@ struct SetupView: View {
             AuroraBackground()
 
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: MirsaSpacing.m) {
                     header
                     step(1, icon: "lock.shield.fill", title: L.t("setup.network"),
                          status: networkOK ? L.t("setup.networkOK") : L.t("setup.networkOff"),
@@ -41,11 +41,11 @@ struct SetupView: View {
                     Text(L.t("setup.note"))
                         .font(.footnote)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(MirsaPalette.textTertiary)
                         .padding(.horizontal, 10)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 30)
+                .padding(.horizontal, MirsaSpacing.page)
+                .padding(.top, MirsaSpacing.xxl)
                 .padding(.bottom, 60)
             }
             .scrollIndicators(.hidden)
@@ -58,17 +58,17 @@ struct SetupView: View {
         }) {
             SetupPairingSheet().environmentObject(vm)
                 .presentationDetents([.large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .sheet(isPresented: $showLogin) {
             LoginSheet(store: store)
                 .presentationDetents([.large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .sheet(item: $store.prompt) { p in
             PromptSheet(prompt: p) { store.prompt = nil }
                 .presentationDetents([.medium, .large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
                 .interactiveDismissDisabled()
         }
         .alert(L.t("setup.title"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
@@ -93,12 +93,13 @@ struct SetupView: View {
                 }
             }
             .frame(width: 84, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.l, style: .continuous))
             .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
-            Text(L.t("setup.title")).font(.largeTitle.bold()).foregroundStyle(.white)
+            Text(L.t("setup.title")).font(MirsaFont.pageTitle).foregroundStyle(.white)
+                .multilineTextAlignment(.center)
             Text(L.t("setup.sub"))
-                .font(.subheadline).multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.7))
+                .font(MirsaFont.secondary).multilineTextAlignment(.center)
+                .foregroundStyle(MirsaPalette.textSecondary)
         }
         .padding(.bottom, 6)
     }
@@ -107,30 +108,32 @@ struct SetupView: View {
                       action: String?, perform: @escaping () -> Void) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(ok ? Color.green.opacity(0.85) : Color.white.opacity(0.12))
-                    .frame(width: 44, height: 44)
+                Circle().fill(ok ? AnyShapeStyle(MirsaPalette.success) : AnyShapeStyle(MirsaPalette.cardRaised))
+                    .frame(width: MirsaIconSize.button, height: MirsaIconSize.button)
                 Image(systemName: ok ? "checkmark" : icon)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: MirsaIconSize.m, weight: .bold))
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(n). \(title)").font(.headline).foregroundStyle(.white)
-                Text(status).font(.subheadline)
-                    .foregroundStyle(ok ? .green : .white.opacity(0.6))
-                    .lineLimit(1)
+                Text("\(n). \(title)").font(MirsaFont.cardTitle).foregroundStyle(.white)
+                    .lineLimit(2).minimumScaleFactor(0.85)
+                Text(status).font(MirsaFont.secondary)
+                    .foregroundStyle(ok ? MirsaPalette.success : MirsaPalette.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: MirsaSpacing.xs)
             if let action {
                 Button(action: perform) {
-                    Text(action).font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12).padding(.vertical, 7)
+                    Text(action).lineLimit(1).fixedSize()
                 }
-                .foregroundStyle(.white)
-                .appsGlassCapsule()
+                .buttonStyle(.mirsaSecondary)
+                .controlSize(.small)
             }
         }
-        .padding(16)
-        .appsGlass(cornerRadius: 22)
+        .padding(MirsaSpacing.card)
+        .appsGlass(cornerRadius: MirsaRadius.l)
+        .mirsaAppear(delay: Double(n) * 0.05)
     }
 
     private var installButton: some View {
@@ -138,13 +141,10 @@ struct SetupView: View {
             Task { await store.installSelf(vm: vm) }
         } label: {
             Label(L.t("setup.install"), systemImage: "arrow.down.app.fill")
-                .font(.headline)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
         }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.capsule)
-        .tint(Color(red: 0.45, green: 0.38, blue: 1.0))
+        .buttonStyle(.mirsaPrimary)
+        .controlSize(.large)
         .disabled(!ready || store.busy != nil)
         .padding(.top, 6)
     }
@@ -157,13 +157,11 @@ struct SetupView: View {
                 .foregroundStyle(.white)
             if let bid = store.installedSelfBundleID {
                 Button(L.t("setup.open")) { _ = AppsStore.openInstalledApp(bundleID: bid) }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .tint(.green)
+                    .buttonStyle(.mirsaSecondary)
             }
         }
-        .padding(16)
+        .padding(MirsaSpacing.card)
         .frame(maxWidth: .infinity)
-        .appsGlass(cornerRadius: 22, tint: .green)
+        .appsGlass(cornerRadius: MirsaRadius.l, tint: MirsaPalette.success)
     }
 }

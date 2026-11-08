@@ -19,7 +19,7 @@ struct NoProfileShortcutGuide: View {
                 Text(app.name).font(.title2.bold())
                 Text(guide).textSelection(.enabled)
                 Button(tr("Share guide and icon", "شارك التعليمات والأيقونة")) { sharing = true }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.mirsaPrimary)
                 ShareLink(item: launchURL) { Label(tr("Share launch link", "شارك رابط الفتح"), systemImage: "link") }
             }
             .padding()

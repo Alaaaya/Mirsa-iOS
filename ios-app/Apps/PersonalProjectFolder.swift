@@ -176,7 +176,7 @@ private struct ProjectFolderContents: View {
                     } else {
                         Button { shared = ProjectFolderLocation(url: source.url) } label: {
                             Label(source.title + " · " + source.url.lastPathComponent, systemImage: "doc")
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.mirsaPress)
                     }
                 }
             }
@@ -199,7 +199,7 @@ private struct ProjectFolderContents: View {
                             Spacer()
                             Image(systemName: "square.and.arrow.up").foregroundStyle(.secondary)
                         }
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.mirsaPress)
                 }
             }
         }
