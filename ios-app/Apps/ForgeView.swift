@@ -157,6 +157,7 @@ struct ForgeProjectView: View {
     @State private var confirmDelete = false
     @Environment(\.dismiss) private var dismiss
 
+    @State private var importingDylib = false
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
     private func run(_ work: @escaping () async throws -> Void) { let startedVersion = store.project(id)?.currentVersion?.id; Task { error = nil; note = nil; fullLog = nil; failedVersionID = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log; self.failedVersionID = startedVersion } catch { self.error = error.localizedDescription } } }
@@ -172,6 +173,7 @@ struct ForgeProjectView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: $prompt).frame(height: 90).scrollContentBackground(.hidden).padding(6).background(Color.black.opacity(0.3)).cornerRadius(10).foregroundStyle(.white)
                         .overlay(alignment: .topLeading) { if prompt.isEmpty { Text(tr("Describe the tweak you want…", "اوصف التويك اللي بدك ياه…", ckb: "تویکەکە باس بکە…", kmr: "Tweaka xwe vebêje…")).foregroundStyle(.white.opacity(0.4)).padding(.horizontal, 12).padding(.vertical, 14).allowsHitTesting(false) } }
+                    forgeButton("square.and.arrow.down.on.square", ForgeDylibText.importTitle) { importingDylib = true }
                     HStack {
                         forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run { try await store.generate(id, prompt: prompt); prompt = "" } }
                         Menu {
@@ -220,6 +222,7 @@ struct ForgeProjectView: View {
                         forgeButton("globe", tr("Publish", "انشر", ckb: "بڵاوکردنەوە", kmr: "Biweşîne")) { run { try await store.publish(id); note = tr("Published.", "انشر.", ckb: "بڵاوکرایەوە.", kmr: "Hat weşandin.") } }
                     }
                     if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
+                    if p.versions.contains(where: { $0.importedInfo != nil }) { ForgeImportedDylibsView(id: id, versions: p.versions.filter { $0.importedInfo != nil }).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Versions", "النسخ", ckb: "وەشانەکان", kmr: "Guhertin")).font(.headline).foregroundStyle(.white)
                         ForEach(Array(p.versions.enumerated().reversed()), id: \.element.id) { i, ver in
@@ -247,6 +250,7 @@ struct ForgeProjectView: View {
         }
         .navigationBarHidden(true)
         .mirsaScreen()
+        .sheet(isPresented: $importingDylib) { ForgeDylibImportSheet(id: id) }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
         .confirmationDialog(tr("Edit version", "تعديل النسخة", ckb: "دەستکاری وەشان", kmr: "Guhertoyê biguherîne"), isPresented: $versionMenu) {
             Button(tr("Rename", "تغيير الاسم", ckb: "ناو بگۆڕە", kmr: "Nav biguherîne")) { renaming = true }
