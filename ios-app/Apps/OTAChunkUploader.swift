@@ -36,9 +36,13 @@ struct OTAChunkPlan: Equatable {
 enum OTAHostPolicy {
     static let allowed: Set<String> = ["mirsa-app.mooo.com"]
     static func acceptsManifest(_ url: URL) -> Bool {
-        guard accepts(url), url.fragment == nil, url.path.hasPrefix("/ota/") else { return false }
+        guard accepts(url), url.fragment == nil,
+              url.path.range(of: "^/ota/download/[a-f0-9]{32}$", options: .regularExpression) != nil else { return false }
         let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        return q.contains { $0.name == "kind" && $0.value == "manifest" } && q.contains { $0.name == "token" && !($0.value ?? "").isEmpty }
+        guard q.count == 2, q.filter({ $0.name == "kind" }).count == 1, q.filter({ $0.name == "token" }).count == 1 else { return false }
+        guard q.first(where: { $0.name == "kind" })?.value == "manifest",
+              let t = q.first(where: { $0.name == "token" })?.value else { return false }
+        return t.range(of: "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$", options: .regularExpression) != nil
     }
     static func accepts(_ url: URL) -> Bool {
         url.scheme == "https" && url.user == nil && url.password == nil && url.port == nil
