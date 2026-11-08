@@ -7,15 +7,16 @@ import UIKit
 final class PersonalSigningOperation: ObservableObject {
     static let shared = PersonalSigningOperation()
     enum Stage: String {
-        case preparing, signing, packaging, connecting, installing, completed, failed
+        case preparing, signing, packaging, uploading, connecting, installing, handedOff, completed, failed
         var order: Int {
             switch self {
             case .preparing: return 0
             case .signing: return 1
             case .packaging: return 2
-            case .connecting: return 3
-            case .installing: return 4
-            case .completed, .failed: return 5
+            case .uploading: return 3
+            case .connecting: return 4
+            case .installing: return 5
+            case .handedOff, .completed, .failed: return 6
             }
         }
     }
@@ -26,10 +27,29 @@ final class PersonalSigningOperation: ObservableObject {
         var fraction: Double?
         var completedUnits: UInt64 = 0
         var totalUnits: UInt64 = 0
+        /// Overall weighted work completion, not a prediction of elapsed time.
+        /// Within a stage use measured units/bytes only. A pending installer never reaches 100%.
+        var overallFraction: Double {
+            let measured = fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } ?? 0
+            switch stage {
+            case .preparing: return 0
+            case .signing: return 0.10 + measured * 0.55
+            case .packaging: return 0.65 + measured * 0.10
+            case .uploading: return 0.75 + measured * 0.20
+            case .connecting: return 0.95
+            case .installing: return 0.97 + min(0.99, measured) * 0.02
+            case .handedOff: return 0.99
+            case .completed: return 1
+            case .failed: return 0
+            }
+        }
         var running = true
         var backgroundExpired = false
         var result: PersonalCertificateSigner.Result?
         var error: String?
+        var showsInlineProgress: Bool { running || stage == .handedOff }
+        var shouldPresentResultAlert: Bool { !running && stage != .handedOff }
+
         /// Main-actor callbacks can be enqueued out of order. Do not regress a
         /// measured stage or republish unchanged progress on every backend tick.
         @discardableResult
@@ -38,8 +58,8 @@ final class PersonalSigningOperation: ObservableObject {
             let sameStage = stage == event.stage
             let nextFraction: Double?
             if sameStage, let current = fraction {
-                nextFraction = max(current, event.fraction ?? current)
-            } else { nextFraction = event.fraction }
+                nextFraction = max(current, event.fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } ?? current)
+            } else { nextFraction = event.fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } }
             let nextCompleted = sameStage ? max(completedUnits, event.completed) : event.completed
             guard stage != event.stage || fraction != nextFraction ||
                     completedUnits != nextCompleted || totalUnits != event.total else { return false }
@@ -67,6 +87,7 @@ final class PersonalSigningOperation: ObservableObject {
         lastActivityStage = nil
         state = State(id: id, projectID: projectID)
         let operation = MirsaOperationProgress.shared.begin(appID: projectID.uuidString, phase: .preparing)
+        MirsaOperationProgress.shared.update(operation, phase: .preparing, fraction: 0)
         activityID = MirsaInstallActivity.shared.begin(title: title, phase: .preparing)
         backgroundID = UIApplication.shared.beginBackgroundTask(withName: "Mirsa signing and installation") { [weak self] in
             // UIKit invokes this handler on the main thread. End the grant
@@ -77,13 +98,19 @@ final class PersonalSigningOperation: ObservableObject {
         Task {
             do {
                 do {
-                    let staged = try CertificateInstall.stageSignedApp(ipa:input,in:FileManager.default.temporaryDirectory)
+                    let staged = try await Task.detached {
+                        try CertificateInstall.stageSignedApp(ipa: input, in: FileManager.default.temporaryDirectory)
+                    }.value
                     defer { try? FileManager.default.removeItem(at:staged.stage) }
-                    _ = try await CertificateOTA.install(source:staged.app,material:material,options:options,projectID:projectID,progress:{ f in MirsaOperationProgress.shared.update(operation, phase: .installing, fraction: f) })
+                    _ = try await CertificateOTA.install(source: staged.app, material: material, options: options, projectID: projectID,
+                        signingProgress: { event in self.receive(event, id: id, operation: operation) })
                     self.state?.running = false
-                    self.state?.stage = .completed
-                    self.state?.error = personalText("Installation requested. If no iOS prompt appears, try again.", "طلبنا التثبيت. إذا ما ظهر طلب iOS، جرب مرة تانية.")
-                    self.finishActivity(success:true)
+                    self.state?.stage = .handedOff
+                    self.state?.error = nil
+                    if let activityID = self.activityID, MirsaInstallActivity.shared.operationID == activityID {
+                        MirsaInstallActivity.shared.handoffToInstaller()
+                    }
+                    self.activityID = nil
                     MirsaOperationProgress.shared.finish(operation)
                     self.endBackgroundTime()
                     self.control = nil
@@ -111,10 +138,10 @@ final class PersonalSigningOperation: ObservableObject {
         let activity: MirsaInstallActivity.Phase
         switch event.stage {
         case .signing: phase = .signing; activity = .signing
-        case .installing, .connecting: phase = .installing; activity = .installing
+        case .uploading, .installing, .connecting, .handedOff: phase = .installing; activity = .installing
         default: phase = .preparing; activity = .preparing
         }
-        MirsaOperationProgress.shared.update(operation, phase: phase, fraction: next.fraction)
+        MirsaOperationProgress.shared.update(operation, phase: phase, fraction: next.overallFraction, stageLabel: PersonalSigningLabels.stage(next.stage))
         // Do not overwrite another download's activity if that operation replaced ours.
         guard let activityID, MirsaInstallActivity.shared.operationID == activityID else { return }
         // Reset percentage only at a real stage transition.
@@ -122,7 +149,7 @@ final class PersonalSigningOperation: ObservableObject {
             lastActivityStage = event.stage
             MirsaInstallActivity.shared.setPhase(activity)
         }
-        if let fraction = next.fraction { MirsaInstallActivity.shared.updateProgress(fraction) }
+        MirsaInstallActivity.shared.updateProgress(next.overallFraction)
     }
     private func finishActivity(success: Bool) {
         if let activityID, MirsaInstallActivity.shared.operationID == activityID {
@@ -179,15 +206,11 @@ struct PersonalSigningProgressView: View {
                 Image(systemName: state.stage == .installing ? "iphone.and.arrow.forward" : "signature")
                 Text(label).fontWeight(.semibold)
                 Spacer()
-                if let fraction = state.fraction {
-                    Text("\(Int(fraction * 100))%").monospacedDigit().fontWeight(.bold)
-                }
+                Text("\(Int(state.overallFraction * 100))%").monospacedDigit().fontWeight(.bold)
             }
-            if let fraction = state.fraction {
-                ProgressView(value: fraction).tint(.green).accessibilityValue("\(Int(fraction * 100))%")
-            } else {
-                HStack(spacing: 8) { ProgressView(); Text(personalText("Waiting for measured progress", "بانتظار تقدّم فعلي")).font(.caption) }
-            }
+            ProgressView(value: state.overallFraction).tint(.green)
+                .accessibilityValue("\(Int(state.overallFraction * 100))%")
+            Text(PersonalSigningLabels.weighted).font(.caption2).foregroundStyle(.secondary)
             if state.stage == .signing, state.totalUnits > 0 {
                 Text(personalText("Signed bundles", "الحزم الموقّعة") + " \(state.completedUnits)/\(state.totalUnits)").font(.caption).foregroundStyle(.secondary)
             }
@@ -197,15 +220,31 @@ struct PersonalSigningProgressView: View {
             }
         }.accessibilityIdentifier("personalSigningProgress")
     }
-    private var label: String {
-        switch state.stage {
-        case .preparing: return personalText("Preparing", "تجهيز")
-        case .signing: return personalText("Signing", "توقيع")
-        case .packaging: return personalText("Exporting signed IPA", "تجهيز الـ IPA الموقّع")
-        case .connecting: return personalText("Connecting to device", "اتصال بالجهاز")
-        case .installing: return personalText("Installing", "تثبيت")
-        case .completed: return personalText("Signed and installed", "تم التوقيع والتثبيت")
-        case .failed: return personalText("Not completed", "ما اكتملت العملية")
+    private var label: String { PersonalSigningLabels.stage(state.stage) }
+}
+
+/// Explicit translations keep the new progress surface available in all four app languages.
+enum PersonalSigningLabels {
+    static func text(_ en: String, _ ar: String, _ ckb: String, _ kmr: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        switch language {
+        case .english: return en
+        case .arabic: return ar
+        case .sorani: return ckb
+        case .kurmanji: return kmr
+        }
+    }
+    static var weighted: String { text("Overall stage progress; measured units/bytes when available", "تقدّم المراحل الإجمالي؛ حسب الحزم أو البايتات لما تتوفر", "پێشکەوتنی گشتی قۆناغەکان؛ بە یەکە یان بایت کاتێک بەردەستە", "Pêşveçûna giştî ya qonaxan; bi yekeyan an baytan dema berdest bin") }
+    static func stage(_ stage: PersonalSigningOperation.Stage, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        switch stage {
+        case .preparing: return text("Preparing", "تجهيز", "ئامادەکردن", "Amadekirin", language: language)
+        case .signing: return text("Signing", "توقيع", "واژۆکردن", "Îmzekirin", language: language)
+        case .packaging: return text("Archiving signed IPA", "ضغط الـ IPA الموقّع", "ئەرشیفکردنی IPAی واژۆکراو", "Arşîvkirina IPA ya îmzekirî", language: language)
+        case .uploading: return text("Uploading signed IPA", "رفع الـ IPA الموقّع", "بارکردنی IPAی واژۆکراو", "Barkirina IPA ya îmzekirî", language: language)
+        case .connecting: return text("Opening iOS installer", "فتح مثبّت iOS", "کردنەوەی دامەزرێنەری iOS", "Vekirina sazkera iOS", language: language)
+        case .installing: return text("Installing", "تثبيت", "دامەزراندن", "Sazkirin", language: language)
+        case .handedOff: return text("Waiting for system installation", "في انتظار تثبيت النظام", "چاوەڕێی دامەزراندنی سیستەم", "Li benda sazkirina pergalê", language: language)
+        case .completed: return text("Installation confirmed", "تم تأكيد التثبيت", "دامەزراندن پشتڕاست کرایەوە", "Sazkirin hate piştrastkirin", language: language)
+        case .failed: return text("Not completed", "ما اكتملت العملية", "تەواو نەبوو", "Temam nebû", language: language)
         }
     }
 }

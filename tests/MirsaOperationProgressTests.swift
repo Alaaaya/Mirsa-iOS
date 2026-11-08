@@ -51,6 +51,17 @@ final class MirsaOperationProgressTests: XCTestCase {
         state.finish(token)
     }
 
+    func testProjectSigningKeepsStageNameWithOverallPercentage() {
+        let state = MirsaOperationProgress()
+        let token = state.begin(appID: "project", phase: .preparing)
+        state.update(token, phase: .installing, fraction: 0.85, stageLabel: "Uploading signed IPA")
+        XCTAssertEqual(state.entries[token]?.stageLabel, "Uploading signed IPA")
+        XCTAssertEqual(state.entries[token]?.fraction, 0.85)
+        state.update(token, phase: .installing, fraction: 0.99, stageLabel: "Opening iOS installer")
+        XCTAssertEqual(state.entries[token]?.stageLabel, "Opening iOS installer")
+        state.finish(token)
+    }
+
     func testOldTokenCannotMutateNextOperation() {
         let state = MirsaOperationProgress()
         let old = state.begin(appID: "a", phase: .downloading)
