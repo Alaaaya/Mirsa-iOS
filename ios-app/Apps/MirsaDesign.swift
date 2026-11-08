@@ -348,3 +348,48 @@ struct MirsaRoundIcon: View {
             .appsGlassCapsule()
     }
 }
+
+// MARK: - Status bar scrim
+
+/// Soft solid fade behind the status bar so scrolled content never collides with
+/// the clock and battery on pages without a navigation bar.
+struct MirsaStatusBarScrim: View {
+    var body: some View {
+        // A thin strip below the status bar whose background grows up into the
+        // top safe area, so the fade covers exactly the status bar plus 14 pt.
+        Color.clear
+            .frame(height: 14)
+            .frame(maxWidth: .infinity)
+            .background {
+                LinearGradient(stops: [
+                    .init(color: MirsaPalette.sheet, location: 0),
+                    .init(color: MirsaPalette.sheet.opacity(0.8), location: 0.55),
+                    .init(color: MirsaPalette.sheet.opacity(0), location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea(edges: .top)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Shows the scrim only once the scroll view has actually scrolled, so the page
+/// top keeps its background at rest. Apply directly to a ScrollView.
+struct MirsaScrollScrim: ViewModifier {
+    @State private var scrolled = false
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: Bool.self) { g in
+                g.contentOffset.y + g.contentInsets.top > 6
+            } action: { _, now in
+                withAnimation(.easeOut(duration: 0.2)) { scrolled = now }
+            }
+            .overlay(alignment: .top) { MirsaStatusBarScrim().opacity(scrolled ? 1 : 0) }
+    }
+}
+
+extension View {
+    func mirsaStatusBarScrim() -> some View {
+        modifier(MirsaScrollScrim())
+    }
+}

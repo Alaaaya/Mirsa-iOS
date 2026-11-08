@@ -683,39 +683,48 @@ struct MirsaUpdateSheet: View {
         VStack(spacing: 18) {
             HStack(spacing: 14) {
                 Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 40)).foregroundStyle(.green)
+                    .font(.system(size: 40)).foregroundStyle(MirsaPalette.success)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(tr("New version available", "في نسخة جديدة")).font(.title3.bold())
+                    Text(tr("New version available", "في نسخة جديدة")).font(MirsaFont.sheetTitle)
                     Text(MirsaTr.f("build", "\(release.build)")).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(tr("What's new", "شو الجديد")).font(.headline)
-                    Text(UpdaterMetadata.notes(body: release.body, language: L.isArabic ? "ar" : "en") ?? tr("Release notes are not available for this version.", "تفاصيل التغييرات مو متوفرة لهالنسخة."))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding()
+            // Short notes hug their content; long notes scroll inside the card.
+            ViewThatFits(in: .vertical) {
+                releaseNotes
+                ScrollView { releaseNotes }
             }
-            .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.06)))
+            .mirsaCard(radius: MirsaRadius.m)
             Text(tr("Enable LocalDevVPN and check your pairing file.",
                     "فعّل LocalDevVPN وتأكد من صحة ملف الاقتران."))
-                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(.footnote).foregroundStyle(MirsaPalette.textSecondary).multilineTextAlignment(.center)
+            Spacer(minLength: 0)
             Button(action: onUpdate) {
-                Text(tr("Update now", "حدّث هلّق")).font(.headline).frame(maxWidth: .infinity).padding()
-                    .background(RoundedRectangle(cornerRadius: 16).fill(.green.opacity(0.8)))
-                    .foregroundStyle(.white)
+                Text(tr("Update now", "حدّث هلّق")).frame(maxWidth: .infinity)
             }
+            .buttonStyle(.mirsaPrimary)
+            .controlSize(.large)
             if let ipa = release.ipa {
                 Button { openURL(ipa) } label: {
                     Label(tr("Download IPA manually", "نزّل الـ IPA يدوياً"), systemImage: "arrow.down.circle")
                 }.font(.subheadline)
             }
             Button(tr("Later", "لاحقاً")) { updater.later(release) }
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(MirsaPalette.textSecondary)
         }
-        .padding(24)
+        .padding(MirsaSpacing.xl)
+        .preferredColorScheme(.dark)
+    }
+
+    private var releaseNotes: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(tr("What's new", "شو الجديد")).font(MirsaFont.cardTitle)
+            Text(UpdaterMetadata.notes(body: release.body, language: L.isArabic ? "ar" : "en") ?? tr("Release notes are not available for this version.", "تفاصيل التغييرات مو متوفرة لهالنسخة."))
+                .font(.subheadline).foregroundStyle(MirsaPalette.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MirsaSpacing.card)
     }
 }
