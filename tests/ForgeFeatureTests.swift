@@ -53,9 +53,17 @@ import ImageIO
                     XCTAssertTrue(fit.height.isFinite && fit.height > 0)
                     XCTAssertLessThanOrEqual(fit.width, 321)
                     host.view.frame = CGRect(x: 0, y: 0, width: 320, height: ceil(fit.height))
+                    let window = UIWindow(frame: host.view.frame)
+                    window.rootViewController = host
+                    window.isHidden = false
+                    window.makeKeyAndVisible()
+                    host.view.setNeedsLayout()
                     host.view.layoutIfNeeded()
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.25))
                     let renderer = UIGraphicsImageRenderer(size: host.view.bounds.size)
-                    let image = renderer.image { ctx in host.view.layer.render(in: ctx.cgContext) }
+                    let image = renderer.image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                    XCTAssertTrue(Self.hasVisiblePixels(image), "blank guide snapshot")
+                    window.isHidden = true
                     XCTAssertEqual(image.size.width, 320)
                     let attachment = XCTAttachment(image: image)
                     attachment.name = "guide-\(feature.rawValue)-\(language.rawValue)-\(seen ? "seen" : "first")"
@@ -69,6 +77,19 @@ import ImageIO
                 XCTAssertLessThanOrEqual(fit.width, 321)
             }
         }
+    }
+
+    private static func hasVisiblePixels(_ image: UIImage) -> Bool {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return false }
+        let bpp = cg.bitsPerPixel / 8, total = cg.width * cg.height
+        var lit = 0
+        var i = 0
+        while i < total {
+            let o = i * bpp
+            if Int(ptr[o]) + Int(ptr[o + 1]) + Int(ptr[o + 2]) > 90 { lit += 1 }
+            i += 7
+        }
+        return lit > 20
     }
 
     func testArchiveErrorsLocalizedInAllFourLanguagesAndDoNotLeakPaths() {
