@@ -79,7 +79,7 @@ final class PersonalSigningOperation: ObservableObject {
                 do {
                     let staged = try CertificateInstall.stageSignedApp(ipa:input,in:FileManager.default.temporaryDirectory)
                     defer { try? FileManager.default.removeItem(at:staged.stage) }
-                    let verification = try await CertificateOTA.install(source:staged.app,material:material,options:options,projectID:projectID)
+                    let verification = try await CertificateOTA.install(source:staged.app,material:material,options:options,projectID:projectID,progress:{ f in MirsaOperationProgress.shared.update(operation, phase: .installing, fraction: f) })
                     self.state?.running = false
                     self.state?.stage = .completed
                     self.state?.error = personalText("The iOS installer opened. Installation is not confirmed.", "تم فتح مثبّت iOS. هاد مو تأكيد نجاح التثبيت.") + (verification.device_authorization != "checked" ? personalText(" Device inclusion is not verified.", " شمول هالجهاز بالبروفايل مو متحقق منه.") : "")
