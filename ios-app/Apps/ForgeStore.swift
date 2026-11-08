@@ -30,7 +30,7 @@ struct ForgeProject: Codable, Identifiable {
     @Published var projects: [ForgeProject] = []
     @Published var busy: String?
     @Published var builderReady = false
-    @Published var pendingGalleryCode: String?
+    @Published var pendingGalleryCode: String? { didSet { if pendingGalleryCode == nil { pendingGallerySource = nil } } }
     @Published var pendingGallerySource: (id: String, version: Int?)?
     @Published var fixNotice: String?
     var fixSyncing = false
@@ -311,19 +311,31 @@ extension ForgeStore {
     func publish(_ id: UUID) async throws {
         guard let p = project(id), let v = p.currentVersion else { return }
         _ = try await ForgeClient.json(["action": "publish", "name": p.name, "bundleID": p.bundleID, "description": v.prompt, "code": v.code,
-            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }])
+            "settings": Self.settingsPayload(v)].merging(Self.linkage(project: p, version: v)) { a, _ in a })
     }
-    /// Publishes a new community version. Author identity is proven by the server session; local fields only describe the source.
+    static func settingsPayload(_ v: ForgeVersion) -> [[String: Any]] {
+        v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }
+    }
+    /// Local identity fields for an exact version of a project (linkage only, never proof of authorship).
+    static func linkage(project p: ForgeProject, version v: ForgeVersion) -> [String: Any] {
+        var out: [String: Any] = ["projectID": p.id.uuidString, "localVersionID": v.id.uuidString,
+                                  "localVersionCreatedAt": ISO8601DateFormatter().string(from: v.created)]
+        if let i = p.versions.firstIndex(where: { $0.id == v.id }) { out["localVersionNumber"] = i + 1 }
+        return out
+    }
+    /// Body of a community update. Code/settings come from EXACTLY the compared local version, never from the selected current one.
+    static func updatePayload(project p: ForgeProject, local: ForgeLocalVersion, entry: String, changelog: String, expectedVersion: Int) throws -> [String: Any] {
+        let log = changelog.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard local.projectID == p.id, let v = p.versions.first(where: { $0.id == local.versionID }) else { throw ForgeClient.Failure.message("Local version not found") }
+        guard !log.isEmpty else { throw ForgeClient.Failure.message("Changelog required") }
+        var body: [String: Any] = ["action": "gallery-update", "id": entry, "code": v.code, "changelog": log,
+                                   "settings": settingsPayload(v), "expectedVersion": expectedVersion]
+        for (k, val) in linkage(project: p, version: v) { body[k] = val }
+        return body
+    }
     func updateGallery(entry: String, from id: UUID, changelog: String, expectedVersion: Int?, local: ForgeLocalVersion?) async throws {
-        guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
-        var body: [String: Any] = ["action": "gallery-update", "id": entry, "code": v.code, "changelog": changelog,
-            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }]
-        if let e = expectedVersion { body["expectedVersion"] = e }
-        if let l = local {
-            body["projectID"] = l.projectID.uuidString; body["localVersionID"] = l.versionID.uuidString
-            body["localVersionNumber"] = l.number; body["localVersionCreatedAt"] = ISO8601DateFormatter().string(from: l.created)
-        }
-        _ = try await ForgeClient.json(body)
+        guard let p = project(id), let local, let expectedVersion else { throw ForgeClient.Failure.message("No version") }
+        _ = try await ForgeClient.json(try Self.updatePayload(project: p, local: local, entry: entry, changelog: changelog, expectedVersion: expectedVersion))
     }
     /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
     func injectInspector(_ id: UUID) async throws -> URL {

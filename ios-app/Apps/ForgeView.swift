@@ -334,7 +334,7 @@ struct ForgeGalleryView: View {
         .alert(tr("Edit tweak", "تعديل التويك", ckb: "دەستکاری تویک", kmr: "Tweakê biguherîne"), isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             TextField(tr("Name", "الاسم", ckb: "ناو", kmr: "Nav"), text: $editName)
             TextField(tr("Description", "الوصف", ckb: "وەسف", kmr: "Danasîn"), text: $editDesc)
-            Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { let id = editing?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-update", "id": id, "name": editName, "description": editDesc]) } }
+            Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { let id = editing?["id"] as? String ?? ""; let ev = ForgeCommunityEntry(editing ?? [:]).version ?? 0; Task { await mutate(["action": "gallery-update", "id": id, "name": editName, "description": editDesc, "expectedVersion": ev]) } }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) {}
         }
         .sheet(isPresented: Binding(get: { versioning != nil }, set: { if !$0 { versioning = nil } })) {
@@ -343,7 +343,7 @@ struct ForgeGalleryView: View {
             }
         }
         .alert(tr("Delete this tweak?", "حذف هالتويك؟", ckb: "ئەم تویکە بسڕیتەوە؟", kmr: "Ev tweak jê bibe?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { let id = deleting?["id"] as? String ?? ""; Task { await mutate(["action": "gallery-delete", "id": id]) } }
+            Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { let id = deleting?["id"] as? String ?? ""; let ev = ForgeCommunityEntry(deleting ?? [:]).version ?? 0; Task { await mutate(["action": "gallery-delete", "id": id, "expectedVersion": ev]) } }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) {}
         } message: { Text(tr("It disappears for everyone.", "رح يختفي عند الجميع.", ckb: "بۆ هەموو دەبزر دەبێت.", kmr: "Ji bo herkesî winda dibe.")) }
     }
@@ -351,7 +351,13 @@ struct ForgeGalleryView: View {
         do { items = (try await ForgeClient.get(["action": "gallery"]))["items"] as? [[String: Any]] ?? [] } catch { self.error = error.localizedDescription }
     }
     private func mutate(_ body: [String: Any]) async {
-        do { _ = try await ForgeClient.json(body); error = nil; await reload() } catch { self.error = error.localizedDescription }
+        do { _ = try await ForgeClient.json(body); error = nil; await reload() } catch {
+            let m = error.localizedDescription
+            if m.contains("version_conflict") || m.contains("409") {
+                self.error = tr("This tweak was updated elsewhere. The list was reloaded, try again.", "التويك انحدث من مكان ثاني. حدّثنا القائمة، جرّب مرة ثانية.", ckb: "ئەم تویکە لە شوێنێکی تر نوێکراوەتەوە. لیستەکە نوێکرایەوە.", kmr: "Ev tweak li cihekî din hat nûkirin. Lîste nû bû.")
+                await reload()
+            } else { self.error = m }
+        }
     }
     private func importUpload(_ it: [String: Any], into project: UUID) async {
         guard !downloading, let id = it["id"] as? String, let hash = it["sha256"] as? String else { return }
@@ -368,6 +374,7 @@ struct ForgeGalleryView: View {
 
     private func use(_ it: [String: Any]) async {
         guard !downloading, let id = it["id"] as? String else { return }
+        ForgeStore.shared.pendingGalleryCode = nil
         if it["provenance"] as? String == "uploaded" {
             guard ForgeStore.shared.projects.contains(where: { $0.bundleID == it["target_bundle_id"] as? String }) else {
                 error = tr("Create a tweak project for this target app first, then import it disabled for review.", "اعمل مشروع تويك لهالتطبيق أول، بعدين استورده معطّل للمراجعة.", ckb: "سەرەتا پڕۆژەی تویک بۆ ئەپەکە دروست بکە.", kmr: "Pêşî ji bo vê appê projeyekê çêke."); return

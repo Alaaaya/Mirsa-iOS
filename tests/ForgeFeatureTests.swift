@@ -149,7 +149,7 @@ import ImageIO
             let explanations = ForgeCommunityCard.Action.allCases.map {
                 ForgeCommunityCard.explanation($0)
             }
-            XCTAssertEqual(Set(explanations).count, 5)
+            XCTAssertEqual(Set(explanations).count, 4)
             XCTAssertTrue(explanations.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
             XCTAssertNotEqual(ForgeCommunityCard.explanation(.use), ForgeCommunityCard.explanation(.use, uploaded: true))
             XCTAssertNotEqual(ForgeCommunityCard.explanation(.version), ForgeCommunityCard.explanation(.version, uploaded: true))
@@ -157,7 +157,7 @@ import ImageIO
         }
         XCTAssertEqual(versions.count, 4)
         AppLanguageStore.shared.set(.arabic)
-        XCTAssertEqual(ForgeCommunityCard.explanation(.version), "ترفع آخر نسخة من تويكك بدل القديمة")
+        XCTAssertEqual(ForgeCommunityCard.explanation(.version), "قارن النسخ، اكتب شو الجديد، وانشر تحديثك.")
         XCTAssertTrue(ForgeCommunityCard.explanation(.edit).contains("اسم"))
         XCTAssertTrue(ForgeCommunityCard.explanation(.delete).contains("المجتمع"))
     }

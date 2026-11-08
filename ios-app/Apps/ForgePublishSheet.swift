@@ -163,7 +163,7 @@ extension ForgeStore {
     func publish(_ id: UUID, name: String, what: String, uploadedDylib: URL?, targetBundleID: String? = nil) async throws {
         guard let p = project(id), let v = p.currentVersion else { return }
         var body: [String: Any] = ["action": "publish", "name": name, "bundleID": targetBundleID ?? p.bundleID, "description": what, "code": v.code,
-            "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }]
+            "settings": Self.settingsPayload(v)].merging(Self.linkage(project: p, version: v)) { a, _ in a }
         if let file = uploadedDylib {
             let data = try Data(contentsOf: file, options: [.mappedIfSafe])
             guard data.count <= 4 * 1024 * 1024 else { throw ForgeDylibImportError.tooLarge }
