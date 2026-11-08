@@ -1,3 +1,4 @@
+import { oracleSession } from "./oracle.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { unzipSync } from "npm:fflate@0.8.3";
 import { validateMetadata, manifest, MAX_IPA_BYTES, isExpired, shareLink, lifetime } from "./contract.mjs";
@@ -66,6 +67,15 @@ Deno.serve(async req => {
   }
   if(req.method!=="POST") return json({error:"method"},405);
   const who=await user(req); if(!who) return json({error:"unauthorized"},401);
+  if(u.searchParams.get("action")==="oracle-session") {
+   if(req.headers.get("content-type")?.split(";")[0]!=="application/json") return json({error:"content_type"},415);
+   if(!req.body) return json({error:"metadata"},400);
+   const reader=req.body.getReader(); let size=0; const chunks:Uint8Array[]=[];
+   while(true) {const {done,value}=await reader.read(); if(done) break; size+=value.length; if(size>4096) {await reader.cancel();return json({error:"metadata"},413);} chunks.push(value);}
+   const bytes=new Uint8Array(size); let at=0; for(const chunk of chunks){bytes.set(chunk,at);at+=chunk.length;}
+   try {return json(await oracleSession(JSON.parse(new TextDecoder().decode(bytes)),who.id,Deno.env.get("MIRSA_OTA_ORACLE_SECRET")));}
+   catch(e) {return json({error:e instanceof Error && e.message==="oracle_unconfigured" ? "oracle_unavailable" : "metadata"},e instanceof Error && e.message==="oracle_unconfigured" ? 503 : 400);}
+  }
   const length=Number(req.headers.get("content-length"));
   if(!Number.isSafeInteger(length) || length<4 || length>MAX_IPA_BYTES) return json({error:"size"},413);
   if(req.headers.get("content-type")!=="application/octet-stream") return json({error:"content_type"},415);
