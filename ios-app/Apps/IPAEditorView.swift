@@ -240,7 +240,7 @@ struct IPATweakLibraryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Text(editorText("Your code, your library", "ملفاتك ومكتبتك"))
-                            .font(.title2.bold())
+                            .font(MirsaFont.sheetTitle)
                         Text(editorText("Files are kept on this device. Imports are not executed. Only select code from developers you trust.",
                                         "الملفات بتنحفظ على هالجهاز وما بتشتغل وقت الإضافة. اختار ملفات من مطوّرين بتوثق فيهم."))
                             .font(.subheadline).foregroundStyle(.white.opacity(0.65))

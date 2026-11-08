@@ -146,7 +146,7 @@ struct DiscoveryView: View {
                         providerRows(o.reports)
                     }
                 }
-                .padding(16)
+                .padding(MirsaSpacing.page)
             }
             .environment(\.layoutDirection, .leftToRight)
             .navigationTitle(tr("Find an app", "دوّر على تطبيق"))
@@ -181,13 +181,14 @@ struct DiscoveryView: View {
                 Button { store.input = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.5)) }
             }
             Button { Task { await store.search() } } label: {
-                Text(tr("Search", "بحث")).font(.subheadline.weight(.bold)).padding(.horizontal, 12).padding(.vertical, 6)
+                Text(tr("Search", "بحث")).lineLimit(1).fixedSize()
             }
-            .appsGlassCapsule(tint: Color(red: 0.45, green: 0.4, blue: 1))
+            .buttonStyle(.mirsaPrimary)
+            .controlSize(.small)
             .disabled(store.searching || store.input.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding(12)
-        .appsGlass(cornerRadius: 20)
+        .padding(MirsaSpacing.s)
+        .appsGlass(cornerRadius: MirsaRadius.l)
     }
 
     private func badge(_ text: String, _ color: Color, _ icon: String) -> some View {
@@ -223,8 +224,9 @@ struct DiscoveryView: View {
             .lineLimit(1).minimumScaleFactor(0.8)
             actions(c, state)
         }
-        .padding(14)
-        .appsGlass(cornerRadius: 22)
+        .padding(MirsaSpacing.card)
+        .appsGlass(cornerRadius: MirsaRadius.l)
+        .mirsaAppear()
     }
 
     @ViewBuilder private func actions(_ c: DiscoveryCandidate, _ state: DiscoveryStore.CardState) -> some View {
@@ -249,15 +251,13 @@ struct DiscoveryView: View {
             if c.isDownloadable {
                 HStack(spacing: 10) {
                     Button { pendingTrust = c } label: {
-                        Text(tr("Download", "تنزيل")).font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 9)
+                        Text(tr("Download", "تنزيل")).frame(maxWidth: .infinity)
                     }
-                    .appsGlassCapsule(tint: .green)
+                    .buttonStyle(.mirsaPrimary)
                     Button { store.dismiss(c) } label: {
-                        Text(tr("No", "لا")).font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 9)
+                        Text(tr("No", "لا")).frame(maxWidth: .infinity)
                     }
-                    .appsGlassCapsule(tint: .red)
+                    .buttonStyle(.mirsaSecondary)
                 }
 
             }
@@ -282,7 +282,7 @@ struct DiscoveryView: View {
 
     private var webSettings: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 Section(tr("Search backend (optional)", "باك إند البحث (اختياري)")) {
                     TextField(tr("Project URL (https://…supabase.co)", "رابط المشروع"), text: $project).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     TextField(tr("Public key (publishable / anon)", "المفتاح العام (publishable / anon)"), text: $publishable).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -293,7 +293,7 @@ struct DiscoveryView: View {
                             "البحث بالويب مو مفعّل لحد ما تعبّي الحقلين. حط المفتاح العام فقط، ولا تحط مفتاح سري. بدونه بيكون البحث بالسورسات وبيانات Apple العامة فقط. بحث تيليجرام مو متاح."))
                         .font(.footnote)
                 }
-            }
+            }.listRowBackground(MirsaPalette.row) }
             .navigationTitle(tr("Web search", "بحث الويب"))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
