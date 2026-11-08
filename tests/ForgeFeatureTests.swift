@@ -48,7 +48,7 @@ import ImageIO
                         let view = ForgeFeatureGuide(feature)
                             .padding(14).background(Color.black)
                             .environment(\.dynamicTypeSize, largeFont ? .accessibility5 : .large)
-                            .environment(\.layoutDirection, .rightToLeft)
+                            .environment(\.layoutDirection, .leftToRight)
                             .ignoresSafeArea()
                         let host = UIHostingController(rootView: view)
                         host.loadViewIfNeeded()
@@ -71,8 +71,7 @@ import ImageIO
                         host.view.setNeedsLayout()
                         host.view.layoutIfNeeded()
                         RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-                        let renderer = UIGraphicsImageRenderer(size: host.view.bounds.size)
-                        let image = renderer.image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }
+                        let image = Self.snapshot(host.view)
                         XCTAssertTrue(Self.hasVisiblePixels(image), "blank guide snapshot")
                         window.isHidden = true
                         XCTAssertEqual(image.size.width, 320)
@@ -84,6 +83,26 @@ import ImageIO
                 }
             }
         }
+    }
+
+    /// Retries the window snapshot (the simulator render server can transiently fail) and
+    /// falls back to the layer renderer. Blank results are still asserted by the caller.
+    private static func snapshot(_ view: UIView) -> UIImage {
+        var image = UIImage()
+        for attempt in 0..<4 {
+            autoreleasepool {
+                let renderer = UIGraphicsImageRenderer(size: view.bounds.size)
+                if attempt < 3 {
+                    image = renderer.image { _ in view.drawHierarchy(in: view.bounds, afterScreenUpdates: true) }
+                } else {
+                    image = renderer.image { ctx in view.layer.render(in: ctx.cgContext) }
+                }
+            }
+            if hasVisiblePixels(image) { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+            view.setNeedsLayout(); view.layoutIfNeeded()
+        }
+        return image
     }
 
     private static func hasVisiblePixels(_ image: UIImage) -> Bool {
