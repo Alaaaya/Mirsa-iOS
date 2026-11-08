@@ -42,5 +42,9 @@
   "1.3.179": {
     "ar": "التثبيت بالشهادة صار يرفع ملفات IPA حتى 2 جيجابايت على سيرفر Oracle عبر HTTPS، مع رفع قابل للاستكمال ونسبة تقدم واضحة وروابط مؤقتة. حسّنا سجل بناء التويكات بإزالة رموز ANSI، وملخّص خطأ واضح مع إمكانية عرض السجل الكامل، وصلّحنا تداخل زر الرجوع مع المحتوى. هالتحديث لسا مو مجرّب على جهاز فعلي.",
     "en": "Certificate installation now uploads IPAs up to 2 GB to the Oracle HTTPS server, with resumable uploads, visible progress and temporary links. Tweak build logs now strip ANSI control sequences and show a clear error summary with an expandable full log. Fixed the back button overlapping scrolled content. This update has not yet been tested on a physical device."
+  },
+  "1.3.185": {
+    "ar": "زر «احقن» صار يفتح خيارات تثبيت ملف IPA الناتج بدل المشاركة فقط، مع الاحتفاظ بالملف لحد ما تخلص العملية. اختيار التطبيق الهدف صار من الملفات أو مكتبتي أو المشاريع أو رابط HTTPS أو متصفح المصادر المضافة للبحث والتنزيل، بدون تغيير الملفات الأصلية. صلّحنا مشكلة إلغاء رفع OTA اللي كانت ممكن تسبّب كراش. التثبيت بالشهادة حتى 2 جيجابايت وتحسينات سجل التويكات وزر الرجوع موجودين. هالتحديث لسا مو مجرّب على جهاز فعلي.",
+    "en": "Inject now opens the existing IPA installation choices instead of only sharing, retaining the generated file until the operation finishes. Choose a target from Files, your personal library, projects, an HTTPS URL, or the added-sources browser for search and download, while preserving original files. Fixed an OTA upload cancellation crash. Includes certificate uploads up to 2 GB, clearer tweak build logs and the back-button fix. This update has not yet been tested on a physical device."
   }
 }
