@@ -111,12 +111,41 @@ import XCTest
         let user = UUID()
         XCTAssertEqual(try ForgeClient.fixUserID(jwt(["role": "authenticated", "sub": user.uuidString])), user)
     }
+    final class FakeStore: ForgeFixSecretStore {
+        var items: [String: Data] = [:]; var readError: Int32?; var addError: Int32?; var raceToken: Data?; var adds = 0
+        func read(service: String, account: String) throws -> Data? {
+            if let e = readError { throw ForgeFixStoreError(status: e) }
+            return items[service + account]
+        }
+        func add(service: String, account: String, data: Data) throws -> Bool {
+            if let e = addError { throw ForgeFixStoreError(status: e) }
+            adds += 1
+            if let race = raceToken { items[service + account] = race; return false }
+            if items[service + account] != nil { return false }
+            items[service + account] = data; return true
+        }
+    }
     func testKeychainProvisioningStableAcrossRetryAndScopedToUser() throws {
-        let user = UUID(), device = UUID().uuidString.lowercased()
-        let token = try ForgeFixKeychain.token(user: user, device: device)
+        let store = FakeStore(); let user = UUID(), device = UUID().uuidString.lowercased()
+        let token = try ForgeFixKeychain.token(user: user, device: device, store: store)
         XCTAssertEqual(token.count, 64)
-        XCTAssertEqual(try ForgeFixKeychain.token(user: user, device: device), token)
-        XCTAssertNotEqual(try ForgeFixKeychain.token(user: UUID(), device: device), token)
+        XCTAssertEqual(try ForgeFixKeychain.token(user: user, device: device, store: store), token)
+        XCTAssertEqual(store.adds, 1)
+        XCTAssertNotEqual(try ForgeFixKeychain.token(user: UUID(), device: device, store: store), token)
+    }
+    func testKeychainConcurrentDuplicateCorruptAndUnavailableFailClosed() throws {
+        let user = UUID(), device = "dev"
+        let race = FakeStore(); race.raceToken = Data(String(repeating: "ab", count: 32).utf8)
+        XCTAssertEqual(try ForgeFixKeychain.token(user: user, device: device, store: race), String(repeating: "ab", count: 32))
+        let corrupt = FakeStore(); corrupt.items[ForgeFixKeychain.service + user.uuidString.lowercased() + ".dev"] = Data("nothex".utf8)
+        XCTAssertThrowsError(try ForgeFixKeychain.token(user: user, device: device, store: corrupt))
+        XCTAssertEqual(corrupt.adds, 0)
+        let down = FakeStore(); down.readError = -34018
+        XCTAssertThrowsError(try ForgeFixKeychain.token(user: user, device: device, store: down)) { XCTAssertTrue($0.localizedDescription.contains("-34018")) }
+        XCTAssertEqual(down.adds, 0)
+        let noAdd = FakeStore(); noAdd.addError = -25291
+        XCTAssertThrowsError(try ForgeFixKeychain.token(user: user, device: device, store: noAdd))
+        XCTAssertThrowsError(try ForgeFixKeychain.token(user: user, device: device, store: FakeStore(), random: { Data([1]) }))
     }
     func testNoConsentFailsBeforeAnyNetworkOrProvisioning() async {
         do {

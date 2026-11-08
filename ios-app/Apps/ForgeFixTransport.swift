@@ -71,34 +71,60 @@ extension ForgeClient {
     }
 }
 
+protocol ForgeFixSecretStore {
+    /// nil = not found. Throws on any other failure (fail closed).
+    func read(service: String, account: String) throws -> Data?
+    /// Returns false when the item already exists (concurrent creator).
+    func add(service: String, account: String, data: Data) throws -> Bool
+}
+
+struct ForgeFixStoreError: Error { let status: Int32 }
+
+struct ForgeFixSystemKeychain: ForgeFixSecretStore {
+    private func query(_ service: String, _ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+    func read(service: String, account: String) throws -> Data? {
+        var q = query(service, account); q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var value: AnyObject?
+        let status = SecItemCopyMatching(q as CFDictionary, &value)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = value as? Data else { throw ForgeFixStoreError(status: status) }
+        return data
+    }
+    func add(service: String, account: String, data: Data) throws -> Bool {
+        var q = query(service, account); q[kSecValueData as String] = data
+        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(q as CFDictionary, nil)
+        if status == errSecDuplicateItem { return false }
+        guard status == errSecSuccess else { throw ForgeFixStoreError(status: status) }
+        return true
+    }
+}
+
 enum ForgeFixKeychain {
-    static func token(user: UUID, device: String) throws -> String {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.alaa.mirsa.forge.fix-inbox",
-            kSecAttrAccount as String: user.uuidString.lowercased() + "." + device.lowercased()]
-        func read() throws -> String? {
-            var q = query; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
-            var value: AnyObject?
-            let status = SecItemCopyMatching(q as CFDictionary, &value)
-            if status == errSecItemNotFound { return nil }
-            guard status == errSecSuccess, let data = value as? Data, let token = String(data: data, encoding: .utf8),
+    static let service = "com.alaa.mirsa.forge.fix-inbox"
+    static func token(user: UUID, device: String, store: ForgeFixSecretStore = ForgeFixSystemKeychain(),
+                      random: () -> Data? = { var b = [UInt8](repeating: 0, count: 32); return SecRandomCopyBytes(kSecRandomDefault, 32, &b) == errSecSuccess ? Data(b) : nil }) throws -> String {
+        let account = user.uuidString.lowercased() + "." + device.lowercased()
+        func valid(_ data: Data?) throws -> String? {
+            guard let data else { return nil }
+            guard let token = String(data: data, encoding: .utf8),
                   token.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
                 throw ForgeClient.Failure.message("Fix identity is unavailable. No token was reset.")
             }
             return token
         }
+        func read() throws -> String? {
+            do { return try valid(store.read(service: service, account: account)) }
+            catch let e as ForgeFixStoreError { throw ForgeClient.Failure.message("Fix identity is unavailable. No token was reset. (\(e.status))") }
+        }
         if let token = try read() { return token }
-        var random = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, random.count, &random) == errSecSuccess else {
-            throw ForgeClient.Failure.message("Cannot create fix identity.")
-        }
-        let token = random.map { String(format: "%02x", $0) }.joined()
-        var add = query; add[kSecValueData as String] = Data(token.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        guard status == errSecSuccess || status == errSecDuplicateItem, let saved = try read() else {
-            throw ForgeClient.Failure.message("Cannot save fix identity.")
-        }
+        guard let bytes = random(), bytes.count == 32 else { throw ForgeClient.Failure.message("Cannot create fix identity.") }
+        let token = bytes.map { String(format: "%02x", $0) }.joined()
+        do { _ = try store.add(service: service, account: account, data: Data(token.utf8)) }
+        catch let e as ForgeFixStoreError { throw ForgeClient.Failure.message("Cannot save fix identity. (\(e.status))") }
+        guard let saved = try read() else { throw ForgeClient.Failure.message("Cannot save fix identity.") }
         return saved // Re-read handles concurrent callers. Never send before durable storage.
     }
 }
