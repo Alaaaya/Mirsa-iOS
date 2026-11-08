@@ -1,0 +1,49 @@
+name: Layout shots new
+on:
+  push:
+    branches: [kat/layout-visual-new]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shots:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Shots
+        env:
+          SHOT_LABEL: new
+          TEST_RUNNER_SHOT_LABEL: new
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MirsaTests/ForgeLayoutShotTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee swift.log | tail -40
+          ls /tmp/shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-new
+          path: |
+            /tmp/shots
+            swift.log
