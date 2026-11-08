@@ -299,35 +299,30 @@ struct ForgeGalleryView: View {
     @State private var usingUpload: [String: Any]?
     @State private var downloading = false
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items.indices, id: \.self) { i in
-                    let it = items[i]
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(it["name"] as? String ?? "").font(.headline)
-                        Text(it["target_bundle_id"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
-                        if let description = it["description"] as? String, !description.isEmpty { Text(description).font(.subheadline) }
-                        if it["provenance"] as? String == "uploaded" {
-                            Label(tr("Uploaded · unverified on device", "مرفوع · مو مجرّب عالجهاز", ckb: "بارکراو · لەسەر ئامێر تاقی نەکراوەتەوە", kmr: "Barkirî · li ser amûrê nehatiye ceribandin"), systemImage: "arrow.up.doc").font(.caption).foregroundStyle(.orange)
-                        }
-                        HStack {
-                            Button(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne")) { Task { await use(it) } }.buttonStyle(.mirsaSecondary)
-                            if it["mine"] as? Bool == true {
-                                Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")) { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it }.buttonStyle(.mirsaSecondary)
-                                if it["provenance"] as? String != "uploaded" {
-                                    Button(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû")) { versioning = it }.buttonStyle(.mirsaSecondary)
-                                }
-                                Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { deleting = it }.buttonStyle(.mirsaSecondary)
-                            } else {
-                                Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.mirsaSecondary)
-                            }
-                        }
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    Text(ForgeCommunityCard.title)
+                        .font(.system(size: 28, weight: .bold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .trailing).padding(.bottom, 6)
+                    ForEach(items.indices, id: \.self) { i in
+                        let it = items[i]
+                        ForgeCommunityCard(
+                            entry: it,
+                            onUse: { Task { await use(it) } },
+                            onEdit: { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it },
+                            onVersion: { versioning = it },
+                            onDelete: { deleting = it },
+                            onReport: { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }
+                        )
                     }
-                }
-                if downloading { ProgressView() }
-                if let note { Text(note).foregroundStyle(.green) }
-                if let error { Text(error).foregroundStyle(.red) }
-            }.navigationTitle(tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê"))
+                    if downloading { ProgressView().tint(.white) }
+                    if let note { Text(note).foregroundStyle(.green) }
+                    if let error { Text(error).foregroundStyle(.red) }
+                }.padding(16)
+            }
+            .background(ForgeCommunityCard.sheetColor.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
         }
         .environment(\.layoutDirection, .leftToRight)
         .task { await reload() }
