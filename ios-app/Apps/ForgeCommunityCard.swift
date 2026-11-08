@@ -198,7 +198,8 @@ struct ForgeCommunityCard: View {
                 Image(systemName: symbol).font(.system(size: 20, weight: .medium)).frame(height: 24)
                     .foregroundStyle(destructive ? Color(red: 226/255, green: 77/255, blue: 77/255) : Color.white)
                 Text(title).font(.system(size: 12, weight: .semibold))
-                    .lineLimit(2).multilineTextAlignment(.center).frame(height: 30, alignment: .top)
+                    .lineLimit(2).minimumScaleFactor(0.65)
+                    .multilineTextAlignment(.center).frame(height: 30, alignment: .top)
             }
             .frame(maxWidth: .infinity).padding(.top, 12).padding(.bottom, 5)
             .foregroundStyle(Color.white)
