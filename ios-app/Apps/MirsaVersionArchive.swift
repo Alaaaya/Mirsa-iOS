@@ -73,6 +73,7 @@ struct MirsaVersionArchiveSection: View {
                 Spacer()
                 Text(ByteCountFormatter.string(fromByteCount: archive.bytes(of: bundleID), countStyle: .file)).font(.caption).foregroundStyle(.white.opacity(0.6))
             }
+            ForgeFeatureGuide(.archive)
             Stepper(value: Binding(get: { archive.keep }, set: { archive.keep = $0 }), in: 1...20) {
                 Text(tr("Keep", "احتفظ بـ", ckb: "هەڵبگرە", kmr: "Bihêle") + " \(archive.keep) " + tr("per app", "لكل تطبيق", ckb: "بۆ هەر ئەپێک", kmr: "ji bo her appê")).font(.subheadline)
             }
