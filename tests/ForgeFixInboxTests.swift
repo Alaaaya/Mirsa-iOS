@@ -133,6 +133,14 @@ import XCTest
         XCTAssertEqual(store.adds, 1)
         XCTAssertNotEqual(try ForgeFixKeychain.token(user: UUID(), device: device, store: store), token)
     }
+    /// Real system Keychain boundary (no fake): durable, same-token on retry, scoped per user.
+    func testRealKeychainProvisioningStableAcrossRetryAndScopedToUser() throws {
+        let user = UUID(), device = UUID().uuidString.lowercased()
+        let token = try ForgeFixKeychain.token(user: user, device: device)
+        XCTAssertEqual(token.count, 64)
+        XCTAssertEqual(try ForgeFixKeychain.token(user: user, device: device), token)
+        XCTAssertNotEqual(try ForgeFixKeychain.token(user: UUID(), device: device), token)
+    }
     func testKeychainConcurrentDuplicateCorruptAndUnavailableFailClosed() throws {
         let user = UUID(), device = "dev"
         let race = FakeStore(); race.raceToken = Data(String(repeating: "ab", count: 32).utf8)
