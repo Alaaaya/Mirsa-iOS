@@ -58,6 +58,27 @@ struct ForgeCommunityCard: View {
             tr("No description provided.", "ما انضاف وصف لهالتويك.", ckb: "وەسفێک نەدراوە.", kmr: "Danasîn nehatiye dayîn.")
     }
 
+    enum Action: CaseIterable { case use, edit, version, delete, report }
+
+    static func explanation(_ action: Action, uploaded: Bool = false) -> String {
+        switch action {
+        case .use:
+            return uploaded
+                ? tr("Import into a matching project, disabled for review.", "تستورد الملف لمشروع نفس التطبيق، معطّل للمراجعة.", ckb: "فایلەکە بۆ پڕۆژەی هەمان ئەپ بە ناچالاکی هاوردە بکە.", kmr: "Pelê neçalak ji bo kontrolê bixe projeya heman sepanê.")
+                : tr("Load its code, then apply it inside your tweak project.", "تجهّز الكود، وبعدين بتستخدمه من جوّا مشروع التويك.", ckb: "کۆدەکە ئامادە بکە، پاشان لە پڕۆژەی تویکەکەت بەکاری بهێنە.", kmr: "Kodê amade bike, paşê di projeya tweaka xwe de bi kar bîne.")
+        case .edit:
+            return tr("Change its community name and description.", "تغيّر اسم التويك ووصفه بالمجتمع.", ckb: "ناو و وەسفی تویکەکە لە کۆمەڵگا بگۆڕە.", kmr: "Nav û danasîna tweakê di civakê de biguherîne.")
+        case .version:
+            return uploaded
+                ? tr("Not available for uploaded binary files.", "مو متاح لملفات التويك المرفوعة.", ckb: "بۆ فایلە بارکراوەکان بەردەست نییە.", kmr: "Ji bo pelên barkirî ne berdest e.")
+                : tr("Upload your latest tweak version in place of the old one.", "ترفع آخر نسخة من تويكك بدل القديمة", ckb: "نوێترین وەشانی تویکەکەت لە جیاتی کۆنەکە بار بکە.", kmr: "Guhertoya herî nû ya tweaka xwe li şûna ya kevn bar bike.")
+        case .delete:
+            return tr("Remove it from the community for everyone, after confirmation.", "تشيله من المجتمع عند الكل، بعد تأكيدك.", ckb: "دوای پشتڕاستکردنەوە، بۆ هەموو لە کۆمەڵگا بیسڕەوە.", kmr: "Piştî piştrastkirinê, ji civakê ji bo herkesî jê bibe.")
+        case .report:
+            return tr("Send a report about this community tweak.", "تبعت بلاغ عن هالتويك بالمجتمع.", ckb: "ڕاپۆرتێک دەربارەی ئەم تویکە بنێرە.", kmr: "Derbarê vê tweaka civakê de raporekê bişîne.")
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 14) {
@@ -104,6 +125,17 @@ struct ForgeCommunityCard: View {
                     action("flag", tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne"), onReport)
                 }
             }
+            // A compact, readable legend keeps all four equal action buttons unchanged.
+            VStack(alignment: .leading, spacing: 7) {
+                helper(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne"), .use)
+                if item.mine {
+                    helper(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne"), .edit)
+                    helper(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû"), .version)
+                    helper(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), .delete)
+                } else {
+                    helper(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne"), .report)
+                }
+            }
         }
         .padding(16).background(Self.cardColor, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .foregroundStyle(.white)
@@ -118,6 +150,15 @@ struct ForgeCommunityCard: View {
                 }
             }
         }
+    }
+
+    private func helper(_ title: String, _ action: Action) -> some View {
+        (Text(title + " · ").fontWeight(.semibold)
+         + Text(Self.explanation(action, uploaded: item.uploaded)))
+            .font(.system(size: 13))
+            .foregroundStyle(.white.opacity(0.8))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func action(_ symbol: String, _ title: String, _ run: @escaping () -> Void,
