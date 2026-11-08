@@ -98,8 +98,12 @@ final class PersonalAppsLibrary: ObservableObject {
     }
     /// Legacy apps imported before icons were stored. Tried once per launch, bounded to 512 MB.
     func ensureIcon(for app: PersonalLibraryApp) async -> UIImage? {
-        if let image = icon(for: app) { return image }
-        guard !triedIcons.contains(app.id) else { return nil }
+        let previous = icon(for: app)
+        let revisionKey = "mirsa.icon.resolver2." + app.id.uuidString
+        let sourceStamp = Self.stamp(url(app))
+        if previous != nil && UserDefaults.standard.string(forKey: revisionKey) == sourceStamp { return previous }
+        // Repair icons saved by the old broad AppIcon-prefix resolver as well as missing icons.
+        guard !triedIcons.contains(app.id) else { return previous }
         triedIcons.insert(app.id)
         let source = url(app), target = iconURL(app)
         let ok: Bool = await Task.detached(priority: .utility) {
@@ -117,40 +121,61 @@ final class PersonalAppsLibrary: ObservableObject {
                 return true
             } catch { return false }
         }.value
-        return ok ? icon(for: app) : nil
+        if ok {
+            iconCache.removeObject(forKey: app.id.uuidString as NSString)
+            UserDefaults.standard.set(sourceStamp, forKey: revisionKey)
+        }
+        return ok ? icon(for: app) : previous
     }
     nonisolated static func iconPNG(bundle: URL, info: [String: Any]) -> Data? {
-        var names = Set<String>()
+        var names: [String] = []
+        func add(_ name: String) {
+            guard !name.isEmpty, !name.hasPrefix("/"), !name.split(separator: "/").contains(".."),
+                  !names.contains(name) else { return }
+            names.append(name)
+        }
         func collect(_ dict: [String: Any]?) {
             guard let primary = dict?["CFBundlePrimaryIcon"] as? [String: Any] else { return }
-            (primary["CFBundleIconFiles"] as? [String])?.forEach { names.insert($0) }
+            (primary["CFBundleIconFiles"] as? [String])?.forEach(add)
+            if let name = primary["CFBundleIconName"] as? String { add(name) }
         }
         collect(info["CFBundleIcons"] as? [String: Any])
+        collect(info["CFBundleIcons~iphone"] as? [String: Any])
+        (info["CFBundleIconFiles"] as? [String])?.forEach(add)
+        if let name = info["CFBundleIconFile"] as? String { add(name) }
+        if let name = info["CFBundleIconName"] as? String { add(name) }
         collect(info["CFBundleIcons~ipad"] as? [String: Any])
-        (info["CFBundleIconFiles"] as? [String])?.forEach { names.insert($0) }
-        if let n = info["CFBundleIconFile"] as? String { names.insert(n) }
-        // Foreign Assets.car catalogs must never enter UIKit's asset machinery.
-        // A missing/unsupported icon is cosmetic; returning nil uses the UI placeholder.
-        names.insert("AppIcon")
-        let prefixes = names.map { ($0 as NSString).lastPathComponent }
-            .map { ($0 as NSString).deletingPathExtension }.filter { !$0.isEmpty }
+        // Only read actual bounded PNGs. Never load a foreign Bundle or Assets.car into UIKit.
+        // Prefer declared primary files over alternate/dark or generic fallback icons.
+        add("AppIcon"); add("DefaultIcon"); add("Icon")
         let root = bundle.resolvingSymlinksInPath().standardizedFileURL.path + "/"
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: bundle, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]
-        ) else { return nil }
-        let candidates = files.compactMap { file -> (URL, Int)? in
+        func containedPNG(_ file: URL) -> Int? {
             guard file.pathExtension.lowercased() == "png",
-                  prefixes.contains(where: { file.lastPathComponent.hasPrefix($0) }),
                   file.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(root),
                   let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
                   values.isRegularFile == true, values.isSymbolicLink != true,
                   let size = values.fileSize, size > 0, size <= 2 * 1024 * 1024 else { return nil }
-            return (file, size)
-        }.sorted { $0.1 == $1.1 ? $0.0.lastPathComponent < $1.0.lastPathComponent : $0.1 > $1.1 }
-        for (file, _) in candidates.prefix(32) {
-            guard let data = try? Data(contentsOf: file),
-                  let png = validatedIconPNG(data) else { continue }
-            return png
+            return size
+        }
+        let fm = FileManager.default
+        for name in names.prefix(32) {
+            let path = bundle.appendingPathComponent(name)
+            let stem = path.deletingPathExtension().lastPathComponent
+            let parent = path.deletingLastPathComponent()
+            guard parent.resolvingSymlinksInPath().standardizedFileURL.path + "/" == root ||
+                    parent.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(root) else { continue }
+            let files = (try? fm.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil)) ?? []
+            let candidates = files.compactMap { file -> (URL, Int)? in
+                let candidate = file.deletingPathExtension().lastPathComponent
+                // Exact name or scale/device variant, NOT AppIconGrey when primary is AppIcon.
+                guard candidate == stem || candidate.hasPrefix(stem + "@") || candidate.hasPrefix(stem + "~") ||
+                    (stem == "AppIcon" && candidate.hasPrefix("AppIcon") && candidate.dropFirst(7).first?.isNumber == true),
+                      let size = containedPNG(file) else { return nil }
+                return (file, size)
+            }.sorted { $0.1 == $1.1 ? $0.0.path < $1.0.path : $0.1 > $1.1 }
+            for (file, _) in candidates.prefix(32) {
+                if let data = try? Data(contentsOf: file), let png = validatedIconPNG(data) { return png }
+            }
         }
         return nil
     }
@@ -347,7 +372,7 @@ private struct PersonalAppIcon: View {
         .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
         .task(id: app.id) {
             image = library.icon(for: app)
-            if image == nil { image = await library.ensureIcon(for: app) }
+            if let refreshed = await library.ensureIcon(for: app) { image = refreshed }
         }
     }
 }

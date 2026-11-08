@@ -119,9 +119,9 @@ private struct PersonalHomeIcon: View {
             else { Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.title3.bold())) }
         }
         .task(id: app.id) {
-            if let c = cached { image = c; return }
+            if let c = cached { image = c }
             if image == nil { image = library.icon(for: app) }
-            if image == nil { image = await library.ensureIcon(for: app) }
+            if let refreshed = await library.ensureIcon(for: app) { image = refreshed }
         }
     }
 }

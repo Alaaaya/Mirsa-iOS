@@ -501,7 +501,7 @@ struct MirsaHomeOperationBadge: View {
         case .updating: phase = tr("Updating", "جاري التحديث")
         }
         let pct = e.fraction.map { " \(Int($0 * 100))%" } ?? ""
-        return name + ", " + phase + pct + (e.canCancel ? "" : ", " + tr("cannot be cancelled", "ما بيتلغى"))
+        return name + ", " + (e.stageLabel ?? phase) + pct + (e.canCancel ? "" : ", " + tr("cannot be cancelled", "ما بيتلغى"))
     }
 
     var body: some View {
