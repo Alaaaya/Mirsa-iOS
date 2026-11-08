@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 struct ForgeArchivedIPA: Codable, Identifiable, Equatable {
     var id = UUID()
@@ -8,6 +9,7 @@ struct ForgeArchivedIPA: Codable, Identifiable, Equatable {
     var signed: Bool
     var date: Date
     var bytes: Int64
+    var sha256: String? = nil
     var file: String { id.uuidString + ".ipa" }
 }
 
@@ -19,8 +21,8 @@ struct ForgeArchivedIPA: Codable, Identifiable, Equatable {
     let root: URL
     private var index: URL { root.appendingPathComponent("index.json") }
 
-    init() {
-        root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaVersionArchive", isDirectory: true)
+    init(root customRoot: URL? = nil) {
+        root = customRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaVersionArchive", isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var u = root; var v = URLResourceValues(); v.isExcludedFromBackup = true; try? u.setResourceValues(v)
         if let d = try? Data(contentsOf: index), let list = try? JSONDecoder().decode([ForgeArchivedIPA].self, from: d) { items = list }
@@ -34,14 +36,21 @@ struct ForgeArchivedIPA: Codable, Identifiable, Equatable {
     var totalBytes: Int64 { items.reduce(0) { $0 + $1.bytes } }
     func bytes(of bundleID: String) -> Int64 { versions(of: bundleID).reduce(0) { $0 + $1.bytes } }
 
-    /// Copies the IPA; the same bundle ID, version, kind and size is not stored twice.
+    /// Content-based dedupe never mistakes equal-size builds for the same IPA.
     func archive(_ ipa: URL, bundleID: String, name: String, version: String, signed: Bool) {
         let fm = FileManager.default
         guard let size = (try? ipa.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size > 0 else { return }
-        if items.contains(where: { $0.bundleID == bundleID && $0.version == version && $0.signed == signed && $0.bytes == Int64(size) }) { return }
-        let item = ForgeArchivedIPA(bundleID: bundleID, name: name, version: version, signed: signed, date: Date(), bytes: Int64(size))
+        guard let digest = try? Self.hash(ipa) else { return }
+        if items.contains(where: { $0.bundleID == bundleID && $0.version == version && $0.signed == signed && $0.sha256 == digest }) { return }
+        let item = ForgeArchivedIPA(bundleID: bundleID, name: name, version: version, signed: signed, date: Date(), bytes: Int64(size), sha256: digest)
         do { try fm.copyItem(at: ipa, to: url(item)) } catch { return }
         items.insert(item, at: 0); save(); prune(bundleID)
+    }
+    nonisolated static func hash(_ url: URL) throws -> String {
+        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+        var digest = SHA256()
+        while let part = try file.read(upToCount: 1024 * 1024), !part.isEmpty { digest.update(data: part) }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
     func delete(_ i: ForgeArchivedIPA) { try? FileManager.default.removeItem(at: url(i)); items.removeAll { $0.id == i.id }; save() }
     func deleteOld(_ bundleID: String) { for i in versions(of: bundleID).dropFirst() { delete(i) } }

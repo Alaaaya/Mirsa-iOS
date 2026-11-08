@@ -43,7 +43,7 @@ struct ForgeCrashCard: View {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(tr("The last app session ended unexpectedly", "آخر تشغيل للتطبيق انتهى بشكل غير متوقع", ckb: "دوایین کارپێکردنی ئەپەکە بە شێوەیەکی چاوەڕواننەکراو کۆتایی هات", kmr: "Danişîna dawî ya appê ji nişkê ve qediya")).font(.subheadline.bold())
-                            Text(info.bundleID + " · " + tr("crashes", "كراشات", ckb: "داخستنەکان", kmr: "qelibîn") + " \(info.count)").font(.caption).foregroundStyle(.white.opacity(0.65))
+                            Text(info.bundleID + " · " + tr("interrupted launches", "تشغيلات انقطعت", ckb: "کارپێکردنی پچڕاو", kmr: "destpêkên qutbûyî") + " \(info.count)").font(.caption).foregroundStyle(.white.opacity(0.65))
                         }
                         Spacer()
                         Button { ForgeCrashMonitor.dismiss(); self.info = nil } label: { Image(systemName: "xmark") }
@@ -51,10 +51,10 @@ struct ForgeCrashCard: View {
                     }
                     if let target = project(info.bundleID) {
                         Button(tr("Send for a fix", "ابعت للإصلاح", ckb: "بنێرە بۆ چاککردنەوە", kmr: "Ji bo sererastkirinê bişîne")) {
-                            report = (target.0, target.1, "Guest app ended abnormally within 20 seconds of launch. Count: \(info.count).")
+                            report = (target.0, target.1, "Termination Reason: Mirsa launch marker reports an interrupted launch; attribution unconfirmed. Interrupted launch count: \(info.count).")
                             showReport = true
                         }.buttonStyle(.mirsaSecondary)
-                        Text(tr("You review the sanitized report first. Nothing is sent without your OK.", "بتشوف التقرير المنظّف أول. ما بينبعت شي بدون موافقتك.", ckb: "یەکەم ڕاپۆرتی پاککراو دەبینیت. بێ ڕەزامەندی تۆ هیچ نانێردرێت.", kmr: "Tu pêşî raporê paqijkirî dibînî. Bê erêkirina te tiştek nayê şandin.")).font(.caption2).foregroundStyle(.white.opacity(0.55))
+                        Text(tr("An interrupted container launch is not proof of a tweak crash. Review the safe report before sending; no system logs are read.", "انقطاع تشغيل الحاوية مو دليل إن التويك سبب كراش. راجع التقرير قبل إرساله؛ ما منقرأ سجلات النظام.", ckb: "پچڕانی کارپێکردن بەڵگەی کێشەی تویک نییە. پێش ناردن ڕاپۆرت بپشکنە؛ تۆماری سیستەم ناخوێنرێتەوە.", kmr: "Qutbûna destpêkê ne delîla qelibîna tweakê ye. Berî şandinê raporê kontrol bike; logên pergalê nayên xwendin.")).font(.caption2).foregroundStyle(.white.opacity(0.55))
                     }
                 }.foregroundStyle(.white).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
             }

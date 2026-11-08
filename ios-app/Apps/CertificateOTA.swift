@@ -62,6 +62,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         }
         guard let bundleID = info["CFBundleIdentifier"] as? String,
               let version = info["CFBundleVersion"] as? String else { throw SideloadError.message(personalText("Missing application identity.", "هوية التطبيق ناقصة.")) }
+        // Archive the actual retained signed bytes, before any OTA handoff or upload failure.
+        MirsaVersionArchive.shared.archive(kept, bundleID: bundleID,
+            name: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID,
+            version: (info["CFBundleShortVersionString"] as? String) ?? version, signed: true)
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
         let plan = try OTAChunkPlan(total: size)
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,

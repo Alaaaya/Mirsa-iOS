@@ -162,4 +162,33 @@ import ImageIO
         }
         XCTAssertEqual(Set(MirsaTr.forgeCkb.keys), Set(MirsaTr.forgeKmr.keys))
     }
+    func testBig3MarkClampsAndRejectsEmptyCanvas() {
+        XCTAssertEqual(ForgeImageMark.normalize(CGRect(x: -10, y: 20, width: 90, height: 120), in: CGSize(width: 100, height: 100)), CGRect(x: 0, y: 0.2, width: 0.8, height: 0.8))
+        XCTAssertEqual(ForgeImageMark.normalize(.zero, in: .zero), .zero)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 160)).image { _ in UIColor.white.setFill(); UIBezierPath(rect: CGRect(x: 0, y: 0, width: 120, height: 160)).fill() }
+        XCTAssertNotNil(ForgeImageMark.marked(image.jpegData(compressionQuality: 0.8)!, region: CGRect(x: 0.1, y: 0.2, width: 0.5, height: 0.4)))
+    }
+    func testBig3ArchiveContentHashAndPersistence() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = MirsaVersionArchive(root: root)
+        let a = root.appendingPathComponent("a.ipa"), b = root.appendingPathComponent("b.ipa")
+        try Data([1, 2, 3]).write(to: a); try Data([3, 2, 1]).write(to: b)
+        archive.archive(a, bundleID: "com.test.archive", name: "Archive", version: "1", signed: false)
+        archive.archive(a, bundleID: "com.test.archive", name: "Archive", version: "1", signed: false)
+        archive.archive(b, bundleID: "com.test.archive", name: "Archive", version: "1", signed: false)
+        XCTAssertEqual(archive.items.count, 2, "Same-size different content must not be discarded")
+        XCTAssertEqual(archive.bytes(of: "com.test.archive"), 6)
+        XCTAssertNotEqual(archive.items[0].sha256, archive.items[1].sha256)
+        XCTAssertEqual(MirsaVersionArchive(root: root).items.count, 2)
+        archive.deleteOld("com.test.archive")
+        XCTAssertEqual(archive.items.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path), "Deleting archive copies must preserve input")
+    }
+    func testBig3InterruptedMarkerKeepsHonestAttribution() {
+        let report = ForgeFixDiagnostic.sanitized("Termination Reason: Mirsa launch marker reports an interrupted launch; attribution unconfirmed. Counter 2.")
+        XCTAssertTrue(report.contains("attribution unconfirmed"))
+        XCTAssertFalse(report.contains("Counter"))
+    }
+
 }

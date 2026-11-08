@@ -65,7 +65,7 @@ struct ForgeFeaturesView: View {
         .onChange(of: photo) { _, item in
             run {
                 guard let data = try await item?.loadTransferable(type: Data.self) else { return }
-                cleanJPEG = try ForgeFeaturePolicy.jpeg(data)
+                markRegion = nil; cleanJPEG = try ForgeFeaturePolicy.jpeg(data)
             }
         }
         .sheet(isPresented: $showInspector) { inspectorSheet }
