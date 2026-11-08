@@ -107,32 +107,45 @@ struct SetupView: View {
 
     private func step(_ n: Int, icon: String, title: String, status: String, ok: Bool,
                       action: String?, perform: @escaping () -> Void) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle().fill(ok ? AnyShapeStyle(MirsaPalette.success) : AnyShapeStyle(MirsaPalette.cardRaised))
-                    .frame(width: MirsaIconSize.button, height: MirsaIconSize.button)
-                Image(systemName: ok ? "checkmark" : icon)
-                    .font(.system(size: MirsaIconSize.m, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(n). \(title)").font(MirsaFont.cardTitle).foregroundStyle(.white)
-                    .lineLimit(2).minimumScaleFactor(0.85)
-                Text(status).font(MirsaFont.secondary)
-                    .foregroundStyle(ok ? MirsaPalette.success : MirsaPalette.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: MirsaSpacing.xs)
-            if let action {
-                Button(action: perform) {
-                    Text(action).lineLimit(1).fixedSize()
-                }
+        let badge = ZStack {
+            Circle().fill(ok ? AnyShapeStyle(MirsaPalette.success) : AnyShapeStyle(MirsaPalette.cardRaised))
+                .frame(width: MirsaIconSize.button, height: MirsaIconSize.button)
+            Image(systemName: ok ? "checkmark" : icon)
+                .font(.system(size: MirsaIconSize.m, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        let texts = VStack(alignment: .leading, spacing: 3) {
+            Text("\(n). \(title)").font(MirsaFont.cardTitle).foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(status).font(MirsaFont.secondary)
+                .foregroundStyle(ok ? MirsaPalette.success : MirsaPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        let button = action.map { a in
+            Button(action: perform) { Text(a).lineLimit(1).fixedSize() }
                 .buttonStyle(.mirsaSecondary)
                 .controlSize(.small)
+        }
+        // One row when everything fits; otherwise the action moves under the text
+        // instead of squeezing the title into a narrow, truncated column.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                badge
+                texts.fixedSize()
+                Spacer(minLength: MirsaSpacing.xs)
+                button
+            }
+            HStack(alignment: .top, spacing: 14) {
+                badge
+                VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+                    texts
+                    button
+                }
+                Spacer(minLength: 0)
             }
         }
         .padding(MirsaSpacing.card)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .appsGlass(cornerRadius: MirsaRadius.l)
         .mirsaAppear(delay: Double(n) * 0.05)
     }

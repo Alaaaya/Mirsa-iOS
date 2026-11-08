@@ -292,7 +292,8 @@ enum MirsaChrome {
     static func forceWindowsLeftToRight() {
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
-            for w in ws.windows where w.traitOverrides.layoutDirection != .leftToRight {
+            // Reading an override that was never set raises, so test membership first.
+            for w in ws.windows where !w.traitOverrides.contains(UITraitLayoutDirection.self) {
                 w.traitOverrides.layoutDirection = .leftToRight
                 w.semanticContentAttribute = .forceLeftToRight
             }
