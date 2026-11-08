@@ -46,6 +46,9 @@ struct ForgeView: View {
     @State private var status: String?
     @State private var shareURL: URL?
     @State private var debID: UUID?
+    @State private var targetSource: String?
+    @State private var targetLink = false
+    @State private var targetSources = false
     @State private var gallery = false
     @State private var toDelete: ForgeProject?
 
@@ -58,7 +61,13 @@ struct ForgeView: View {
                         Text(tr("Describe it, Mirsa writes and injects it.", "اوصفه ومرسى بتكتبه وبتحقنه.", ckb: "وەسفی بکە، میرسا دەینووسێت و دەیچەسپێنێت.", kmr: "Vebêje, Mirsa dinivîse û dixe.")).font(.footnote).foregroundStyle(.white.opacity(0.6))
                     }
                     Spacer()
-                    Button { picking = true } label: { Image(systemName: "plus").font(.title3.bold()).foregroundStyle(.white).frame(width: 44, height: 44).background(Color.accentColor).cornerRadius(12) }
+                    Menu {
+                        Button { picking = true } label: { Label(tr("From Files", "من الملفات"), systemImage: "folder") }
+                        Button { targetSource = "library" } label: { Label(tr("My Library", "مكتبتي"), systemImage: "books.vertical") }
+                        Button { targetSource = "projects" } label: { Label(tr("Projects", "المشاريع"), systemImage: "doc.badge.gearshape") }
+                        Button { targetLink = true } label: { Label(tr("From link", "من رابط"), systemImage: "link") }
+                        Button { targetSources = true } label: { Label(tr("From sources", "من السورسات"), systemImage: "shippingbox") }
+                    } label: { Image(systemName: "plus").font(.title3.bold()).foregroundStyle(.white).frame(width: 44, height: 44).background(Color.accentColor).cornerRadius(12) }
                 }
                 ForEach(store.projects) { p in
                     NavigationLink(destination: ForgeProjectView(id: p.id)) {
@@ -87,18 +96,34 @@ struct ForgeView: View {
             Button(forgeDeleteTitle, role: .destructive) { if let p = toDelete { do { try store.delete(p.id); error = nil } catch { self.error = forgeDeleteFailed(p.appName) + " " + error.localizedDescription } }; toDelete = nil }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { toDelete = nil }
         }
+        .sheet(isPresented: Binding(get: { targetSource != nil }, set: { if !$0 { targetSource = nil } })) {
+            ForgeLibraryTargetPicker(projectsOnly: targetSource == "projects") { url in
+                try await createTarget(url)
+                targetSource = nil
+            }
+        }
+        .sheet(isPresented: $targetLink) { PersonalURLImportSheet { try await createTarget($0) } }
+        .sheet(isPresented: $targetSources) {
+            SourcesTab(onSelectIPA: { url in
+                try await createTarget(url)
+                targetSources = false
+            })
+        }
         .sheet(isPresented: $gallery) { ForgeGalleryView() }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
     }
+    private func createTarget(_ url: URL) async throws {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+        try FileManager.default.copyItem(at: url, to: local)
+        defer { try? FileManager.default.removeItem(at: local) }
+        let info = try await ForgeStore.inspect(ipa: local)
+        _ = try store.create(ipa: local, info: info)
+    }
     private func handle(_ url: URL) async {
         error = nil; status = nil
-        let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let local = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
-        do {
-            try FileManager.default.copyItem(at: url, to: local); defer { try? FileManager.default.removeItem(at: local) }
-            let info = try await ForgeStore.inspect(ipa: local)
-            _ = try store.create(ipa: local, info: info)
-        } catch { self.error = error.localizedDescription }
+        do { try await createTarget(url) } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -303,5 +328,53 @@ struct ForgeGalleryView: View {
             ForgeStore.shared.pendingGalleryCode = d["code"] as? String
             note = tr("Open one of your tweak projects and tap Use community tweak.", "افتح مشروع تويك وكبس استخدم تويك المجتمع.", ckb: "پڕۆژەیەکی تویک بکەرەوە.", kmr: "Projeyekê veke.")
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Selects existing personal app archives without mutating the library or project.
+private struct ForgeLibraryTargetPicker: View {
+    let projectsOnly: Bool
+    let onFile: (URL) async throws -> Void
+    @ObservedObject private var library = PersonalAppsLibrary.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var working = false
+    @State private var failure: String?
+    private var apps: [PersonalLibraryApp] {
+        library.apps.filter { app in
+            (!projectsOnly || FileManager.default.fileExists(atPath: library.draftURL(app).path)) &&
+            (query.isEmpty || app.name.localizedCaseInsensitiveContains(query) || app.bundleID.localizedCaseInsensitiveContains(query))
+        }
+    }
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(apps) { app in
+                    Button {
+                        working = true; failure = nil
+                        Task { @MainActor in
+                            do { try await onFile(library.url(app)); dismiss() }
+                            catch { failure = error.localizedDescription }
+                            working = false
+                        }
+                    } label: {
+                        HStack {
+                            Group {
+                                if let icon = library.icon(for: app) { Image(uiImage: icon).resizable().scaledToFit() }
+                                else { Image(systemName: "app.dashed") }
+                            }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading) { Text(app.name); Text(app.bundleID).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }.disabled(working)
+                }
+                if apps.isEmpty { Text(tr("No apps found.", "ما في تطبيقات.")).foregroundStyle(.secondary) }
+                if let failure { Text(failure).foregroundStyle(.red) }
+            }
+            .searchable(text: $query)
+            .navigationTitle(projectsOnly ? tr("Projects", "المشاريع") : tr("My Library", "مكتبتي"))
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(tr("Cancel", "إلغاء")) { dismiss() }.disabled(working) } }
+            .overlay { if working { ProgressView() } }
+            .mirsaScreen()
+        }.environment(\.layoutDirection, .leftToRight).interactiveDismissDisabled(working)
     }
 }
