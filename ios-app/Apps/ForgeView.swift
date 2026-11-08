@@ -312,8 +312,7 @@ struct ForgeGalleryView: View {
                             onUse: { Task { await use(it) } },
                             onEdit: { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it },
                             onVersion: { versioning = it },
-                            onDelete: { deleting = it },
-                            onReport: { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }
+                            onDelete: { deleting = it }
                         )
                     }
                     if downloading { ProgressView().tint(.white) }
