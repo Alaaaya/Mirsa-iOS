@@ -15,14 +15,24 @@ struct NoProfileShortcutGuide: View {
     }
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Text(app.name).font(.title2.bold())
-                Text(guide).textSelection(.enabled)
-                Button(tr("Share guide and icon", "شارك التعليمات والأيقونة")) { sharing = true }
-                    .buttonStyle(.borderedProminent)
-                ShareLink(item: launchURL) { Label(tr("Share launch link", "شارك رابط الفتح"), systemImage: "link") }
+            ScrollView {
+                VStack(spacing: MirsaSpacing.l) {
+                    Text(app.name).font(MirsaFont.sheetTitle)
+                    Text(guide).textSelection(.enabled)
+                        .font(MirsaFont.secondary)
+                        .foregroundStyle(MirsaPalette.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(MirsaSpacing.card)
+                        .mirsaCard(radius: MirsaRadius.l)
+                    Button(tr("Share guide and icon", "شارك التعليمات والأيقونة")) { sharing = true }
+                        .buttonStyle(.mirsaPrimary)
+                        .controlSize(.large)
+                    ShareLink(item: launchURL) { Label(tr("Share launch link", "شارك رابط الفتح"), systemImage: "link") }
+                        .buttonStyle(.mirsaSecondary)
+                }
+                .padding(MirsaSpacing.page)
             }
-            .padding()
+            .mirsaScreen()
             .navigationTitle(tr("No-profile shortcut", "اختصار بدون بروفايل"))
             .sheet(isPresented: $sharing) {
                 ShortcutAssetsSheet(text: guide, icon: UIImage(contentsOfFile: AppsStore.iconURL(app.id).path))

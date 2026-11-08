@@ -5,7 +5,7 @@ import SwiftUI
 struct MirsaForm<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        Form { content() }
+        Form { Group { content() }.listRowBackground(MirsaPalette.row) }
             .mirsaScreen()
     }
 }
@@ -23,8 +23,8 @@ extension View {
         self
             .scrollContentBackground(.hidden)
             .background(AuroraBackground().ignoresSafeArea())
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .tint(Color(red: 0.62, green: 0.55, blue: 1.0))
+            .toolbarBackground(MirsaPalette.sheet, for: .navigationBar)
+            .tint(MirsaPalette.accentSoft)
             .environment(\.defaultMinListRowHeight, 50)
             .preferredColorScheme(.dark)
     }
@@ -46,68 +46,41 @@ enum MirsaTheme: String, CaseIterable, Identifiable {
 }
 
 extension View {
+    /// Every card in Mirsa goes through here. Since the style unification it is
+    /// always a solid card (no blur / material), whatever theme is selected.
     func appsGlass(cornerRadius: CGFloat = 24, tint: Color? = nil, interactive: Bool = false) -> some View {
-        modifier(ThemedGlass(shape: .rect(cornerRadius: cornerRadius), tint: tint, interactive: interactive))
+        modifier(MirsaSolidCard(shape: RoundedRectangle(cornerRadius: MirsaRadius.snap(cornerRadius), style: .continuous),
+                                tint: tint, elevation: cornerRadius >= 20 ? 1 : 0.6))
     }
     func appsGlassCapsule(tint: Color? = nil) -> some View {
-        modifier(ThemedGlass(shape: .capsule, tint: tint, interactive: true))
+        modifier(MirsaSolidCard(shape: Capsule(), tint: tint, elevation: 0.6))
     }
 }
 
 enum GlassShapeKind { case rect(cornerRadius: CGFloat), capsule }
 
+/// Kept for source compatibility: renders the same solid card for both themes.
 struct ThemedGlass: ViewModifier {
     let shape: GlassShapeKind
     let tint: Color?
     let interactive: Bool
-    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if theme == MirsaTheme.liquid.rawValue {
-            switch shape {
-            case .rect(let r): content.modifier(LiquidGlass(shape: RoundedRectangle(cornerRadius: r, style: .continuous), tint: tint, depth: r >= 20 ? 1 : 0.6))
-            case .capsule: content.modifier(LiquidGlass(shape: Capsule(), tint: tint, depth: 0.6))
-            }
-        } else {
-            switch shape {
-            case .rect(let r): content.appsGlassClassic(cornerRadius: r, tint: tint, interactive: interactive)
-            case .capsule: content.appsGlassCapsuleClassic(tint: tint)
-            }
+        switch shape {
+        case .rect(let r): content.appsGlass(cornerRadius: r, tint: tint, interactive: interactive)
+        case .capsule: content.appsGlassCapsule(tint: tint)
         }
     }
 }
 
-/// The design's glass: blurred, white diagonal sheen, hairline border, a bright
-/// top edge and a soft deep shadow. A tint washes the card in that colour.
+/// Former glass look, now solid. Kept as a thin alias so older call sites keep compiling.
 struct LiquidGlass<S: InsettableShape>: ViewModifier {
     let shape: S
     let tint: Color?
     var depth: Double = 1
-
     func body(content: Content) -> some View {
-        content
-            .background {
-                ZStack {
-                    shape.fill(.ultraThinMaterial).opacity(0.75)
-                    if let tint {
-                        shape.fill(LinearGradient(colors: [tint.opacity(0.55), tint.opacity(0.18)],
-                                                  startPoint: .topLeading, endPoint: .bottomTrailing))
-                    }
-                    shape.fill(LinearGradient(stops: [
-                        .init(color: .white.opacity(0.20), location: 0),
-                        .init(color: .white.opacity(0.05), location: 0.55),
-                        .init(color: .white.opacity(0.12), location: 1),
-                    ], startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-                .shadow(color: .black.opacity(0.38 * depth), radius: 20 * depth, y: 16 * depth)
-            }
-            .overlay {
-                shape.strokeBorder(.white.opacity(0.26), lineWidth: 1)
-                shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.5), .clear, .clear, .white.opacity(0.08)],
-                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1.5)
-            }
-            .contentShape(shape)
+        content.modifier(MirsaSolidCard(shape: shape, tint: tint, elevation: depth))
     }
 }
 
@@ -165,40 +138,48 @@ struct LiquidTabBar: View {
     @Namespace private var ns
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: MirsaSpacing.xxs) {
             ForEach(items) { item in
                 let on = selection == item.tab
                 Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { selection = item.tab }
+                    withAnimation(MirsaMotion.select) { selection = item.tab }
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: item.icon).font(.system(size: 19, weight: on ? .semibold : .regular))
-                        Text(item.title).font(.system(size: 12, weight: on ? .semibold : .regular)).lineLimit(1)
-                            .minimumScaleFactor(0.65)
+                            .frame(height: 22)
+                        Text(item.title).font(MirsaFont.tabLabel).lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .allowsTightening(true)
                     }
-                    .foregroundStyle(on ? .white : .white.opacity(0.68))
+                    .foregroundStyle(on ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background {
                         if on {
                             Capsule()
-                                .fill(LinearGradient(colors: [Color(red: 96 / 255, green: 165 / 255, blue: 250 / 255).opacity(0.42),
-                                                              Color(red: 96 / 255, green: 165 / 255, blue: 250 / 255).opacity(0.16)],
-                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .overlay(Capsule().strokeBorder(.white.opacity(0.32), lineWidth: 1))
+                                .fill(MirsaPalette.accentGradient)
+                                .opacity(0.9)
+                                .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 1))
+                                .shadow(color: MirsaPalette.accent.opacity(0.45), radius: 8, y: 3)
                                 .matchedGeometryEffect(id: "tab", in: ns)
                         }
                     }
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.mirsaPress)
             }
         }
         .padding(6)
-        .frame(height: 72)
+        .frame(height: MirsaTabBarMetrics.height)
         .environment(\.layoutDirection, .leftToRight)
-        .modifier(LiquidGlass(shape: Capsule(), tint: nil, depth: 1.1))
-        .padding(.horizontal, 18)
-        .padding(.bottom, 8)
+        .modifier(MirsaSolidCard(shape: Capsule(), tint: nil, elevation: 1.2))
+        .padding(.horizontal, MirsaSpacing.page)
+        .padding(.bottom, MirsaTabBarMetrics.bottomGap)
     }
+}
+
+enum MirsaTabBarMetrics {
+    static let height: CGFloat = 66
+    static let bottomGap: CGFloat = 8
+    /// Space content must keep free so nothing hides behind the floating bar.
+    static var clearance: CGFloat { height + bottomGap + 10 }
 }

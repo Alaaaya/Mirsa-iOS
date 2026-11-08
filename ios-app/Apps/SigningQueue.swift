@@ -124,11 +124,11 @@ struct SigningQueueView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(sgText("Signing queue", "طابور التوقيع", "ڕیزی واژووکردن", "Rêzika îmzekirinê")).font(.title3.bold())
+                Text(sgText("Signing queue", "طابور التوقيع", "ڕیزی واژووکردن", "Rêzika îmzekirinê")).font(MirsaFont.sheetTitle)
                 Toggle(sgText("Clone with a new bundle ID", "نسخة بمعرّف جديد", "کلۆن بە ناسنامەی نوێ", "Klon bi nasnameya nû"), isOn: $clone)
                 Toggle(sgText("Remove device restrictions (copy only)", "إزالة قيود الجهاز (على النسخة فقط)", "لابردنی سنووردارییەکانی ئامێر (تەنها کۆپی)", "Sînorên cîhazê rake (tenê kopî)"), isOn: $stripRestrictions)
                 Button(sgText("Add IPAs", "إضافة IPA", "زیادکردنی IPA", "IPA lê zêde bike")) { picking = true }
-                    .buttonStyle(.borderedProminent).disabled(identities.isEmpty)
+                    .buttonStyle(.mirsaPrimary).disabled(identities.isEmpty)
                 if identities.isEmpty {
                     Text(sgText("Import a certificate first.", "استورد شهادة بالأول.", "سەرەتا شەهادەیەک هاوردە بکە.", "Pêşî sertîfîkayekê têxe.")).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -141,11 +141,11 @@ struct SigningQueueView: View {
                         if !IPAEditorService.validBundleID(p.bundleID) || p.bundleID == p.originalID {
                             Text(sgText("Enter a valid bundle ID different from the original.", "اكتب معرّف صالح ومختلف عن الأصلي.", "ناسنامەیەکی دروست و جیاواز بنووسە.", "Nasnameyeke derbasdar û cuda binivîse.")).font(.caption2).foregroundStyle(.orange)
                         }
-                    }.padding(12).appsGlass(cornerRadius: 16)
+                    }.padding(MirsaSpacing.s).appsGlass(cornerRadius: MirsaRadius.m)
                 }
                 if !pending.isEmpty {
                     Button(sgText("Start cloning", "ابدأ النسخ", "دەستپێکردنی کلۆن", "Klonê dest pê bike")) { startPending() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.mirsaPrimary)
                         .disabled(pending.contains { !IPAEditorService.validBundleID($0.bundleID) || $0.bundleID == $0.originalID })
                 }
                 if let message { Text(message).font(.footnote).foregroundStyle(.orange) }
@@ -155,8 +155,9 @@ struct SigningQueueView: View {
                 } else if !queue.items.isEmpty {
                     Button(sgText("Clear", "مسح", "پاککردنەوە", "Paqij bike")) { queue.clearFinished() }
                 }
-            }.padding(18)
+            }.padding(MirsaSpacing.page)
         }
+        .mirsaScreen()
         .environment(\.layoutDirection, .leftToRight)
         .task { identities = (try? PersonalIdentityVault.savedIdentities()) ?? []; await CertificateRevocationMonitor.shared.checkAll() }
         .sheet(isPresented: $picking) { MultiIPAPicker { urls in picking = false; add(urls) } }

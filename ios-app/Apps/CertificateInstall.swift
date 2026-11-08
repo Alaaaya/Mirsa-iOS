@@ -123,15 +123,15 @@ struct CertificateInstallSheet: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                            .mirsaCard(radius: MirsaRadius.m)
                         }
-                        .buttonStyle(.plain).disabled(working)
+                        .buttonStyle(.mirsaPress).disabled(working)
                     }
                     if working { ProgressView() }
                     if let message { Text(message).font(.footnote).foregroundStyle(.orange) }
                     if let retainedURL {
                         Button(personalText("Share signed IPA", "مشاركة الـIPA الموقّع")) { sharing = true }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.mirsaPrimary)
                     }
                 }
                 .padding(20)

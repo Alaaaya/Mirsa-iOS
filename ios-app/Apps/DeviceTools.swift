@@ -45,7 +45,7 @@ private extension View {
 struct DeviceToolsView: View {
     var body: some View {
         NavigationStack {
-            Form {
+            Form { Group {
                 Section {
                     NavigationLink { BatteryView() } label: { Label(tr("Battery health", "صحة البطارية"), systemImage: "battery.75percent") }
                     NavigationLink { StorageView() } label: { Label(tr("Storage by app", "المساحة لكل تطبيق"), systemImage: "internaldrive") }
@@ -56,7 +56,7 @@ struct DeviceToolsView: View {
                     Text(tr("These need LocalDevVPN and Mirsa's pairing, over Wi-Fi or cellular.",
                             "هدول بدهم LocalDevVPN والاقتران تبع Mirsa، على واي فاي أو بيانات الهاتف."))
                 }
-            }
+            }.listRowBackground(MirsaPalette.row) }
             .navigationTitle(tr("Device", "الجهاز"))
             .mirsaScreen()
         }
@@ -70,12 +70,12 @@ struct BatteryView: View {
     @State private var rows: [(String, String)] = []
 
     var body: some View {
-        Form {
+        Form { Group {
             if m.loading { ProgressView() }
             ForEach(rows, id: \.0) { r in
                 HStack { Text(r.0); Spacer(); Text(r.1).foregroundStyle(.secondary) }
             }
-        }
+        }.listRowBackground(MirsaPalette.row) }
         .navigationTitle(tr("Battery health", "صحة البطارية"))
         .task { await load() }
         .refreshable { await load() }
@@ -115,7 +115,7 @@ struct StorageView: View {
     @State private var rows: [Row] = []
 
     var body: some View {
-        Form {
+        Form { Group {
             if m.loading { ProgressView() }
             if !rows.isEmpty {
                 Section(tr("Total: ", "المجموع: ") + bytes(rows.reduce(0) { $0 + $1.app + $1.data })) {
@@ -128,7 +128,7 @@ struct StorageView: View {
                     }
                 }
             }
-        }
+        }.listRowBackground(MirsaPalette.row) }
         .navigationTitle(tr("Storage by app", "المساحة لكل تطبيق"))
         .task { await load() }
         .refreshable { await load() }
@@ -154,7 +154,7 @@ struct ProfilesView: View {
     @State private var list: [P] = []
 
     var body: some View {
-        Form {
+        Form { Group {
             if m.loading { ProgressView() }
             let expired = list.filter { ($0.expires ?? .distantFuture) < Date() }
             if !expired.isEmpty {
@@ -181,7 +181,7 @@ struct ProfilesView: View {
                 Text(tr("Removing a profile stops the app that uses it from opening until it is renewed.",
                         "حذف البروفايل بيوقف التطبيق اللي بيستعمله لحد ما ينجدّد."))
             }
-        }
+        }.listRowBackground(MirsaPalette.row) }
         .navigationTitle(tr("Provisioning profiles", "البروفايلات"))
         .task { await load() }
         .refreshable { await load() }

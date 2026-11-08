@@ -136,7 +136,7 @@ struct DownloadsList: View {
                     .font(.caption.weight(.bold)).foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 7)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.mirsaPress)
             .appsGlassCapsule(tint: Color(red: 0.45, green: 0.4, blue: 1))
         }
         .padding(12)

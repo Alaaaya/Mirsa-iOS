@@ -113,7 +113,7 @@ struct MirsaHomeScreen<Menu: View>: View {
                                     SwiftUI.Menu {
                                         Button(tr("From Files", "من الملفات"), action: onImport)
                                         Button(tr("From link", "من رابط"), action: onImportLink)
-                                    } label: { Text(L.t("empty.import")) }.buttonStyle(.bordered)
+                                    } label: { Text(L.t("empty.import")) }.buttonStyle(.mirsaSecondary)
                                 }.padding(.top, 40)
                             }
                             Spacer(minLength: 0)
@@ -210,7 +210,7 @@ struct MirsaHomeScreen<Menu: View>: View {
                     if let icon = MirsaIconCache.image(id: app.id, path: AppsStore.iconURL(app.id).path) {
                         Image(uiImage: icon).resizable().scaledToFill()
                     } else {
-                        Color.indigo.overlay(Text(String(app.name.prefix(1))).font(.title2.bold()))
+                        Color.indigo.overlay(Text(String(app.name.prefix(1))).font(MirsaFont.sheetTitle))
                     }
                 }
                 .frame(width: compact ? 48 : 64, height: compact ? 48 : 64)

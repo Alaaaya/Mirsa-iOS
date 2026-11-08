@@ -42,7 +42,7 @@ struct IncomingIPAConfirmationSheet: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 5) {
                             Text("MIRSA").font(.caption.weight(.bold)).tracking(5).foregroundStyle(gold)
-                            Text(tr("Confirm IPA", "تأكيد ملف IPA")).font(.title2.weight(.bold))
+                            Text(tr("Confirm IPA", "تأكيد ملف IPA")).font(MirsaFont.sheetTitle)
                         }
                     }.foregroundStyle(.white)
                     if loading {
@@ -140,7 +140,7 @@ struct IncomingIPAConfirmationSheet: View {
             }.frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 19))
                 .overlay(RoundedRectangle(cornerRadius: 19).stroke(gold.opacity(0.5), lineWidth: 1))
             VStack(alignment: .leading, spacing: 8) {
-                Text(p.name).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
+                Text(p.name).font(MirsaFont.sheetTitle).fixedSize(horizontal: false, vertical: true)
                 Text(p.bundleID).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 HStack(spacing: 8) {
                     chip(p.version, color: violet)
@@ -183,7 +183,7 @@ struct IncomingIPAConfirmationSheet: View {
                         Spacer(minLength: 0)
                         Image(systemName: copiedKey == row.key ? "checkmark" : "doc.on.doc").font(.caption).foregroundStyle(gold)
                     }.padding(10).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain).accessibilityLabel(tr("Copy ", "نسخ ") + row.key)
+                }.buttonStyle(.mirsaPress).accessibilityLabel(tr("Copy ", "نسخ ") + row.key)
             }
             if rows.count > 5 {
                 Button { expanded.wrappedValue.toggle() } label: {
@@ -248,8 +248,9 @@ struct IncomingIPAConfirmationSheet: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }.appsGlass(cornerRadius: 13).disabled(preview == nil || submitted)
             }
-        }.buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
-            .background(.ultraThinMaterial)
+        }.buttonStyle(.mirsaPress).padding(.horizontal, MirsaSpacing.page).padding(.top, MirsaSpacing.s).padding(.bottom, MirsaSpacing.s)
+            .background(MirsaPalette.sheet.ignoresSafeArea(edges: .bottom))
+            .overlay(alignment: .top) { Rectangle().fill(MirsaPalette.stroke).frame(height: 1) }
     }
     private func submit(_ callback: (URL) -> Void) {
         guard preview != nil, !submitted else { return }
