@@ -615,11 +615,6 @@ struct AppTile: View {
         let tint = IconTint.color(for: app.id, image: img)
         VStack(spacing: 8) {
             ZStack {
-                Circle()
-                    .fill(tint)
-                    .frame(width: 70, height: 70)
-                    .blur(radius: 22)
-                    .opacity(0.55)
                 Group {
                     if let img {
                         Image(uiImage: img).resizable().scaledToFill()
@@ -637,8 +632,8 @@ struct AppTile: View {
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
                 .shadow(color: .black.opacity(0.35), radius: 6, y: 4)
             }
-            .frame(width: liquid ? 76 : 96, height: liquid ? 76 : 96)
-            .appsGlass(cornerRadius: liquid ? 24 : 26, tint: liquid ? nil : tint)
+            .frame(width: liquid ? 68 : 78, height: liquid ? 68 : 78)
+            .appsGlass(cornerRadius: 21, tint: liquid ? nil : tint)
             .overlay(alignment: .topTrailing) { badges }
             .overlay { operationOverlay }
 
