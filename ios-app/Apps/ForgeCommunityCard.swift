@@ -7,6 +7,14 @@ struct ForgeCommunityEntry {
     let description: String
     let uploaded: Bool
     let mine: Bool
+    let id: String
+    let version: Int?
+    let updatedAt: Date?
+    let changelog: String
+    let authorProjectID: UUID?
+    let authorVersionID: UUID?
+    let authorLocalVersion: Int?
+    let authorVersionCreatedAt: Date?
 
     init(_ entry: [String: Any]) {
         name = (entry["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -14,6 +22,15 @@ struct ForgeCommunityEntry {
         description = (entry["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         uploaded = entry["provenance"] as? String == "uploaded"
         mine = entry["mine"] as? Bool == true
+        id = entry["id"] as? String ?? ""
+        version = entry["version"] as? Int
+        func date(_ k: String) -> Date? { (entry[k] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } }
+        updatedAt = date("updated_at")
+        changelog = (entry["changelog"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        authorProjectID = (entry["author_project_id"] as? String).flatMap(UUID.init)
+        authorVersionID = (entry["author_version_id"] as? String).flatMap(UUID.init)
+        authorLocalVersion = entry["author_local_version"] as? Int
+        authorVersionCreatedAt = date("author_version_created_at")
     }
 
     // Never infer a capability from a bundle ID or from another person's local project.
@@ -57,6 +74,21 @@ struct ForgeCommunityCard: View {
             tr("No description provided.", "ما انضاف وصف لهالتويك.", ckb: "وەسفێک نەدراوە.", kmr: "Danasîn nehatiye dayîn.")
     }
 
+    private var versionLine: String {
+        guard let v = item.version else {
+            return tr("Version unavailable (older entry)", "النسخة غير متوفرة (إدخال قديم)", ckb: "وەشان بەردەست نییە (تۆماری کۆن)", kmr: "Guhertoya nederbasdar e (tomara kevn)")
+        }
+        guard let d = item.updatedAt else { return "v\(v)" }
+        return "v\(v) · " + tr("updated ", "آخر تحديث ", ckb: "نوێکراوەتەوە ", kmr: "nûkirî ") + d.formatted(date: .abbreviated, time: .omitted)
+    }
+    /// Consumer badge only when a local copy really came from this entry at an older published version.
+    private var usedOlder: Int? {
+        guard !item.mine, let pub = item.version else { return nil }
+        let used = store.projects.flatMap(\.versions).filter { $0.communitySourceID == item.id }.compactMap(\.usedPublishedVersion)
+        guard let m = used.max(), m < pub else { return nil }
+        return m
+    }
+
     enum Action: CaseIterable { case use, edit, version, delete }
 
     static func explanation(_ action: Action, uploaded: Bool = false) -> String {
@@ -70,7 +102,7 @@ struct ForgeCommunityCard: View {
         case .version:
             return uploaded
                 ? tr("Not available for uploaded binary files.", "مو متاح لملفات التويك المرفوعة.", ckb: "بۆ فایلە بارکراوەکان بەردەست نییە.", kmr: "Ji bo pelên barkirî ne berdest e.")
-                : tr("Upload your latest tweak version in place of the old one.", "ترفع آخر نسخة من تويكك بدل القديمة", ckb: "نوێترین وەشانی تویکەکەت لە جیاتی کۆنەکە بار بکە.", kmr: "Guhertoya herî nû ya tweaka xwe li şûna ya kevn bar bike.")
+                : tr("Compare versions, describe what changed, then publish your update.", "قارن النسخ، اكتب شو الجديد، وانشر تحديثك.", ckb: "وەشانەکان بەراورد بکە، گۆڕانکارییەکان بنووسە و بڵاوی بکەرەوە.", kmr: "Guhertoyan bidin ber hev, guhertinan binivîse û biweşîne.")
         case .delete:
             return tr("Remove it from the community for everyone, after confirmation.", "تشيله من المجتمع عند الكل، بعد تأكيدك.", ckb: "دوای پشتڕاستکردنەوە، بۆ هەموو لە کۆمەڵگا بیسڕەوە.", kmr: "Piştî piştrastkirinê, ji civakê ji bo herkesî jê bibe.")
         }
@@ -97,6 +129,9 @@ struct ForgeCommunityCard: View {
                     Text(item.bundleID).font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.58))
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                    Text(versionLine).font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     Text(description).font(.system(size: 15, weight: .medium))
                         .lineLimit(2).multilineTextAlignment(.trailing)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -111,12 +146,19 @@ struct ForgeCommunityCard: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }.fixedSize(horizontal: false, vertical: true)
             }
+            if let m = usedOlder {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text(tr("Update available: you use v\(m), published v\(item.version ?? m)", "في تحديث: عندك v\(m) والمنشور v\(item.version ?? m)", ckb: "نوێکردنەوە هەیە: v\(m) → v\(item.version ?? m)", kmr: "Nûkirin heye: v\(m) → v\(item.version ?? m)"))
+                }.font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(red: 120/255, green: 190/255, blue: 255/255))
+                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
             HStack(alignment: .top, spacing: 8) {
                 action("square.and.arrow.down", tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne"), onUse)
                 if item.mine {
                     action("pencil", tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne"), onEdit)
                     // Keep the equal-width slot but do not enable a code rebuild for uploaded binaries.
-                    action("square.on.square", tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû"), onVersion, enabled: !item.uploaded)
+                    action("square.on.square", tr("Update in community", "تحديث بالمجتمع", ckb: "نوێکردنەوە لە کۆمەڵگا", kmr: "Nûkirin di civakê de"), onVersion, enabled: !item.uploaded)
                     action("trash", tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), onDelete, destructive: true)
                 }
             }
@@ -125,7 +167,7 @@ struct ForgeCommunityCard: View {
                 helper(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne"), .use)
                 if item.mine {
                     helper(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne"), .edit)
-                    helper(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû"), .version)
+                    helper(tr("Update in community", "تحديث بالمجتمع", ckb: "نوێکردنەوە لە کۆمەڵگا", kmr: "Nûkirin di civakê de"), .version)
                     helper(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), .delete)
                 }
             }
