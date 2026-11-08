@@ -334,6 +334,10 @@ fn deb_data(input: &Path) -> Result<(String, Vec<u8>)> {
     found.ok_or("Debian package has no data archive".into())
 }
 fn extract_deb(input: &Path, dest: &Path) -> Result<()> {
+    extract_deb_bounded(input, dest, FILE_LIMIT, TOTAL_LIMIT, ENTRY_LIMIT)
+}
+/// Inert user-imported tweak packages get a tighter, independent budget.
+fn extract_deb_bounded(input: &Path, dest: &Path, file_limit: u64, total_limit: u64, entry_limit: usize) -> Result<()> {
     let (name, data) = deb_data(input)?;
     let reader: Box<dyn Read> = match name.as_str() {
         "data.tar" => Box::new(Cursor::new(data)),
@@ -351,14 +355,14 @@ fn extract_deb(input: &Path, dest: &Path) -> Result<()> {
     };
     fresh_dir(dest)?;
     let result = (|| {
-        let mut archive = tar::Archive::new(reader.take(TOTAL_LIMIT + 1));
+        let mut archive = tar::Archive::new(reader.take(total_limit + 1));
         let mut total = 0u64;
         let mut count = 0;
         let mut seen = HashSet::new();
         let mut path_spellings = BTreeMap::new();
         for entry in archive.entries().map_err(err)? {
             count += 1;
-            if count > ENTRY_LIMIT {
+            if count > entry_limit {
                 return Err("Too many tar entries".into());
             }
             let mut entry = entry.map_err(err)?;
@@ -386,7 +390,7 @@ fn extract_deb(input: &Path, dest: &Path) -> Result<()> {
             }
             let size = entry.size();
             total = total.checked_add(size).ok_or("Package too large")?;
-            if size > FILE_LIMIT || total > TOTAL_LIMIT {
+            if size > file_limit || total > total_limit {
                 return Err("Package expansion limit exceeded".into());
             }
             let out = dest.join(rel);
@@ -394,7 +398,7 @@ fn extract_deb(input: &Path, dest: &Path) -> Result<()> {
                 fs::create_dir_all(out).map_err(err)?;
             } else {
                 let mode = entry.header().mode().map_err(err)?;
-                checked_write(&mut entry, &out, size, mode)?;
+                checked_write_limit(&mut entry, &out, size, mode, file_limit)?;
             }
         }
         Ok(())
@@ -1063,6 +1067,7 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
         "extract_inspection" => extract_inspection(Path::new(&r.input), Path::new(&r.output)),
         "pack" => pack(Path::new(&r.input), Path::new(&r.output)),
         "deb" => extract_deb(Path::new(&r.input), Path::new(&r.output)),
+        "deb_tweak" => extract_deb_bounded(Path::new(&r.input), Path::new(&r.output), 128 * 1024 * 1024, 128 * 1024 * 1024, 20_000),
         "incoming_profile" => crate::personal_sign::incoming_ipa::inspect_profile(Path::new(&r.input),Path::new(&r.output)),
         "incoming_preview" => crate::personal_sign::incoming_ipa::inspect(Path::new(&r.input),Path::new(&r.output)),
         "dependencies" => {
