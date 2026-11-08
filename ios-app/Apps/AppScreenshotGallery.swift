@@ -74,7 +74,7 @@ struct AppScreenshotGallery: View {
                                     .frame(width: 130, height: 260)
                                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.mirsaPress)
                                 .accessibilityLabel(MirsaTr.f("screenshot", i + 1, model.urls.count))
                                 .accessibilityAddTraits(.isButton)
                             }

@@ -39,7 +39,7 @@ struct PersonalCertificateManagerView: View {
                                         }
                                         Spacer(minLength: 0)
                                     }
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(.mirsaPress)
                                 NavigationLink { PersonalCertificateDetailsView(identity: item) } label: { Image(systemName: "info.circle") }
                                 Button(role: .destructive) { removing = item } label: { Image(systemName: "trash") }
                             }.padding(16).appsGlass(cornerRadius: 22)
@@ -47,7 +47,7 @@ struct PersonalCertificateManagerView: View {
                         Button { adding = true } label: {
                             Label(personalText("Add certificate", "إضافة شهادة"), systemImage: "plus.circle.fill").fontWeight(.semibold)
                                 .frame(maxWidth: .infinity).padding(.vertical, 12)
-                        }.buttonStyle(.borderedProminent).tint(.green)
+                        }.buttonStyle(.mirsaPrimary)
                         if let message { Text(message).font(.footnote) }
                     }.padding(20)
                 }

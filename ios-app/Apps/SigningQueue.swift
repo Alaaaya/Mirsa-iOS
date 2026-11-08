@@ -128,7 +128,7 @@ struct SigningQueueView: View {
                 Toggle(sgText("Clone with a new bundle ID", "نسخة بمعرّف جديد", "کلۆن بە ناسنامەی نوێ", "Klon bi nasnameya nû"), isOn: $clone)
                 Toggle(sgText("Remove device restrictions (copy only)", "إزالة قيود الجهاز (على النسخة فقط)", "لابردنی سنووردارییەکانی ئامێر (تەنها کۆپی)", "Sînorên cîhazê rake (tenê kopî)"), isOn: $stripRestrictions)
                 Button(sgText("Add IPAs", "إضافة IPA", "زیادکردنی IPA", "IPA lê zêde bike")) { picking = true }
-                    .buttonStyle(.borderedProminent).disabled(identities.isEmpty)
+                    .buttonStyle(.mirsaPrimary).disabled(identities.isEmpty)
                 if identities.isEmpty {
                     Text(sgText("Import a certificate first.", "استورد شهادة بالأول.", "سەرەتا شەهادەیەک هاوردە بکە.", "Pêşî sertîfîkayekê têxe.")).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -145,7 +145,7 @@ struct SigningQueueView: View {
                 }
                 if !pending.isEmpty {
                     Button(sgText("Start cloning", "ابدأ النسخ", "دەستپێکردنی کلۆن", "Klonê dest pê bike")) { startPending() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.mirsaPrimary)
                         .disabled(pending.contains { !IPAEditorService.validBundleID($0.bundleID) || $0.bundleID == $0.originalID })
                 }
                 if let message { Text(message).font(.footnote).foregroundStyle(.orange) }

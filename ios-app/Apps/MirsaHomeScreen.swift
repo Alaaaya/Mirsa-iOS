@@ -113,7 +113,7 @@ struct MirsaHomeScreen<Menu: View>: View {
                                     SwiftUI.Menu {
                                         Button(tr("From Files", "من الملفات"), action: onImport)
                                         Button(tr("From link", "من رابط"), action: onImportLink)
-                                    } label: { Text(L.t("empty.import")) }.buttonStyle(.bordered)
+                                    } label: { Text(L.t("empty.import")) }.buttonStyle(.mirsaSecondary)
                                 }.padding(.top, 40)
                             }
                             Spacer(minLength: 0)

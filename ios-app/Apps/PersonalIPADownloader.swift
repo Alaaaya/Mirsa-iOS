@@ -176,7 +176,7 @@ struct PersonalURLImportSheet: View {
                         Spacer()
                         Button { start() } label: {
                             Label(personalText("Download", "تحميل"), systemImage: "arrow.down.circle.fill").fontWeight(.semibold)
-                        }.buttonStyle(.borderedProminent)
+                        }.buttonStyle(.mirsaPrimary)
                             .disabled(working || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || disabled)
                     }
                     Spacer()

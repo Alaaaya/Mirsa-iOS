@@ -183,7 +183,7 @@ struct IncomingIPAConfirmationSheet: View {
                         Spacer(minLength: 0)
                         Image(systemName: copiedKey == row.key ? "checkmark" : "doc.on.doc").font(.caption).foregroundStyle(gold)
                     }.padding(10).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain).accessibilityLabel(tr("Copy ", "نسخ ") + row.key)
+                }.buttonStyle(.mirsaPress).accessibilityLabel(tr("Copy ", "نسخ ") + row.key)
             }
             if rows.count > 5 {
                 Button { expanded.wrappedValue.toggle() } label: {
@@ -248,8 +248,9 @@ struct IncomingIPAConfirmationSheet: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }.appsGlass(cornerRadius: 13).disabled(preview == nil || submitted)
             }
-        }.buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
-            .background(.ultraThinMaterial)
+        }.buttonStyle(.mirsaPress).padding(.horizontal, MirsaSpacing.page).padding(.top, MirsaSpacing.s).padding(.bottom, MirsaSpacing.s)
+            .background(MirsaPalette.sheet.ignoresSafeArea(edges: .bottom))
+            .overlay(alignment: .top) { Rectangle().fill(MirsaPalette.stroke).frame(height: 1) }
     }
     private func submit(_ callback: (URL) -> Void) {
         guard preview != nil, !submitted else { return }

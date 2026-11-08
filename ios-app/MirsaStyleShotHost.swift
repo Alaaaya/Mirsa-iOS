@@ -78,7 +78,7 @@ struct MirsaStyleShotHost: View {
         let app = Self.fixtureApps[0]
         switch page {
         case "settings": AppsSettingsSheet(store: store, onSignIn: {}).environmentObject(vm)
-        case "login": LoginSheet(store: store).presentationDetents([.large]).presentationBackground(.ultraThinMaterial)
+        case "login": LoginSheet(store: store).presentationDetents([.large]).mirsaSheetBackground()
         case "url-import": PersonalURLImportSheet(disabled: false) { _ in }
         case "discovery": DiscoveryView()
         case "certificates": PersonalCertificateManagerView()
@@ -97,12 +97,12 @@ struct MirsaStyleShotHost: View {
             MirsaUpdateSheet(release: .init(tag_name: "1.3.200", name: "Mirsa 1.3.200",
                                             body: "• Faster signing\n• New Sources layout\n• Bug fixes", assets: []),
                              updater: MirsaUpdater.shared, onUpdate: {})
-                .presentationDetents([.large]).presentationBackground(.ultraThinMaterial)
+                .presentationDetents([.large]).mirsaSheetBackground()
         case "hidden": HiddenAppsView(store: HiddenAppsStore.shared) { HiddenAppsGrid(apps: Self.fixtureApps, pendingHide: $pendingHide) }
         case "prompt":
             PromptSheet(prompt: SideloadPrompt(kind: .twoFactor, sms: false, lastError: nil, phones: [], certs: [])) {}
-                .presentationDetents([.medium, .large]).presentationBackground(.ultraThinMaterial)
-        case "app-info": AppInfoSheet(app: app, store: store).presentationDetents([.medium]).presentationBackground(.ultraThinMaterial)
+                .presentationDetents([.medium, .large]).mirsaSheetBackground()
+        case "app-info": AppInfoSheet(app: app, store: store).presentationDetents([.medium]).mirsaSheetBackground()
         case "backups": BackupsSheet(app: app)
         case "tweak-library": IPATweakLibraryView()
         case "no-profile-guide": NoProfileShortcutGuide(app: app)
