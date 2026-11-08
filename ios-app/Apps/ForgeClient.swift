@@ -31,6 +31,7 @@ enum ForgeClient {
     }
 
     private static func message(_ status: Int, _ data: Data) -> String {
+        if let server = ForgeServerMessage.text(data, lang: ForgeServerMessage.lang()) { return server }
         let code = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? ""
         switch (status, code) {
         case (429, "daily_limit"): return tr("Daily limit reached. Try again tomorrow.", "الحد اليومي خلص، جرّب بكرا", ckb: "سنووری ڕۆژانە تەواو بوو، سبەی تاقی بکەرەوە.", kmr: "Sînorê rojane qediya, sibê biceribîne.")
