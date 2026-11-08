@@ -79,7 +79,6 @@ enum ForgeServerMessage {
     private static func allText(_ root: [String: Any]) -> String {
         var out: [String] = []
         for l in ["en", "ar", "ckb", "kmr"] { if let t = text(Data((try? JSONSerialization.data(withJSONObject: root)) ?? Data()), lang: l) { out.append(t) } }
-        return out.joined(separator: "
-")
+        return out.joined(separator: "\n")
     }
 }
