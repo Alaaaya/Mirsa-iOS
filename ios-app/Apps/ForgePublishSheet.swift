@@ -23,7 +23,7 @@ struct ForgePublishSheet: View {
     private var project: ForgeProject? { store.project(id) }
     private var targetApp: PersonalLibraryApp? { library.apps.first { $0.bundleID == project?.bundleID } }
     private var canPublish: Bool {
-        !busy && name.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
+        !busy && !describing && name.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
             && what.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 && (!uploaded || uploadFile != nil)
     }
 
@@ -75,6 +75,8 @@ struct ForgePublishSheet: View {
         }
         .foregroundStyle(.white).font(.subheadline)
         .environment(\.layoutDirection, .leftToRight)
+        .onChange(of: uploaded) { _, _ in what = "" }
+        .onDisappear { if let uploadFile { try? FileManager.default.removeItem(at: uploadFile) } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "dylib") ?? .data, UTType(filenameExtension: "deb") ?? .data, .data]) { result in
             guard case .success(let url) = result else { return }
             load { try await ForgeDylibImporter.fromFile(url) }
@@ -84,7 +86,8 @@ struct ForgePublishSheet: View {
             if name.isEmpty { name = p.name }
             if what.isEmpty {
                 describing = true; defer { describing = false }
-                what = (try? await store.describeForPublish(id)) ?? String((v.title ?? v.prompt).prefix(120))
+                let suggested = (try? await store.describeForPublish(id)) ?? String((v.title ?? v.prompt).prefix(120))
+                if what.isEmpty && !uploaded { what = suggested }
             }
         }
     }
@@ -115,7 +118,9 @@ struct ForgePublishSheet: View {
             defer { busy = false }
             do {
                 if let old = uploadFile { try? FileManager.default.removeItem(at: old) }
-                let r = try await work(); uploadFile = r.dylib; uploadInfo = r.info
+                let r = try await work()
+                guard r.info.size <= 4 * 1024 * 1024 else { try? FileManager.default.removeItem(at: r.dylib); throw ForgeDylibImportError.tooLarge }
+                uploadFile = r.dylib; uploadInfo = r.info
             } catch { self.error = error.localizedDescription; uploadFile = nil; uploadInfo = nil }
         }
     }
@@ -140,7 +145,7 @@ extension ForgeStore {
     /// AI-prefilled description grounded in the actual original request; nil on any failure so the caller falls back to the request text.
     func describeForPublish(_ id: UUID) async throws -> String? {
         guard let p = project(id), let v = p.currentVersion else { return nil }
-        let out = try await ForgeClient.json(["action": "describe", "name": p.name, "bundleID": p.bundleID, "prompt": String(v.prompt.prefix(1000)), "code": String(v.code.prefix(6000))])
+        let out = try await ForgeClient.json(["action": "describe", "language": ForgeServerMessage.lang(), "name": p.name, "bundleID": p.bundleID, "prompt": String(v.prompt.prefix(1000)), "code": String(v.code.prefix(6000))])
         let d = (out["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return d.isEmpty ? nil : String(d.prefix(200))
     }
@@ -150,8 +155,8 @@ extension ForgeStore {
             "settings": v.settings.map { ["key": $0.key, "title": $0.title, "default": $0.default] }]
         if let file = uploadedDylib {
             let data = try Data(contentsOf: file, options: [.mappedIfSafe])
-            guard data.count <= ForgeDylibInspector.maximumBytes else { throw ForgeDylibImportError.tooLarge }
-            body["upload"] = ["filename": name + ".dylib", "base64": data.base64EncodedString()]
+            guard data.count <= 4 * 1024 * 1024 else { throw ForgeDylibImportError.tooLarge }
+            body["upload"] = ["filename": "Community.dylib", "base64": data.base64EncodedString()]
             body["code"] = ""
         }
         _ = try await ForgeClient.json(body)

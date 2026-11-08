@@ -206,8 +206,8 @@ int MirsaGuestLaunchIfRequested(int argc, char *argv[]) {
         [d setObject:@{@"bundleID": markedID, @"at": @(NSDate.date.timeIntervalSince1970)} forKey:@"mirsa.guest.crashMarker"];
         [d synchronize];
         void (^clearMarker)(NSNotification *) = ^(NSNotification *n) {
-            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"mirsa.guest.crashMarker"];
-            [NSUserDefaults.standardUserDefaults synchronize];
+            [d removeObjectForKey:@"mirsa.guest.crashMarker"];
+            [d synchronize];
         };
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:clearMarker];
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:clearMarker];

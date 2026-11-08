@@ -295,6 +295,8 @@ struct ForgeGalleryView: View {
     @State private var editDesc = ""
     @State private var deleting: [String: Any]?
     @State private var versioning: [String: Any]?
+    @State private var usingUpload: [String: Any]?
+    @State private var downloading = false
     var body: some View {
         NavigationView {
             List {
@@ -303,11 +305,17 @@ struct ForgeGalleryView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(it["name"] as? String ?? "").font(.headline)
                         Text(it["target_bundle_id"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
+                        if let description = it["description"] as? String, !description.isEmpty { Text(description).font(.subheadline) }
+                        if it["provenance"] as? String == "uploaded" {
+                            Label(tr("Uploaded · unverified on device", "مرفوع · مو مجرّب عالجهاز", ckb: "بارکراو · لەسەر ئامێر تاقی نەکراوەتەوە", kmr: "Barkirî · li ser amûrê nehatiye ceribandin"), systemImage: "arrow.up.doc").font(.caption).foregroundStyle(.orange)
+                        }
                         HStack {
                             Button(tr("Use", "استخدم", ckb: "بەکاربهێنە", kmr: "Bi kar bîne")) { Task { await use(it) } }.buttonStyle(.mirsaSecondary)
                             if it["mine"] as? Bool == true {
                                 Button(tr("Edit", "تعديل", ckb: "دەستکاری", kmr: "Biguherîne")) { editName = it["name"] as? String ?? ""; editDesc = it["description"] as? String ?? ""; editing = it }.buttonStyle(.mirsaSecondary)
-                                Button(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû")) { versioning = it }.buttonStyle(.mirsaSecondary)
+                                if it["provenance"] as? String != "uploaded" {
+                                    Button(tr("New version", "نسخة جديدة", ckb: "وەشانی نوێ", kmr: "Guhertoya nû")) { versioning = it }.buttonStyle(.mirsaSecondary)
+                                }
                                 Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe"), role: .destructive) { deleting = it }.buttonStyle(.mirsaSecondary)
                             } else {
                                 Button(tr("Report", "بلّغ", ckb: "ڕاپۆرت", kmr: "Ragihîne")) { Task { _ = try? await ForgeClient.json(["action": "report", "id": it["id"] as? String ?? ""]) } }.buttonStyle(.mirsaSecondary)
@@ -315,11 +323,19 @@ struct ForgeGalleryView: View {
                         }
                     }
                 }
+                if downloading { ProgressView() }
                 if let note { Text(note).foregroundStyle(.green) }
                 if let error { Text(error).foregroundStyle(.red) }
             }.navigationTitle(tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê"))
         }
+        .environment(\.layoutDirection, .leftToRight)
         .task { await reload() }
+        .confirmationDialog(tr("Import disabled into which project?", "لأي مشروع بدك تستورده معطّل؟", ckb: "بۆ کام پڕۆژە هاوردە بکرێت؟", kmr: "Di kîjan projeyê de bê import kirin?"), isPresented: Binding(get: { usingUpload != nil }, set: { if !$0 { usingUpload = nil } }), titleVisibility: .visible) {
+            ForEach(ForgeStore.shared.projects.filter { $0.bundleID == usingUpload?["target_bundle_id"] as? String }) { p in
+                Button(p.name) { if let entry = usingUpload { Task { await importUpload(entry, into: p.id) } } }
+            }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) { usingUpload = nil }
+        }
         .alert(tr("Edit tweak", "تعديل التويك", ckb: "دەستکاری تویک", kmr: "Tweakê biguherîne"), isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             TextField(tr("Name", "الاسم", ckb: "ناو", kmr: "Nav"), text: $editName)
             TextField(tr("Description", "الوصف", ckb: "وەسف", kmr: "Danasîn"), text: $editDesc)
@@ -342,8 +358,27 @@ struct ForgeGalleryView: View {
     private func mutate(_ body: [String: Any]) async {
         do { _ = try await ForgeClient.json(body); error = nil; await reload() } catch { self.error = error.localizedDescription }
     }
+    private func importUpload(_ it: [String: Any], into project: UUID) async {
+        guard !downloading, let id = it["id"] as? String, let hash = it["sha256"] as? String else { return }
+        downloading = true; error = nil; defer { downloading = false }
+        do {
+            let file = try await ForgeClient.communityDylib(id: id, sha256: hash)
+            defer { try? FileManager.default.removeItem(at: file) }
+            let result = try await ForgeDylibImporter.fromFile(file)
+            defer { try? FileManager.default.removeItem(at: result.dylib) }
+            try ForgeStore.shared.importDylib(project, dylib: result.dylib, info: result.info, name: it["name"] as? String ?? "Community")
+            note = tr("Imported disabled. Review the binary before enabling; uploaded does not mean trusted.", "انستورد معطّل. راجع الملف قبل ما تفعّله؛ مرفوع مو معناها موثوق.", ckb: "بە ناچالاکی هاوردەکرا. پێش چالاککردن فایلەکە بپشکنە.", kmr: "Neçalak hat import kirin. Berî çalakkirinê pelê kontrol bike.")
+        } catch { self.error = error.localizedDescription }
+    }
+
     private func use(_ it: [String: Any]) async {
-        guard let id = it["id"] as? String else { return }
+        guard !downloading, let id = it["id"] as? String else { return }
+        if it["provenance"] as? String == "uploaded" {
+            guard ForgeStore.shared.projects.contains(where: { $0.bundleID == it["target_bundle_id"] as? String }) else {
+                error = tr("Create a tweak project for this target app first, then import it disabled for review.", "اعمل مشروع تويك لهالتطبيق أول، بعدين استورده معطّل للمراجعة.", ckb: "سەرەتا پڕۆژەی تویک بۆ ئەپەکە دروست بکە.", kmr: "Pêşî ji bo vê appê projeyekê çêke."); return
+            }
+            error = nil; usingUpload = it; return
+        }
         do {
             let d = try await ForgeClient.get(["action": "gallery-item", "id": id])
             ForgeStore.shared.pendingGalleryCode = d["code"] as? String

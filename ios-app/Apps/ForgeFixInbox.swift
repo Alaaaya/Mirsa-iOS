@@ -101,6 +101,9 @@ enum ForgeFixText {
 enum ForgeFixDiagnostic {
     static func sanitized(_ input: String, kind: String) -> String {
         let lower = String(input.prefix(24000)).lowercased()
+        if kind == "crash", lower.contains("mirsa launch marker reports an interrupted launch") {
+            return "Exception Type: not provided\nTermination Reason: Mirsa launch marker reports an interrupted launch; attribution unconfirmed. No system crash log is available."
+        }
         let signals = ["error:", "warning:", "undefined symbol", "undeclared identifier", "no known", "unavailable", "deprecated", "killed", "memory", "layout", "recursion", "sigabrt", "sigsegv", "exception", "crash", "guard disabled", "guard enabled"]
         let found = signals.filter { lower.contains($0) }
         let summary = found.isEmpty ? "unspecified failure" : found.joined(separator: ", ")
