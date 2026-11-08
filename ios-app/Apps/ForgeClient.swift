@@ -8,7 +8,9 @@ enum ForgeClient {
 
     enum Failure: LocalizedError {
         case message(String)
-        var errorDescription: String? { if case .message(let m) = self { return m }; return nil }
+        /// Server refusal that needs inspector data; UI offers to open the existing Inspector for this app.
+        case inspectorNeeded(String)
+        var errorDescription: String? { switch self { case .message(let m), .inspectorNeeded(let m): return m } }
     }
 
     private static func token() async throws -> String {
@@ -28,6 +30,11 @@ enum ForgeClient {
         var add = q; add[kSecValueData as String] = Data(id.utf8); add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
         return id
+    }
+
+    private static func failure(_ status: Int, _ data: Data) -> Failure {
+        let m = message(status, data)
+        return ForgeServerMessage.needsInspector(data) ? .inspectorNeeded(m) : .message(m)
     }
 
     private static func message(_ status: Int, _ data: Data) -> String {
@@ -58,7 +65,7 @@ enum ForgeClient {
         defer { session.invalidateAndCancel() }
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else { throw Failure.message(message(status, data)) }
+        guard status == 200 else { throw failure(status, data) }
         return data
     }
 
