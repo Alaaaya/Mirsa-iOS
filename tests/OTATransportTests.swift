@@ -27,6 +27,7 @@ final class StubProtocol: URLProtocol {
 
 final class FakeOTAServer {
     var committed = Data()
+    var open429Count = 0
     var dropAfterCommitOnce = false, failGETOnce = false, status503Once = false
     var methods: [String] { StubProtocol.log.map { $0.0 } }
     func json(_ o: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: o) }
@@ -36,7 +37,9 @@ final class FakeOTAServer {
             switch req.httpMethod! {
             case "POST" where req.url!.path.hasSuffix("finalize"):
                 return (200, json(["manifestURL": "https://mirsa-app.mooo.com/ota/download/0123456789abcdef0123456789abcdef?token=eyJhIjoxfQ.c2ln&kind=manifest"]))
-            case "POST": return (200, json(["offset": committed.count, "total": 20]))
+            case "POST":
+                if open429Count > 0 { open429Count -= 1; return (429, Data()) }
+                return (200, json(["offset": committed.count, "total": 20]))
             case "GET":
                 if failGETOnce { failGETOnce = false; throw URLError(.networkConnectionLost) }
                 return (200, json(["offset": committed.count, "total": 20]))
@@ -64,6 +67,21 @@ final class OTATransportTests: XCTestCase {
     }
     override func tearDown() { try? FileManager.default.removeItem(at: file); StubProtocol.handler = nil }
 
+    func testOpen429BacksOffAndRetriesSameSession() async throws {
+        let s = FakeOTAServer(); s.open429Count = 2; s.install()
+        _ = try await OTAChunkUploader.run(file: file, total: 20, session: sess, configuration: config(), backoff: [0, 0], chunkSize: 8) { _ in }
+        XCTAssertEqual(s.committed, payload)
+        XCTAssertEqual(s.methods.filter { $0 == "POST" }.count, 4)
+    }
+    func testOpen429StopsAtRetryBudget() async {
+        let s = FakeOTAServer(); s.open429Count = 10; s.install()
+        do {
+            _ = try await OTAChunkUploader.run(file: file, total: 20, session: sess, configuration: config(), backoff: [0, 0], chunkSize: 8) { _ in }
+            XCTFail("Must stop retrying")
+        } catch { XCTAssertEqual(error as? OTAChunkError, .server(429)) }
+        XCTAssertEqual(s.methods.filter { $0 == "POST" }.count, 3)
+        XCTAssertTrue(s.methods.contains("DELETE"))
+    }
     func testHappyPathExactBytes() async throws {
         let s = FakeOTAServer(); s.install()
         let url = try await OTAChunkUploader.run(file: file, total: 20, session: sess, configuration: config(), backoff: [0], chunkSize: 8) { _ in }
