@@ -47,7 +47,7 @@ struct ForgeFeaturesView: View {
         }
         .font(.subheadline)
         .foregroundStyle(.white)
-        .padding(14).background(forgeCard).cornerRadius(16)
+        .padding(14).appsGlass(cornerRadius: MirsaRadius.l)
         .environment(\.layoutDirection, .leftToRight)
         .disabled(busy || store.busy != nil)
         .onAppear { repairOptIn = UserDefaults.standard.bool(forKey: "forge.repair.optin." + id.uuidString) }

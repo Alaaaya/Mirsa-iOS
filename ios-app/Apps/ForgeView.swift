@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-let forgeCard = Color(red: 0.11, green: 0.12, blue: 0.16)
-private let forgeBG = Color(red: 0.05, green: 0.06, blue: 0.09)
+let forgeCard = MirsaPalette.card
+private let forgeBG = MirsaPalette.sheet
 struct ForgeShareItem: Identifiable { let url: URL; var id: String { url.path } }
 /// Secondary share action: the same tweak as a .deb. Only offered inside the share menu.
 final class DebActivity: UIActivity {
@@ -25,8 +25,11 @@ struct ForgeShareSheet: UIViewControllerRepresentable {
 }
 private func forgeButton(_ icon: String, _ title: String, _ run: @escaping () -> Void) -> some View {
     Button(action: run) {
-        VStack(spacing: 4) { Image(systemName: icon); Text(title).font(.caption.bold()).lineLimit(1) }
-            .frame(maxWidth: .infinity).padding(.vertical, 10).background(Color.white.opacity(0.12)).foregroundStyle(.white).cornerRadius(12)
+        VStack(spacing: 4) { Image(systemName: icon).font(.system(size: MirsaIconSize.m, weight: .semibold)); Text(title).font(MirsaFont.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.8) }
+            .frame(maxWidth: .infinity).padding(.vertical, MirsaSpacing.s)
+            .background(MirsaPalette.cardRaised, in: RoundedRectangle(cornerRadius: MirsaRadius.s, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: MirsaRadius.s, style: .continuous).strokeBorder(MirsaPalette.strokeStrong, lineWidth: 1))
+            .foregroundStyle(.white)
     }.buttonStyle(.mirsaPress)
 }
 
@@ -67,7 +70,7 @@ struct ForgeView: View {
                         Button { targetSource = "projects" } label: { Label(tr("Projects", "المشاريع"), systemImage: "doc.badge.gearshape") }
                         Button { targetLink = true } label: { Label(tr("From link", "من رابط"), systemImage: "link") }
                         Button { targetSources = true } label: { Label(tr("From sources", "من السورسات"), systemImage: "shippingbox") }
-                    } label: { Image(systemName: "plus").font(.title3.bold()).foregroundStyle(.white).frame(width: 44, height: 44).background(Color.accentColor).cornerRadius(12) }
+                    } label: { MirsaIconButtonLabel(systemName: "plus").background(MirsaPalette.accentGradient, in: Circle()).shadow(color: MirsaPalette.accent.opacity(0.4), radius: 8, y: 3) }
                 }
                 ForEach(store.projects) { p in
                     NavigationLink(destination: ForgeProjectView(id: p.id)) {
@@ -75,7 +78,7 @@ struct ForgeView: View {
                             Text(p.appName).font(.headline).foregroundStyle(.white)
                             Text(p.bundleID + " · v" + p.appVersion).font(.caption).foregroundStyle(.white.opacity(0.55))
                             Text(String(p.versions.count) + " " + tr("versions", "نسخ", ckb: "وەشان", kmr: "guhertin")).font(.caption2).foregroundStyle(.white.opacity(0.5))
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                     }.buttonStyle(.mirsaPress)
                     .contextMenu { Button(role: .destructive) { toDelete = p } label: { Label(forgeDeleteTitle, systemImage: "trash") } }
                     .gesture(DragGesture(minimumDistance: 30).onEnded { g in if g.translation.width < -60 && abs(g.translation.height) < 40 { toDelete = p } })
@@ -83,10 +86,10 @@ struct ForgeView: View {
                 forgeButton("person.2.fill", tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê")) { gallery = true }
                 if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(MirsaSpacing.page).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
-        .toolbarBackground(forgeBG, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline)
+        .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
+        .navigationBarTitleDisplayMode(.inline).mirsaScreen()
         .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
             guard case .success(let url) = r else { return }
             Task { await handle(url) }
@@ -144,15 +147,15 @@ struct ForgeTranslateView: View {
                     HStack { ForEach(IPAStringsTranslator.targets, id: \.code) { t in
                         Button { if langs.contains(t.code) { langs.remove(t.code) } else { langs.insert(t.code) } } label: {
                             Text(t.label).font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 6)
-                                .background(langs.contains(t.code) ? Color.accentColor : Color.white.opacity(0.1)).foregroundStyle(.white).cornerRadius(8)
+                                .background(langs.contains(t.code) ? AnyShapeStyle(MirsaPalette.accentGradient) : AnyShapeStyle(MirsaPalette.cardRaised), in: Capsule()).foregroundStyle(.white)
                         }.buttonStyle(.mirsaPress) } }
                     forgeButton("doc.badge.gearshape", tr("Choose IPA", "اختر IPA", ckb: "IPA هەڵبژێرە", kmr: "IPA hilbijêre")) { picking = true }
-                }.padding(14).background(forgeCard).cornerRadius(16)
+                }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(MirsaSpacing.page).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
+        .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
         .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
             guard case .success(let url) = r else { return }
             Task { await handle(url) }
@@ -202,7 +205,7 @@ struct ForgeProjectView: View {
                         forgeButton("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) { run { let ipa = try await store.injectInspector(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                     }
-                }.padding(14).background(forgeCard).cornerRadius(16)
+                }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 ForgeFeaturesView(id: id, prompt: $prompt)
                 if let pending = store.pendingGalleryCode {
                     forgeButton("square.and.arrow.down", tr("Use community tweak", "استخدم تويك المجتمع", ckb: "تویکی کۆمەڵگا بەکاربهێنە", kmr: "Tweaka civakê bi kar bîne")) { store.editCode(id, code: pending); store.pendingGalleryCode = nil }
@@ -214,8 +217,8 @@ struct ForgeProjectView: View {
                             Toggle(s.title, isOn: Binding(get: { p.values[s.key] ?? s.default }, set: { store.setValue(id, key: s.key, $0) })).foregroundStyle(.white)
                         }
                         if store.needsRebuild(p) { Text(tr("Toggles apply on the next build.", "الخيارات بتنطبق بالبناء الجاي.", ckb: "گۆڕانکاریەکان لە دروستکردنی داهاتوو جێبەجێ دەبن.", kmr: "Vebijark di çêkirina din de têne bicihanîn.")).font(.caption).foregroundStyle(.orange) }
-                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
-                    if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, exporting the dylib and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
+                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: MirsaRadius.l)
+                    if !store.builderReady { Text(tr("Building tweaks is not available yet (the build server is not set up). Injecting, exporting the dylib and the inspector are disabled.", "بناء التويكس مو متاح هلق (سيرفر البناء مو جاهز). الحقن وتصدير deb والمفتش معطّلة.", ckb: "دروستکردنی تویک هێشتا بەردەست نییە (سێرڤەری دروستکردن ئامادە نییە).", kmr: "Çêkirina tweak hê ne amade ye (serverê çêkirinê ne sazkirî ye).")).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     HStack {
                         forgeButton("syringe.fill", tr("Inject", "احقن", ckb: "بچەسپێنە", kmr: "Bixe")) { run { let ipa = try await store.inject(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
@@ -229,7 +232,7 @@ struct ForgeProjectView: View {
                         forgeButton("arrow.triangle.2.circlepath", tr("App updated", "التطبيق تحدّث", ckb: "ئەپ نوێبوو", kmr: "App nû bû")) { updating = true }
                         forgeButton("globe", tr("Publish", "انشر", ckb: "بڵاوکردنەوە", kmr: "Biweşîne")) { run { try await store.publish(id); note = tr("Published.", "انشر.", ckb: "بڵاوکرایەوە.", kmr: "Hat weşandin.") } }
                     }
-                    if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(forgeCard).cornerRadius(16) }
+                    if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Versions", "النسخ", ckb: "وەشانەکان", kmr: "Guhertin")).font(.headline).foregroundStyle(.white)
                         ForEach(Array(p.versions.enumerated().reversed()), id: \.element.id) { i, ver in
@@ -240,20 +243,20 @@ struct ForgeProjectView: View {
                                 else { Button(tr("Revert", "ارجع", ckb: "بگەڕێوە", kmr: "Vegere")) { store.revert(id, to: ver.id) }.font(.caption.bold()) }
                             }
                         }
-                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(forgeCard).cornerRadius(16)
+                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: MirsaRadius.l)
                 }
                 if let note { Text(note).font(.footnote).foregroundStyle(.green) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if let fullLog {
                     DisclosureGroup(tr("Full log", "السجل الكامل", ckb: "تۆماری تەواو", kmr: "Têketina tev")) {
                         ScrollView(.horizontal) { Text(fullLog).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                    }.foregroundStyle(.white).padding(14).background(forgeCard).cornerRadius(16)
+                    }.foregroundStyle(.white).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 }
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(MirsaSpacing.page).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
+        .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
         .task { await store.refreshStatus() }
-        .toolbarBackground(forgeBG, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.inline).mirsaScreen()
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
         .sheet(isPresented: $editing) {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
