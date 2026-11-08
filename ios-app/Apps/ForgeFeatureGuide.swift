@@ -72,7 +72,8 @@ struct ForgeFeatureGuide: View {
                         HStack(alignment: .top, spacing: 10) {
                             Text(String(index + 1)).font(.caption.bold()).foregroundStyle(MirsaPalette.accent)
                                 .frame(width: 18, alignment: .leading)
-                            Text(step).font(.caption).fixedSize(horizontal: false, vertical: true)
+                            Text(step).font(.caption).lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -81,6 +82,7 @@ struct ForgeFeatureGuide: View {
                 .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.white.opacity(0.75))
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.layoutDirection, .leftToRight)
@@ -89,12 +91,11 @@ struct ForgeFeatureGuide: View {
 
 struct ForgeGuideSubtitle: View {
     let feature: ForgeGuide
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Text(feature.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
-            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-            .minimumScaleFactor(0.8)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.layoutDirection, .leftToRight)
     }
