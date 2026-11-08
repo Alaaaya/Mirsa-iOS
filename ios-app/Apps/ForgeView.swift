@@ -76,6 +76,7 @@ struct ForgeView: View {
                         Button { targetSources = true } label: { Label(tr("From sources", "من السورسات"), systemImage: "shippingbox") }
                     } label: { MirsaIconButtonLabel(systemName: "plus").background(MirsaPalette.accentGradient, in: Circle()).shadow(color: MirsaPalette.accent.opacity(0.4), radius: 8, y: 3) }
                 }
+                ForgeCrashCard()
                 ForEach(store.projects) { p in
                     NavigationLink(destination: ForgeProjectView(id: p.id)) {
                         VStack(alignment: .leading, spacing: 3) {
