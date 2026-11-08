@@ -114,6 +114,18 @@ final class ForgeCommunityUpdateTests: XCTestCase {
         XCTAssertNil(old.versions[0].communitySourceID)
     }
 
+    func testDateParsingSupabaseFractionalAndPlain() throws {
+        let plain = try XCTUnwrap(ForgeCommunityUpdateLogic.parseDate("2026-11-09T00:30:01Z"))
+        let micro = try XCTUnwrap(ForgeCommunityUpdateLogic.parseDate("2026-11-09T00:30:01.123456+00:00"))
+        let milli = try XCTUnwrap(ForgeCommunityUpdateLogic.parseDate("2026-11-09T00:30:01.5Z"))
+        XCTAssertEqual(micro.timeIntervalSince(plain), 0.123456, accuracy: 0.0001)
+        XCTAssertEqual(milli.timeIntervalSince(plain), 0.5, accuracy: 0.0001)
+        XCTAssertNotNil(ForgeCommunityUpdateLogic.parseDate("2026-11-09T01:30:01+01:00"))
+        XCTAssertNil(ForgeCommunityUpdateLogic.parseDate("garbage"))
+        let e = ForgeCommunityEntry(["id": "a", "updated_at": "2026-11-09T00:30:01.123456+00:00", "author_version_created_at": "2026-11-09T00:30:01.999+00:00"])
+        XCTAssertNotNil(e.updatedAt); XCTAssertNotNil(e.authorVersionCreatedAt)
+    }
+
     func testSourceVersionMustMatchEntry() {
         XCTAssertTrue(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 2, entryVersion: 2))
         XCTAssertFalse(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 3, entryVersion: 2))

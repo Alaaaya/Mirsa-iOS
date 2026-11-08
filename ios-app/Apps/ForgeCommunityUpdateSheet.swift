@@ -2,6 +2,14 @@ import SwiftUI
 
 /// Pure, testable decisions behind the update sheet and the consumer badge.
 enum ForgeCommunityUpdateLogic {
+    /// Accepts plain ISO8601 and Supabase-style fractional seconds of any length (e.g. 2026-11-09T00:30:01.123456+00:00).
+    static func parseDate(_ raw: String) -> Date? {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        guard let r = s.range(of: #"\.\d+"#, options: .regularExpression) else { return ISO8601DateFormatter().date(from: s) }
+        let frac = Double("0" + s[r]) ?? 0
+        guard let base = ISO8601DateFormatter().date(from: s.replacingCharacters(in: r, with: "")) else { return nil }
+        return base.addingTimeInterval(frac)
+    }
     /// The fetched source must be the exact revision the card shows, otherwise a diff/publish would compare different CAS versions.
     static func sourceMatches(fetchedVersion: Int?, entryVersion: Int?) -> Bool {
         guard let f = fetchedVersion, let e = entryVersion else { return false }
