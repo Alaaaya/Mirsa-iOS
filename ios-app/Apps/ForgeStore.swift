@@ -53,11 +53,13 @@ struct ForgeProject: Codable, Identifiable {
         try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tmp) }
         let x = tmp.appendingPathComponent("x", isDirectory: true)
-        try IPAEditorService.run("extract", input: ipa, output: x)
+        try IPAEditorService.run("extract_inspection", input: ipa, output: x)
         let app = try IPAEditorService.app(in: x)
         let info = try IPAEditorService.info(in: app)
-        guard let id = info["CFBundleIdentifier"] as? String, let exe = info["CFBundleExecutable"] as? String else { throw ForgeClient.Failure.message("Bad app") }
-        let mach = try ForgeMachO.inspect(app.appendingPathComponent(exe))
+        guard let id = info["CFBundleIdentifier"] as? String, let exe = info["CFBundleExecutable"] as? String else { throw ForgeClient.Failure.message(IPAEditorService.archiveError("Invalid app metadata")) }
+        let mach: ForgeMachO.Info
+        do { mach = try ForgeMachO.inspect(app.appendingPathComponent(exe)) }
+        catch { throw ForgeClient.Failure.message(IPAEditorService.archiveError("Invalid app executable")) }
         if mach.encrypted {
             throw ForgeClient.Failure.message(tr("This app is encrypted (App Store build). Import a decrypted IPA to build tweaks for it.", "هالتطبيق مشفّر (نسخة App Store). استورد نسخة IPA مفكوكة التشفير لتبني تويكس إله.", ckb: "ئەم ئەپە ڕەمزکراوە (وەشانی App Store). IPAیەکی ڕەمزنەکراو هاوردە بکە بۆ دروستکردنی تویک.", kmr: "Ev app şîfrekirî ye (guhertoya App Store). IPAyeke bê şîfre têxe da ku tweak çêbikî."))
         }
@@ -88,7 +90,7 @@ struct ForgeProject: Codable, Identifiable {
         defer { try? fm.removeItem(at: tmp) }
         guard (try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)) != nil else { return nil }
         let x = tmp.appendingPathComponent("x", isDirectory: true)
-        guard (try? IPAEditorService.run("extract", input: ipa, output: x)) != nil,
+        guard (try? IPAEditorService.run("extract_inspection", input: ipa, output: x)) != nil,
               let app = try? IPAEditorService.app(in: x), let info = try? IPAEditorService.info(in: app) else { return nil }
         return pickName(info)
     }

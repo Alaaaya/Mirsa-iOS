@@ -21,6 +21,12 @@ type Result<T> = std::result::Result<T, String>;
 const FILE_LIMIT: u64 = 512 * 1024 * 1024;
 const TOTAL_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
 const ENTRY_LIMIT: usize = 100_000;
+// Match IPALimits.standard for IPA resources. Debian/code editing keep their
+// smaller independent limits; archive IO always streams through a bounded copy.
+const IPA_FILE_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
+const IPA_TOTAL_LIMIT: u64 = 6 * 1024 * 1024 * 1024;
+const IPA_EXECUTABLE_LIMIT: u64 = 1_500_000_000;
+const IPA_PLIST_LIMIT: u64 = 2 * 1024 * 1024;
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -55,9 +61,12 @@ fn fresh_dir(path: &Path) -> Result<()> {
     }
     fs::create_dir_all(path).map_err(err)
 }
-fn checked_write<R: Read>(mut reader: R, path: &Path, size: u64, mode: u32) -> Result<()> {
-    if size > FILE_LIMIT {
-        return Err("Archive entry exceeds 512 MiB".into());
+fn checked_write<R: Read>(reader: R, path: &Path, size: u64, mode: u32) -> Result<()> {
+    checked_write_limit(reader, path, size, mode, FILE_LIMIT)
+}
+fn checked_write_limit<R: Read>(mut reader: R, path: &Path, size: u64, mode: u32, limit: u64) -> Result<()> {
+    if size > limit {
+        return Err("Archive size limit exceeded".into());
     }
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(err)?;
@@ -82,47 +91,116 @@ fn checked_write<R: Read>(mut reader: R, path: &Path, size: u64, mode: u32) -> R
     }
     Ok(())
 }
-pub(crate) fn extract_zip(input: &Path, dest: &Path) -> Result<()> {
-    let mut zip = ZipArchive::new(File::open(input).map_err(err)?).map_err(err)?;
-    if zip.len() > ENTRY_LIMIT {
-        return Err("Too many archive entries".into());
-    }
-    // Validate every entry before writing anything.
+/// Validate the whole central directory even for selective reads. No skipped
+/// resource can hide traversal, links, case aliases or an expansion bomb.
+fn validate_zip(zip: &mut ZipArchive<File>) -> Result<()> {
+    if zip.len() > ENTRY_LIMIT { return Err("Too many archive entries".into()); }
     let mut seen = HashSet::new();
+    let mut spellings = BTreeMap::new();
+    let mut files = HashSet::new();
     let mut total = 0u64;
     for i in 0..zip.len() {
         let f = zip.by_index(i).map_err(err)?;
         let p = relative(f.name())?;
-        if !seen.insert(p.to_string_lossy().to_lowercase()) {
-            return Err("Duplicate archive path".into());
+        let key = p.to_string_lossy().to_lowercase();
+        if !seen.insert(key.clone()) { return Err("Duplicate archive path".into()); }
+        for prefix in p.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+            let spelling = prefix.to_string_lossy().to_string();
+            if let Some(old) = spellings.insert(spelling.to_lowercase(), spelling.clone()) {
+                if old != spelling { return Err("Case-colliding archive path component".into()); }
+            }
         }
         let mode = f.unix_mode().unwrap_or(0o100644);
         if !matches!(mode & 0o170000, 0 | 0o040000 | 0o100000) {
             return Err("Archive links and special files are not supported".into());
         }
+        if !f.is_dir() { files.insert(key); }
         total = total.checked_add(f.size()).ok_or("Archive too large")?;
-        if f.size() > FILE_LIMIT || total > TOTAL_LIMIT {
+        if f.size() > IPA_FILE_LIMIT || total > IPA_TOTAL_LIMIT {
             return Err("Archive size limit exceeded".into());
         }
+        // Same per-entry ratio ceiling as IPA import, checked without overflow.
+        if f.size() > f.compressed_size().saturating_mul(1000) {
+            return Err("Archive compression ratio limit exceeded".into());
+        }
+    }
+    for spelling in spellings.values() {
+        if Path::new(spelling).ancestors().skip(1)
+            .any(|p| files.contains(&p.to_string_lossy().to_lowercase())) {
+            return Err("Archive file and directory collision".into());
+        }
+    }
+    Ok(())
+}
+pub(crate) fn extract_zip(input: &Path, dest: &Path) -> Result<()> {
+    extract_zip_mode(input, dest, false)
+}
+/// For the AI tweak target picker only: identity plist and main executable.
+/// The source IPA remains intact for the later full injection/repack operation.
+fn extract_inspection(input: &Path, dest: &Path) -> Result<()> {
+    extract_zip_mode(input, dest, true)
+}
+fn extract_zip_mode(input: &Path, dest: &Path, inspection: bool) -> Result<()> {
+    let mut zip = ZipArchive::new(File::open(input).map_err(err)?).map_err(err)?;
+    validate_zip(&mut zip)?;
+    let mut selected = HashSet::new();
+    if inspection {
+        let mut app = None;
+        for i in 0..zip.len() {
+            let f = zip.by_index(i).map_err(err)?;
+            let p = relative(f.name())?;
+            let c: Vec<_> = p.iter().collect();
+            if c.len() >= 2 && c[0] == "Payload"
+                && Path::new(c[1]).extension().and_then(|s| s.to_str()) == Some("app") {
+                let candidate = Path::new("Payload").join(c[1]);
+                if app.as_ref().is_some_and(|old| old != &candidate) {
+                    return Err("IPA must contain exactly one Payload app".into());
+                }
+                app = Some(candidate);
+            }
+        }
+        let app = app.ok_or("IPA must contain exactly one Payload app")?;
+        let plist_path = app.join("Info.plist");
+        let plist_index = (0..zip.len()).find(|&i| zip.by_index(i).ok()
+            .and_then(|f| relative(f.name()).ok()).as_ref() == Some(&plist_path))
+            .ok_or("App Info.plist is missing")?;
+        let mut f = zip.by_index(plist_index).map_err(err)?;
+        if f.size() > IPA_PLIST_LIMIT { return Err("App Info.plist exceeds 2 MiB".into()); }
+        let mut bytes = Vec::new();
+        (&mut f).take(IPA_PLIST_LIMIT + 1).read_to_end(&mut bytes).map_err(err)?;
+        if bytes.len() as u64 != f.size() { return Err("Truncated or oversized archive entry".into()); }
+        let info = plist::Value::from_reader(Cursor::new(bytes)).map_err(err)?;
+        let exe = info.as_dictionary().and_then(|d| d.get("CFBundleExecutable"))
+            .and_then(plist::Value::as_string).ok_or("Invalid app executable path")?;
+        let relative_exe = relative(exe)?;
+        if relative_exe.components().count() != 1 { return Err("Invalid app executable path".into()); }
+        selected.insert(plist_path);
+        selected.insert(app.join(relative_exe));
+        drop(f);
+        let executable = selected.iter().find(|p| p.file_name().and_then(|s|s.to_str()) != Some("Info.plist")).ok_or("Invalid app executable path")?;
+        let executable_index = (0..zip.len()).find(|&i| zip.by_index(i).ok()
+            .and_then(|f| relative(f.name()).ok()).as_ref() == Some(executable))
+            .ok_or("App executable is missing")?;
+        let f = zip.by_index(executable_index).map_err(err)?;
+        if f.is_dir() || f.size() > IPA_EXECUTABLE_LIMIT { return Err("App executable size limit exceeded".into()); }
     }
     fresh_dir(dest)?;
     let result = (|| {
         for i in 0..zip.len() {
             let mut f = zip.by_index(i).map_err(err)?;
-            let out = dest.join(relative(f.name())?);
-            if f.is_dir() {
-                fs::create_dir_all(out).map_err(err)?;
-            } else {
+            let rel = relative(f.name())?;
+            if inspection && !selected.contains(&rel) { continue; }
+            let out = dest.join(rel);
+            if f.is_dir() { fs::create_dir_all(out).map_err(err)?; }
+            else {
                 let size = f.size();
                 let mode = f.unix_mode().unwrap_or(0o644);
-                checked_write(&mut f, &out, size, mode)?;
+                checked_write_limit(&mut f, &out, size, mode, IPA_FILE_LIMIT)?;
             }
         }
         Ok(())
     })();
-    if result.is_err() {
-        let _ = fs::remove_dir_all(dest);
-    }
+    if result.is_err() { let _ = fs::remove_dir_all(dest); }
     result
 }
 pub(crate) fn walk(root: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
@@ -953,6 +1031,7 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
         "read_device_once" => crate::personal_sign::actual_udid(&r.input).and_then(|id| std::fs::write(&r.output,id).map_err(err)),
         "validate" => unencrypted(&read_macho(Path::new(&r.input))?),
         "extract" => extract_zip(Path::new(&r.input), Path::new(&r.output)),
+        "extract_inspection" => extract_inspection(Path::new(&r.input), Path::new(&r.output)),
         "pack" => pack(Path::new(&r.input), Path::new(&r.output)),
         "deb" => extract_deb(Path::new(&r.input), Path::new(&r.output)),
         "incoming_profile" => crate::personal_sign::incoming_ipa::inspect_profile(Path::new(&r.input),Path::new(&r.output)),
@@ -1596,5 +1675,140 @@ mod fat_injection_tests {
     }
     fn dependencies_fixture(d:&[u8])->Vec<String> {
         macho(d.to_vec(),true).unwrap().commands.into_iter().filter(|c|c.kind!=0xd).filter_map(|c|c.name).collect()
+    }
+}
+
+#[cfg(test)]
+mod archive_inspection_tests {
+    use super::*;
+    use std::io::Write;
+    fn temp() -> PathBuf {
+        let p = std::env::temp_dir().join(format!("archive199-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&p).unwrap(); p
+    }
+    fn fixture(p: &Path, extra: &[(&str, &[u8])], executable: &str) {
+        let mut d = plist::Dictionary::new();
+        d.insert("CFBundleExecutable".into(), plist::Value::String(executable.into()));
+        let mut info = Vec::new();
+        plist::Value::Dictionary(d).to_writer_xml(&mut info).unwrap();
+        let mut z = ZipWriter::new(File::create(p).unwrap());
+        for (name, bytes) in [("Payload/Test.app/Info.plist", info.as_slice()),
+                              ("Payload/Test.app/Main", b"executable".as_slice())].into_iter()
+            .chain(extra.iter().copied()) {
+            z.start_file(name, SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored)).unwrap();
+            z.write_all(bytes).unwrap();
+        }
+        z.finish().unwrap();
+    }
+    #[test] fn inspection_only_copies_identity_and_executable() {
+        let t = temp(); let ipa = t.join("a.ipa");
+        fixture(&ipa, &[("Payload/Test.app/Assets.car", b"untouched resource"),
+            ("Payload/Test.app/Frameworks/F.framework/F", b"framework")], "Main");
+        let original = fs::read(&ipa).unwrap();
+        extract_inspection(&ipa, &t.join("x")).unwrap();
+        assert_eq!(fs::read(t.join("x/Payload/Test.app/Main")).unwrap(), b"executable");
+        assert!(!t.join("x/Payload/Test.app/Assets.car").exists());
+        assert!(!t.join("x/Payload/Test.app/Frameworks").exists());
+        assert_eq!(fs::read(&ipa).unwrap(), original);
+        extract_zip(&ipa, &t.join("full")).unwrap();
+        assert_eq!(fs::read(t.join("full/Payload/Test.app/Assets.car")).unwrap(), b"untouched resource");
+        fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn inspection_checks_even_skipped_paths_and_case_parent_aliases() {
+        for bad in ["../escape", "/absolute", "Payload/test.app/asset", "Payload/Test.app/Main/child"] {
+            let t = temp(); let ipa = t.join("a.ipa"); fixture(&ipa, &[(bad, b"bad")], "Main");
+            assert!(extract_inspection(&ipa, &t.join("x")).is_err(), "{bad}");
+            assert!(!t.join("x").exists()); fs::remove_dir_all(t).unwrap();
+        }
+    }
+    #[test] fn inspection_rejects_unsafe_or_missing_executable_and_multiple_apps() {
+        for exe in ["../Main", "/Main", "nope", "Info.plist"] {
+            let t = temp(); let ipa=t.join("a.ipa"); fixture(&ipa, &[], exe);
+            assert!(extract_inspection(&ipa,&t.join("x")).is_err(), "{exe}");
+            assert!(!t.join("x").exists()); fs::remove_dir_all(t).unwrap();
+        }
+        let t=temp();let ipa=t.join("a.ipa");
+        fixture(&ipa,&[("Payload/Other.app/asset",b"other")],"Main");
+        assert!(extract_inspection(&ipa,&t.join("x")).is_err());
+        fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn inspection_rejects_skipped_symlink() {
+        let t=temp();let ipa=t.join("a.ipa");
+        let mut z=ZipWriter::new(File::create(&ipa).unwrap());
+        z.add_symlink("Payload/A.app/link","../../../outside",SimpleFileOptions::default()).unwrap();
+        z.finish().unwrap();
+        assert!(extract_inspection(&ipa,&t.join("x")).is_err());assert!(!t.join("x").exists());
+        fs::remove_dir_all(t).unwrap();
+    }
+    fn patched_size(p:&Path, size:u32, compressed:u32) {
+        let mut d=fs::read(p).unwrap();
+        let central=d.windows(4).rposition(|b| b==b"PK\x01\x02").unwrap();
+        d[central+20..central+24].copy_from_slice(&compressed.to_le_bytes());
+        d[central+24..central+28].copy_from_slice(&size.to_le_bytes());
+        fs::write(p,d).unwrap();
+    }
+    #[test] fn selective_inspection_accepts_resource_over_old_512mib_cap_without_reading_it() {
+        let t=temp();let ipa=t.join("a.ipa");
+        fixture(&ipa,&[("Payload/Test.app/Assets.car",b"not decompressed")],"Main");
+        // Metadata-only sparse resource fixture: a 600 MiB resource with a
+        // plausible 2 MiB compressed size, never opened by selective inspection.
+        patched_size(&ipa,600*1024*1024,2*1024*1024);
+        extract_inspection(&ipa,&t.join("x")).unwrap();
+        assert!(!t.join("x/Payload/Test.app/Assets.car").exists());
+        fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn expansion_bomb_and_total_limit_remain_enforced() {
+        for (size, compressed) in [(100_000u32,1u32),(u32::MAX,1_000_000)] {
+            let t=temp();let ipa=t.join("a.ipa");
+            fixture(&ipa,&[("Payload/Test.app/Assets.car",b"bad")],"Main");
+            patched_size(&ipa,size,compressed);
+            assert!(extract_inspection(&ipa,&t.join("x")).is_err());assert!(!t.join("x").exists());
+            fs::remove_dir_all(t).unwrap();
+        }
+        let t=temp();let ipa=t.join("a.ipa");
+        fixture(&ipa,&[("Payload/Test.app/A",b"x"),("Payload/Test.app/B",b"x")],"Main");
+        let mut d=fs::read(&ipa).unwrap();
+        let offsets:Vec<_>=d.windows(4).enumerate().filter(|(_,b)|*b==b"PK\x01\x02").map(|(i,_)|i).collect();
+        for o in offsets.into_iter().rev().take(2) {
+            d[o+20..o+24].copy_from_slice(&(4_000_000u32).to_le_bytes());
+            d[o+24..o+28].copy_from_slice(&(4_000_000_000u32).to_le_bytes());
+        }
+        fs::write(&ipa,d).unwrap();
+        assert!(extract_inspection(&ipa,&t.join("x")).unwrap_err().contains("size limit"));
+        fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn streamed_copy_checks_actual_size_and_preserves_existing_destination() {
+        let t=temp();
+        assert!(checked_write_limit(Cursor::new(b"too long"),&t.join("bad"),2,0o644,IPA_FILE_LIMIT).is_err());
+        let ipa=t.join("a.ipa");fixture(&ipa,&[],"Main");
+        fs::create_dir(t.join("x")).unwrap();fs::write(t.join("x/keep"),b"keep").unwrap();
+        assert!(extract_inspection(&ipa,&t.join("x")).is_err());
+        assert_eq!(fs::read(t.join("x/keep")).unwrap(),b"keep");fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn real_streamed_resource_over_512mib_extracts_without_large_buffer() {
+        let t=temp(); let ipa=t.join("large.ipa");
+        let mut z=ZipWriter::new(File::create(&ipa).unwrap());
+        z.start_file("Payload/Test.app/LargeResource",SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)).unwrap();
+        let size=513*1024*1024u64;
+        io::copy(&mut io::repeat(0x5a).take(size),&mut z).unwrap(); z.finish().unwrap();
+        extract_zip(&ipa,&t.join("x")).unwrap();
+        assert_eq!(fs::metadata(t.join("x/Payload/Test.app/LargeResource")).unwrap().len(),size);
+        fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn bad_selected_entry_crc_removes_disposable_extraction() {
+        let t=temp();let ipa=t.join("a.ipa");fixture(&ipa,&[],"Main");
+        let mut d=fs::read(&ipa).unwrap();
+        let offset=d.windows(10).position(|b|b==b"executable").unwrap();
+        d[offset]=b'X';fs::write(&ipa,d).unwrap();
+        assert!(extract_inspection(&ipa,&t.join("x")).is_err());
+        assert!(!t.join("x").exists());fs::remove_dir_all(t).unwrap();
+    }
+    #[test] fn ipa_limits_match_import_without_relaxing_package_code_limits() {
+        assert_eq!(IPA_FILE_LIMIT,4*1024*1024*1024);
+        assert_eq!(IPA_TOTAL_LIMIT,6*1024*1024*1024);
+        assert_eq!(IPA_EXECUTABLE_LIMIT,1_500_000_000);
+        assert_eq!(FILE_LIMIT,512*1024*1024);
     }
 }
