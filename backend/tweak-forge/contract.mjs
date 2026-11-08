@@ -36,6 +36,7 @@ export function settingsHeader(settings, values = {}) {
 // The builder wraps generated hooks in %group Main and installs the crash guard.
 export function assembleSource({ id, bundleID, code, settings, values }) {
   const guard = `#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 // Crash guard: a launch that never reached the 8s "ok" mark counts as a crash. Two in a row disables the tweak.
 static BOOL MirsaGuardAllow(void) {
   NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"];

@@ -86,3 +86,10 @@ test("admin rules", async () => {
   assert.equal(await adminCodeHash(" abcd-efgh-jklm-npqr "), await adminCodeHash("ABCD-EFGH-JKLM-NPQR"));
   assert.notEqual(await adminCodeHash("ABCD-EFGH-JKLM-NPQR"), await adminCodeHash("ABCD-EFGH-JKLM-NPQS"));
 });
+
+// UIKit must be imported by the trusted scaffold, not invented by the model.
+test('assembled source declares UIKit types for generation and compiler repair', () => {
+  const s = assembleSource({id:'uikit',bundleID:'com.test',code:'%hook UIView\n- (void)layoutSubviews { %orig; }\n%end',settings:[],values:{}});
+  assert.ok(s.includes('#import <UIKit/UIKit.h>'));
+  assert.ok(s.indexOf('#import <UIKit/UIKit.h>') < s.indexOf('%group Main'));
+});
