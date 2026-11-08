@@ -50,7 +50,7 @@ jobs:
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")))')
           xcrun simctl boot "$DEVICE" || true
-          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MirsaTests/ForgeDebTests -only-testing:MirsaTests/ForgeFeatureTests -only-testing:MirsaTests/ForgeInspectorTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee swift.log | tail -40
+          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MirsaTests/ForgeDebTests -only-testing:MirsaTests/ForgeFeatureTests -only-testing:MirsaTests/ForgeInspectorTests -only-testing:MirsaTests/ForgeFixInboxTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee swift.log | tail -40
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -146,6 +146,8 @@ struct ForgeProjectView: View {
     @State private var draft = ""
     @State private var updating = false
     @State private var fullLog: String?
+    @State private var failedVersionID: UUID?
+    @State private var reportTarget: ForgeFixReportTarget?
     @State private var showInspector = false
     @State private var actionVersion: ForgeVersion?
     @State private var renameDraft = ""
@@ -157,7 +159,7 @@ struct ForgeProjectView: View {
 
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
-    private func run(_ work: @escaping () async throws -> Void) { Task { error = nil; note = nil; fullLog = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log } catch { self.error = error.localizedDescription } } }
+    private func run(_ work: @escaping () async throws -> Void) { let startedVersion = store.project(id)?.currentVersion?.id; Task { error = nil; note = nil; fullLog = nil; failedVersionID = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log; self.failedVersionID = startedVersion } catch { self.error = error.localizedDescription } } }
 
     @ViewBuilder private func content(_ p: ForgeProject) -> some View {
         ScrollView {
@@ -180,10 +182,22 @@ struct ForgeProjectView: View {
                     }
                 }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 ForgeFeaturesView(id: id, prompt: $prompt, showInspector: $showInspector)
+                if let notice = store.fixNotice {
+                    HStack(alignment: .top) {
+                        Image(systemName: "checkmark.shield")
+                        Text(notice).font(.footnote)
+                        Spacer()
+                        Button { store.fixNotice = nil } label: { Image(systemName: "xmark") }
+                            .accessibilityLabel(tr("Done", "تم", ckb: "تەواو", kmr: "Temam"))
+                    }.foregroundStyle(.green).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
+                }
                 if let pending = store.pendingGalleryCode {
                     forgeButton("square.and.arrow.down", tr("Use community tweak", "استخدم تويك المجتمع", ckb: "تویکی کۆمەڵگا بەکاربهێنە", kmr: "Tweaka civakê bi kar bîne")) { store.editCode(id, code: pending); store.pendingGalleryCode = nil }
                 }
                 if let v = p.currentVersion {
+                    Button { reportTarget = ForgeFixReportTarget(versionID: v.id, kind: "crash", diagnostic: "") } label: {
+                        Label(ForgeFixText.report, systemImage: "wrench.and.screwdriver")
+                    }
                     if !v.settings.isEmpty { VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Settings", "الإعدادات", ckb: "ڕێکخستنەکان", kmr: "Mîheng")).font(.headline).foregroundStyle(.white)
                         ForEach(v.settings) { s in
@@ -209,7 +223,7 @@ struct ForgeProjectView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Versions", "النسخ", ckb: "وەشانەکان", kmr: "Guhertin")).font(.headline).foregroundStyle(.white)
                         ForEach(Array(p.versions.enumerated().reversed()), id: \.element.id) { i, ver in
-                            ForgeVersionRow(label: "v\(i + 1) · " + (ver.title ?? ver.prompt), active: ver.id == p.currentVersion?.id,
+                            ForgeVersionRow(label: "v\(i + 1) · " + (ver.fixSourceSHA256 != nil ? ForgeFixText.label : (ver.title ?? ver.prompt)), active: ver.id == p.currentVersion?.id,
                                 onRevert: { store.revert(id, to: ver.id) }, onEdit: { actionVersion = ver; renameDraft = ver.title ?? ""; versionMenu = true }, onDelete: { actionVersion = ver; confirmDelete = true })
                         }
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: MirsaRadius.l)
@@ -217,6 +231,9 @@ struct ForgeProjectView: View {
                 if let note { Text(note).font(.footnote).foregroundStyle(.green) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if let fullLog {
+                    if let failedVersionID {
+                        Button(ForgeFixText.report) { reportTarget = ForgeFixReportTarget(versionID: failedVersionID, kind: "build", diagnostic: fullLog) }
+                    }
                     DisclosureGroup(tr("Full log", "السجل الكامل", ckb: "تۆماری تەواو", kmr: "Têketina tev")) {
                         ScrollView(.horizontal) { Text(fullLog).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                     }.foregroundStyle(.white).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
@@ -224,7 +241,10 @@ struct ForgeProjectView: View {
             }.padding(MirsaSpacing.page).padding(.bottom, 90).frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
-        .task { await store.refreshStatus() }
+        .task { await store.refreshStatus(); await store.syncFixInbox() }
+        .sheet(item: $reportTarget) { target in
+            ForgeFixReportView(projectID: id, versionID: target.versionID, initialDiagnostic: target.diagnostic, kind: target.kind)
+        }
         .navigationBarHidden(true)
         .mirsaScreen()
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
