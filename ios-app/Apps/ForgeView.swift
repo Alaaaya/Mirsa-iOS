@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-private let forgeCard = Color(red: 0.11, green: 0.12, blue: 0.16)
+let forgeCard = Color(red: 0.11, green: 0.12, blue: 0.16)
 private let forgeBG = Color(red: 0.05, green: 0.06, blue: 0.09)
 struct ForgeShareItem: Identifiable { let url: URL; var id: String { url.path } }
 /// Secondary share action: the same tweak as a .deb. Only offered inside the share menu.
@@ -203,6 +203,7 @@ struct ForgeProjectView: View {
                             .disabled(!store.builderReady).opacity(store.builderReady ? 1 : 0.4)
                     }
                 }.padding(14).background(forgeCard).cornerRadius(16)
+                ForgeFeaturesView(id: id, prompt: $prompt)
                 if let pending = store.pendingGalleryCode {
                     forgeButton("square.and.arrow.down", tr("Use community tweak", "استخدم تويك المجتمع", ckb: "تویکی کۆمەڵگا بەکاربهێنە", kmr: "Tweaka civakê bi kar bîne")) { store.editCode(id, code: pending); store.pendingGalleryCode = nil }
                 }
