@@ -12,7 +12,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 @MainActor enum CertificateOTA {
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
     @discardableResult
-    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil) async throws -> PersonalProfileVerification {
+    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil) async throws -> PersonalProfileVerification {
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }
         else if let identity = try PersonalIdentityVault.savedIdentities().first { selectedMaterial = identity.material }
@@ -46,12 +46,71 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let info = try IPAEditorService.info(in: app)
         guard let bundleID = info["CFBundleIdentifier"] as? String,
               let version = info["CFBundleVersion"] as? String else { throw SideloadError.message("Missing application identity.") }
-        let bytes = try Data(contentsOf: kept, options: .mappedIfSafe)
-        guard bytes.count <= 30 * 1024 * 1024 else { throw SideloadError.message("OTA upload limit is 30 MB.") }
+        let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        let plan = try OTAChunkPlan(total: size)
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
-        let metadata: [String: Any] = ["bundleID": bundleID, "version": version, "title": (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID, "bytes": bytes.count]
+        let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
+        let manifestURL: URL
+        do {
+            manifestURL = try await oracleUpload(file: kept, plan: plan, token: token, bundleID: bundleID, version: version, title: title, progress: progress)
+        } catch let e as OTAChunkError where e == .cancelled || e == .tooLarge { throw e }
+        catch is CancellationError { throw OTAChunkError.cancelled }
+        catch {
+            guard size <= 30 * 1024 * 1024 else {
+                throw SideloadError.message(personalText("Upload server unavailable. Large apps need it; try again later.", "سيرفر الرفع مو متاح. التطبيقات الكبيرة بتحتاجه، جرب بعدين."))
+            }
+            manifestURL = try await legacyUpload(file: kept, size: size, token: token, bundleID: bundleID, version: version, title: title)
+        }
+        let manifest = manifestURL.absoluteString
+        var install = URLComponents()
+        install.scheme = "itms-services"
+        install.queryItems = [.init(name: "action", value: "download-manifest"), .init(name: "url", value: manifest)]
+        guard let target = install.url, await UIApplication.shared.open(target) else {
+            throw SideloadError.message(personalText("iOS could not open OTA installation.", "iOS ما قدر يفتح تثبيت OTA."))
+        }
+        return signed.verification
+        // Opening the installer is not evidence of successful device installation.
+        // Keep the signed artifact even after handing off to iOS.
+        } catch {
+            throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, kept), signedURL: kept)
+        }
+    }
+}
+
+extension CertificateOTA {
+    static let brokerURL = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota?action=oracle-session")!
+    static func oracleUpload(file: URL, plan: OTAChunkPlan, token: String, bundleID: String, version: String, title: String, progress: ((Double) -> Void)?) async throws -> URL {
+        var req = URLRequest(url: brokerURL, timeoutInterval: 30)
+        req.httpMethod = "POST"
+        req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["bundleID": bundleID, "version": version, "title": title, "bytes": Int(plan.total)])
+        let cfg = URLSessionConfiguration.ephemeral; cfg.httpCookieStorage = nil
+        let s = URLSession(configuration: cfg, delegate: OTANoRedirect(), delegateQueue: nil)
+        defer { s.invalidateAndCancel() }
+        let (d, resp) = try await s.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw OTAChunkError.server(code) }
+        let session = try OTAOracleWire.session(from: d)
+        let up = OTAChunkUploader()
+        return try await withTaskCancellationHandler {
+            do {
+                let start = try await up.open(session)
+                try await up.upload(file: file, total: plan.total, session: session, from: start) { f in
+                    DispatchQueue.main.async { progress?(f) }
+                }
+                return try await up.finalize(session)
+            } catch {
+                if error as? OTAChunkError == .cancelled { await up.abort(session) }
+                throw error
+            }
+        } onCancel: { up.cancel() }
+    }
+    static func legacyUpload(file: URL, size: Int64, token: String, bundleID: String, version: String, title: String) async throws -> URL {
+        let bytes = try Data(contentsOf: file, options: .mappedIfSafe)
+        let metadata: [String: Any] = ["bundleID": bundleID, "version": version, "title": title, "bytes": Int(size)]
         let data = try JSONSerialization.data(withJSONObject: metadata)
         var request = URLRequest(url: endpoint, timeoutInterval: 120)
         request.httpMethod = "POST"
@@ -72,18 +131,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
               url.path == endpoint.path, url.user == nil, url.password == nil else {
             throw SideloadError.message(personalText("Temporary OTA upload failed or quota reached.", "رفع التثبيت المؤقت فشل أو وصل للحد المسموح."))
         }
-        var install = URLComponents()
-        install.scheme = "itms-services"
-        install.queryItems = [.init(name: "action", value: "download-manifest"), .init(name: "url", value: manifest)]
-        guard let target = install.url, await UIApplication.shared.open(target) else {
-            throw SideloadError.message(personalText("iOS could not open OTA installation.", "iOS ما قدر يفتح تثبيت OTA."))
-        }
-        return signed.verification
-        // Opening the installer is not evidence of successful device installation.
-        // Keep the signed artifact even after handing off to iOS.
-        } catch {
-            throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, kept), signedURL: kept)
-        }
+        return url
     }
 }
 

@@ -23,4 +23,18 @@ final class OTAChunkTests: XCTestCase {
         XCTAssertNotNil(OTAChunkError.tooLarge.errorDescription)
         XCTAssertNotNil(OTAChunkError.server(500).errorDescription)
     }
+    func testSessionWireValidation() throws {
+        let ok = #"{"uploadURL":"https://mirsa-app.mooo.com/ota/sessions/abc","uploadToken":"t","maxChunkBytes":99999999999}"#.data(using: .utf8)!
+        let s = try OTAOracleWire.session(from: ok)
+        XCTAssertEqual(s.maxChunk, 8 * 1024 * 1024)
+        for bad in [#"{"uploadURL":"https://evil.com/ota/sessions/a","uploadToken":"t"}"#,
+                    #"{"uploadURL":"https://mirsa-app.mooo.com/other","uploadToken":"t"}"#,
+                    #"{"uploadURL":"https://mirsa-app.mooo.com/ota/sessions/a","uploadToken":""}"#] {
+            XCTAssertThrowsError(try OTAOracleWire.session(from: bad.data(using: .utf8)!))
+        }
+    }
+    func testOffsetParse() {
+        XCTAssertEqual(OTAOracleWire.offset(from: #"{"offset":8388608,"total":9}"#.data(using: .utf8)!), 8388608)
+        XCTAssertNil(OTAOracleWire.offset(from: Data("x".utf8)))
+    }
 }
