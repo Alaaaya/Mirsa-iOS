@@ -14,4 +14,11 @@ final class ForgeServerMessageTests: XCTestCase {
         XCTAssertNil(ForgeServerMessage.text(d(#"{"error":"busy"}"#), lang: "en"))
         XCTAssertNil(ForgeServerMessage.text(Data(), lang: "en"))
     }
+    func testNeedsInspectorFlagsAndText() {
+        XCTAssertTrue(ForgeServerMessage.needsInspector(d(#"{"error":"unsupported_request","needsInspector":true,"message":"x"}"#)))
+        XCTAssertTrue(ForgeServerMessage.needsInspector(d(#"{"error":"inspector_required"}"#)))
+        XCTAssertTrue(ForgeServerMessage.needsInspector(d(#"{"message":{"ar":"افتح المفتش أولاً","en":"x"}}"#)))
+        XCTAssertFalse(ForgeServerMessage.needsInspector(d(#"{"error":"unsupported_request","message":"Not possible"}"#)))
+        XCTAssertFalse(ForgeServerMessage.needsInspector(Data()))
+    }
 }

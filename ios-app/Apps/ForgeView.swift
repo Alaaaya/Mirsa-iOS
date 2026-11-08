@@ -149,6 +149,7 @@ struct ForgeProjectView: View {
     @State private var failedVersionID: UUID?
     @State private var reportTarget: ForgeFixReportTarget?
     @State private var showInspector = false
+    @State private var needsInspector = false
     @State private var actionVersion: ForgeVersion?
     @State private var renameDraft = ""
     @State private var versionMenu = false
@@ -160,7 +161,7 @@ struct ForgeProjectView: View {
     @State private var importingDylib = false
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
-    private func run(_ work: @escaping () async throws -> Void) { let startedVersion = store.project(id)?.currentVersion?.id; Task { error = nil; note = nil; fullLog = nil; failedVersionID = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log; self.failedVersionID = startedVersion } catch { self.error = error.localizedDescription } } }
+    private func run(_ work: @escaping () async throws -> Void) { let startedVersion = store.project(id)?.currentVersion?.id; Task { error = nil; needsInspector = false; note = nil; fullLog = nil; failedVersionID = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log; self.failedVersionID = startedVersion } catch ForgeClient.Failure.inspectorNeeded(let m) { self.error = m; self.needsInspector = true } catch { self.error = error.localizedDescription } } }
 
     @ViewBuilder private func content(_ p: ForgeProject) -> some View {
         ScrollView {
@@ -222,7 +223,7 @@ struct ForgeProjectView: View {
                         forgeButton("globe", tr("Publish", "انشر", ckb: "بڵاوکردنەوە", kmr: "Biweşîne")) { run { try await store.publish(id); note = tr("Published.", "انشر.", ckb: "بڵاوکرایەوە.", kmr: "Hat weşandin.") } }
                     }
                     if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
-                    if p.versions.contains(where: { $0.importedInfo != nil }) { ForgeImportedDylibsView(id: id, versions: p.versions.filter { $0.importedInfo != nil }).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
+                    if p.versions.contains(where: { $0.importedInfo != nil }) { ForgeImportedDylibsView(id: id, versions: p.versions.filter { $0.importedInfo != nil }, openInspector: { showInspector = true }).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     VStack(alignment: .leading, spacing: 8) {
                         Text(tr("Versions", "النسخ", ckb: "وەشانەکان", kmr: "Guhertin")).font(.headline).foregroundStyle(.white)
                         ForEach(Array(p.versions.enumerated().reversed()), id: \.element.id) { i, ver in
@@ -233,6 +234,7 @@ struct ForgeProjectView: View {
                 }
                 if let note { Text(note).font(.footnote).foregroundStyle(.green) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+                if needsInspector { Button(ForgeInspectorText.open) { showInspector = true } }
                 if let fullLog {
                     if let failedVersionID {
                         Button(ForgeFixText.report) { reportTarget = ForgeFixReportTarget(versionID: failedVersionID, kind: "build", diagnostic: fullLog) }

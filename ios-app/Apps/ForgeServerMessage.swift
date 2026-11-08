@@ -60,4 +60,26 @@ enum ForgeServerMessage {
         }
         return String(out.prefix(1500))
     }
+
+    /// True only when the server says the refusal needs inspector data: an explicit structured flag/code, or the localized
+    /// message/next steps themselves point at the Inspector. Reads local response text only; nothing is sent anywhere.
+    static func needsInspector(_ data: Data) -> Bool {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        var objs = [root]
+        if let e = root["error"] as? [String: Any] { objs.append(e) }
+        if let d = root["details"] as? [String: Any] { objs.append(d) }
+        let codes: Set<String> = ["needs_inspector", "inspector_required", "inspector_data_required", "open_inspector", "inspector"]
+        for o in objs {
+            for k in ["needsInspector", "needs_inspector", "inspectorRequired", "inspector_required"] { if (o[k] as? Bool) == true { return true } }
+            for k in ["error", "code", "reason", "action", "nextAction", "next_action"] { if let c = (o[k] as? String)?.lowercased(), codes.contains(c) { return true } }
+        }
+        let lower = ForgeServerMessage.allText(root).lowercased()
+        return ["inspector", "المفتش", "الفاحص", "پشکنەر", "lêkolîner", "lekolîner"].contains { lower.contains($0) }
+    }
+    private static func allText(_ root: [String: Any]) -> String {
+        var out: [String] = []
+        for l in ["en", "ar", "ckb", "kmr"] { if let t = text(Data((try? JSONSerialization.data(withJSONObject: root)) ?? Data()), lang: l) { out.append(t) } }
+        return out.joined(separator: "
+")
+    }
 }

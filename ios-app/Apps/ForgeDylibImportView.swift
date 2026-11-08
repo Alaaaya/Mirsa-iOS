@@ -87,6 +87,8 @@ struct ForgeDylibImportSheet: View {
 struct ForgeImportedDylibsView: View {
     let id: UUID
     let versions: [ForgeVersion]
+    var openInspector: () -> Void = {}
+    @State private var needsInspector = false
     @ObservedObject private var store = ForgeStore.shared
     @State private var asking: ForgeVersion?
     @State private var request = ""
@@ -115,10 +117,11 @@ struct ForgeImportedDylibsView: View {
             Text(ForgeDylibText.disabledNote).font(.caption).foregroundStyle(.white.opacity(0.6))
             Text(ForgeDylibText.companionNote).font(.caption).foregroundStyle(.white.opacity(0.5))
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if needsInspector { Button(ForgeInspectorText.open) { openInspector() } }
         }
         .alert(ForgeDylibText.companion, isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } })) {
             TextField(tr("What should it do?", "شو بدك يعمل؟", ckb: "چی بکات؟", kmr: "Çi bike?"), text: $request)
-            Button(tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { if let v = asking { Task { do { try await store.generateCompanion(id, from: v, request: request); error = nil } catch { self.error = error.localizedDescription } } } }
+            Button(tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { if let v = asking { Task { do { try await store.generateCompanion(id, from: v, request: request); error = nil; needsInspector = false } catch ForgeClient.Failure.inspectorNeeded(let m) { self.error = m; needsInspector = true } catch { self.error = error.localizedDescription } } } }
             Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {}
         }
     }
