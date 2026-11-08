@@ -244,6 +244,7 @@ struct ForgeProject: Codable, Identifiable {
             if needsRebuild(p) || !FileManager.default.fileExists(atPath: lib.path) { lib = try await build(id) }
             libs.append(lib)
         }
+        let finalLibs = libs
         if libs.isEmpty { throw ForgeClient.Failure.message(tr("No enabled dylib to inject.", "ما في dylib مفعّل للحقن.", ckb: "هیچ dylibێکی چالاک نییە.", kmr: "dylibeke çalak tune.")) }
         busy = tr("Injecting…", "عم أحقن…", ckb: "دەچەسپێنرێت…", kmr: "Tê xistin…"); defer { busy = nil }
         let source = dir(p).appendingPathComponent("source.ipa"), exe = p.executable, name = p.appName
@@ -255,7 +256,7 @@ struct ForgeProject: Codable, Identifiable {
             let x = tmp.appendingPathComponent("x", isDirectory: true)
             try IPAEditorService.run("extract", input: source, output: x)
             let app = try IPAEditorService.app(in: x)
-            try IPAEditorService.run("inject", input: app, executable: exe, libraries: libs)
+            try IPAEditorService.run("inject", input: app, executable: exe, libraries: finalLibs)
             try IPAEditorService.run("pack", input: x, output: out)
         }.value
         return out
