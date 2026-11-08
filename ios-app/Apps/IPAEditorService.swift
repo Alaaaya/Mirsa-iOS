@@ -11,7 +11,7 @@ enum IPAEditorService {
 
     static func run(_ operation: String, input: URL, output: URL? = nil,
                     executable: String? = nil, libraries: [URL] = [], newFirst: Bool = false,
-                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false) throws {
+                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil) throws {
         var request: [String: Any] = ["operation": operation, "input": input.path]
         if let output { request["output"] = output.path }
         if let executable { request["executable"] = executable }
@@ -20,6 +20,11 @@ enum IPAEditorService {
         if let injections { request["injections"] = injections }
         if let order { request["order"] = order }
         if useLoader { request["use_loader"] = true }
+        if let options = signingOptions {
+            request["remove_extensions"] = options.removeExtensions
+            request["remove_watch"] = options.removeWatchApp
+            request["remove_app_clips"] = options.removeAppClips
+        }
         let data = try JSONSerialization.data(withJSONObject: request)
         guard let text = String(data: data, encoding: .utf8),
               let response = text.withCString({ al_ipa_editor_run($0) }) else {
