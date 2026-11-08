@@ -114,6 +114,13 @@ final class ForgeCommunityUpdateTests: XCTestCase {
         XCTAssertNil(old.versions[0].communitySourceID)
     }
 
+    func testSourceVersionMustMatchEntry() {
+        XCTAssertTrue(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 2, entryVersion: 2))
+        XCTAssertFalse(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 3, entryVersion: 2))
+        XCTAssertFalse(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: nil, entryVersion: 2))
+        XCTAssertFalse(ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: 1, entryVersion: nil))
+    }
+
     func testPendingSourceClearsWithCode() {
         let s = ForgeStore.shared
         s.pendingGalleryCode = "code"; s.pendingGallerySource = (id: "e", version: 1)

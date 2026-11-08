@@ -2,6 +2,11 @@ import SwiftUI
 
 /// Pure, testable decisions behind the update sheet and the consumer badge.
 enum ForgeCommunityUpdateLogic {
+    /// The fetched source must be the exact revision the card shows, otherwise a diff/publish would compare different CAS versions.
+    static func sourceMatches(fetchedVersion: Int?, entryVersion: Int?) -> Bool {
+        guard let f = fetchedVersion, let e = entryVersion else { return false }
+        return f == e
+    }
     /// Facts only. Returns nil when the published code could not be fetched: never a misleading zero.
     static func changeLines(publishedCode: String?, publishedSettings: Int?, local: ForgeVersion?) -> [String]? {
         guard let pub = publishedCode, let lv = local else { return nil }
@@ -136,7 +141,8 @@ struct ForgeCommunityUpdateSheet: View {
     private func loadPublished() async {
         guard !item.id.isEmpty, item.mine, !item.uploaded,
               let d = try? await ForgeClient.get(["action": "gallery-source", "id": item.id]),
-              let code = d["code"] as? String else { loadFailed = true; return }
+              let code = d["code"] as? String,
+              ForgeCommunityUpdateLogic.sourceMatches(fetchedVersion: d["version"] as? Int, entryVersion: item.version) else { loadFailed = true; return }
         publishedCode = code
         publishedSettings = (d["settings"] as? [Any])?.count
         publishedLoaded = true
