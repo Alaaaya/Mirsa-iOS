@@ -46,5 +46,9 @@
   "1.3.185": {
     "ar": "زر «احقن» صار يفتح خيارات تثبيت ملف IPA الناتج بدل المشاركة فقط، مع الاحتفاظ بالملف لحد ما تخلص العملية. اختيار التطبيق الهدف صار من الملفات أو مكتبتي أو المشاريع أو رابط HTTPS أو متصفح المصادر المضافة للبحث والتنزيل، بدون تغيير الملفات الأصلية. صلّحنا مشكلة إلغاء رفع OTA اللي كانت ممكن تسبّب كراش. التثبيت بالشهادة حتى 2 جيجابايت وتحسينات سجل التويكات وزر الرجوع موجودين. هالتحديث لسا مو مجرّب على جهاز فعلي.",
     "en": "Inject now opens the existing IPA installation choices instead of only sharing, retaining the generated file until the operation finishes. Choose a target from Files, your personal library, projects, an HTTPS URL, or the added-sources browser for search and download, while preserving original files. Fixed an OTA upload cancellation crash. Includes certificate uploads up to 2 GB, clearer tweak build logs and the back-button fix. This update has not yet been tested on a physical device."
+  },
+  "1.3.188": {
+    "ar": "أيقونات التطبيقات بالصفحة الرئيسية صار خلفيتها صغيرة وملاصقة للأيقونة بهامش خفيف من كل الجهات، والاسم تحتها، وبقي الضغط المطوّل وإعادة الترتيب مثل ما هم.",
+    "en": "App icons on the home screen now sit on a compact background that hugs the icon with a small margin on every side, with the name below. Long-press and reorder are unchanged."
   }
 }
