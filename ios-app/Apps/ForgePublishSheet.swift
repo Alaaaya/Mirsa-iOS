@@ -32,6 +32,7 @@ struct ForgePublishSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    ForgeFeatureGuide(.publish)
                     VStack(alignment: .leading, spacing: 6) {
                         label(tr("Tweak name", "اسم التويك", ckb: "ناوی تویک", kmr: "Navê tweak"))
                         TextField("", text: $name).textFieldStyle(.plain).padding(10).background(Color.black.opacity(0.3)).cornerRadius(10)
