@@ -383,10 +383,11 @@ struct ForgeGalleryView: View {
         }
         do {
             let d = try await ForgeClient.get(["action": "gallery-item", "id": id])
-            ForgeStore.shared.pendingGalleryCode = d["code"] as? String
-            ForgeStore.shared.pendingGallerySource = (id: id, version: (d["version"] as? Int) ?? (it["version"] as? Int))
+            guard let code = d["code"] as? String, !code.isEmpty else { throw ForgeClient.Failure.message(tr("This tweak has no code to use.", "هالتويك ما فيه كود للاستخدام.", ckb: "ئەم تویکە کۆدی نییە.", kmr: "Ev tweak kod nîne.")) }
+            ForgeStore.shared.pendingGalleryCode = code
+            ForgeStore.shared.pendingGallerySource = (id: id, version: d["version"] as? Int)
             note = tr("Open one of your tweak projects and tap Use community tweak.", "افتح مشروع تويك وكبس استخدم تويك المجتمع.", ckb: "پڕۆژەیەکی تویک بکەرەوە.", kmr: "Projeyekê veke.")
-        } catch { self.error = error.localizedDescription }
+        } catch { ForgeStore.shared.pendingGalleryCode = nil; self.error = error.localizedDescription }
     }
 }
 
