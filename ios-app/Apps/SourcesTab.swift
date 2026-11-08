@@ -117,7 +117,7 @@ final class SourcesStore: ObservableObject {
     /// user who deletes one keeps it deleted).
     static let builtIn: [(url: String, name: String)] = [
         ("https://repository.apptesters.org", "AppTesters IPA Repo"),
-        ("https://github.com/Alaaaya/Mirsa/releases/download/setup/source.json", "Mirsa"),
+        (MirsaSourceFeed.primary, "Mirsa"),
         ("https://itslevii.dev/repo.json", "itslevii"),
         ("https://raw.githubusercontent.com/Sami-Wali/ryP0-repository/main/repo.json", "ryP0"),
     ]
@@ -134,7 +134,7 @@ final class SourcesStore: ObservableObject {
             }
             UserDefaults.standard.set(true, forKey: seededKey)
         }
-        sources = list
+        sources = MirsaSourceFeed.migrate(list)
         save()
     }
 
@@ -179,20 +179,27 @@ final class SourcesStore: ObservableObject {
         loading.insert(url)
         defer { loading.remove(url) }
         do {
-            var req = URLRequest(url: u)
-            req.cachePolicy = .reloadIgnoringLocalCacheData
-            req.timeoutInterval = 20
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) {
-                throw NSError(domain: "Mirsa", code: h.statusCode,
-                              userInfo: [NSLocalizedDescriptionKey: MirsaTr.f("sourceAnswered", h.statusCode)])
+            let data: Data, base: URL
+            if MirsaSourceFeed.isOwned(url) {
+                let f = try await MirsaSourceFeed.fetch()
+                data = f.data; base = f.url
+            } else {
+                var req = URLRequest(url: u)
+                req.cachePolicy = .reloadIgnoringLocalCacheData
+                req.timeoutInterval = 20
+                let (d, resp) = try await URLSession.shared.data(for: req)
+                if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) {
+                    throw NSError(domain: "Mirsa", code: h.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: MirsaTr.f("sourceAnswered", h.statusCode)])
+                }
+                data = d; base = u
             }
             let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
             let root: [String: Any]? = (json as? [String: Any]) ?? ((json as? [[String: Any]]).map { ["apps": $0] })
             guard let root else {
                 throw NSError(domain: "Mirsa", code: 0, userInfo: [NSLocalizedDescriptionKey: tr("Not a source file.", "هذا مو ملف سورس.")])
             }
-            let parsed = Self.parseApps(root, base: u)
+            let parsed = Self.parseApps(root, base: base)
             apps[url] = parsed
             if let i = sources.firstIndex(where: { $0.url == url }) {
                 var s = sources[i]
