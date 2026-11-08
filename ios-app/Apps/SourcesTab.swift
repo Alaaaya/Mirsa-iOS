@@ -285,6 +285,7 @@ extension Color {
 // MARK: - Views
 
 struct SourcesTab: View {
+    var onSelectIPA: ((URL) async throws -> Void)? = nil
     @StateObject private var store = SourcesStore.shared
     @ObservedObject private var installedApps = AppsStore.shared
     @State private var adding = false
@@ -312,7 +313,7 @@ struct SourcesTab: View {
                     .listRowBackground(Color.clear)
                 }
                 ForEach(store.visibleSources) { s in
-                    NavigationLink { SourceDetailView(source: s) } label: { SourceRow(source: s, loading: store.loading.contains(s.url)) }
+                    NavigationLink { SourceDetailView(source: s, onSelectIPA: onSelectIPA) } label: { SourceRow(source: s, loading: store.loading.contains(s.url)) }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .swipeActions(edge: .leading) {
@@ -421,6 +422,7 @@ private struct SourceRow: View {
 
 struct SourceDetailView: View {
     let source: RepoSource
+    var onSelectIPA: ((URL) async throws -> Void)? = nil
     @ObservedObject private var store = SourcesStore.shared
     @ObservedObject private var apps = AppsStore.shared
     @State private var query = ""
@@ -432,7 +434,7 @@ struct SourceDetailView: View {
         }
         List {
             ForEach(shown) { a in
-                RepoAppRow(app: a, installed: apps.apps.first { $0.id == a.bundleID })
+                RepoAppRow(app: a, installed: apps.apps.first { $0.id == a.bundleID }, onSelectIPA: onSelectIPA)
                     .listRowBackground(Color.clear)
             }
             if all.isEmpty && !store.loading.contains(source.url) {
@@ -451,6 +453,10 @@ struct SourceDetailView: View {
 private struct RepoAppRow: View {
     let app: RepoApp
     let installed: ManagedApp?
+    var onSelectIPA: ((URL) async throws -> Void)? = nil
+    @StateObject private var downloader = PersonalIPADownloader()
+    @State private var selecting = false
+    @State private var selectionError: String?
     @State private var showInfo = false
 
     var body: some View {
@@ -472,20 +478,37 @@ private struct RepoAppRow: View {
                     .background(.white.opacity(0.15), in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(AppsStore.shared.busy != nil)
+            .disabled(selecting || AppsStore.shared.busy != nil)
         }
         .contentShape(Rectangle())
         .onTapGesture { showInfo = true }
         .sheet(isPresented: $showInfo) { RepoAppInfo(app: app, install: install) }
+        .alert(tr("Notice", "تنبيه"), isPresented: Binding(get: { selectionError != nil }, set: { if !$0 { selectionError = nil } })) { Button(tr("OK", "تمام")) { selectionError = nil } } message: { Text(selectionError ?? "") }
+        .overlay(alignment: .bottom) { if selecting { ProgressView(value: downloader.fraction).padding(4) } }
     }
 
     private var buttonTitle: String {
+        if onSelectIPA != nil { return selecting ? tr("Downloading…", "عم يتحمّل…") : tr("Choose", "اختيار") }
         guard let i = installed else { return tr("GET", "تثبيت") }
         return i.version == app.version || app.version.isEmpty ? tr("OPEN", "مثبّت") : tr("UPDATE", "تحديث")
     }
 
     private func install() {
         showInfo = false
+        if let onSelectIPA {
+            guard !selecting else { return }
+            selecting = true
+            Task { @MainActor in
+                var file: URL?
+                defer { if let file { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }; selecting = false }
+                do {
+                    let url = try await downloader.download(app.downloadURL.absoluteString)
+                    file = url
+                    try await onSelectIPA(url)
+                } catch { selectionError = error.localizedDescription }
+            }
+            return
+        }
         let target = installed?.location   // update keeps its place; new apps ask Container or Real
         AppViewModel.shared?.selectedTab = .apps
         Task { await AppsStore.shared.installFromURL(app.downloadURL, location: target, appID: app.bundleID) }
