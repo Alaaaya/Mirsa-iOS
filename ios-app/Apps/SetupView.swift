@@ -19,7 +19,7 @@ struct SetupView: View {
             AuroraBackground()
 
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: MirsaSpacing.m) {
                     header
                     step(1, icon: "lock.shield.fill", title: L.t("setup.network"),
                          status: networkOK ? L.t("setup.networkOK") : L.t("setup.networkOff"),
@@ -41,14 +41,15 @@ struct SetupView: View {
                     Text(L.t("setup.note"))
                         .font(.footnote)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(MirsaPalette.textTertiary)
                         .padding(.horizontal, 10)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 30)
+                .padding(.horizontal, MirsaSpacing.page)
+                .padding(.top, MirsaSpacing.xxl)
                 .padding(.bottom, 60)
             }
             .scrollIndicators(.hidden)
+            .mirsaStatusBarScrim()
 
             if let busy = store.busy { BusyOverlay(text: busy, progress: store.progress, isDownloading: store.isDownloading, hasKnownSize: store.downloadHasKnownSize, onCancel: { store.cancelDownload() }) }
         }
@@ -58,17 +59,17 @@ struct SetupView: View {
         }) {
             SetupPairingSheet().environmentObject(vm)
                 .presentationDetents([.large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .sheet(isPresented: $showLogin) {
             LoginSheet(store: store)
                 .presentationDetents([.large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
         }
         .sheet(item: $store.prompt) { p in
             PromptSheet(prompt: p) { store.prompt = nil }
                 .presentationDetents([.medium, .large])
-                .presentationBackground(.ultraThinMaterial)
+                .mirsaSheetBackground()
                 .interactiveDismissDisabled()
         }
         .alert(L.t("setup.title"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
@@ -93,44 +94,60 @@ struct SetupView: View {
                 }
             }
             .frame(width: 84, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.l, style: .continuous))
             .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
-            Text(L.t("setup.title")).font(.largeTitle.bold()).foregroundStyle(.white)
+            Text(L.t("setup.title")).font(MirsaFont.pageTitle).foregroundStyle(.white)
+                .multilineTextAlignment(.center)
             Text(L.t("setup.sub"))
-                .font(.subheadline).multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.7))
+                .font(MirsaFont.secondary).multilineTextAlignment(.center)
+                .foregroundStyle(MirsaPalette.textSecondary)
         }
         .padding(.bottom, 6)
     }
 
     private func step(_ n: Int, icon: String, title: String, status: String, ok: Bool,
                       action: String?, perform: @escaping () -> Void) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle().fill(ok ? Color.green.opacity(0.85) : Color.white.opacity(0.12))
-                    .frame(width: 44, height: 44)
-                Image(systemName: ok ? "checkmark" : icon)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(n). \(title)").font(.headline).foregroundStyle(.white)
-                Text(status).font(.subheadline)
-                    .foregroundStyle(ok ? .green : .white.opacity(0.6))
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            if let action {
-                Button(action: perform) {
-                    Text(action).font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                }
+        let badge = ZStack {
+            Circle().fill(ok ? AnyShapeStyle(MirsaPalette.success) : AnyShapeStyle(MirsaPalette.cardRaised))
+                .frame(width: MirsaIconSize.button, height: MirsaIconSize.button)
+            Image(systemName: ok ? "checkmark" : icon)
+                .font(.system(size: MirsaIconSize.m, weight: .bold))
                 .foregroundStyle(.white)
-                .appsGlassCapsule()
+        }
+        let texts = VStack(alignment: .leading, spacing: 3) {
+            Text("\(n). \(title)").font(MirsaFont.cardTitle).foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(status).font(MirsaFont.secondary)
+                .foregroundStyle(ok ? MirsaPalette.success : MirsaPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        let button = action.map { a in
+            Button(action: perform) { Text(a).lineLimit(1).fixedSize() }
+                .buttonStyle(.mirsaSecondary)
+                .controlSize(.small)
+        }
+        // One row when everything fits; otherwise the action moves under the text
+        // instead of squeezing the title into a narrow, truncated column.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                badge
+                texts.fixedSize()
+                Spacer(minLength: MirsaSpacing.xs)
+                button
+            }
+            HStack(alignment: .top, spacing: 14) {
+                badge
+                VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+                    texts
+                    button
+                }
+                Spacer(minLength: 0)
             }
         }
-        .padding(16)
-        .appsGlass(cornerRadius: 22)
+        .padding(MirsaSpacing.card)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appsGlass(cornerRadius: MirsaRadius.l)
+        .mirsaAppear(delay: Double(n) * 0.05)
     }
 
     private var installButton: some View {
@@ -138,13 +155,10 @@ struct SetupView: View {
             Task { await store.installSelf(vm: vm) }
         } label: {
             Label(L.t("setup.install"), systemImage: "arrow.down.app.fill")
-                .font(.headline)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
         }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.capsule)
-        .tint(Color(red: 0.45, green: 0.38, blue: 1.0))
+        .buttonStyle(.mirsaPrimary)
+        .controlSize(.large)
         .disabled(!ready || store.busy != nil)
         .padding(.top, 6)
     }
@@ -157,13 +171,11 @@ struct SetupView: View {
                 .foregroundStyle(.white)
             if let bid = store.installedSelfBundleID {
                 Button(L.t("setup.open")) { _ = AppsStore.openInstalledApp(bundleID: bid) }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .tint(.green)
+                    .buttonStyle(.mirsaSecondary)
             }
         }
-        .padding(16)
+        .padding(MirsaSpacing.card)
         .frame(maxWidth: .infinity)
-        .appsGlass(cornerRadius: 22, tint: .green)
+        .appsGlass(cornerRadius: MirsaRadius.l, tint: MirsaPalette.success)
     }
 }

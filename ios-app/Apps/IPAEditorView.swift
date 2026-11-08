@@ -56,7 +56,7 @@ struct IPAEditorView: View {
                             .frame(maxWidth: .infinity).padding(16)
                             .appsGlass(cornerRadius: 18, tint: .purple)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.mirsaPress)
                         .disabled(saving || library.importing || (!options.tweakIDs.isEmpty && !trustsTweaks))
                     }
                     .padding(20)
@@ -192,7 +192,7 @@ struct IPAEditorView: View {
                     }
                     .padding(.vertical, 5).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.mirsaPress)
             }
             if !options.tweakIDs.isEmpty {
                 Toggle(editorText("I trust the selected code", "أنا واثق من هالملفات"), isOn: $trustsTweaks)
@@ -240,7 +240,7 @@ struct IPATweakLibraryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Text(editorText("Your code, your library", "ملفاتك ومكتبتك"))
-                            .font(.title2.bold())
+                            .font(MirsaFont.sheetTitle)
                         Text(editorText("Files are kept on this device. Imports are not executed. Only select code from developers you trust.",
                                         "الملفات بتنحفظ على هالجهاز وما بتشتغل وقت الإضافة. اختار ملفات من مطوّرين بتوثق فيهم."))
                             .font(.subheadline).foregroundStyle(.white.opacity(0.65))
@@ -249,7 +249,7 @@ struct IPATweakLibraryView: View {
                                 .font(.headline).frame(maxWidth: .infinity).padding(16)
                                 .appsGlass(cornerRadius: 18, tint: .purple)
                         }
-                        .buttonStyle(.plain).disabled(library.importing)
+                        .buttonStyle(.mirsaPress).disabled(library.importing)
                         VStack(alignment: .leading, spacing: 10) {
                             Text(editorText("Direct HTTPS download", "رابط تنزيل HTTPS مباشر")).font(.subheadline.weight(.medium))
                             TextField("https://example.com/tweak.deb", text: $remoteURL)

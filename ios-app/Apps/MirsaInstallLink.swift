@@ -110,8 +110,8 @@ struct MirsaInstallLinkView: View {
                     catch { self.error = error.localizedDescription }
                     busy = false
                 }
-            }.buttonStyle(.borderedProminent).disabled(busy)
-        }.padding(18).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+            }.buttonStyle(.mirsaPrimary).disabled(busy)
+        }.padding(MirsaSpacing.card).mirsaCard(radius: MirsaRadius.l)
             .environment(\.layoutDirection, .leftToRight)
     }
     private func qr(_ url: URL) -> UIImage? {
