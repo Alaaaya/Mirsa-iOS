@@ -9,6 +9,7 @@ public func mirsaSwiftMain() {
 
 struct MirsaApp: App {
     @UIApplicationDelegateAdaptor(MirsaDownloadAppDelegate.self) private var downloadDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var vm = AppViewModel()
     @StateObject private var language = AppLanguageStore.shared
 
@@ -44,6 +45,10 @@ struct MirsaApp: App {
             .id(language.current)
             .mirsaKeyboardDismissal()
             .mirsaLeftToRightChrome()
+            .task { await ForgeStore.shared.syncFixInbox() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await ForgeStore.shared.syncFixInbox() } }
+            }
         }
     }
 }
