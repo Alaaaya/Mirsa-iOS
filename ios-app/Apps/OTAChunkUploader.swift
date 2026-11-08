@@ -120,7 +120,11 @@ final class OTAChunkUploader {
         self.backoff = backoff
         session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
     }
-    func cancel() { session.invalidateAndCancel() }
+    // Cancellation can fire before the operation creates its first request.
+    // Never invalidate here: creating a task on an invalidated session raises
+    // an Objective-C exception rather than a catchable Swift error.
+    func cancel() { session.getAllTasks { tasks in tasks.forEach { $0.cancel() } } }
+    private func finish() { session.finishTasksAndInvalidate() }
 
     private func request(_ s: OTASession, _ url: URL, _ method: String) -> URLRequest {
         var r = URLRequest(url: url, timeoutInterval: 120)
@@ -144,6 +148,7 @@ final class OTAChunkUploader {
     private func offsetCall(_ s: OTASession, _ method: String) async throws -> Int64 {
         guard OTAHostPolicy.accepts(s.url) else { throw OTAChunkError.badHost }
         do {
+            try Task.checkCancellation()
             let (d, resp) = try await session.data(for: request(s, s.url, method))
             let c = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(c) else { throw OTAChunkError.server(c) }
@@ -212,6 +217,7 @@ final class OTAChunkUploader {
     func finalize(_ s: OTASession) async throws -> URL {
         let url = s.url.appendingPathComponent("finalize")
         do {
+            try Task.checkCancellation()
             let (d, resp) = try await session.data(for: request(s, url, "POST"))
             let c = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard c == 200 else { throw OTAChunkError.server(c) }
@@ -240,6 +246,7 @@ final class OTAChunkUploader {
                     backoff: [TimeInterval] = [0.5, 1, 2, 4], chunkSize: Int64? = nil,
                     progress: @escaping (Double) -> Void) async throws -> URL {
         let up = OTAChunkUploader(configuration: configuration, backoff: backoff)
+        defer { up.finish() }
         return try await withTaskCancellationHandler {
             do {
                 let start = try await up.open(s)
