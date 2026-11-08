@@ -587,7 +587,7 @@ final class MirsaUpdater: ObservableObject {
     @Published var checking = false
 
     func check(force: Bool = false) async {
-        guard !AppsStore.isSetupMode, available == nil, !installing else { return }
+        guard !AppsStore.isSetupMode, !MirsaUITestHarness.active, available == nil, !installing else { return }
         if !force, let u = snoozedUntil, u > Date() { return }
         var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
