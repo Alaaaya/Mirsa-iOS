@@ -237,7 +237,7 @@ struct ForgeProject: Codable, Identifiable {
     func inject(_ id: UUID) async throws -> URL {
         guard let p = project(id), let v = p.currentVersion else { throw ForgeClient.Failure.message("No version") }
         // Imported dylibs are injected as-is, in list order, only if enabled. Nothing is injected unless the user taps Inject.
-        let imported = p.versions.filter { $0.importedInfo != nil && ($0.importEnabled ?? true) && FileManager.default.fileExists(atPath: dylibURL(p, $0).path) }
+        let imported = Self.enabledImported(p).filter { FileManager.default.fileExists(atPath: dylibURL(p, $0).path) }
         var libs = imported.map { dylibURL(p, $0) }
         if v.importedInfo == nil {
             var lib = dylibURL(p, v)
@@ -260,6 +260,10 @@ struct ForgeProject: Codable, Identifiable {
             try IPAEditorService.run("pack", input: x, output: out)
         }.value
         return out
+    }
+    /// Imported dylibs the user EXPLICITLY enabled, in list (load) order. New imports are disabled.
+    nonisolated static func enabledImported(_ p: ForgeProject) -> [ForgeVersion] {
+        p.versions.filter { $0.importedInfo != nil && $0.importEnabled == true }
     }
     func addToLibrary(_ id: UUID) async throws {
         let url = try await build(id)
