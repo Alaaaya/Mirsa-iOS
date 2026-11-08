@@ -10,6 +10,7 @@ enum OTAChunkError: LocalizedError, Equatable {
         case .tooLarge: return personalText("This app is larger than the 2 GB upload limit.", "التطبيق أكبر من حد الرفع 2 غيغا.")
         case .badHost: return personalText("Upload server is not allowed.", "سيرفر الرفع غير مسموح.")
         case .cancelled: return personalText("Upload cancelled.", "تم إلغاء الرفع.")
+        case .server(429): return personalText("Upload server is busy. Wait a moment, then try again.", "سيرفر الرفع مشغول. انتظر شوي وجرب مرة تانية.")
         case .server(let c): return personalText("Upload failed (code \(c)).", "فشل الرفع (رمز \(c)).")
         case .expired: return personalText("Upload session expired.", "انتهت جلسة الرفع.")
         case .badResponse: return personalText("Unexpected reply from the upload server.", "رد غير متوقع من سيرفر الرفع.")
@@ -157,14 +158,14 @@ final class OTAChunkUploader {
         } catch { throw map(error) }
     }
     /// Creates (idempotent) and returns the server's committed offset.
-    func open(_ s: OTASession) async throws -> Int64 { try await offsetCall(s, "POST") }
+    func open(_ s: OTASession) async throws -> Int64 { try await statusWithRetry(s, method: "POST") }
     func status(_ s: OTASession) async throws -> Int64 { try await offsetCall(s, "GET") }
 
     /// Authoritative-offset status with bounded retries.
-    private func statusWithRetry(_ s: OTASession) async throws -> Int64 {
+    private func statusWithRetry(_ s: OTASession, method: String = "GET") async throws -> Int64 {
         var attempt = 0
         while true {
-            do { return try await status(s) }
+            do { return try await offsetCall(s, method) }
             catch {
                 guard Self.isTransient(error), attempt < backoff.count else { throw error }
                 try await Task.sleep(nanoseconds: UInt64(backoff[attempt] * 1e9)); attempt += 1
