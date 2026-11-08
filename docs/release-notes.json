@@ -74,5 +74,9 @@
   "1.3.205": {
     "ar": "أضفنا إرسال تقرير إصلاح من التويك الحالي أو خطأ البناء، بعد معاينة تقرير منظّف وموافقتك. مرسى بيتفقّد الإصلاحات عند فتحه، وبيحفظ النسخة المصحّحة ضمن النسخ للمراجعة بعد التحقق من الملف وبصمته، بدون تغيير نسختك الحالية أو تفعيل أو حقن أي شيء تلقائياً. الملفات الأصلية وإعدادات الحماية بتضل محفوظة. واجهة الميزة متوفرة باللغات الأربع. هالتحديث لسا مو مجرّب على جهاز فعلي، ووصول إصلاح لتويك معيّن بده تقرير من جهازك أولاً.",
     "en": "Added repair reports for the current tweak and build failures, with a sanitized preview and explicit consent before sending. Mirsa checks for fixes when opened and saves verified fixes in Versions for review without changing the current version or automatically enabling or injecting anything. Original files and guard settings stay unchanged. The feature UI supports all four languages. Not yet tested on a physical device; delivery for a specific tweak requires a report from your device first."
+  },
+  "1.3.206": {
+    "ar": "صار مرسى يعرض رسالة السيرفر الحقيقية بلغتك (عربي، سوراني، كرمانجي، إنجليزي) لما يرفض طلب أو يفشل، بدل «خطأ بالسيرفر». ولو السيرفر عطى خطوات تالية (ناقص معلومات مثلاً) بتظهر مرقّمة تحت الرسالة. ما تغير شي بالتصميم. هالتحديث لسا مو مجرّب على جهاز فعلي.",
+    "en": "Mirsa now shows the server's real message in your language (Arabic, Sorani, Kurmanji, English) when a request is refused or fails, instead of a generic server error. If the server supplies next steps (for example when information is missing), they appear numbered under the message. No design changes. Not yet tested on a physical device."
   }
 }
