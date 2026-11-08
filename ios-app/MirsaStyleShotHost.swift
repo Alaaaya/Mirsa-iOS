@@ -84,7 +84,7 @@ struct MirsaStyleShotHost: View {
         case "certificates": PersonalCertificateManagerView()
         case "personal-certificate": NavigationStack { ScrollView { PersonalCertificateView().padding(20) }.background(AuroraBackground()) }.preferredColorScheme(.dark)
         case "signing-queue": SigningQueueView()
-        case "telemetry": NavigationStack { ScrollView { MirsaTelemetryView(bundleID: "com.alaa.mirsa").padding() }.background(Color.black) }.preferredColorScheme(.dark)
+        case "telemetry": NavigationStack { ScrollView { MirsaTelemetryView(bundleID: "com.alaa.mirsa").padding() }.background(AuroraBackground()) }.preferredColorScheme(.dark)
         case "credits": CreditsSheet()
         case "pairing-guide": PairingGuideSheet(onImportTapped: {})
         case "support-popup": SupportPopupSheet(dontShowOnLaunch: .constant(false))

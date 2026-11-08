@@ -24,7 +24,15 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                                "-AppleLanguages", lang == "en" ? "(en)" : "(ar)",
                                "-AppleLocale", lang == "en" ? "en_US" : "ar"]
         app.launch()
-        Thread.sleep(forTimeInterval: 3.0)
+        Thread.sleep(forTimeInterval: 2.0)
+        // First launch asks for notification permission; the system alert would hide the page.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        if alert.waitForExistence(timeout: 1) {
+            let deny = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow", "عدم السماح"])).firstMatch
+            if deny.exists { deny.tap() } else { alert.buttons.firstMatch.tap() }
+        }
+        Thread.sleep(forTimeInterval: 1.5)
         return app
     }
 

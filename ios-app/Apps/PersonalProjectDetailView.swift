@@ -135,7 +135,7 @@ struct PersonalProjectDetailView: View {
         .sheet(isPresented: $showProjectLogs) {
             NavigationStack {
                 ScrollView { MirsaTelemetryView(bundleID: app.bundleID).padding() }
-                    .background(Color.black).navigationTitle(draft.name)
+                    .background(AuroraBackground()).navigationTitle(draft.name)
                     .toolbar { ToolbarItem(placement: .topBarLeading) {
                         Button(personalText("Close", "إغلاق")) { showProjectLogs = false }
                     } }

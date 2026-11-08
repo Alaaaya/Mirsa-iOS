@@ -313,8 +313,14 @@ struct SourcesTab: View {
                     .listRowBackground(Color.clear)
                 }
                 ForEach(store.visibleSources) { s in
-                    NavigationLink { SourceDetailView(source: s, onSelectIPA: onSelectIPA) } label: { SourceRow(source: s, loading: store.loading.contains(s.url)) }
+                    // The row is the card; the link stays invisible so the system chevron
+                    // no longer floats outside the card.
+                    ZStack {
+                        NavigationLink { SourceDetailView(source: s, onSelectIPA: onSelectIPA) } label: { EmptyView() }.opacity(0)
+                        SourceRow(source: s, loading: store.loading.contains(s.url))
+                    }
                         .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
                         .listRowSeparator(.hidden)
                         .swipeActions(edge: .leading) {
                             Button { store.hiddenURLs.insert(s.url) } label: {
