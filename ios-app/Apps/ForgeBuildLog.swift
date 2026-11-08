@@ -16,7 +16,9 @@ struct ForgeBuildFailure: LocalizedError {
 enum ForgeBuildLog {
     /// Removes ANSI escape sequences (also the bare "[0m" form whose ESC byte got lost) and other control codes.
     static func sanitize(_ s: String) -> String {
-        var t = s.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+        // OSC sequences (ESC ] ... BEL or ESC \\), e.g. terminal titles/hyperlinks
+        var t = s.replacingOccurrences(of: "\u{1B}\\][^\u{07}\u{1B}]*(\u{07}|\u{1B}\\\\)", with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: "\\[[0-9;]*m", with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: "\r\n?", with: "\n", options: .regularExpression)
         t = String(t.unicodeScalars.filter { $0 == "\n" || $0 == "\t" || $0.value >= 0x20 && $0.value != 0x7F })
@@ -25,9 +27,13 @@ enum ForgeBuildLog {
 
     /// First compiler "error:" line (file:line + message) or a generic message.
     static func summary(_ clean: String) -> String {
+        let lower = clean.lowercased()
+        if lower.contains("no known instance method for selector") || lower.contains("deprecated") || lower.contains("-wdeprecated") || lower.contains("is unavailable") {
+            return tr("The tweak uses an old iOS function that no longer exists (for example UIAlertView). Ask Mirsa to rewrite it with the new API.", "التويك بيستخدم دالة قديمة بـ iOS ما عادت موجودة (مثل UIAlertView). اطلب من مرسى يعيد كتابته بالدالة الجديدة.", ckb: "تویکەکە فەنکشنێکی کۆنی iOS بەکاردەهێنێت.", kmr: "Tweak fonksiyoneke kevn a iOS bi kar tîne.")
+        }
         let generic = tr("The tweak failed to build. Tap for the full log.", "فشل بناء التويك. اضغط لعرض السجل الكامل.", ckb: "دروستکردنی تویک سەرکەوتوو نەبوو.", kmr: "Çêkirina tweak têk çû.")
         guard let line = clean.split(separator: "\n").first(where: { $0.contains("error:") && !$0.hasPrefix("make") }) else { return generic }
-        let msg = String(line).trimmingCharacters(in: .whitespaces)
-        return generic.components(separatedBy: ".").first! + ": " + String(msg.prefix(200))
+        _ = line
+        return generic
     }
 }
