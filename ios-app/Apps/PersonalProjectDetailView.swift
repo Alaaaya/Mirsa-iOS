@@ -56,7 +56,6 @@ struct PersonalProjectDetailView: View {
                     }
                     appCard
                     outputCard
-                    MirsaProjectInstallLink(projectID: app.id, latest: signing.state?.projectID == app.id ? signing.state?.result?.url : nil)
                     tweaksCard
                     settingsCard
                     depsCard
