@@ -60,6 +60,7 @@ struct PersonalProjectDetailView: View {
                     settingsCard
                     depsCard
                     certificateCard
+                    MirsaVersionArchiveSection(bundleID: app.bundleID)
                     Button { openBundleFiles() } label: {
                         Label(bundleLoading ? personalText("Reading app…", "عم أقرأ التطبيق…") : personalText("Bundle files", "ملفات التطبيق"), systemImage: "doc.on.doc")
                     }.buttonStyle(.mirsaPrimary).disabled(bundleLoading)
