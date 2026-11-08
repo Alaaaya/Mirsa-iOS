@@ -3,8 +3,8 @@ import Foundation
 /// One place for Mirsa's own source feed: ordered URLs, identity validation,
 /// legacy migration. Source refresh and self-update both use this, so they cannot drift.
 enum MirsaSourceFeed {
-    /// Build-time primary. Switch to https://mirsa-source.mooo.com/source.json only after DNS + HTTPS are verified.
-    static let primary = "https://mirsa-app.mooo.com/source.json"
+    /// Dedicated Oracle static feed, DNS and trusted HTTPS verified before enabling.
+    static let primary = "https://mirsa-source.mooo.com/source.json"
     static let githubPages = "https://mirsa-app.github.io/source.json"
     static let raw = "https://raw.githubusercontent.com/Mirsa-App/mirsa-app.github.io/main/source.json"
     /// Ordered, de-duplicated.
