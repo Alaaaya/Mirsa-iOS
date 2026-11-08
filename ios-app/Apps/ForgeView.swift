@@ -159,6 +159,7 @@ struct ForgeProjectView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var importingDylib = false
+    @State private var publishing = false
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
     private func run(_ work: @escaping () async throws -> Void) { let startedVersion = store.project(id)?.currentVersion?.id; Task { error = nil; needsInspector = false; note = nil; fullLog = nil; failedVersionID = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log; self.failedVersionID = startedVersion } catch ForgeClient.Failure.inspectorNeeded(let m) { self.error = m; self.needsInspector = true } catch { self.error = error.localizedDescription } } }
@@ -220,7 +221,7 @@ struct ForgeProjectView: View {
                     HStack {
                         forgeButton("chevron.left.forwardslash.chevron.right", tr("Edit code", "عدّل الكود", ckb: "کۆد", kmr: "Kod")) { draft = v.code; editing = true }
                         forgeButton("arrow.triangle.2.circlepath", tr("App updated", "التطبيق تحدّث", ckb: "ئەپ نوێبوو", kmr: "App nû bû")) { updating = true }
-                        forgeButton("globe", tr("Publish", "انشر", ckb: "بڵاوکردنەوە", kmr: "Biweşîne")) { run { try await store.publish(id); note = tr("Published.", "انشر.", ckb: "بڵاوکرایەوە.", kmr: "Hat weşandin.") } }
+                        forgeButton("globe", ForgePublishSheet.title) { publishing = true }
                     }
                     if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     if p.versions.contains(where: { $0.importedInfo != nil }) { ForgeImportedDylibsView(id: id, versions: p.versions.filter { $0.importedInfo != nil }, openInspector: { showInspector = true }).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
@@ -253,6 +254,7 @@ struct ForgeProjectView: View {
         .navigationBarHidden(true)
         .mirsaScreen()
         .sheet(isPresented: $importingDylib) { ForgeDylibImportSheet(id: id) }
+        .sheet(isPresented: $publishing) { ForgePublishSheet(id: id) { note = $0 } }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
         .confirmationDialog(tr("Edit version", "تعديل النسخة", ckb: "دەستکاری وەشان", kmr: "Guhertoyê biguherîne"), isPresented: $versionMenu) {
             Button(tr("Rename", "تغيير الاسم", ckb: "ناو بگۆڕە", kmr: "Nav biguherîne")) { renaming = true }
