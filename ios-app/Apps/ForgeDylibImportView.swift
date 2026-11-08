@@ -9,6 +9,7 @@ extension ForgeStore {
         v.title = name
         v.builtWithValues = [:]
         v.importedInfo = info
+        v.importEnabled = false // explicit opt-in: a fresh import is never injected silently
         try FileManager.default.createDirectory(at: dir(p), withIntermediateDirectories: true)
         let dest = dylibURL(p, v)
         try? FileManager.default.removeItem(at: dest)
@@ -40,6 +41,8 @@ enum ForgeDylibText {
     static let fromFiles = tr("From Files", "من الملفات", ckb: "لە فایلەکان", kmr: "Ji Pelan")
     static let fromLink = tr("From link (HTTPS)", "من رابط (HTTPS)", ckb: "لە لینک (HTTPS)", kmr: "Ji lînkê (HTTPS)")
     static let honest = tr("Info is read from symbols and strings. It does not guarantee which methods are really hooked.", "المعلومات مقروءة من الرموز والنصوص. ما بتضمن أي دوال معمول لها hook فعلاً.", ckb: "زانیاری لە هێما و دەقەکانەوە دەخوێنرێتەوە، گەرەنتی هووکی ڕاستەقینە نییە.", kmr: "Agahî ji sembol û rêzikan tê xwendin, garantiya hookên rastî nade.")
+    static let jointNote = tr("Enabled imported dylibs are injected together as binaries, in this order (binary joint injection). This is NOT the source merge of AI tweaks, which combines code.", "الـ dylib المفعّلة بتنحقن مع بعض كملفات جاهزة بهالترتيب (حقن مشترك للباينري). هاد مو دمج الكود تبع تويكات الذكاء الاصطناعي.", ckb: "dylibە چالاککراوەکان پێکەوە وەک فایلی ئامادە دەچەسپێنرێن (چەسپاندنی هاوبەش). ئەمە تێکەڵکردنی کۆدی تویکەکان نییە.", kmr: "dylibên çalak bi hev re wek binary têne xistin (derzîkirina hevpar). Ev ne yekkirina koda tweakan e.")
+    static let disabledNote = tr("New imports start disabled. Enable one to include it when you press Inject.", "الاستيراد الجديد بيبدأ معطّل. فعّله ليدخل عند الحقن.", ckb: "هاوردەی نوێ ناچالاکە. چالاکی بکە بۆ ئەوەی لەگەڵ چەسپاندن بێت.", kmr: "Importa nû ne çalak dest pê dike. Çalak bike da di derzîkirinê de be.")
     static let companion = tr("Edit on it", "عدّل عليه", ckb: "دەستکاری بکە لەسەری", kmr: "Li ser biguherîne")
     static let companionNote = tr("Creates a NEW companion tweak from a summary. The original binary is not changed.", "بيعمل تويك مرافق جديد من ملخص. الملف الأصلي ما بيتغير.", ckb: "تویکێکی هاوەڵی نوێ دروست دەکات. فایلە سەرەکییەکە ناگۆڕێت.", kmr: "Ji kurteyê tweakeke nû çêdike. Binaryê eslî nayê guhertin.")
 }
@@ -98,7 +101,7 @@ struct ForgeImportedDylibsView: View {
                             Spacer()
                             Button { store.moveImported(id, v.id, by: -1) } label: { Image(systemName: "arrow.up").frame(width: 36, height: 36) }
                             Button { store.moveImported(id, v.id, by: 1) } label: { Image(systemName: "arrow.down").frame(width: 36, height: 36) }
-                            Toggle("", isOn: Binding(get: { v.importEnabled ?? true }, set: { store.setImportedEnabled(id, v.id, $0) })).labelsHidden()
+                            Toggle("", isOn: Binding(get: { v.importEnabled ?? false }, set: { store.setImportedEnabled(id, v.id, $0) })).labelsHidden()
                         }
                         Text("\(info.arch) · \(ByteCountFormatter.string(fromByteCount: Int64(info.size), countStyle: .file)) · \(info.classes.count) classes · \(info.selectors.count) selectors")
                             .font(.caption).foregroundStyle(.white.opacity(0.7))
@@ -108,6 +111,8 @@ struct ForgeImportedDylibsView: View {
                     }.foregroundStyle(.white).padding(10).background(forgeCard)
                 }
             }
+            Text(ForgeDylibText.jointNote).font(.caption).foregroundStyle(.white.opacity(0.6))
+            Text(ForgeDylibText.disabledNote).font(.caption).foregroundStyle(.white.opacity(0.6))
             Text(ForgeDylibText.companionNote).font(.caption).foregroundStyle(.white.opacity(0.5))
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
         }
