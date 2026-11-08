@@ -10,6 +10,8 @@ struct ForgeVersion: Codable, Identifiable, Hashable {
     var repairChainID: UUID?
     var fixSourceSHA256: String?
     var fixDylibSHA256: String?
+    var importedInfo: ForgeDylibInfo?
+    var importEnabled: Bool?
     var tweakID: UUID { guardID ?? id }
     var hasBuild: Bool { builtWithValues != nil }
 }
