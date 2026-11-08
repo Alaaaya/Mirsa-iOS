@@ -111,6 +111,21 @@ final class OTATransportTests: XCTestCase {
         do { _ = try await t.value; XCTFail() } catch { XCTAssertEqual(error as? OTAChunkError, .cancelled) }
         XCTAssertTrue(s.methods.contains("DELETE"))
     }
+    func testRepeatedImmediateCancellationNeverReusesInvalidatedSession() async {
+        // Exercise the cancellation-handler-before-first-request race repeatedly.
+        for _ in 0..<8 {
+            let server = FakeOTAServer(); server.install()
+            let cfg = config()
+            let task = Task {
+                try await OTAChunkUploader.run(file: file, total: 20, session: sess,
+                                              configuration: cfg, backoff: [0], chunkSize: 8) { _ in }
+            }
+            task.cancel()
+            do { _ = try await task.value; XCTFail("Cancelled upload succeeded") }
+            catch { XCTAssertEqual(error as? OTAChunkError, .cancelled) }
+            XCTAssertTrue(server.methods.contains("DELETE"))
+        }
+    }
     func testServerFailureAbortsSession() async {
         let s = FakeOTAServer(); s.install()
         StubProtocol.handler = { req, body in req.httpMethod == "PUT" ? (400, Data()) : (req.httpMethod == "DELETE" ? (204, Data()) : (200, try! JSONSerialization.data(withJSONObject: ["offset": 0]))) }
