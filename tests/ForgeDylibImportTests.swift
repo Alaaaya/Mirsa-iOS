@@ -1,40 +1,87 @@
 import XCTest
 @testable import Mirsa
 
-@MainActor final class ForgeDylibImportTests: XCTestCase {
-    private func info(_ n: Int = 1) -> ForgeDylibInfo {
-        ForgeDylibInfo(arch: "arm64", size: 10, linked: [], classes: ["A"], selectors: [], summary: String(repeating: "x", count: 9000))
+final class ForgeDylibImportTests: XCTestCase {
+    private func thin() -> Data {
+        var result = Data()
+        for word: UInt32 in [0xfeedfacf, 0x0100000c, 0, 6, 0, 0, 0, 0] {
+            var value = word.littleEndian
+            result.append(withUnsafeBytes(of: &value) { Data($0) })
+        }
+        return result
     }
-    private func project() -> (ForgeStore, UUID) {
-        let s = ForgeStore.shared; let id = UUID()
-        var p = ForgeProject(id: id, name: "D" + id.uuidString.prefix(4), bundleID: "x.y", appName: "D", appVersion: "1", executable: "D", classes: [])
-        let orig = ForgeVersion(prompt: "orig", code: "c", settings: [], explain: ""); p.versions = [orig]; p.current = orig.id
-        s.projects.append(p); return (s, id)
+    private func temporary(_ ext: String) -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
     }
-    private func tmp() throws -> URL { let u = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".dylib"); try Data("d".utf8).write(to: u); return u }
-    func testImportKeepsOriginalAndIsDisabled() throws {
-        let (s, id) = project()
-        try s.importDylib(id, dylib: try tmp(), info: info(), name: "N")
-        let p = s.project(id)!
-        XCTAssertEqual(p.versions.count, 2); XCTAssertEqual(p.versions[0].code, "c")
-        XCTAssertEqual(p.versions[1].importEnabled, false)
-        XCTAssertTrue(ForgeStore.enabledImported(p).isEmpty)
+    private func ar(_ tar: Data) -> Data {
+        let header = "data.tar/".padding(toLength: 16, withPad: " ", startingAt: 0) +
+            "0".padding(toLength: 12, withPad: " ", startingAt: 0) +
+            "0     0     100644  " +
+            String(tar.count).padding(toLength: 10, withPad: " ", startingAt: 0) + "`\n"
+        var data = Data("!<arch>\n".utf8) + Data(header.utf8) + tar
+        if tar.count % 2 != 0 { data.append(10) }
+        return data
     }
-    func testEnableAndOrderAndDisabledExclusion() throws {
-        let (s, id) = project()
-        for n in ["A", "B", "C"] { try s.importDylib(id, dylib: try tmp(), info: info(), name: n) }
-        var p = s.project(id)!
-        let ids = p.versions.filter { $0.importedInfo != nil }.map { $0.id }
-        s.setImportedEnabled(id, ids[0], true); s.setImportedEnabled(id, ids[2], true)
-        XCTAssertEqual(ForgeStore.enabledImported(s.project(id)!).compactMap { $0.title }, ["A", "C"])
-        s.moveImported(id, ids[2], by: -2)
-        p = s.project(id)!
-        XCTAssertEqual(ForgeStore.enabledImported(p).compactMap { $0.title }, ["C", "A"])
-        s.moveImported(id, ids[2], by: -1) // already first: no change
-        XCTAssertEqual(ForgeStore.enabledImported(s.project(id)!).compactMap { $0.title }, ["C", "A"])
+    private func maliciousTar(path: String, type: UInt8 = 48, size: Int = 0) -> Data {
+        var h = [UInt8](repeating: 0, count: 512)
+        func put(_ string: String, _ offset: Int, _ limit: Int) {
+            for (i, b) in string.utf8.prefix(limit).enumerated() { h[offset + i] = b }
+        }
+        put(path, 0, 100); put("0000644", 100, 8); put("0000000", 108, 8); put("0000000", 116, 8)
+        put(String(format: "%011o", size), 124, 12); put("00000000000", 136, 12)
+        put("        ", 148, 8); h[156] = type
+        if type == 50 { put("../../escape", 157, 100) }
+        put("ustar", 257, 6); put("00", 263, 2)
+        let sum = h.reduce(0) { $0 + Int($1) }
+        put(String(format: "%06o", sum), 148, 7); h[154] = 0; h[155] = 32
+        return Data(h) + Data(repeating: 0, count: 1024)
     }
-    func testCompanionContextBounded() {
-        let i = info()
-        XCTAssertLessThanOrEqual(String(i.summary.prefix(4000)).utf8.count, 4000)
+    func testFileImportPreservesOriginalAndCreatesOwnedTemporaryCopy() async throws {
+        let source = temporary("dylib")
+        let binary = thin()
+        try binary.write(to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let imported = try await ForgeDylibImporter.fromFile(source)
+        defer { try? FileManager.default.removeItem(at: imported.dylib) }
+        XCTAssertNotEqual(imported.dylib, source)
+        XCTAssertEqual(try Data(contentsOf: source), binary)
+        XCTAssertEqual(try Data(contentsOf: imported.dylib), binary)
+        XCTAssertEqual(imported.info.arch, "arm64")
+    }
+    func testMagicNotExtensionSelectsParser() async throws {
+        let renamed = temporary("deb")
+        try thin().write(to: renamed)
+        defer { try? FileManager.default.removeItem(at: renamed) }
+        let result = try await ForgeDylibImporter.fromFile(renamed)
+        defer { try? FileManager.default.removeItem(at: result.dylib) }
+        XCTAssertEqual(result.info.arch, "arm64")
+        let package = temporary("dylib")
+        try ForgeDeb.build(name: "Test", bundleID: "com.test", dylib: thin()).write(to: package)
+        defer { try? FileManager.default.removeItem(at: package) }
+        let debResult = try await ForgeDylibImporter.fromFile(package)
+        defer { try? FileManager.default.removeItem(at: debResult.dylib) }
+        XCTAssertEqual(debResult.info.arch, "arm64")
+    }
+    func testNonBinaryWithDylibExtensionRejected() async throws {
+        let source = temporary("dylib")
+        try Data("<html>not a library</html>".utf8).write(to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+        do {
+            let result = try await ForgeDylibImporter.fromFile(source)
+            try? FileManager.default.removeItem(at: result.dylib)
+            XCTFail("Non-binary accepted")
+        } catch { XCTAssertTrue(error is ForgeDylibImportError) }
+    }
+    func testDebTraversalSymlinkAndExpansionRejectedWithoutResidue() throws {
+        for tar in [maliciousTar(path: "../escape.dylib"), maliciousTar(path: "Library/link.dylib", type: 50),
+                    maliciousTar(path: "large.dylib", size: ForgeDylibInspector.maximumBytes + 1)] {
+            let workspace = temporary("workspace")
+            try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: workspace) }
+            let package = workspace.appendingPathComponent("package.deb")
+            try ar(tar).write(to: package)
+            XCTAssertThrowsError(try ForgeDylibDebImport.extract(package, in: workspace))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("extracted").path))
+        }
     }
 }
