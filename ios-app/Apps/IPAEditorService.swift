@@ -23,15 +23,52 @@ enum IPAEditorService {
         let data = try JSONSerialization.data(withJSONObject: request)
         guard let text = String(data: data, encoding: .utf8),
               let response = text.withCString({ al_ipa_editor_run($0) }) else {
-            throw SideloadError.message("IPA editor did not respond.")
+            throw SideloadError.message(archiveError("IPA editor did not respond."))
         }
         defer { al_string_free(response) }
         let resultData = Data(String(cString: response).utf8)
         guard let result = try JSONSerialization.jsonObject(with: resultData) as? [String: Any],
               result["ok"] as? Bool == true else {
             let result = try? JSONSerialization.jsonObject(with: resultData) as? [String: Any]
-            throw SideloadError.message(result?["error"] as? String ?? "IPA editor failed.")
+            let detail = result?["error"] as? String ?? "IPA editor failed."
+            let archiveOperation = ["extract", "extract_inspection", "deb", "package_roots"].contains(operation)
+            throw SideloadError.message(archiveOperation ? archiveError(detail) : detail)
         }
+    }
+
+    /// Do not expose backend English or file paths from untrusted archives.
+    static func archiveError(_ detail: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        func text(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String {
+            switch language {
+            case .english: return en
+            case .arabic: return ar
+            case .sorani: return ckb
+            case .kurmanji: return kmr
+            }
+        }
+        let lower = detail.lowercased()
+        if lower.contains("size limit") || lower.contains("too large") || lower.contains("exceeds") {
+            return text("This IPA exceeds the safe extraction limits. Choose a smaller IPA.",
+                        "حجم هالـ IPA أكبر من حد فك الضغط الآمن. اختار ملف أصغر.",
+                        "قەبارەی ئەم IPA لە سنووری سەلامەتی زیاترە. فایلێکی بچووکتر هەڵبژێرە.",
+                        "Ev IPA ji sînorê ewle yê vekirinê mezintir e. Dosyayeke biçûktir hilbijêre.")
+        }
+        if lower.contains("ratio") || lower.contains("too many") {
+            return text("This archive expands beyond safe limits and cannot be opened.",
+                        "هالأرشيف بيتجاوز حدود فك الضغط الآمن وما فينا نفتحه.",
+                        "ئەم ئەرشیفە لە سنووری سەلامەتی دەردەچێت و ناکرێتەوە.",
+                        "Ev arşîv ji sînorên ewle derdikeve û nayê vekirin.")
+        }
+        if lower.contains("path") || lower.contains("link") || lower.contains("collision") || lower.contains("duplicate") {
+            return text("This IPA contains unsafe or conflicting file paths. Choose another IPA.",
+                        "هالـ IPA فيه مسارات ملفات غير آمنة أو متعارضة. اختار ملف تاني.",
+                        "ئەم IPA ڕێڕەوی ناسەلامەت یان ناکۆکی تێدایە. فایلێکی تر هەڵبژێرە.",
+                        "Di vê IPA de rêyên dosyayan ne ewle ne an li hev dikevin. IPAyeke din hilbijêre.")
+        }
+        return text("Could not read this IPA. It may be damaged or missing app files.",
+                    "ما قدرت أقرأ هالـ IPA. ممكن يكون تالف أو ناقصه ملفات التطبيق.",
+                    "نەتوانرا ئەم IPA بخوێندرێتەوە. ڕەنگە خراپ بێت یان فایلی کەم بێت.",
+                    "Ev IPA nehat xwendin. Dibe ku xerab be an dosyeyên appê kêm bin.")
     }
 
     /// Lists injection targets of an extracted .app (main, frameworks, extensions); thin arm64 only.
@@ -65,14 +102,14 @@ enum IPAEditorService {
         let payload = extraction.appendingPathComponent("Payload", isDirectory: true)
         let apps = try FileManager.default.contentsOfDirectory(at: payload, includingPropertiesForKeys: [.isDirectoryKey])
             .filter { $0.pathExtension == "app" && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-        guard apps.count == 1 else { throw SideloadError.message("IPA must contain exactly one Payload app.") }
+        guard apps.count == 1 else { throw SideloadError.message(archiveError("IPA must contain exactly one Payload app.")) }
         return apps[0]
     }
 
     static func info(in app: URL) throws -> [String: Any] {
         let plistURL = app.appendingPathComponent("Info.plist")
         guard (try plistURL.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0 <= 4 * 1024 * 1024 else {
-            throw SideloadError.message("App Info.plist exceeds 4 MiB.")
+            throw SideloadError.message(archiveError("App Info.plist exceeds 4 MiB."))
         }
         let data = try Data(contentsOf: plistURL)
         guard let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
@@ -80,7 +117,7 @@ enum IPAEditorService {
               let executable = info["CFBundleExecutable"] as? String,
               !executable.isEmpty, !executable.contains("/"), !executable.contains("\\"),
               executable != ".", executable != ".." else {
-            throw SideloadError.message("Invalid app metadata, bundle identifier or executable path.")
+            throw SideloadError.message(archiveError("Invalid app metadata, bundle identifier or executable path."))
         }
         return info
     }

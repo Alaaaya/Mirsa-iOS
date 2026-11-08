@@ -4,6 +4,22 @@ import ImageIO
 @testable import Mirsa
 
 @MainActor final class ForgeFeatureTests: XCTestCase {
+    func testArchiveErrorsLocalizedInAllFourLanguagesAndDoNotLeakPaths() {
+        let errors = ["Archive size limit exceeded", "Archive compression ratio limit exceeded",
+                      "Too many archive entries", "Unsafe archive path: /private/secret",
+                      "Duplicate archive path", "Archive links and special files are not supported",
+                      "Case-colliding archive path component", "App executable is missing", "Invalid Zip header"]
+        for error in errors {
+            let messages = AppLanguage.allCases.map { IPAEditorService.archiveError(error, language: $0) }
+            XCTAssertEqual(Set(messages).count, 4)
+            for message in messages {
+                XCTAssertFalse(message.isEmpty)
+                XCTAssertFalse(message.contains("/private/secret"))
+                XCTAssertNotEqual(message, error)
+            }
+        }
+    }
+
     private func project(_ bundle: String = "com.test.target") -> ForgeProject {
         ForgeProject(name: "Test", bundleID: bundle, appName: "Test", appVersion: "1", executable: "Test", classes: ["UIView"])
     }
