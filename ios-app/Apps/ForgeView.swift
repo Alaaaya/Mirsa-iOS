@@ -158,10 +158,11 @@ struct ForgeProjectView: View {
     @State private var editing = false
     @State private var draft = ""
     @State private var updating = false
+    @State private var fullLog: String?
 
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
-    private func run(_ work: @escaping () async throws -> Void) { Task { error = nil; note = nil; do { try await work() } catch { self.error = error.localizedDescription } } }
+    private func run(_ work: @escaping () async throws -> Void) { Task { error = nil; note = nil; fullLog = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log } catch { self.error = error.localizedDescription } } }
 
     @ViewBuilder private func content(_ p: ForgeProject) -> some View {
         ScrollView {
@@ -215,7 +216,12 @@ struct ForgeProjectView: View {
                 }
                 if let note { Text(note).font(.footnote).foregroundStyle(.green) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                if let fullLog {
+                    DisclosureGroup(tr("Full log", "السجل الكامل", ckb: "تۆماری تەواو", kmr: "Têketina tev")) {
+                        ScrollView(.horizontal) { Text(fullLog).font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                    }.foregroundStyle(.white).padding(14).background(forgeCard).cornerRadius(16)
+                }
+            }.padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 60).frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().background(forgeCard).cornerRadius(14) } }
         .task { await store.refreshStatus() }
