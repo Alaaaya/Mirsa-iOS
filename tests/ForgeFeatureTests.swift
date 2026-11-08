@@ -118,6 +118,77 @@ import ImageIO
         }
     }
 
+    func testCommunityDescriptionsStayGroundedAndOwnershipIsPreserved() {
+        var project = ForgeProject(name: "Glass", bundleID: "com.ry0.ryP0", appName: "ryP0",
+                                   appVersion: "1", executable: "ryP0", classes: [])
+        project.versions = [ForgeVersion(prompt: "Make the navigation bar glass", code: "", settings: [],
+                                        explain: "Glass navigation bar with appearance settings")]
+        let own: [String: Any] = ["name": "Glass", "target_bundle_id": project.bundleID, "mine": true]
+        XCTAssertEqual(ForgeCommunityEntry(own).groundedDescription(projects: [project]),
+                       project.currentVersion?.explain)
+        var other = own; other["mine"] = false
+        XCTAssertNil(ForgeCommunityEntry(other).groundedDescription(projects: [project]))
+        var uploaded = own; uploaded["provenance"] = "uploaded"
+        XCTAssertTrue(ForgeCommunityEntry(uploaded).uploaded)
+        XCTAssertNil(ForgeCommunityEntry(uploaded).groundedDescription(projects: [project]))
+        var described = uploaded; described["description"] = "  User-written description  "
+        XCTAssertEqual(ForgeCommunityEntry(described).groundedDescription(projects: []), "User-written description")
+        var different = own; different["name"] = "Unrelated"
+        XCTAssertNil(ForgeCommunityEntry(different).groundedDescription(projects: [project]))
+        XCTAssertNil(ForgeCommunityEntry([:]).groundedDescription(projects: [project]))
+        project.versions = [ForgeVersion(prompt: "Manual edit", code: "", settings: [], explain: "")]
+        XCTAssertNil(ForgeCommunityEntry(own).groundedDescription(projects: [project]))
+    }
+
+    func testCommunityOriginalApprovedCardSnapshotsInFourLanguages() throws {
+        let previous = AppLanguageStore.shared.current
+        let savedProjects = ForgeStore.shared.projects
+        defer { AppLanguageStore.shared.set(previous); ForgeStore.shared.projects = savedProjects }
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/ryP0-primary-CgBI.png")
+        let originalIcon = try Data(contentsOf: fixture)
+        let png = try XCTUnwrap(PersonalAppsLibrary.validatedIconPNG(originalIcon))
+        let icon = try XCTUnwrap(UIImage(data: png))
+        // This exact primary PNG was extracted from the owner's real ryP0 IPA, not a generated logo.
+        ForgeStore.shared.projects = [ForgeProject(name: "TweakryP0", bundleID: "com.ry0.ryP0",
+            appName: "ryP0", appVersion: "1", executable: "ryP0", classes: [])]
+        for language in AppLanguage.allCases {
+            AppLanguageStore.shared.set(language)
+            for width in [320.0, 390.0] {
+                let description = tr("Glass navigation bar with appearance settings",
+                    "شريط تنقل زجاجي مع إعدادات للمظهر",
+                    ckb: "شریتی گواستنەوەی شووشەیی لەگەڵ ڕێکخستنەکانی دەرکەوتن",
+                    kmr: "Barê navîgasyonê yê camî bi mîhengên xuyangê")
+                let card = ForgeCommunityCard(
+                    entry: ["name": "TweakryP0", "target_bundle_id": "com.ry0.ryP0",
+                            "description": description, "mine": true],
+                    knownTargetIcon: icon, onUse: {}, onEdit: {}, onVersion: {}, onDelete: {}, onReport: {})
+                let view = VStack(alignment: .leading, spacing: 20) {
+                    Text(ForgeCommunityCard.title).font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .trailing)
+                    card
+                    Spacer(minLength: 0)
+                }.padding(16).background(ForgeCommunityCard.sheetColor)
+                    .environment(\.layoutDirection, .leftToRight).ignoresSafeArea()
+                let host = UIHostingController(rootView: view)
+                let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+                let window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow(frame: .zero)
+                window.frame = CGRect(x: 0, y: 0, width: width, height: 600)
+                window.rootViewController = host; window.makeKeyAndVisible()
+                host.view.frame = window.bounds
+                host.view.setNeedsLayout(); host.view.layoutIfNeeded()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+                XCTAssertEqual(host.view.effectiveUserInterfaceLayoutDirection, .leftToRight)
+                let image = Self.snapshot(host.view)
+                XCTAssertTrue(Self.hasVisiblePixels(image), "Community screenshot must not be blank")
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "community-original-\(language.rawValue)-\(Int(width))"
+                attachment.lifetime = .keepAlways; add(attachment)
+                window.isHidden = true; window.rootViewController = nil
+            }
+        }
+    }
+
     private static func scrollView(in view: UIView) -> UIScrollView? {
         if let scroll = view as? UIScrollView { return scroll }
         return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
