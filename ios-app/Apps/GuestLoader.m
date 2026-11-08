@@ -201,6 +201,17 @@ int MirsaGuestLaunchIfRequested(int argc, char *argv[]) {
         char *gargv[2] = { (char *)exe.fileSystemRepresentation, NULL };
         char *apple[1] = { NULL };
         NSLog(@"[Mirsa Container] launching %@", guest.bundleIdentifier);
+        // Crash marker: cleared after 20 s alive or on clean background/terminate; a leftover marker is read by Mirsa next start.
+        NSString *markedID = guest.bundleIdentifier ?: @"";
+        [d setObject:@{@"bundleID": markedID, @"at": @(NSDate.date.timeIntervalSince1970)} forKey:@"mirsa.guest.crashMarker"];
+        [d synchronize];
+        void (^clearMarker)(NSNotification *) = ^(NSNotification *n) {
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"mirsa.guest.crashMarker"];
+            [NSUserDefaults.standardUserDefaults synchronize];
+        };
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:clearMarker];
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:clearMarker];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ clearMarker(nil); });
         int rc = entry(1, gargv, *_NSGetEnviron(), apple);
         exit(rc);
     }
