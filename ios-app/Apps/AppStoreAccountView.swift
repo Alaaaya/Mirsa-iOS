@@ -352,7 +352,10 @@ struct AppStoreAccountView: View {
             let dir = url.deletingLastPathComponent()
             try await onDownloaded(url)
             // Only after the host copied it successfully: remove the private temp directory.
-            if dir.path.hasPrefix(FileManager.default.temporaryDirectory.path) && dir != FileManager.default.temporaryDirectory {
+            // Parent is deleted only if it is a UUID-named direct child of the temp directory.
+            let tmp = FileManager.default.temporaryDirectory.standardizedFileURL.resolvingSymlinksInPath()
+            let parent = dir.standardizedFileURL.resolvingSymlinksInPath()
+            if parent.deletingLastPathComponent() == tmp, UUID(uuidString: parent.lastPathComponent) != nil {
                 try? FileManager.default.removeItem(at: dir)
             } else { try? FileManager.default.removeItem(at: url) }
             notice = t("Saved to your encrypted list, unchanged.", "انحفظ بقائمة المشفّرة متل ما هو.",
