@@ -48,6 +48,13 @@ jobs:
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+            build/tmp-unit.log
+      - name: Run managed temp unit tests
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -only-testing:MirsaTests/MirsaManagedTmpTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/tmp-unit.log
       - name: Export named screenshots
         if: always()
         run: |
@@ -77,6 +84,7 @@ jobs:
             build/shots
             build/crashes
             build/ai-ui.log
+            build/tmp-unit.log
           if-no-files-found: warn
 
   unsigned-ipa:
