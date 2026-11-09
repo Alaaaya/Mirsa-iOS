@@ -42,10 +42,23 @@ export function shareLink(page, token, expiresAt) {
 // Local OTA: the HTTPS manifest only points at the device's own loopback listener.
 // iOS requires an HTTPS manifest; the software-package URL may be loopback HTTP.
 export function localManifest(metadata, port, token) {
+  if (!((typeof port === "string" && /^[1-9][0-9]{3,4}$/.test(port)) || typeof port === "number")) throw new Error("port");
   const p = Number(port);
   if (!Number.isInteger(p) || p < 1024 || p > 65535) throw new Error("port");
-  if (!/^[a-f0-9]{32,64}$/.test(token ?? "")) throw new Error("token");
-  const m = validateMetadata(metadata);
+  if (typeof token !== "string" || !/^[a-f0-9]{32,64}$/.test(token)) throw new Error("token");
+  // Local serving has the same bounded size as Oracle; never widen legacy uploads.
+  if (!metadata || !Number.isSafeInteger(metadata.bytes) || metadata.bytes < 4 || metadata.bytes > 2 * 1024 ** 3) throw new Error("size");
+  const m = {...validateMetadata({...metadata, bytes: 4}), bytes: metadata.bytes};
+  // Reject characters that cannot appear in XML 1.0, including lone surrogates.
+  if (/[\uD800-\uDFFF\uFFFE\uFFFF]/u.test(m.title)) throw new Error("title");
   const u = "http://127.0.0.1:" + p + "/" + token + "/Mirsa.ipa";
   return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>' + xml(u) + '</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>' + xml(m.bundleID) + '</string><key>bundle-version</key><string>' + xml(m.version) + '</string><key>kind</key><string>software</string><key>title</key><string>' + xml(m.title) + '</string></dict></dict></array></dict></plist>';
+}
+
+// Keep parsing and duplicate-field rejection testable without network or database access.
+export function localManifestFromQuery(params) {
+  const fields = ["action", "port", "token", "bundleID", "version", "title", "bytes"];
+  if ([...params.keys()].some(k => !fields.includes(k)) || fields.some(k => params.getAll(k).length !== 1)) throw new Error("query");
+  if (params.get("action") !== "local-manifest" || !/^[1-9][0-9]{0,9}$/.test(params.get("bytes") ?? "")) throw new Error("query");
+  return localManifest({bundleID: params.get("bundleID"), version: params.get("version"), title: params.get("title"), bytes: Number(params.get("bytes"))}, params.get("port"), params.get("token"));
 }
