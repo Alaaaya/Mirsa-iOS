@@ -41,6 +41,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::exploit::{self, AppDeviceTunnel, Logger};
 use crate::ffi_util::{cstr, opt_str};
 
+mod store_install;
+
 const MACHINE_NAME: &str = "Mirsa";
 
 // AFC PublicStaging and Apple session signing must not overlap between callers.
@@ -948,6 +950,38 @@ pub unsafe extern "C" fn al_sl_install_signed(
             }
         };
         runtime().block_on(install_signed(pairing, app, &logger, progress))
+    });
+    write_result(res, out_json, out_error)
+}
+
+/// Install an App Store (FairPlay) .ipa UNMODIFIED: no extraction, no signing,
+/// no decryption. The package's own iTunesMetadata/sinf go to installation_proxy;
+/// iOS decides whether the purchase is valid for this device. BLOCKS.
+#[no_mangle]
+pub unsafe extern "C" fn al_sl_install_store_ipa(
+    pairing_path: *const c_char,
+    ipa_path: *const c_char,
+    progress_cb: ALProgressCb,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let pairing = opt_str(pairing_path, "");
+    let ipa = opt_str(ipa_path, "");
+    let c = SendPtr(ctx as usize);
+    let pcb = progress_cb.map(|f| SendPtr(f as usize));
+    let res = guarded("al_sl_install_store_ipa", move || {
+        let logger = Logger { cb: log_cb, ctx: c.0 as *mut c_void };
+        let progress = move |f: f64, stage: &str| {
+            if let Some(p) = pcb {
+                let cb: extern "C" fn(*mut c_void, f64, *const c_char) = unsafe { std::mem::transmute(p.0) };
+                if let Ok(s) = CString::new(stage) {
+                    cb(c.0 as *mut c_void, f, s.as_ptr());
+                }
+            }
+        };
+        runtime().block_on(store_install::install_store_ipa(pairing, ipa, &logger, progress))
     });
     write_result(res, out_json, out_error)
 }
