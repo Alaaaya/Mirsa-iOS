@@ -122,9 +122,8 @@ struct ForgePrecisePending: Codable { let id: UUID; let tweakID: UUID; let bundl
 
     @discardableResult private func send(_ p: ForgePrecisePending, _ c: ForgeFixCredentials) async throws -> ForgePreciseItem {
         let context = (try? JSONSerialization.jsonObject(with: p.contextJSON)) ?? [String: Any]()
-        let body: [String: Any] = ["action": "precise-enqueue", "id": p.id.uuidString.lowercased(), "tweakID": p.tweakID.uuidString.lowercased(),
+        var body: [String: Any] = ["action": "precise-enqueue", "id": p.id.uuidString.lowercased(), "tweakID": p.tweakID.uuidString.lowercased(),
             "bundleID": p.bundleID, "name": p.name, "prompt": p.prompt, "version": p.version, "context": context]
-        var body = body
         if let s = p.screenshotJSON, let shot = try? JSONSerialization.jsonObject(with: s) { body["screenshot"] = shot }
         let r = try await ForgePreciseClient.request(body, credentials: c)
         if r.status == 409 { pending.removeAll { $0.id == p.id } }
