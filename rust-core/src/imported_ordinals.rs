@@ -47,16 +47,33 @@ fn exports(d:&[u8])->Result<()> {
 }
 pub(super) fn rewrite(m:&mut Mach,map:&[Option<usize>])->Result<()>{
     let min=m.first_data;
-    // Reject overlapping ordinal-bearing regions. Rewriting twice is unsafe.
-    let mut regions=Vec::new();
+    // Segment envelopes intentionally overlap sections and LINKEDIT. Only concrete
+    // live payloads participate. Writable regions must not alias ANY other payload.
+    let mut regions:Vec<(usize,usize,bool)>=Vec::new();
+    let mut add=|a:usize,n:usize,w:bool|->Result<()>{
+        if n==0{return Ok(())}let b=a.checked_add(n).ok_or("Payload range overflow")?;
+        if a<32+u32at(&m.data,20)?as usize || b>m.data.len(){return Err("Payload outside file or overlaps headers".into())}
+        if regions.iter().any(|&(x,y,other)|a<y&&x<b&&(w||other)){return Err("Ordinal payload aliases another live payload".into())}
+        regions.push((a,b,w));Ok(())
+    };
     for c in &m.commands{
-        let fields:Vec<(usize,usize)>=match c.kind{
-            0x22|0x80000022=>vec![(u32at(&c.data,16)?as usize,u32at(&c.data,20)?as usize),(u32at(&c.data,24)?as usize,u32at(&c.data,28)?as usize),(u32at(&c.data,32)?as usize,u32at(&c.data,36)?as usize)],
-            0x80000034=>vec![(u32at(&c.data,8)?as usize,u32at(&c.data,12)?as usize)],
-            0x2=>vec![(u32at(&c.data,8)?as usize,(u32at(&c.data,12)?as usize).checked_mul(16).ok_or("Symbol count overflow")?)],
-            _=>vec![],
-        };
-        for (a,n) in fields.into_iter().filter(|(_,n)|*n>0){let b=a.checked_add(n).ok_or("Binding range overflow")?;if regions.iter().any(|&(x,y)|a<y&&x<b){return Err("Overlapping binding payloads".into())}regions.push((a,b));}
+        let pair=|o:usize,width:usize|->Result<(usize,usize)>{Ok((u32at(&c.data,o)?as usize,(u32at(&c.data,o+4)?as usize).checked_mul(width).ok_or("Payload count overflow")?))};
+        match c.kind{
+            0x22|0x80000022=>for o in [8,16,24,32,40]{let(a,n)=pair(o,1)?;add(a,n,matches!(o,16|24|32))?},
+            0x2=>{let(a,n)=pair(8,16)?;add(a,n,true)?;let(a,n)=pair(16,1)?;add(a,n,false)?},
+            0xb=>for(o,w)in [(32,8),(40,56),(48,4),(56,4),(64,8),(72,8)]{let(a,n)=pair(o,w)?;add(a,n,false)?},
+            0x1d|0x1e|0x26|0x29|0x2b|0x2e|0x80000033|0x80000034|0x36|0x2c|0x21=>{
+                let(a,n)=pair(8,1)?;add(a,n,c.kind==0x80000034)?;
+            },
+            0x19=>{
+                for i in 0..u32at(&c.data,64)?as usize{
+                    let o=72+i*80;let typ=u32at(&c.data,o+64)?&255;
+                    if !matches!(typ,1|0xc|0x12){add(u32at(&c.data,o+48)?as usize,usize::try_from(u64at(&c.data,o+40)?).map_err(err)?,false)?}
+                    let(a,n)=pair(o+56,8)?;add(a,n,false)?;
+                }
+            },
+            _=>{},
+        }
     }
     for c in &m.commands{match c.kind{
         0x22|0x80000022=>{

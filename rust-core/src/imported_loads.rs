@@ -34,7 +34,7 @@ fn owners(app: &Path, executable: &str) -> Result<Vec<PathBuf>> {
     for p in files {
         if p==main || !p.is_file(){continue}
         let mut h=[0;4];if File::open(&p).map_err(err)?.read_exact(&mut h).is_err(){continue}
-        if matches!(h,[0xcf,0xfa,0xed,0xfe]|[0xca,0xfe,0xba,0xbe]|[0xbe,0xba,0xfe,0xca]|[0xca,0xfe,0xba,0xbf]|[0xbf,0xba,0xfe,0xca]) {
+        if matches!(h,[0xce,0xfa,0xed,0xfe]|[0xfe,0xed,0xfa,0xce]|[0xfe,0xed,0xfa,0xcf]|[0xcf,0xfa,0xed,0xfe]|[0xca,0xfe,0xba,0xbe]|[0xbe,0xba,0xfe,0xca]|[0xca,0xfe,0xba,0xbf]|[0xbf,0xba,0xfe,0xca]) {
             out.push(p);
         }
     }
@@ -77,7 +77,9 @@ fn entries(app: &Path, executable: &str) -> Result<Vec<Entry>> {
     for (a,b) in fat_macho::arm64_ranges(&main_bytes)? {main_paths.extend(rpaths(&macho_subtype(main_bytes[a..b].to_vec(),false,true)?,&app,&main)?)}
     let mut out=Vec::new();let mut budget=0usize;
     for owner in owners(&app,executable)? {
-        let bytes=read_macho(&owner)?;budget=budget.checked_add(bytes.len()).ok_or("Inspection overflow")?;
+        let bytes=read_macho(&owner)?;
+        if matches!(bytes.get(..4),Some([0xce,0xfa,0xed,0xfe]|[0xfe,0xed,0xfa,0xce]|[0xfe,0xed,0xfa,0xcf])){continue}
+        budget=budget.checked_add(bytes.len()).ok_or("Inspection overflow")?;
         if budget>512*1024*1024{return Err("Inspection code budget exceeded".into())}
         let ranges=match fat_macho::arm64_ranges(&bytes){
             Err(e) if e=="FAT binary has no arm64 slices" || e=="Unsupported thin architecture" => continue,
@@ -266,6 +268,44 @@ mod tests {
         assert_eq!(entries(&app,"Main").unwrap()[0].resolved_path.as_deref(),Some("Frameworks/A.dylib"));
         let edit=Edit{owner:"Main".into(),remove:vec![load.into()],order:vec![],delete_files:true};let work=root.join("Deleted.app");edit_copy(&app,"Main",&work,&[edit]).unwrap();assert!(!work.join("Frameworks/A.dylib").exists());assert!(app.join("Frameworks/A.dylib").exists());
         fs::write(app.join("Frameworks/B.dylib"),fixture(0,&["@executable_path/Frameworks/A.dylib"])).unwrap();let work=root.join("Shared.app");let edit=Edit{owner:"Main".into(),remove:vec![load.into()],order:vec![],delete_files:true};edit_copy(&app,"Main",&work,&[edit]).unwrap();assert!(work.join("Frameworks/A.dylib").exists());fs::remove_dir_all(root).unwrap();
+    }
+    #[test]fn thin32_owner_reference_prevents_file_deletion(){
+        let root=std::env::temp_dir().join(format!("imported-thin32-{}",std::process::id()));let _=fs::remove_dir_all(&root);
+        let app=root.join("Original.app");fs::create_dir_all(app.join("Frameworks")).unwrap();
+        let load="@executable_path/Frameworks/A.dylib";
+        fs::write(app.join("Main"),fixture(0,&[load])).unwrap();fs::write(app.join("Frameworks/A.dylib"),fixture(0,&[])).unwrap();
+        // Genuine 32-bit ARM Mach-O header with an LC_LOAD_DYLIB referring to A.
+        let cmd=dylib_command(0xc,load,None).unwrap();let mut thin=vec![0;28+cmd.len()];
+        for(o,v)in [(0,0xfeedface),(4,12),(8,9),(12,6),(16,1),(20,cmd.len()as u32)]{put32(&mut thin,o,v)}
+        thin[28..].copy_from_slice(&cmd);fs::write(app.join("Frameworks/Legacy.dylib"),thin).unwrap();
+        assert_eq!(owners(&app,"Main").unwrap().len(),3);
+        let edit=Edit{owner:"Main".into(),remove:vec![load.into()],order:vec![],delete_files:true};
+        let out=root.join("Work.app");edit_copy(&app,"Main",&out,&[edit]).unwrap();
+        assert!(out.join("Frameworks/A.dylib").is_file());assert!(app.join("Frameworks/A.dylib").is_file());fs::remove_dir_all(root).unwrap();
+    }
+    #[test]fn ordinal_aliases_export_rebase_strings_sections_and_linkedit_reject(){
+        for kind in [0u32,1,2,3,4,5]{
+            let mut d=modern_fixture(1);
+            match kind{
+                0=>{let mut c=vec![0;16];put32(&mut c,0,0x80000033);put32(&mut c,4,16);put32(&mut c,8,2048);put32(&mut c,12,12);add_command(&mut d,c)},
+                1=>{ // dyld rebase aliases its bind stream
+                    let m=macho_subtype(d.clone(),false,true).unwrap();let mut at=32;
+                    for c in m.commands{if c.kind==0x80000022{put32(&mut d,at+8,2048);put32(&mut d,at+12,12)}at+=c.data.len()}
+                },
+                2=>{let m=macho_subtype(d.clone(),false,true).unwrap();let mut at=32;
+                    for c in m.commands{if c.kind==2{put32(&mut d,at+16,2048);put32(&mut d,at+20,12)}at+=c.data.len()}
+                },
+                3=>{put32(&mut d,32+72+48,2048)}, // file-backed section aliases bind
+                4=>{let mut c=vec![0;16];put32(&mut c,0,0x26);put32(&mut c,4,16);put32(&mut c,8,2200);put32(&mut c,12,16);add_command(&mut d,c)},
+                _=>{put32(&mut d,32+72+56,2328);put32(&mut d,32+72+60,1)}, // section relocation aliases chained imports
+            }
+            let before=d.clone();let failure=capability(&d).unwrap_err();assert!(failure.contains("aliases"),"{kind} {failure}");assert_eq!(d,before);
+        }
+        // LINKEDIT parent segment may contain all these independent payloads.
+        let mut d=modern_fixture(1);let mut c=vec![0;72];put32(&mut c,0,0x19);put32(&mut c,4,72);c[8..18].copy_from_slice(b"__LINKEDIT");
+        c[40..48].copy_from_slice(&2048u64.to_le_bytes());c[48..56].copy_from_slice(&2048u64.to_le_bytes());add_command(&mut d,c);
+        let mut c=vec![0;16];put32(&mut c,0,0x80000033);put32(&mut c,4,16);put32(&mut c,8,2500);put32(&mut c,12,2);add_command(&mut d,c);d[2500..2502].copy_from_slice(&[0,0]);
+        assert!(capability(&d).is_ok());let edit=Edit{owner:"Main".into(),remove:vec!["@rpath/Unused".into()],order:vec![],delete_files:false};assert!(patch(&d,&edit).is_ok());
     }
     #[test]fn malformed_and_mismatched_slices_reject(){
         let e=Edit{owner:"Main".into(),remove:vec!["@rpath/A".into()],order:vec![],delete_files:false};
