@@ -13,7 +13,7 @@ Use the single actor `MirsaStoreClient.shared`. Do not create separate productio
 - `acquireFreeApp(app)` is a separate, explicit free-license action. It refreshes metadata in the authenticated account's storefront and rejects missing, negative, nonfinite or nonzero prices. No paid acquisitions.
 - `availableVersions(app)` returns Apple's external version IDs. These are not human-readable version labels and availability is not guaranteed.
 - `downloadOwnedApp(app, externalVersionID:)` downloads the account-owned encrypted IPA and assembles its original SINF and metadata. It never acquires a license automatically. The returned local URL may be passed to the existing local importer, then its UUID temporary directory must be removed after a successful copy.
-- `signOut()` deletes account and challenge secrets, clears memory state and prevents an in-flight response from restoring the account. A failed Keychain deletion is reported and must not be presented as a successful sign-out.
+- `signOut()` deletes account and challenge secrets, clears challenge memory, actively cancels a CDN transfer and prevents an in-flight response from restoring the account. Account secrets are loaded from Keychain only for each operation, not cached on the client. ApplePackage does not expose its underlying auth HTTP handle; an already-sent Apple authentication request may finish within its bounded timeout, but its response is discarded after sign-out. A failed Keychain deletion is reported and must not be presented as a successful sign-out.
 
 Do not claim encrypted apps can be re-signed, decrypted, installed or run merely because a download succeeded. There is no decryption or certificate bypass in this backend.
 
