@@ -21,7 +21,7 @@ enum ExistingLibraryPlan {
     static func stateLabel(_ lib: ExistingProjectLibrary) -> String {
         lib.provenance == "bundledDependency"
             ? tr("Bundled in the app", "موجودة داخل التطبيق", ckb: "لەناو ئەپەکەدایە", kmr: "Di nav sepanê de ye")
-            : tr("Not found in the app", "مو موجودة بالتطبيق", ckb: "لەناو ئەپەکەدا نییە", kmr: "Di nav sepanê de nîne")
+            : tr("Location unresolved", "المكان غير محدد", ckb: "شوێنەکەی دیارینەکراوە", kmr: "Cih nehatiye diyarkirin")
     }
 
     static func removeTitle() -> String { tr("Remove this library?", "تشيل هالمكتبة؟", ckb: "ئەم کتێبخانەیە لابدرێت؟", kmr: "Ev pirtûkxane were rakirin?") }
@@ -108,7 +108,9 @@ struct ExistingLibrariesCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(ExistingLibraryPlan.isMain(owner) ? tr("Main executable", "الملف الرئيسي", ckb: "فایلی سەرەکی", kmr: "Pelê sereke") : ExistingLibraryPlan.frameworkName(owner))
                             .font(.caption.weight(.semibold))
-                        ForEach(rows, id: \.lib.id) { row in
+                        ForEach(Array(rows.enumerated()), id: \.element.lib.id) { idx, row in
+                            let keptIdx = rows.prefix(idx).filter { !$0.removed }.count
+                            let keptCount = rows.filter { !$0.removed }.count
                             HStack(spacing: 8) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(row.lib.loadPath).font(.caption2.monospaced()).lineLimit(2)
@@ -119,11 +121,16 @@ struct ExistingLibrariesCard: View {
                                 Spacer(minLength: 4)
                                 if !row.removed {
                                     Button { edits = ExistingLibraryPlan.move(row.lib, by: -1, libs: libraries, in: edits) } label: { Image(systemName: "arrow.up") }
+                                        .disabled(keptIdx == 0)
+                                        .accessibilityLabel(tr("Move up", "تحريك لفوق", ckb: "بۆ سەرەوە", kmr: "Biçe jor"))
                                     Button { edits = ExistingLibraryPlan.move(row.lib, by: 1, libs: libraries, in: edits) } label: { Image(systemName: "arrow.down") }
+                                        .disabled(keptIdx >= keptCount - 1)
+                                        .accessibilityLabel(tr("Move down", "تحريك لتحت", ckb: "بۆ خوارەوە", kmr: "Biçe jêr"))
                                 }
                                 Button { if row.removed { edits = ExistingLibraryPlan.toggleRemoved(row.lib, in: edits) } else { pendingRemove = row.lib } } label: {
                                     Image(systemName: row.removed ? "arrow.uturn.backward" : "trash")
                                 }.tint(row.removed ? .green : .red)
+                                .accessibilityLabel(row.removed ? tr("Restore", "استرجاع", ckb: "گەڕاندنەوە", kmr: "Vegerîne") : tr("Remove", "إزالة", ckb: "لابردن", kmr: "Rakirin"))
                             }
                             .buttonStyle(.borderless)
                             .opacity(row.removed ? 0.55 : 1)

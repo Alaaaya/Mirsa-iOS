@@ -34,6 +34,16 @@ final class ExistingProjectLibrariesUITests: XCTestCase {
         XCTAssertTrue(ExistingLibraryPlan.reset().isEmpty)
     }
 
+    func testUnresolvedStateWording() {
+        for l in [AppLanguage.english, .arabic, .sorani, .kurmanji] {
+            AppLanguageStore.shared.set(l)
+            XCTAssertFalse(ExistingLibraryPlan.stateLabel(libs[2]).isEmpty)
+        }
+        AppLanguageStore.shared.set(.english)
+        XCTAssertEqual(ExistingLibraryPlan.stateLabel(libs[2]), "Location unresolved")
+        AppLanguageStore.shared.set(.arabic)
+    }
+
     func testMoveAtEdgeIsNoOp() {
         XCTAssertTrue(ExistingLibraryPlan.move(libs[0], by: -1, libs: libs, in: []).isEmpty)
     }
@@ -70,7 +80,8 @@ final class ExistingProjectLibrariesUITests: XCTestCase {
             @State var edits = [ExistingLibraryEdit(owner: "App", removed: ["@rpath/B.framework/B"])]
             var body: some View { ExistingLibrariesCard(libraries: libs, edits: $edits).padding().background(Color.black) }
         }
-        try await render(Host(libs: libs), name: "existing-libraries-ar", height: 760)
+        let more = libs + [lib("Frameworks/B.framework/B", "@rpath/E.dylib"), lib("Frameworks/B.framework/B", "@rpath/F.dylib", bundled: false)]
+        try await render(Host(libs: more), name: "existing-libraries-ar", height: 1000)
     }
 
     func testArabicSnapshotSourceDeleteConfirmation() async throws {
