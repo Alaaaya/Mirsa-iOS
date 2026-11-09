@@ -1,7 +1,7 @@
 import { oracleSession } from "./oracle.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { unzipSync } from "npm:fflate@0.8.3";
-import { validateMetadata, manifest, localManifest, MAX_IPA_BYTES, isExpired, shareLink, lifetime } from "./contract.mjs";
+import { validateMetadata, manifest, localManifestFromQuery, MAX_IPA_BYTES, isExpired, shareLink, lifetime } from "./contract.mjs";
 
 const root = Deno.env.get("SUPABASE_URL")!;
 const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -54,8 +54,7 @@ Deno.serve(async req => {
   if(req.method==="GET" && u.searchParams.get("action")==="local-manifest") {
    // Stateless: no stored data and no IPA bytes; only emits a loopback URL for the requesting device.
    try {
-    const meta={bundleID:u.searchParams.get("bundleID"),version:u.searchParams.get("version"),title:u.searchParams.get("title"),bytes:Number(u.searchParams.get("bytes"))};
-    return new Response(localManifest(meta,u.searchParams.get("port"),u.searchParams.get("token") ?? ""),{headers:{...headers,"content-type":"application/xml","cache-control":"no-store"}});
+    return new Response(localManifestFromQuery(u.searchParams),{headers:{...headers,"content-type":"application/xml","cache-control":"no-store"}});
    } catch { return json({error:"bad_request"},400); }
   }
   if(req.method==="GET") {
