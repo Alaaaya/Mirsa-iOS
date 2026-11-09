@@ -1,15 +1,15 @@
 import SwiftUI
 import PhotosUI
 
-/// "Create anything": a request thread with Kat. This is a manual queue, not an instant AI chat; replies take time.
+/// "Create anything": a request thread with Mirsa. This is a manual queue, not an instant AI chat; replies take time.
 enum ForgeChatText {
     static var title: String { tr("Create anything", "إنشاء كل شي", ckb: "هەموو شتێک دروست بکە", kmr: "Her tiştî çêke") }
-    static var subtitle: String { tr("Write what you want. Kat takes your request and works on it. It takes time.", "اكتب شو بدك، كات بتاخد طلبك وبتشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، کات داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات. کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Kat daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
-    static var guide: String { tr("This is not an instant chat. Your message goes into a queue and Kat answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "هاد مو شات فوري. رسالتك بتدخل بالدور وكات بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويكات الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "ئەمە گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و کات بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Ev ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Kat bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
+    static var subtitle: String { tr("Write what you want. Mirsa takes your request and works on it. It takes time.", "اكتب شو بدك، مرسى بتاخد طلبك وبتشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، مرسا داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات. کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Mirsa daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
+    static var guide: String { tr("This is not an instant chat. Your message goes into a queue and Mirsa answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "هاد مو شات فوري. رسالتك بتدخل بالدور ومرسى بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويكات الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "ئەمە گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و مرسا بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Ev ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Mirsa bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
     static var placeholder: String { tr("Write your request…", "اكتب طلبك…", ckb: "داواکارییەکەت بنووسە…", kmr: "Daxwaza xwe binivîse…") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
-    static var waiting: String { tr("Waiting for Kat. This can take a while.", "بانتظار كات. ممكن ياخد وقت.", ckb: "چاوەڕێی کات. ڕەنگە کاتی بوێت.", kmr: "Li benda Katê. Dibe ku demek bikşîne.") }
+    static var waiting: String { tr("Waiting for Mirsa. This can take a while.", "بانتظار مرسى، ممكن ياخد وقت.", ckb: "چاوەڕێی مرسا. ڕەنگە کاتی بوێت.", kmr: "Li benda Mirsayê. Dibe ku demek bikşîne.") }
     static var sending: String { tr("Sending…", "عم يتبعت…", ckb: "دەنێردرێت…", kmr: "Tê şandin…") }
     static var photo: String { tr("Add image", "أضف صورة", ckb: "وێنە زیاد بکە", kmr: "Wêne zêde bike") }
     static var removeImage: String { tr("Remove image", "إزالة الصورة", ckb: "لابردنی وێنە", kmr: "Wêne rake") }
@@ -90,9 +90,20 @@ enum ForgeChatImage {
     private var ackedThreads = Set<UUID>()
     func serverKnows(_ id: UUID) -> Bool { ackedThreads.contains(id) || threads.contains { $0.id == id } || !(messages[id] ?? []).isEmpty }
 
+    /// One stable draft thread id for "New request" until its first message is accepted, so reopening never makes a second thread.
+    private let draftKey = "mirsa.chat.draftThread.v1"
+    func draftThreadID() -> UUID {
+        if let pending = outgoing.first(where: { !serverKnows($0.threadID) }) { return pending.threadID }
+        if let s = UserDefaults.standard.string(forKey: draftKey), let u = UUID(uuidString: s), !serverKnows(u) { return u }
+        let u = UUID(); UserDefaults.standard.set(u.uuidString, forKey: draftKey); return u
+    }
+    var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return outgoing.map(\.threadID).filter { !threads.contains { t in t.id == $0 } && seen.insert($0).inserted } }
+    func hasInFlight(_ id: UUID) -> Bool { outgoing.contains { $0.threadID == id } }
+
     func send(threadID: UUID?, text: String, jpeg: Data?) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        if let tid = threadID, hasInFlight(tid) { return } // no double send while a message is still unsent
         let img = jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString()
         outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: threadID ?? UUID(), newThread: !serverKnows(threadID ?? UUID()), text: String(t.prefix(4000)), imageBase64: img))
         saveOutgoing()
@@ -185,6 +196,9 @@ struct ForgeChatRoot: View {
                 }
                 if let e = store.error { Text(e).font(.footnote).foregroundStyle(.red) }
                 if store.threads.isEmpty && store.outgoing.isEmpty { Text(ForgeChatText.empty).foregroundStyle(.secondary) }
+                ForEach(store.pendingThreadIDs, id: \.self) { id in
+                    NavigationLink(value: id) { VStack(alignment: .leading) { Text(store.outgoing.first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(ForgeChatText.sending).font(.caption2).foregroundStyle(.secondary) } }
+                }
                 ForEach(store.threads) { t in
                     NavigationLink(value: t.id) {
                         VStack(alignment: .leading) { Text(t.title ?? ForgeChatText.newRequest).lineLimit(2); if let s = t.status { Text(s).font(.caption2).foregroundStyle(.secondary) } }
@@ -195,7 +209,7 @@ struct ForgeChatRoot: View {
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(ForgeChatText.close) { dismiss() } }
-                ToolbarItem(placement: .primaryAction) { Button { path.append(UUID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest) }
+                ToolbarItem(placement: .primaryAction) { Button { path.append(store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest) }
             }
             .task { // poll only while this screen is visible
                 await store.flush()
@@ -213,7 +227,7 @@ struct ForgeChatThreadView: View {
     @State private var jpeg: Data?
     @State private var started = false
     private var msgs: [ForgeChatMessage] { store.messages[threadID] ?? [] }
-    private var queued: [ForgeChatOutgoing] { store.outgoing.filter { $0.threadID == threadID } }
+    private var queued: [ForgeChatOutgoing] { store.outgoing.filter { o in o.threadID == threadID && !msgs.contains { $0.id == o.id } } }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
 
     var body: some View {
@@ -242,7 +256,7 @@ struct ForgeChatThreadView: View {
                     started = true
                     store.send(threadID: threadID, text: text, jpeg: jpeg)
                     text = ""; jpeg = nil; photo = nil
-                }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !queued.isEmpty)
             }.padding(10)
         }
         .navigationTitle(ForgeChatText.title).navigationBarTitleDisplayMode(.inline)
