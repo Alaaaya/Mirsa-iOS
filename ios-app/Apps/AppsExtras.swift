@@ -318,6 +318,7 @@ private final class UploadConnection {
     var header = Data()
     var file: FileHandle?
     var fileURL: URL?
+    private var work: URL?
     var remaining = 0
     init(_ c: NWConnection) { conn = c }
 
@@ -346,9 +347,11 @@ private final class UploadConnection {
         let len = lines.first(where: { $0.lowercased().hasPrefix("content-length:") })
             .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
         guard len > 0 else { return send(411, "length required") }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("web-\(UUID().uuidString).ipa")
+        guard let dir = try? MirsaManagedTmp.begin("web-upload") else { return send(500, "disk") }
+        work = dir
+        let url = dir.appendingPathComponent("Upload.ipa")
         FileManager.default.createFile(atPath: url.path, contents: nil)
-        guard let fh = try? FileHandle(forWritingTo: url) else { return send(500, "disk") }
+        guard let fh = try? FileHandle(forWritingTo: url) else { MirsaManagedTmp.end(dir); work = nil; return send(500, "disk") }
         file = fh; fileURL = url; remaining = len
         write(firstBody)
     }
@@ -363,20 +366,23 @@ private final class UploadConnection {
     }
 
     private func abort() {
-        try? file?.close(); if let u = fileURL { try? FileManager.default.removeItem(at: u) }
+        try? file?.close(); if let work { MirsaManagedTmp.end(work) }; work = nil
         conn.cancel()
     }
 
     private func finish() {
         try? file?.close()
         send(200, "ok")
-        guard let u = fileURL else { return }
+        guard let u = fileURL, let dir = work else { return }
+        work = nil // ownership transferred to the importer task
         Task { @MainActor in
+            defer { MirsaManagedTmp.end(dir) }
             WebUploadServer.shared.received = u.lastPathComponent
             await AppsStore.shared.importIPA(from: u)
-            try? FileManager.default.removeItem(at: u)
         }
     }
+
+    deinit { if let work { MirsaManagedTmp.end(work) } }
 
     private func send(_ code: Int, _ body: String, type: String = "text/plain; charset=utf-8") {
         let b = Data(body.utf8)
@@ -550,7 +556,7 @@ final class MirsaUpdater: ObservableObject {
         guard let url = rel.ipa else { return nil }
         do {
             let file = try await updaterDownload(url)
-            defer { try? FileManager.default.removeItem(at: file) }
+            defer { MirsaManagedTmp.end(file.deletingLastPathComponent()) }
             let facts = try await Self.verifiedUpdate(file)
             return facts.build
         } catch { return nil }
@@ -645,9 +651,9 @@ final class MirsaUpdater: ObservableObject {
         available = nil
         guard store.downloadTask == nil, store.busy == nil else { return }
         let fm = FileManager.default
-        let work = fm.temporaryDirectory.appendingPathComponent("upd-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: work) }
         do {
+            let work = try MirsaManagedTmp.begin("updater")
+            defer { MirsaManagedTmp.end(work) }
             try fm.createDirectory(at: work, withIntermediateDirectories: true)
             let ipa = try await updaterDownload(url)
             defer { try? fm.removeItem(at: ipa) }

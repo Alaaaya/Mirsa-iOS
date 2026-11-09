@@ -516,7 +516,7 @@ struct PersonalProjectDetailView: View {
         } catch { message = error.localizedDescription }
     }
     private func cleanOutput() {
-        if let output, output != signing.state?.result?.url { try? FileManager.default.removeItem(at: output.deletingLastPathComponent()) }
+        if let output, output != signing.state?.result?.url { MirsaManagedTmp.end(output.deletingLastPathComponent()) }
         output = nil
     }
 
