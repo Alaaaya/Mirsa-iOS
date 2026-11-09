@@ -91,13 +91,22 @@ enum MirsaManagedTmp {
 
     static func size(root r: URL? = nil) -> Int64 {
         lock.lock(); defer { lock.unlock() }
-        guard let base = safeRoot(r ?? root),
-              let e = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isSymbolicLinkKey, .fileSizeKey, .isRegularFileKey]) else { return 0 }
+        guard let base = safeRoot(r ?? root) else { return 0 }
+        // Walk each directory explicitly so skipping a link never prunes siblings.
+        // Only real directories are enqueued; user-linked targets are never visited.
+        let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey, .isRegularFileKey]
+        var pending = [base]
         var bytes: Int64 = 0
-        for case let u as URL in e {
-            guard let v = try? u.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey, .isRegularFileKey]) else { continue }
-            if v.isSymbolicLink == true { e.skipDescendants(); continue }
-            if v.isRegularFile == true { bytes += Int64(v.fileSize ?? 0) }
+        while let directory = pending.popLast() {
+            guard safeRoot(directory)?.path == directory.path,
+                  let children = try? FileManager.default.contentsOfDirectory(
+                    at: directory, includingPropertiesForKeys: Array(keys)) else { continue }
+            for child in children {
+                guard let values = try? child.resourceValues(forKeys: keys),
+                      values.isSymbolicLink == false else { continue }
+                if values.isDirectory == true { pending.append(child) }
+                else if values.isRegularFile == true { bytes += Int64(values.fileSize ?? 0) }
+            }
         }
         return bytes
     }

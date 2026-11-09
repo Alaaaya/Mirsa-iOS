@@ -106,6 +106,27 @@ final class MirsaManagedTmpTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: precious).count, 50_000)
     }
 
+    func testSizeCountsNestedSiblingsBesideLinksInAnyCreationOrder() throws {
+        let user = fm.temporaryDirectory.appendingPathComponent("user-" + UUID().uuidString)
+        try fm.createDirectory(at: user, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: user) }
+        try Data(count: 50_000).write(to: user.appendingPathComponent("original.ipa"))
+        for linkFirst in [true, false] {
+            let d = try MirsaManagedTmp.begin("size-order", root: root)
+            let link = d.appendingPathComponent("link")
+            if linkFirst { try fm.createSymbolicLink(at: link, withDestinationURL: user) }
+            let nested = d.appendingPathComponent("nested/deeper")
+            try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+            try Data(count: 31).write(to: nested.appendingPathComponent("file"))
+            try Data(count: 20).write(to: d.appendingPathComponent("sibling"))
+            if !linkFirst { try fm.createSymbolicLink(at: link, withDestinationURL: user) }
+            XCTAssertEqual(MirsaManagedTmp.size(root: root), 51)
+            MirsaManagedTmp.end(d, root: root)
+            XCTAssertEqual(MirsaManagedTmp.size(root: root), 0)
+            XCTAssertEqual(try Data(contentsOf: user.appendingPathComponent("original.ipa")).count, 50_000)
+        }
+    }
+
     func testStalePersistenceAndDistinctRootOwnership() throws {
         let old = root.appendingPathComponent("old-run")
         try fm.createDirectory(at: old, withIntermediateDirectories: true); age(old, hours: 2)
