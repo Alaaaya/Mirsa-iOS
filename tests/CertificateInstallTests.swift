@@ -99,3 +99,32 @@ extension CertificateInstallTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: input.path))
     }
 }
+
+extension CertificateInstallTests {
+    func testSignedMetadataUsesPostSigningSnapshotWithoutOpeningArchive() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        // Deliberately nonexistent output. Reading it or extracting into its parent fails.
+        let ipa = root.appendingPathComponent("Rave-signed.ipa")
+        let info: [String: Any] = ["CFBundleIdentifier": "sh.weme.wemesh",
+                                  "CFBundleVersion": "800", "CFBundleDisplayName": "Rave",
+                                  "CFBundleShortVersionString": "8.0"]
+        let bytes = try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0)
+        var result = PersonalCertificateSigner.Result(url: ipa, bundleIdentifierChanged: false,
+            verification: PersonalProfileVerification.parse([:]))
+        result.signedInfoPlist = bytes
+        XCTAssertEqual(try CertificateOTA.signedMetadata(result), bytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testMissingOrOversizedSignedMetadataNeverFallsBackToExtraction() throws {
+        var result = PersonalCertificateSigner.Result(url: URL(fileURLWithPath: "/nonexistent/Rave-signed.ipa"),
+            bundleIdentifierChanged: false, verification: PersonalProfileVerification.parse([:]))
+        XCTAssertThrowsError(try CertificateOTA.signedMetadata(result))
+        result.signedInfoPlist = Data(repeating: 0, count: 2 * 1024 * 1024 + 1)
+        XCTAssertThrowsError(try CertificateOTA.signedMetadata(result))
+        for info in [["CFBundleIdentifier": ""], ["CFBundleIdentifier": "sh.weme.wemesh", "CFBundleVersion": ""]] {
+            result.signedInfoPlist = try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0)
+            XCTAssertThrowsError(try CertificateOTA.signedMetadata(result))
+        }
+    }
+}
