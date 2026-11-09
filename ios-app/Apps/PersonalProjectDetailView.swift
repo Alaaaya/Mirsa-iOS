@@ -163,9 +163,11 @@ struct PersonalProjectDetailView: View {
                 field(personalText("Version", "الإصدار"), $draft.version)
                 field(personalText("Workspace note", "ملاحظة المشروع"), Binding(get: { draft.workspaceNote ?? "" }, set: { draft.workspaceNote = String($0.prefix(300)) }))
                 HStack(spacing: 8) {
-                    chip("puzzlepiece.extension", extensionCount.map { "\($0) " + personalText("extensions", "إضافات") } ?? "…")
+                    chip("puzzlepiece.extension", extensionCount.map { "\($0) " + personalText("app extensions", "إضافات تطبيق") } ?? "…")
                     chip("arrow.triangle.branch", personalText("Main executable", "الملف الرئيسي"))
                 }
+                Text(personalText("App extensions are parts already inside the app (widgets, share sheet…). They are not tweaks injected by Mirsa.", "إضافات التطبيق هي أجزاء موجودة أصلاً داخل التطبيق (ودجات، المشاركة…). مو إضافات حقنها Mirsa."))
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }.padding(16).appsGlass(cornerRadius: 24)
     }
