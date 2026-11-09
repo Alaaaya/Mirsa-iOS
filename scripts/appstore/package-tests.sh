@@ -18,7 +18,7 @@ import PackageDescription
 let package = Package(name: "MirsaStoreKit", platforms: [.macOS(.v14), .iOS(.v18)],
     products: [.library(name: "MirsaStoreKit", targets: ["MirsaStoreKit"])],
     dependencies: [
-        .package(url: "https://github.com/Lakr233/ApplePackage.git", revision: "391bfe6ee6598d73e4f94b88b38b50bd6f6ec67b"),
+        .package(path: "__APPLEPACKAGE_PATH__"),
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.20"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0")
     ],
@@ -34,5 +34,10 @@ let package = Package(name: "MirsaStoreKit", platforms: [.macOS(.v14), .iOS(.v18
         ])
     ], swiftLanguageModes: [.v5])
 SWIFT
+python3 - "$WORK/Package.swift" "$ROOT/vendor/ApplePackage" <<'PYTHON'
+import sys
+from pathlib import Path
+p=Path(sys.argv[1]);p.write_text(p.read_text().replace("__APPLEPACKAGE_PATH__", sys.argv[2]))
+PYTHON
 cd "$WORK"
 swift test

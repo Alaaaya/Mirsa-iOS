@@ -22,6 +22,14 @@ checks = {
     "signout invalidates generations": "generation &+= 1" in text and "run == generation" in text,
     "CDN cancellation on signout": "packages.cancel()" in text,
 }
+vendor = repo / "vendor/ApplePackage"
+auth_patch = (vendor / "Sources/ApplePackage/Commands/Authenticate.swift").read_text()
+diagnostics = (vendor / "Sources/ApplePackage/Supplement/AuthenticationServiceError.swift").read_text()
+checks["auth errors explicitly typed at UI boundary"] = "MirsaStoreAuthDiagnostic" in text and "AuthenticationServiceError" in text
+checks["HTTP rejection fields parsed before non-200 guard"] = auth_patch.index("let diagnostic = Self.rejection") < auth_patch.index("guard response.status == .ok")
+checks["no automatic credential rejection retry"] = "case retry" not in auth_patch and "var retried" not in auth_patch
+checks["diagnostics do not copy arbitrary NSError descriptions"] = "ns.localizedDescription" not in diagnostics and "NSURLErrorDomain" in diagnostics
+checks["signed exact bytes still required"] = "sapSigner.sign(data)" in auth_patch and '("X-Apple-ActionSignature", signature.base64EncodedString())' in auth_patch
 if len(sys.argv) == 2:
     reference = pathlib.Path(sys.argv[1])
     revision = subprocess.check_output(["git", "-C", str(reference), "rev-parse", "HEAD"], text=True).strip()

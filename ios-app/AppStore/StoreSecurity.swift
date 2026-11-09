@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import ApplePackage
 
 enum MirsaStoreError: Error, Equatable, LocalizedError {
     case busy, signedOut, verificationRequired, invalidInput, freeAppsOnly
@@ -99,5 +100,29 @@ enum MirsaStorePolicy {
               !parts.contains(".."), !parts.contains("."), !path.contains("\0") else {
             throw MirsaStoreError.invalidPackage
         }
+    }
+}
+
+/// Safe structured diagnostics from the authentication boundary only.
+struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
+    let stage: AuthenticationServiceError.Stage
+    let httpStatus: Int?
+    let appleCode: String?
+    let appleMessage: String?
+    let networkCode: Int?
+
+    init(_ error: AuthenticationServiceError) {
+        stage = error.stage; httpStatus = error.httpStatus; appleCode = error.appleCode
+        appleMessage = error.message; networkCode = error.networkCode
+    }
+
+    var errorDescription: String? {
+        // Stable stage names make owner reports comparable in every app language.
+        var fields = ["Apple · " + stage.rawValue]
+        if let httpStatus { fields.append("HTTP " + String(httpStatus)) }
+        if let appleCode { fields.append("Apple " + appleCode) }
+        if let networkCode { fields.append("Network " + String(networkCode)) }
+        if let appleMessage { fields.append(appleMessage) }
+        return fields.joined(separator: " · ")
     }
 }
