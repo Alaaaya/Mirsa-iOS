@@ -39,20 +39,31 @@ final class EncryptedAppsTests: XCTestCase {
 
     /// Stored (uncompressed) zip, enough for ZipReader.
     private func zip(_ files: [(String, Data)]) -> Data {
-        func le16(_ v: Int) -> Data { Data([UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)]) }
-        func le32(_ v: UInt32) -> Data { Data([UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8(v >> 24)]) }
-        var out = Data(), central = Data()
+        func u16(_ d: inout Data, _ v: Int) { d.append(UInt8(v & 0xFF)); d.append(UInt8((v >> 8) & 0xFF)) }
+        func u32(_ d: inout Data, _ v: UInt32) {
+            d.append(UInt8(v & 0xFF)); d.append(UInt8((v >> 8) & 0xFF))
+            d.append(UInt8((v >> 16) & 0xFF)); d.append(UInt8(v >> 24))
+        }
+        var out = Data()
+        var central = Data()
         for (name, body) in files {
-            let n = Data(name.utf8), crc = CRC32.update(0, body), offset = UInt32(out.count)
-            out += le32(0x04034b50) + le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(crc)
-            out += le32(UInt32(body.count)) + le32(UInt32(body.count)) + le16(n.count) + le16(0) + n + body
-            central += le32(0x02014b50) + le16(20) + le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(crc)
-            central += le32(UInt32(body.count)) + le32(UInt32(body.count)) + le16(n.count) + le16(0) + le16(0) + le16(0) + le16(0)
-            central += le32(0x81A40000) + le32(offset) + n
+            let n = Data(name.utf8)
+            let crc: UInt32 = CRC32.update(0, body)
+            let offset = UInt32(out.count)
+            let size = UInt32(body.count)
+            u32(&out, 0x04034b50); u16(&out, 20); u16(&out, 0); u16(&out, 0); u16(&out, 0); u16(&out, 0)
+            u32(&out, crc); u32(&out, size); u32(&out, size); u16(&out, n.count); u16(&out, 0)
+            out.append(n); out.append(body)
+            u32(&central, 0x02014b50); u16(&central, 20); u16(&central, 20); u16(&central, 0); u16(&central, 0)
+            u16(&central, 0); u16(&central, 0); u32(&central, crc); u32(&central, size); u32(&central, size)
+            u16(&central, n.count); u16(&central, 0); u16(&central, 0); u16(&central, 0); u16(&central, 0)
+            u32(&central, 0x81A40000); u32(&central, offset); central.append(n)
         }
         let cd = UInt32(out.count)
-        out += central
-        out += le32(0x06054b50) + le16(0) + le16(0) + le16(files.count) + le16(files.count) + le32(UInt32(central.count)) + le32(cd) + le16(0)
+        let cdSize = UInt32(central.count)
+        out.append(central)
+        u32(&out, 0x06054b50); u16(&out, 0); u16(&out, 0); u16(&out, files.count); u16(&out, files.count)
+        u32(&out, cdSize); u32(&out, cd); u16(&out, 0)
         return out
     }
 
