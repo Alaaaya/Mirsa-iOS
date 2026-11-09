@@ -9,8 +9,12 @@ struct ImportedLoad: Codable, Equatable, Sendable {
     let loadPath: String
     let weak: Bool
     let resolvedPath: String?
+    // Capability is opt-in. Older inspection responses are read-only, never presumed safe.
+    var editable: Bool? = nil
+    var editBlockReason: String? = nil
     enum CodingKeys: String, CodingKey {
-        case owner, slice, subtype, weak
+        case owner, slice, subtype, weak, editable
+        case editBlockReason = "edit_block_reason"
         case mainOwner = "main_owner", loadPath = "load_path", resolvedPath = "resolved_path"
     }
 }
@@ -30,6 +34,11 @@ struct ImportedLoadEdit: Codable, Equatable, Sendable {
 /// Edits describe commands, never arbitrary filesystem paths. All edits are replayed
 /// against a fresh archive copy on export; Reset just clears this plan.
 enum ImportedLoadPlan {
+    static func canEdit(owner: String, entries: [ImportedLoad]) -> Bool {
+        let owned = entries.filter { $0.owner == owner }
+        return !owned.isEmpty && owned.allSatisfy { $0.editable == true }
+    }
+
     static func paths(owner: String, entries: [ImportedLoad], edits: [ImportedLoadEdit]) -> [String] {
         let edit = edits.first { $0.owner == owner }
         var seen = Set<String>()
@@ -113,10 +122,18 @@ struct ImportedDependenciesView: View {
              : sgText("Via framework / bundled executable", "عبر framework / ملف مضمّن", "لە ڕێگەی framework / فایلی ناوخۆ", "Bi rêya framework / dosyaya hundirîn"))
             .font(.caption.weight(.semibold))
         Text(owner).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+        let supported = ImportedLoadPlan.canEdit(owner: owner, entries: entries)
+        if !supported {
+            Text(sgText("Read-only: safe removal and reordering have not been verified for this executable. Modern symbol bindings need ordinal rewriting.",
+                        "للقراءة بس: الحذف والترتيب الآمن مو متاحين لهالملف حالياً. ربط الرموز بالتطبيقات الحديثة بده معالجة إضافية.",
+                        "تەنها بۆ خوێندنەوە: سڕینەوە و ڕیزکردنی سەلامەت بۆ ئەم فایلە پشتڕاست نەکراونەتەوە. بەستەری هێما نوێکان پێویستی بە دەستکاری زیاترە.",
+                        "Tenê xwendin: jêbirin û rêzkirina ewle ji bo vê dosyayê nehatine piştrastkirin. Girêdanên nû yên sembolan pêdivî bi guhartina ordinalan hene."))
+                .font(.caption2).foregroundStyle(.orange)
+        }
         ForEach(Array(paths.enumerated()), id: \.element) { index, path in
             let entry = entries.first { $0.owner == owner && $0.loadPath == path }
             HStack(spacing: 8) {
-                Button { pending = entry } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
+                Button { pending = entry } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }.disabled(!supported)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(path).font(.caption).textSelection(.enabled)
                     if entry?.resolvedPath == nil {
@@ -124,8 +141,8 @@ struct ImportedDependenciesView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Button { edits = ImportedLoadPlan.moving(path, by: -1, owner: owner, entries: entries, edits: plan) } label: { Image(systemName: "arrow.up") }.disabled(index == 0)
-                Button { edits = ImportedLoadPlan.moving(path, by: 1, owner: owner, entries: entries, edits: plan) } label: { Image(systemName: "arrow.down") }.disabled(index == paths.count - 1)
+                Button { edits = ImportedLoadPlan.moving(path, by: -1, owner: owner, entries: entries, edits: plan) } label: { Image(systemName: "arrow.up") }.disabled(!supported || index == 0)
+                Button { edits = ImportedLoadPlan.moving(path, by: 1, owner: owner, entries: entries, edits: plan) } label: { Image(systemName: "arrow.down") }.disabled(!supported || index == paths.count - 1)
             }.buttonStyle(.mirsaPress).padding(10).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
         }
     }
