@@ -273,6 +273,7 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
     let team = profiles[chosen].parsed.team_id();
     let mut assignments = BTreeMap::new();
     let mut entitlements = BTreeMap::new();
+    let mut pending = Vec::new();
     for node in &nodes {
         if node.framework { continue; }
         let id = mapping.get(&node.id).ok_or("معرّف تطبيق غير موجود.")?;
@@ -285,19 +286,28 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         };
         let p = &profiles[index].parsed;
         if p.team_id() != team { return Err(format!("فريق البروفايل مختلف للتطبيق {id}.")); }
-        let prefix = patterns[index].split_once('.').ok_or("معرّف البروفايل غير صالح.")?.0;
         let mut requested = nested::read_entitlements(&std::fs::read(node.executable()?).map_err(err)?)?;
         if node.path == app && !opts.custom_entitlements_path.is_empty() {
             for (k, v) in custom_entitlements(&opts.custom_entitlements_path)? { requested.insert(k, v); }
         }
-        let (constrained, dropped) = nested::constrain(&requested, p.entitlements(), prefix, id, team, &mapping, opts.strict_profile)
+        pending.push((id.clone(), index, fallback, requested));
+    }
+    let group_pairs: Vec<_> = pending.iter().map(|(_, index, _, request)|
+        (request, profiles[*index].parsed.entitlements())).collect();
+    let group_plan = nested::app_group_plan(&group_pairs);
+    for (id, index, fallback, requested) in pending {
+        let p = &profiles[index].parsed;
+        let pattern = p.entitlements().get("application-identifier").and_then(plist::Value::as_string)
+            .ok_or("معرّف البروفايل غير صالح.")?;
+        let prefix = pattern.split_once('.').ok_or("معرّف البروفايل غير صالح.")?.0;
+        let (constrained, dropped) = nested::constrain_with_groups(&requested, p.entitlements(), prefix, &id, team, &mapping, opts.strict_profile, &group_plan)
             .map_err(|e| format!("{id} - {e}"))?;
         if !dropped.is_empty() {
             status.warnings.push(serde_json::json!({"code":"entitlements_dropped","message":dropped.join(", "), "bundle_id":id, "entitlements":dropped}));
         }
         let mut constrained = constrained;
         if fallback {
-            constrained.insert("application-identifier".into(), compat_app_identifier(patterns[index], prefix, id).into());
+            constrained.insert("application-identifier".into(), compat_app_identifier(pattern, prefix, &id).into());
         }
         assignments.insert(id.clone(), index);
         entitlements.insert(id.clone(), constrained);
