@@ -83,7 +83,7 @@ final class ExistingProjectLibrariesUITests: XCTestCase {
         try await render(Host(libs: more), name: "existing-libraries-ar", height: 1000)
     }
 
-    func testArabicSnapshotSourceDeleteConfirmation() async throws {
+    func testArabicSnapshotSourceListWithPendingDeletion() async throws {
         AppLanguageStore.shared.set(.arabic)
         let defaults = UserDefaults(suiteName: "ExistingLibsUISnap")!
         defaults.removePersistentDomain(forName: "ExistingLibsUISnap")
@@ -91,7 +91,7 @@ final class ExistingProjectLibrariesUITests: XCTestCase {
         store.sources.append(RepoSource(url: "https://dup.example/s.json", name: "Dup"))
         store.requestDelete(id: store.sources.last!.id)
         XCTAssertEqual(store.pendingDelete?.name, "Dup")
-        try await render(SourcesTab(store: store), name: "sources-delete-confirm-ar", height: 700)
+        try await render(SourcesTab(store: store), name: "sources-list-pending-delete-ar", height: 700)
         XCTAssertEqual(store.pendingDelete?.name, "Dup")
         defaults.removePersistentDomain(forName: "ExistingLibsUISnap")
     }
