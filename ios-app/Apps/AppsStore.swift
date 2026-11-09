@@ -229,30 +229,44 @@ final class AppsStore: ObservableObject {
     /// This prerequisite belongs only to Apple ID real-app installs/renewals.
     /// Import, editing, library and certificate OTA never call it.
     func realAppNetworkReady(_ vm: AppViewModel?, selfUpdate: Bool = false) async -> Bool {
-        let ip = vm?.deviceIP ?? "10.7.0.1"
         let path = await WiFiPathMonitor.shared.resolve()
-        let en0 = NetworkStatus.summarize(deviceIP: ip).wifi
-        let what = selfUpdate ? tr("Updating", "التحديث") : tr("Real app installation", "التثبيت الحقيقي")
-        switch WiFiPathPolicy.verdict(path: path, en0HasAddress: en0) {
+        switch WiFiPathPolicy.verdict(path: path) {
         case .allow: break
         case .needWiFi:
-            fail(tr("\(what) needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.",
-                    "\(what) بدو واي فاي مو بيانات الموبايل. وصّل على الواي فاي وخلّي LocalDevVPN شغّال وجرّب مرة تانية."),
+            fail(selfUpdate
+                 ? tr("Updating needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.",
+                      "التحديث بدو واي فاي مو بيانات الموبايل. وصّل على الواي فاي وخلّي LocalDevVPN شغّال وجرّب مرة تانية.")
+                 : tr("Real app installation needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.",
+                      "التثبيت الحقيقي بدو واي فاي مو بيانات الموبايل. وصّل على الواي فاي وخلّي LocalDevVPN شغّال وجرّب مرة تانية."),
                  offersSettings: true)
             return false
         case .undetermined:
             fail(tr("Could not confirm your connection yet. Wait a moment and try again.",
-                    "ما قدرت أتأكد من الاتصال هلأ. استنى شوي وجرّب مرة تانية."),
-                 offersSettings: false)
+                    "ما قدرت أتأكد من الاتصال هلأ. استنى شوي وجرّب مرة تانية."), offersSettings: false)
             return false
         }
         guard networkReady(vm) else {
-            fail(tr("\(what) needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.",
-                    "\(what) بدو LocalDevVPN شغّال وملف اقتران. شغّل LocalDevVPN وجرّب مرة تانية."),
+            fail(selfUpdate
+                 ? tr("Updating needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.",
+                      "التحديث بدو LocalDevVPN شغّال وملف اقتران. شغّل LocalDevVPN وجرّب مرة تانية.")
+                 : tr("Real app installation needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.",
+                      "التثبيت الحقيقي بدو LocalDevVPN شغّال وملف اقتران. شغّل LocalDevVPN وجرّب مرة تانية."),
                  offersSettings: true)
             return false
         }
         return true
+    }
+
+    static func busyMessage() -> String {
+        tr("Another install is still running. Wait for it to finish, then try again.",
+           "في عملية تثبيت لسا شغّالة. استنى تخلص وجرّب مرة تانية.")
+    }
+
+    /// Every install failure ends with what to do next, in the app language.
+    static func withNextStep(_ message: String) -> String {
+        let step = tr("Next step: check Wi-Fi and LocalDevVPN, then try again. If it repeats, send the report from Settings.",
+                      "الخطوة الجاية: تأكد من الواي فاي و LocalDevVPN وجرّب مرة تانية. إذا تكرر ابعت التقرير من الإعدادات.")
+        return message.contains(step) ? message : message + "\n\n" + step
     }
 
     private func fail(_ message: String, offersSettings: Bool) {
@@ -790,7 +804,7 @@ final class AppsStore: ObservableObject {
             return true
         } catch {
             operationOutcome = MirsaCompletionFeedback.outcome(for: error)
-            self.error = Self.friendly(error)
+            self.error = Self.withNextStep(Self.friendly(error))
             return false
         }
     }
@@ -881,11 +895,11 @@ final class AppsStore: ObservableObject {
     /// them. This installs a copy of AirCard signed with the user's Apple ID.
     func installSelf(vm: AppViewModel?, from source: URL? = nil, feedback: Bool = true) async {
         if MirsaInstallMode.ownCertificate {
-            guard busy == nil else { return }
+            guard busy == nil else { error = Self.busyMessage(); return }
             busy = personalText("Signing for OTA…", "عم يوقّع لتثبيت OTA…")
             defer { busy = nil }
             do { try await CertificateOTA.install(source: source ?? Bundle.main.bundleURL) }
-            catch { self.error = error.localizedDescription }
+            catch { self.error = Self.withNextStep(error.localizedDescription) }
             return
         }
 
@@ -957,7 +971,7 @@ final class AppsStore: ObservableObject {
             toast = L.f("toast.installed", "Mirsa")
             activitySucceeded = true
         } catch { operationOutcome = MirsaCompletionFeedback.outcome(for: error)
-            self.error = Self.friendly(error) }
+            self.error = Self.withNextStep(Self.friendly(error)) }
     }
 
     /// Turn the raw connection error into something readable, keeping the detail.

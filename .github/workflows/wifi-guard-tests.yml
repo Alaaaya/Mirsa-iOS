@@ -1,0 +1,16 @@
+name: Mirsa wifi guard tests
+on:
+  workflow_dispatch:
+  push:
+    branches: [kat/wifi-guard]
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: brew install xcodegen && xcodegen generate
+      - name: Run WiFiPathPolicyTests
+        run: |
+          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:MirsaTests/WiFiPathPolicyTests CODE_SIGNING_ALLOWED=NO 2>&1 | tail -60
+          exit ${PIPESTATUS[0]}

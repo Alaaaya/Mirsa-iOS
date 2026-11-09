@@ -3,19 +3,29 @@ import XCTest
 
 final class WiFiPathPolicyTests: XCTestCase {
     func testStateMapping() {
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: true), .wifi)
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: false), .notWifi)
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: false, usesWiFi: true), .notWifi)
+        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: true, wifiAvailable: true), .wifi)
+        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: false, wifiAvailable: true), .wifi)
+        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: false, wifiAvailable: false), .notWifi)
+        XCTAssertEqual(WiFiPathPolicy.state(satisfied: false, usesWiFi: true, wifiAvailable: true), .notWifi)
     }
-    func testUnknownIsNeverReportedAsCellular() {
-        XCTAssertEqual(WiFiPathPolicy.verdict(path: .unknown, en0HasAddress: false), .undetermined)
+    func testVerdictIsAuthoritative() {
+        XCTAssertEqual(WiFiPathPolicy.verdict(path: .wifi), .allow)
+        XCTAssertEqual(WiFiPathPolicy.verdict(path: .notWifi), .needWiFi)
+        XCTAssertEqual(WiFiPathPolicy.verdict(path: .unknown), .undetermined)
     }
-    func testCellularBlocks() {
-        XCTAssertEqual(WiFiPathPolicy.verdict(path: .notWifi, en0HasAddress: false), .needWiFi)
+    func testEveryLanguageHasEveryNewMessage() {
+        let keys = Array(MirsaTr.extraCkb.keys.filter { $0.contains("Wi-Fi, not mobile data") || $0.hasPrefix("Next step:") || $0 == "Open Settings" || $0.hasPrefix("Another install") || $0.hasPrefix("Could not confirm") })
+        XCTAssertGreaterThanOrEqual(keys.count, 5)
+        for k in keys {
+            XCTAssertNotNil(MirsaTr.extraCkb[k], k)
+            XCTAssertNotNil(MirsaTr.extraKmr[k], k)
+            XCTAssertFalse(MirsaTr.extraCkb[k]!.isEmpty)
+            XCTAssertFalse(MirsaTr.extraKmr[k]!.isEmpty)
+        }
     }
-    func testEitherWiFiSignalAllows() {
-        XCTAssertEqual(WiFiPathPolicy.verdict(path: .wifi, en0HasAddress: false), .allow)
-        XCTAssertEqual(WiFiPathPolicy.verdict(path: .notWifi, en0HasAddress: true), .allow)
-        XCTAssertEqual(WiFiPathPolicy.verdict(path: .unknown, en0HasAddress: true), .allow)
+    @MainActor func testNextStepAddedOnceForAnyFailure() {
+        let once = AppsStore.withNextStep("Install failed: boom")
+        XCTAssertTrue(once.hasPrefix("Install failed: boom"))
+        XCTAssertEqual(AppsStore.withNextStep(once), once)
     }
 }
