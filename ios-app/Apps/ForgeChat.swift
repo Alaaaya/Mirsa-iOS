@@ -9,6 +9,19 @@ enum ForgeChatText {
     static var placeholder: String { tr("Write your request…", "اكتب طلبك…", ckb: "داواکارییەکەت بنووسە…", kmr: "Daxwaza xwe binivîse…") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
+    static var deleteTitle: String { tr("Delete this request?", "حذف هالطلب؟", ckb: "ئەم داواکارییە بسڕیتەوە؟", kmr: "Ev daxwaz were jêbirin?") }
+    static var deleteAction: String { tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe") }
+    static var cancel: String { tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal") }
+    static var deleteFailed: String { tr("Couldn't delete. Check your connection and try again.", "تعذّر الحذف. تأكد من الاتصال وجرّب مرة تانية.", ckb: "نەسڕایەوە. پەیوەندییەکەت بپشکنە و دووبارە هەوڵبدەرەوە.", kmr: "Jê neçû. Girêdana xwe kontrol bike û dîsa biceribîne.") }
+    static func status(_ s: String?) -> String {
+        switch (s ?? "").lowercased() {
+        case "queued", "pending", "new": return tr("Queued", "بالانتظار", ckb: "لە ڕیزدایە", kmr: "Li benda rêzê")
+        case "working", "building", "in_progress", "running": return tr("Working on it", "عم يشتغل", ckb: "کاری لەسەر دەکرێت", kmr: "Tê xebitandin")
+        case "done", "ready", "completed", "delivered": return tr("Done", "تم", ckb: "تەواو بوو", kmr: "Qediya")
+        case "failed", "error", "rejected": return tr("Failed", "تعذّر", ckb: "سەرنەکەوت", kmr: "Têk çû")
+        default: return ""
+        }
+    }
     static var waiting: String { tr("Mirsa is working", "مرسى عم يشتغل", ckb: "چاوەڕێی مرسا. ڕەنگە کاتی بوێت.", kmr: "Li benda Mirsayê. Dibe ku demek bikşîne.") }
     static var sending: String { tr("Sending…", "عم يتبعت…", ckb: "دەنێردرێت…", kmr: "Tê şandin…") }
     static var welcome: String { tr("""
@@ -187,6 +200,16 @@ enum ForgeChatImage {
         await refreshThreads()
     }
 
+    /// Server delete first (device-owned thread); local removal only after the server confirms.
+    func deleteThread(_ id: UUID) async {
+        do {
+            _ = try await call(["action": "chat-delete", "threadID": id.uuidString.lowercased()])
+            threads.removeAll { $0.id == id }; messages[id] = nil
+            outgoing.removeAll { $0.threadID == id }; saveOutgoing()
+            error = nil
+        } catch { self.error = ForgeChatText.deleteFailed }
+    }
+
     func refreshThreads() async {
         struct Lossy: Decodable { let value: ForgeChatThread?; init(from d: Decoder) throws { value = try? ForgeChatThread(from: d) } }
         struct W: Decodable { let threads: [Lossy] }
@@ -234,6 +257,7 @@ struct ForgeChatRoot: View {
     @ObservedObject private var store = ForgeChatStore.shared
     @AppStorage("mirsa.chat.guideSeen") private var guideSeen = false
     @State private var path: [UUID] = []
+    @State private var toDelete: UUID?
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -247,9 +271,17 @@ struct ForgeChatRoot: View {
                 }
                 ForEach(store.threads) { t in
                     NavigationLink(value: t.id) {
-                        VStack(alignment: .leading) { Text(t.title ?? ForgeChatText.newRequest).lineLimit(2); if let s = t.status { Text(s).font(.caption2).foregroundStyle(.secondary) } }
+                        VStack(alignment: .leading) { Text(t.title ?? ForgeChatText.newRequest).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { Text(ForgeChatText.status(s)).font(.caption2).foregroundStyle(.secondary) } }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { toDelete = t.id } label: { Label(ForgeChatText.deleteAction, systemImage: "trash") }.tint(.red)
                     }
                 }
+            }
+            .scrollContentBackground(.hidden).background(MirsaChatTheme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
+            .confirmationDialog(ForgeChatText.deleteTitle, isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
+                Button(ForgeChatText.deleteAction, role: .destructive) { if let id = toDelete { Task { await store.deleteThread(id) } }; toDelete = nil }
+                Button(ForgeChatText.cancel, role: .cancel) { toDelete = nil }
             }
             .navigationTitle(ForgeChatText.title).navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
