@@ -100,7 +100,13 @@ pub(super) fn rewrite(m:&mut Mach,map:&[Option<usize>])->Result<()>{
             let starts=u32at(d,4)?as usize;let symbols=u32at(d,12)?as usize;
             let imports_end=base+count*width;
             if starts<28||symbols<28||symbols>d.len(){return Err("Invalid chained internal offsets".into())}
-            let mut spans=vec![(0usize,28usize),(base,imports_end),(symbols,d.len())];
+            let mut spans:Vec<(usize,usize)>=Vec::new();
+            for (a,b) in [(0usize,28usize),(base,imports_end),(symbols,d.len())]{
+                if a>b||b>d.len()||spans.iter().any(|&(x,y)|a<y&&x<b){
+                    return Err("Chained initial regions overlap or exceed payload".into())
+                }
+                spans.push((a,b));
+            }
             let mut span=|a:usize,n:usize|->Result<()>{
                 let b=a.checked_add(n).ok_or("Chained starts overflow")?;
                 if a<28||b>d.len()||spans.iter().any(|&(x,y)|a<y&&x<b){return Err("Chained internal regions overlap or exceed payload".into())}

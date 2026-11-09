@@ -252,6 +252,22 @@ mod tests {
             let mut broken=d.clone();broken[2394..2396].copy_from_slice(&0x8000u16.to_le_bytes());assert!(capability(&broken).is_err());
         }
     }
+    #[test]fn chained_imports_symbol_pool_overlap_with_valid_nul_names(){
+        for format in [1,2,3]{
+            let mut d=modern_fixture(format);
+            // Pool starts strictly inside import entry, not at its boundary.
+            // Name offset zero resolves to a valid NUL in unchanged entry bytes.
+            put32(&mut d,2312,30);
+            assert_eq!(d[2330],0);
+            let failure=capability(&d).unwrap_err();
+            assert!(failure.contains("initial regions overlap"),"{format} {failure}");
+            // Also exercise interior overlap in the second entry.
+            let width=match format{1=>4,2=>8,_=>16};
+            let mut d=modern_fixture(format);put32(&mut d,2312,(28+width+2)as u32);
+            assert_eq!(d[2300+28+width+2],0);
+            assert!(capability(&d).unwrap_err().contains("initial regions overlap"));
+        }
+    }
     #[test]fn chained_internal_aliases_and_names_fail_before_edit(){
         for format in [1,2,3]{
             for mode in 0..6{
