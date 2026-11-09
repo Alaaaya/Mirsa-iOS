@@ -24,9 +24,7 @@ enum CertificateInstall {
     /// `stage` is the only thing the caller may delete afterwards.
     static func stageSignedApp(ipa: URL, in parent: URL) throws -> (stage: URL, app: URL) {
         let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard ipa.isFileURL, ipa.path.hasPrefix("/"), fm.fileExists(atPath: ipa.path, isDirectory: &isDir),
-              !isDir.boolValue, ipa.pathExtension.lowercased() == "ipa" else { throw Failure.noApp("Signed IPA path is not valid.") }
+        try validateIPA(ipa)
         let stage = parent.appendingPathComponent("cert-install-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: stage, withIntermediateDirectories: true,
                                attributes: [.protectionKey: FileProtectionType.complete])
@@ -39,6 +37,14 @@ enum CertificateInstall {
             try? fm.removeItem(at: stage)
             throw error
         }
+    }
+
+    /// Validate the caller-owned archive without extracting or copying it.
+    static func validateIPA(_ ipa: URL) throws {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard ipa.isFileURL, ipa.path.hasPrefix("/"), fm.fileExists(atPath: ipa.path, isDirectory: &isDir),
+              !isDir.boolValue, ipa.pathExtension.lowercased() == "ipa" else { throw Failure.noApp("Signed IPA path is not valid.") }
     }
 
     static func shouldUseOTA(ownCertificateMode: Bool, wifi: Bool) -> Bool { true }
@@ -55,9 +61,7 @@ enum CertificateInstall {
         store?.busy = personalText("Signing with certificate", "عم نوقّع بالشهادة")
         defer { running = false; store?.busy = nil }
         guard FileManager.default.fileExists(atPath: input.path) else { throw Failure.missingIPA }
-        let staged = try stageSignedApp(ipa: input, in: FileManager.default.temporaryDirectory)
-        defer { try? FileManager.default.removeItem(at: staged.stage) }
-        let verification = try await CertificateOTA.install(source: staged.app, material: identity.material, options: PersonalProjectOptions())
+        let verification = try await CertificateOTA.install(source: input, sourceIsArchive: true, material: identity.material, options: PersonalProjectOptions())
         return ["otaInstallerOpened": true, "installed": false,
                 "warnings": verification.warnings.map { ["code": $0.code, "message": PersonalProfileVerification.localizedWarning($0)] },
                 "device_authorization": verification.device_authorization ?? "not_checked"]
