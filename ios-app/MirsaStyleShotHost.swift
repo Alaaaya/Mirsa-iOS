@@ -60,6 +60,7 @@ struct MirsaStyleShotHost: View {
             }
             .preferredColorScheme(.dark)
         case "setup": SetupView()
+        case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(.dark)
         default: sheetHost
         }
     }
