@@ -4,7 +4,7 @@ on:
   push:
     branches: [apps-sideloader]
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: macos-15
@@ -63,7 +63,7 @@ jobs:
 
       # Mirsa checks the latest release on launch and offers to update itself.
       - name: Publish release for in-app updates
-        if: false
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -76,7 +76,7 @@ jobs:
       # so Mirsa's own updater is not affected) holding Mirsa-Setup.ipa and an
       # AltStore-format source.json that Feather/ESign read for updates.
       - name: Publish Mirsa Setup + Feather source
-        if: false
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN: ${{ github.run_number }}
