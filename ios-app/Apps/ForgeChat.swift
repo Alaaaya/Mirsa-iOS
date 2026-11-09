@@ -1,11 +1,11 @@
 import SwiftUI
 import PhotosUI
 
-/// "Create anything": a request thread with Kat. This is a manual queue, not an instant AI chat; replies take time.
+/// Mirsa AI: a manually handled request thread. This is a manual queue, not an instant AI chat; replies take time.
 enum ForgeChatText {
-    static var title: String { tr("Create anything", "إنشاء كل شي", ckb: "هەموو شتێک دروست بکە", kmr: "Her tiştî çêke") }
+    static var title: String { tr("Mirsa AI", "مرسى AI", ckb: "میرسا AI", kmr: "Mirsa AI") }
     static var subtitle: String { tr("Write what you want, Mirsa takes your request and works on it. It takes time.", "اكتب شو بدك، مرسى بياخد طلبك وبيشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، میرسا داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات، کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Mirsa daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
-    static var guide: String { tr("This is not an instant chat. Your message goes into a queue and Mirsa answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "هاد مو شات فوري. رسالتك بتدخل بالدور ومرسى بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويمرسى الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "ئەمە گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و میرسا بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Ev ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Mirsa bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
+    static var guide: String { tr("Mirsa AI is not an instant chat. Your message goes into a queue and Mirsa answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "مرسى AI مو شات فوري. رسالتك بتدخل بالدور ومرسى بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويكات الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "میرسا AI گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و میرسا بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Mirsa AI ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Mirsa bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
     static var placeholder: String { tr("Write your request…", "اكتب طلبك…", ckb: "داواکارییەکەت بنووسە…", kmr: "Daxwaza xwe binivîse…") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
