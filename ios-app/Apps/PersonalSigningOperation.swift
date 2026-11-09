@@ -7,13 +7,13 @@ import UIKit
 final class PersonalSigningOperation: ObservableObject {
     static let shared = PersonalSigningOperation()
     enum Stage: String {
-        case preparing, signing, packaging, uploading, connecting, installing, handedOff, completed, failed
+        case preparing, signing, packaging, uploading, serving, connecting, installing, handedOff, completed, failed
         var order: Int {
             switch self {
             case .preparing: return 0
             case .signing: return 1
             case .packaging: return 2
-            case .uploading: return 3
+            case .uploading, .serving: return 3
             case .connecting: return 4
             case .installing: return 5
             case .handedOff, .completed, .failed: return 6
@@ -36,6 +36,7 @@ final class PersonalSigningOperation: ObservableObject {
             case .signing: return 0.10 + measured * 0.55
             case .packaging: return 0.65 + measured * 0.10
             case .uploading: return 0.75 + measured * 0.20
+            case .serving: return 0.95
             case .connecting: return 0.95
             case .installing: return 0.97 + min(0.99, measured) * 0.02
             case .handedOff: return 0.99
@@ -136,7 +137,7 @@ final class PersonalSigningOperation: ObservableObject {
         let activity: MirsaInstallActivity.Phase
         switch event.stage {
         case .signing: phase = .signing; activity = .signing
-        case .uploading, .installing, .connecting, .handedOff: phase = .installing; activity = .installing
+        case .uploading, .serving, .installing, .connecting, .handedOff: phase = .installing; activity = .installing
         default: phase = .preparing; activity = .preparing
         }
         MirsaOperationProgress.shared.update(operation, phase: phase, fraction: next.overallFraction, stageLabel: PersonalSigningLabels.stage(next.stage))
@@ -238,6 +239,7 @@ enum PersonalSigningLabels {
         case .signing: return text("Signing", "توقيع", "واژۆکردن", "Îmzekirin", language: language)
         case .packaging: return text("Archiving signed IPA", "ضغط الـ IPA الموقّع", "ئەرشیفکردنی IPAی واژۆکراو", "Arşîvkirina IPA ya îmzekirî", language: language)
         case .uploading: return text("Uploading signed IPA", "رفع الـ IPA الموقّع", "بارکردنی IPAی واژۆکراو", "Barkirina IPA ya îmzekirî", language: language)
+        case .serving: return text("Serving signed IPA from this device", "تقديم الـ IPA الموقّع من هالجهاز", "پێشکەشکردنی IPAی واژۆکراو لەم ئامێرە", "Pêşkêşkirina IPA ya îmzekirî ji vê cihazê", language: language)
         case .connecting: return text("Opening iOS installer", "فتح مثبّت iOS", "کردنەوەی دامەزرێنەری iOS", "Vekirina sazkera iOS", language: language)
         case .installing: return text("Installing", "تثبيت", "دامەزراندن", "Sazkirin", language: language)
         case .handedOff: return text("Waiting for system installation", "في انتظار تثبيت النظام", "چاوەڕێی دامەزراندنی سیستەم", "Li benda sazkirina pergalê", language: language)

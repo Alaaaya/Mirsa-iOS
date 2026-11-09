@@ -9,6 +9,8 @@ enum MirsaInstallMode {
 final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
+/// Why the last install used the upload path instead of local serving (nil = local or not attempted).
+@MainActor enum OTARouteLog { static var last: OTAUploadReason?; static var active: LocalOTAServer? }
 @MainActor enum CertificateOTA {
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
 
@@ -95,13 +97,36 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             name: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID,
             version: (info["CFBundleShortVersionString"] as? String) ?? version, signed: true)
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
+        // Local route: HTTPS manifest from our broker, IPA bytes served from 127.0.0.1 on this device.
+        // The stage only says "serving" when the listener is truly running; any failure falls back with a reason.
+        var fallback: OTAUploadReason?
+        switch OTARouteSelector.select(fileReadable: fm.isReadableFile(atPath: kept.path) && size > 0) {
+        case .upload(let reason): fallback = reason
+        case .local:
+            let server = try? LocalOTAServer(file: kept)
+            if let server, let port = try? await server.start(),
+               let manifest = LocalOTAManifest.url(base: endpoint, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
+               let target = try? OTAInstallLink.make(manifestURL: manifest) {
+                OTARouteLog.active?.stop(); OTARouteLog.active = server
+                signingProgress?(PersonalSigningEvent(stage: .serving))
+                if await UIApplication.shared.open(target) {
+                    signingProgress?(PersonalSigningEvent(stage: .handedOff))
+                    return signed.verification
+                }
+                server.stop(); fallback = .installerRefused
+            } else {
+                server?.stop()
+                fallback = server == nil ? .fileUnavailable : (server!.port == 0 ? .serverStartFailed : .manifestUnreachable)
+            }
+        }
+        OTARouteLog.last = fallback
         let plan = try OTAChunkPlan(total: size)
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
         try control.checkpoint()
         try Task.checkCancellation()
-        let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
         signingProgress?(PersonalSigningEvent(stage: .uploading))
         let uploadProgress: (Double) -> Void = { fraction in
             progress?(fraction)
