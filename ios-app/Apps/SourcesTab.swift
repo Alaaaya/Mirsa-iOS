@@ -52,7 +52,8 @@ struct RepoApp: Identifiable, Hashable {
 }
 
 struct RepoSource: Codable, Identifiable, Hashable {
-    var id: String { url }
+    var id: String { entryID ?? url }
+    var entryID: String? = nil
     var url: String
     var name: String
     var iconURL: String?
@@ -65,6 +66,7 @@ struct RepoSource: Codable, Identifiable, Hashable {
 final class SourcesStore: ObservableObject {
     static let shared = SourcesStore()
     private let key = "mirsa.sources.v1"
+    private let defaults: UserDefaults
 
     @Published var sources: [RepoSource] = [] { didSet { save() } }
     @Published var apps: [String: [RepoApp]] = [:]   // by source url
@@ -123,23 +125,37 @@ final class SourcesStore: ObservableObject {
     ]
     private let seededKey = "mirsa.sources.builtin.v2"
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         var list: [RepoSource] = []
-        if let d = UserDefaults.standard.data(forKey: key),
+        if let d = defaults.data(forKey: key),
            let s = try? JSONDecoder().decode([RepoSource].self, from: d) { list = s }
-        if !UserDefaults.standard.bool(forKey: seededKey) {
+        if !defaults.bool(forKey: seededKey) {
             func norm(_ u: String) -> String { u.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
             for b in Self.builtIn where !list.contains(where: { norm($0.url) == norm(b.url) }) {
                 list.append(RepoSource(url: b.url, name: b.name))
             }
-            UserDefaults.standard.set(true, forKey: seededKey)
+            defaults.set(true, forKey: seededKey)
         }
-        sources = MirsaSourceFeed.migrate(list)
+        sources = SourceDeletionPolicy.migrate(list)
         save()
     }
 
     private func save() {
-        if let d = try? JSONEncoder().encode(sources) { UserDefaults.standard.set(d, forKey: key) }
+        if let d = try? JSONEncoder().encode(sources) { defaults.set(d, forKey: key) }
+    }
+
+    /// Confirmed deletion is identity-based. Shared URL caches survive while another row uses them.
+    @discardableResult
+    func deleteSource(id: String) -> Bool {
+        guard let source = sources.first(where: { $0.id == id }),
+              SourceDeletionPolicy.canDelete(source) else { return false }
+        sources.removeAll { $0.id == id }
+        if !sources.contains(where: { $0.url == source.url }) {
+            apps.removeValue(forKey: source.url)
+            hiddenURLs.remove(source.url)
+        }
+        return true
     }
 
     static func normalize(_ raw: String) -> URL? {
@@ -155,7 +171,9 @@ final class SourcesStore: ObservableObject {
     func add(_ raw: String) async -> Bool {
         guard let u = Self.normalize(raw) else { error = tr("That link isn't valid.", "الرابط مو صحيح."); return false }
         if sources.contains(where: { $0.url == u.absoluteString }) { return true }
-        sources.append(RepoSource(url: u.absoluteString, name: u.host ?? "Source"))
+        var source = RepoSource(url: u.absoluteString, name: u.host ?? "Source")
+        source.entryID = UUID().uuidString
+        sources.append(source)
         let ok = await refresh(u.absoluteString)
         if !ok { sources.removeAll { $0.url == u.absoluteString } }
         return ok
@@ -299,6 +317,7 @@ struct SourcesTab: View {
     @State private var sharingURL: URL?
     @State private var input = ""
     @State private var finding = false
+    @State private var pendingDeletion: RepoSource?
 
     var body: some View {
         NavigationStack {
@@ -335,7 +354,13 @@ struct SourcesTab: View {
                             }.tint(.orange)
                             SourceURLButtons(stored: s.url, sharing: $sharingURL).tint(.blue)
                         }
+                        .deleteDisabled(!SourceDeletionPolicy.canDelete(s))
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if SourceDeletionPolicy.canDelete(s) {
+                                Button(role: .destructive) { pendingDeletion = s } label: {
+                                    Label(SourceDeletionText.delete, systemImage: "trash")
+                                }.tint(.red)
+                            }
                             SourceURLButtons(stored: s.url, sharing: $sharingURL).tint(.blue)
                         }
                         .contextMenu {
@@ -347,8 +372,10 @@ struct SourcesTab: View {
                 }
                 .onMove { store.moveVisible(from: $0, to: $1) }
                 .onDelete { offsets in
-                    let urls = Set(offsets.map { store.visibleSources[$0].url })
-                    store.sources.removeAll { urls.contains($0.url) }
+                    if let index = offsets.first {
+                        let source = store.visibleSources[index]
+                        if SourceDeletionPolicy.canDelete(source) { pendingDeletion = source }
+                    }
                 }
                 if !store.hiddenSources.isEmpty {
                     Section(tr("Hidden Sources", "السورسات المخفية")) {
@@ -356,6 +383,11 @@ struct SourcesTab: View {
                             HStack {
                                 Text(source.name)
                                 Spacer()
+                                if SourceDeletionPolicy.canDelete(source) {
+                                    Button(role: .destructive) { pendingDeletion = source } label: {
+                                        Image(systemName: "trash")
+                                    }.buttonStyle(.borderless)
+                                }
                                 Button {
                                     store.hiddenURLs.remove(source.url)
                                     Task { await store.refresh(source.url) }
@@ -392,6 +424,19 @@ struct SourcesTab: View {
             .alert(tr("Source", "السورس"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
                 Button(MirsaTr.lit("OK")) { store.error = nil }
             } message: { Text(store.error ?? "") }
+            .alert(SourceDeletionText.title, isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            )) {
+                Button(SourceDeletionText.cancel, role: .cancel) { pendingDeletion = nil }
+                Button(SourceDeletionText.delete, role: .destructive) {
+                    if let source = pendingDeletion { store.deleteSource(id: source.id) }
+                    pendingDeletion = nil
+                }
+            } message: {
+                Text(SourceDeletionText.message + "\n" + (pendingDeletion?.name ?? ""))
+            }
+            .environment(\.layoutDirection, .leftToRight)
             .task { if store.apps.isEmpty { await store.refreshAll() } }
             .mirsaScreen()
         }
