@@ -37,4 +37,16 @@ final class ForgeChatLifecycleTests: XCTestCase {
         XCTAssertEqual(m[1].role, "kat")
         XCTAssertEqual(m[1].text, "reply")
     }
+
+    /// Exact sanitized live backend shape (6-digit fractional +00:00 dates, result null, role "kat"). Must decode with the strict model, none skipped.
+    func testLiveBackendChatReadShapeDecodesStrictly() throws {
+        let json = """
+        {"thread":{"id":"75dce450-e96d-4895-b7d5-7606e8ae41af","title":"Disposable decode regression fixture","status":"working","createdAt":"2026-11-09T17:47:29.582498+00:00","updatedAt":"2026-11-09T17:47:30.992884+00:00"},"messages":[{"id":"ca6bc0cd-20b4-4c05-babd-67c7996d9ca0","threadID":"75dce450-e96d-4895-b7d5-7606e8ae41af","role":"user","text":"Disposable decode regression fixture","createdAt":"2026-11-09T17:47:29.582498+00:00","hasImage":false,"result":null},{"id":"0ae45156-990a-4537-8660-705ae49bf373","threadID":"75dce450-e96d-4895-b7d5-7606e8ae41af","role":"kat","text":"Representative operator reply for decoder regression.","createdAt":"2026-11-09T17:47:30.992884+00:00","hasImage":false,"result":null}]}
+        """.data(using: .utf8)!
+        struct W: Decodable { let messages: [ForgeChatMessage] }
+        let m = try JSONDecoder().decode(W.self, from: json).messages
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m[1].role, "kat")
+        XCTAssertEqual(m[1].text, "Representative operator reply for decoder regression.")
+    }
 }
