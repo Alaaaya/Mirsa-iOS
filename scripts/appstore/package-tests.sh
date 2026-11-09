@@ -6,6 +6,12 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/Sources/MirsaStoreKit" "$WORK/Tests/MirsaStoreKitTests"
 cp "$ROOT"/ios-app/AppStore/*.swift "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/StoreClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+cp "$ROOT/ios-app/Apps/UpdateNetworkPath.swift" "$WORK/Sources/MirsaStoreKit/"
+cp "$ROOT/tests/UpdateNetworkPathTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+# UI localization is outside this standalone backend package.
+cat > "$WORK/Sources/MirsaStoreKit/TestLocalization.swift" <<'SWIFT'
+func tr(_ en: String, _ ar: String, ckb: String, kmr: String) -> String { en }
+SWIFT
 cat > "$WORK/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.2
 import PackageDescription
