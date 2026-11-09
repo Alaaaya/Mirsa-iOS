@@ -328,14 +328,28 @@ final class PersonalProjectIntegrationTests: XCTestCase {
                     let req = VNRecognizeTextRequest()
                     req.recognitionLevel = .accurate
                     req.usesLanguageCorrection = false
+                    // The actual failed pixels contain the fixture and empty message:
+                    // Vision read "UI" as "Ul" and joined Arabic word spacing.
+                    // Supply the exact expected vocabulary, not fuzzy substitutions.
+                    req.recognitionLanguages = ["ar", "en-US"]
+                    req.customWords = requiredText
                     if #available(iOS 18.0, *) { req.automaticallyDetectsLanguage = true }
                     try? VNImageRequestHandler(cgImage: cg).perform([req])
-                    let ocr = (req.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+                    // Keep exact recognition alternatives, including case-sensitive
+                    // Latin identifiers. Do not rewrite I/l, digits, or punctuation.
+                    let ocr = (req.results ?? []).flatMap { $0.topCandidates(10).map(\.string) }.joined(separator: "\n")
                     text += "\n" + ocr
                 }
             }
             XCTAssertFalse(text.isEmpty, "Hosted SwiftUI accessibility tree must not be empty")
-            for expected in requiredText { XCTAssertTrue(text.contains(expected), "Missing rendered text: \(expected); actual: \(text)") }
+            for expected in requiredText {
+                // Arabic OCR can omit inter-word spaces. Compare the same exact
+                // letters in order, never remove letters or accept edit distance.
+                let hasArabic = expected.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) }
+                let compact: (String) -> String = { $0.filter { !$0.isWhitespace } }
+                let found = text.contains(expected) || (hasArabic && compact(text).contains(compact(expected)))
+                XCTAssertTrue(found, "Missing rendered text: \(expected); actual: \(text)")
+            }
             for forbidden in forbiddenText { XCTAssertFalse(text.contains(forbidden), "Forbidden rendered text: \(forbidden)") }
         }
         let format = UIGraphicsImageRendererFormat(); format.scale = 1

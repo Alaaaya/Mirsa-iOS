@@ -42,7 +42,9 @@ final class MirsaKeyboardTests: XCTestCase {
     }
 
     /// Actual project + actual first responder + OS keyboard notifications.
-    /// Attachments use XCUIScreen so the software keyboard is included.
+    /// Hosted unit tests cannot call the UI-test runner's XCUIScreen API.
+    /// Attachments capture the app window; real OS keyboard presence/geometry
+    /// is proved by keyboardDidShow and first-responder assertions below.
     func testProjectActualKeyboardFocusedFieldAndCTA() async throws {
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "PersonalUIFixture", withExtension: "zip"))
         let library = PersonalAppsLibrary.shared
@@ -77,16 +79,19 @@ final class MirsaKeyboardTests: XCTestCase {
         XCTAssertLessThanOrEqual(visibleField.maxY, keyboardTop, "Focused project field remains above keyboard")
         XCTAssertGreaterThan(visibleField.height, 0)
         let scroll = try XCTUnwrap(descendants(host.view).compactMap { $0 as? UIScrollView }.first)
-        XCTAssertEqual(scroll.keyboardDismissMode, .interactive)
+        // SwiftUI uses interactiveWithAccessory on newer UIKit. Both modes
+        // follow the finger and allow cancellation; none/onDrag are still bugs.
+        XCTAssertTrue([UIScrollView.KeyboardDismissMode.interactive, .interactiveWithAccessory]
+            .contains(scroll.keyboardDismissMode), "Expected interactive dismissal, got \(scroll.keyboardDismissMode)")
         XCTAssertFalse(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
                        "CTA must not be exposed or cover the page while software keyboard is visible")
-        attach("project-real-keyboard-visible-focused-field")
+        attach(window, name: "project-app-window-keyboard-visible-focused-field")
         window.endEditing(false)
         try await Task.sleep(nanoseconds: 800_000_000)
         XCTAssertFalse(field.isFirstResponder)
         XCTAssertTrue(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
                       "CTA must return after keyboard fully dismisses")
-        attach("project-real-keyboard-hidden-CTA-restored")
+        attach(window, name: "project-app-window-keyboard-hidden-CTA-restored")
     }
 
     private func accessibilityContains(_ root: NSObject, identifier: String) -> Bool {
@@ -113,8 +118,17 @@ final class MirsaKeyboardTests: XCTestCase {
         return find(root, depth: 0)
     }
 
-    private func attach(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    private func attach(_ window: UIWindow, name: String) {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = window.screen.scale
+        var rendered = false
+        let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        XCTAssertTrue(rendered, "The real hosted app window must render")
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
+        let attachment = XCTAttachment(image: image)
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
