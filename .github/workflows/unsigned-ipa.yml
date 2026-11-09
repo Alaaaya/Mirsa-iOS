@@ -23,6 +23,15 @@ jobs:
       - name: Validate on-device App Store backend without simulator
         run: bash scripts/appstore/package-tests.sh
 
+      - name: Authentication diagnostics, redaction and exact signed-body offline tests
+        run: swift test --package-path vendor/ApplePackage --filter 'AuthenticationDiagnosticTests|SAPAuthenticationRequestTests'
+
+      - name: Credential-free Apple SAP preflight
+        continue-on-error: true
+        env:
+          MIRSA_AUTH_PREFLIGHT: "1"
+        run: swift test --package-path vendor/ApplePackage --filter AuthenticationDiagnosticTests.testCredentialFreeLiveSAPPreflight
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
