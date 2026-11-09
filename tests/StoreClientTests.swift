@@ -11,12 +11,18 @@ import ZIPFoundation
 private final class StoreTestVault: MirsaStoreVault {
     var data: [String: Data] = [:]
     var failWrite = false
+    var failDeleteAccount = false
+    var removed: [String] = []
     func read(_ key: String) throws -> Data? { data[key] }
     func write(_ data: Data, key: String) throws {
         if failWrite { throw MirsaStoreError.keychain(-1) }
         self.data[key] = data
     }
-    func remove(_ key: String) throws { data[key] = nil }
+    func remove(_ key: String) throws {
+        removed.append(key)
+        if key == "account" && failDeleteAccount { throw MirsaStoreError.keychain(-1) }
+        data[key] = nil
+    }
 }
 
 private func testOwner() -> Account {
@@ -44,6 +50,7 @@ private final class StoreTestAuth: MirsaStoreAuthentication {
 private final class StoreTestEngine: MirsaStoreEngine {
     let auth = StoreTestAuth()
     var authCreations = 0
+    var failSetup = false
     var guids: [String] = []
     var app = testSoftware()
     var lookupCountries: [String] = []
@@ -63,7 +70,11 @@ private final class StoreTestEngine: MirsaStoreEngine {
         }
     }
     func configure(guid: String) { guids.append(guid) }
-    func authentication() async throws -> any MirsaStoreAuthentication { authCreations += 1; return auth }
+    func authentication() async throws -> any MirsaStoreAuthentication {
+        authCreations += 1
+        if failSetup { throw MirsaStoreError.serviceUnavailable }
+        return auth
+    }
     func search(term: String, country: String, limit: Int) async throws -> [Software] { [app] }
     func lookup(bundleID: String, country: String) async throws -> Software { lookupCountries.append(country); return app }
     func acquire(account: inout Account, app: Software) async throws { acquisitions += 1 }
@@ -76,6 +87,8 @@ private final class StoreTestEngine: MirsaStoreEngine {
 }
 private final class StoreTestPackages: MirsaStorePackages {
     var calls = 0
+    var cancellations = 0
+    func cancel() { cancellations += 1 }
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
         calls += 1
         return URL(fileURLWithPath: "/tmp/MirsaStore-test/App.ipa")
@@ -83,6 +96,29 @@ private final class StoreTestPackages: MirsaStorePackages {
 }
 
 final class MirsaStoreClientTests: XCTestCase {
+    func testSignoutAttemptsBothSecretsAndCancelsDownloadEvenOnKeychainFailure() async throws {
+        let vault = StoreTestVault(), packages = StoreTestPackages()
+        let client = MirsaStoreClient(vault: vault, engine: StoreTestEngine(), packages: packages)
+        _ = try await client.currentAccount()
+        vault.data["challenge"] = Data("fixture".utf8)
+        vault.failDeleteAccount = true
+        do { try await client.signOut(); XCTFail("delete failure swallowed") } catch {}
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertTrue(vault.removed.contains("account"))
+        XCTAssertEqual(packages.cancellations, 1)
+    }
+
+    func testSAPSetupFailureFailsClosedBeforePasswordIsStored() async throws {
+        let vault = StoreTestVault(), engine = StoreTestEngine()
+        engine.failSetup = true
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        do { _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password"); XCTFail("unsigned fallback") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .serviceUnavailable) }
+        XCTAssertTrue(engine.auth.calls.isEmpty)
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertNil(vault.data["account"])
+    }
+
     func testPolicyRejectsPaidUnknownAndInvalidPrices() throws {
         try MirsaStorePolicy.requireFree(0)
         for price in [nil, 1.0, -1, Double.nan, Double.infinity] as [Double?] {

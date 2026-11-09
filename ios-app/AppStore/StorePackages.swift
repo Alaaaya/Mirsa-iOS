@@ -3,11 +3,25 @@ import Foundation
 import ZIPFoundation
 
 protocol MirsaStorePackages {
+    func cancel()
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL
 }
 
 /// A private, transient download. No Authorization/Cookie headers are forwarded to the CDN.
-struct AppleStorePackages: MirsaStorePackages {
+final class AppleStorePackages: MirsaStorePackages {
+    private let lock = NSLock()
+    private var download: StoreCDNDownload?
+    func cancel() {
+        lock.lock()
+        let download = self.download
+        lock.unlock()
+        download?.cancel()
+    }
+    private func register(_ download: StoreCDNDownload?) {
+        lock.lock()
+        self.download = download
+        lock.unlock()
+    }
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
         try MirsaStorePolicy.downloadURL(url)
@@ -18,7 +32,10 @@ struct AppleStorePackages: MirsaStorePackages {
                                                attributes: Self.protection)
         let destination = directory.appendingPathComponent("App.ipa")
         do {
-            try await StoreCDNDownload().download(url, to: destination)
+            let download = StoreCDNDownload()
+            register(download)
+            defer { register(nil) }
+            try await download.download(url, to: destination)
             try Task.checkCancellation()
             try Self.assemble(destination, output: output, bundleID: bundleID)
             try FileManager.default.setAttributes(Self.protection, ofItemAtPath: destination.path)
@@ -130,6 +147,14 @@ private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unc
     private var cancelled = false
     private let maxBytes: Int64 = 4 * 1024 * 1024 * 1024
 
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let task = self.task
+        lock.unlock()
+        task?.cancel()
+    }
+
     func download(_ url: URL, to destination: URL) async throws {
         try MirsaStorePolicy.downloadURL(url)
         let config = URLSessionConfiguration.ephemeral
@@ -142,7 +167,7 @@ private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unc
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 lock.lock()
                 self.destination = destination
                 self.continuation = continuation
@@ -154,11 +179,7 @@ private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unc
                 task.resume()
             }
         }, onCancel: {
-            self.lock.lock()
-            self.cancelled = true
-            let task = self.task
-            self.lock.unlock()
-            task?.cancel()
+            self.cancel()
         })
     }
 
