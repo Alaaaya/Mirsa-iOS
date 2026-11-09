@@ -412,10 +412,10 @@ enum PersonalCertificateSigner {
         try control.checkpoint()
         progress(PersonalSigningEvent(stage: .preparing))
         let fm = FileManager.default
-        let stage = fm.temporaryDirectory.appendingPathComponent("personal-sign-\(UUID().uuidString)", isDirectory: true)
+        let stage = MirsaManagedTmp.begin("sign")
         try fm.createDirectory(at: stage, withIntermediateDirectories: true,
                                attributes: [.protectionKey: FileProtectionType.complete])
-        defer { try? fm.removeItem(at: stage) }
+        defer { MirsaManagedTmp.end(stage) }
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options, applyBundleID: false)
         let reportURL = stage.appendingPathComponent("encryption.json")
         try IPAEditorService.run("signing_encryption", input: app, output: reportURL, signingOptions: options)

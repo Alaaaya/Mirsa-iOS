@@ -406,7 +406,8 @@ final class AppsStore: ObservableObject {
             if !prepared { MirsaInstallActivity.shared.finish(success: false) }
         }
         let fm = FileManager.default
-        let work = fm.temporaryDirectory.appendingPathComponent("import-\(UUID().uuidString)", isDirectory: true)
+        let work = MirsaManagedTmp.begin("import")
+        defer { if !prepared { MirsaManagedTmp.end(work) } } // kept (registered) while the import is pending
         let ipa = work.appendingPathComponent("original.ipa")
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }

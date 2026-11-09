@@ -53,9 +53,9 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         else { throw SideloadError.message(personalText("Import your certificate first.", "استورد شهادتك بالأول.")) }
         let device = (try? OwnCertificateDevice.require()) ?? ""
         let fm = FileManager.default
-        let stage = fm.temporaryDirectory.appendingPathComponent("ota-\(UUID().uuidString)", isDirectory: true)
+        let stage = MirsaManagedTmp.begin("ota")
         try fm.createDirectory(at: stage.appendingPathComponent("Payload"), withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: stage) }
+        defer { MirsaManagedTmp.end(stage) }
         let input = try await Task.detached {
             try prepareSigningInput(source: source, sourceIsArchive: sourceIsArchive, stage: stage, control: control)
         }.value

@@ -1129,6 +1129,7 @@ struct AppsSettingsSheet: View {
                         Label(tr("Privacy", "الخصوصية"), systemImage: "lock")
                     }
                 }
+                MirsaTempCleanRow()
                 Section(tr("Theme", "الثيم")) {
                     Picker(tr("Theme", "الثيم"), selection: $theme) {
                         ForEach(MirsaTheme.allCases) { t in Text(t.title).tag(t.rawValue) }
