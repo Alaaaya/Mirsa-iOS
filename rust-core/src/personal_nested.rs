@@ -122,8 +122,59 @@ fn intersection(request: &Value, allowed: &Value) -> Option<Value> {
         _ => None,
     }
 }
+const APP_GROUPS: &str = "com.apple.security.application-groups";
+fn concrete_group(s: &str) -> bool {
+    s.starts_with("group.") && valid_id(s) && s.len() > "group.".len()
+}
+fn group_authorized(s: &str, allowed: &Dictionary) -> bool {
+    concrete_group(s) && allowed.get(APP_GROUPS).and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|v| v.as_string().is_some_and(|p| matches_id(p,s))))
+}
+/// Plan once for the entire bundle tree. A shared original group must map to
+/// one concrete ID authorized by EVERY profile whose app requests that group.
+/// None is deliberate: disjoint capabilities must never silently split storage.
+pub(super) fn app_group_plan(pairs: &[(&Dictionary, &Dictionary)]) -> BTreeMap<String, Option<String>> {
+    let mut consumers: BTreeMap<String, Vec<&Dictionary>> = BTreeMap::new();
+    for (request, allowed) in pairs {
+        if let Some(groups) = request.get(APP_GROUPS).and_then(Value::as_array) {
+            for group in groups.iter().filter_map(Value::as_string).filter(|s| concrete_group(s)) {
+                consumers.entry(group.to_owned()).or_default().push(allowed);
+            }
+        }
+    }
+    let mut plan = BTreeMap::new();
+    for (original, profiles) in consumers {
+        let mut candidates = BTreeSet::new();
+        for profile in &profiles {
+            if let Some(groups) = profile.get(APP_GROUPS).and_then(Value::as_array) {
+                for pattern in groups.iter().filter_map(Value::as_string) {
+                    if concrete_group(pattern) { candidates.insert(pattern.to_owned()); }
+                    // Instantiate only scoped, valid trailing wildcards. Never
+                    // emit wildcard entitlements, invent grants, or use bundle IDs.
+                    if let Some(scope) = pattern.strip_suffix(".*") {
+                        if scope.starts_with("group.") && valid_id(scope) {
+                            candidates.insert(format!("{scope}.{}", &original["group.".len()..]));
+                        }
+                    }
+                }
+            }
+        }
+        let mapped = if profiles.iter().all(|a| group_authorized(&original,a)) {
+            Some(original.clone())
+        } else {
+            candidates.into_iter().find(|s| profiles.iter().all(|a| group_authorized(s,a)))
+        };
+        plan.insert(original, mapped);
+    }
+    plan
+}
 pub(super) fn constrain(request: &Dictionary, allowed: &Dictionary, prefix: &str, id: &str, team: &str,
     map: &BTreeMap<String,String>, strict: bool) -> Result<(Dictionary, Vec<String>)> {
+    let groups = app_group_plan(&[(request, allowed)]);
+    constrain_with_groups(request, allowed, prefix, id, team, map, strict, &groups)
+}
+pub(super) fn constrain_with_groups(request: &Dictionary, allowed: &Dictionary, prefix: &str, id: &str, team: &str,
+    map: &BTreeMap<String,String>, strict: bool, groups: &BTreeMap<String,Option<String>>) -> Result<(Dictionary, Vec<String>)> {
     let mut out = Dictionary::new();
     let mut dropped = Vec::new();
     for (k,v) in request {
@@ -140,8 +191,26 @@ pub(super) fn constrain(request: &Dictionary, allowed: &Dictionary, prefix: &str
                 }
             }
         }
-        let filtered = allowed.get(k).and_then(|a| intersection(&v,a));
-        if filtered.as_ref() != Some(&v) {
+        if k == APP_GROUPS && !strict {
+            if let Some(requested) = v.as_array() {
+                let mut mapped = Vec::new();
+                for original in requested.iter().filter_map(Value::as_string) {
+                    if let Some(Some(replacement)) = groups.get(original) {
+                        if group_authorized(replacement, allowed) && !mapped.contains(&Value::String(replacement.clone())) {
+                            mapped.push(Value::String(replacement.clone()));
+                        }
+                    }
+                }
+                v = Value::Array(mapped);
+            }
+        }
+        let filtered = allowed.get(k).and_then(|a| intersection(&v,a))
+            .filter(|v| k != APP_GROUPS || v.as_array().is_some_and(|a| !a.is_empty()));
+        // Report substitutions as well as dropped entries, never as success with
+        // the original app-group identity. Strict mode never uses the plan.
+        let changed_groups = k == APP_GROUPS && &v != request.get(k).unwrap();
+
+        if changed_groups || filtered.as_ref() != Some(&v) {
             if strict { return Err(format!("الصلاحية المطلوبة {k} مو موجودة بالبروفايل. استورد بروفايل يدعمها.")); }
             dropped.push(k.clone());
         }
@@ -295,5 +364,87 @@ mod compatibility_entitlement_tests {
         let (out,dropped)=constrain(&request,&allowed,"P","com.test","T",&BTreeMap::new(),true).unwrap();
         assert!(dropped.is_empty()); assert_eq!(out["groups"],request["groups"]); assert!(!out.contains_key("extra"));
         assert!(intersection(&"*".into(),&"specific".into()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod app_group_mapping_tests {
+    use super::*;
+    fn groups(values: &[&str]) -> Dictionary {
+        let mut d=Dictionary::new();
+        d.insert(APP_GROUPS.into(), Value::Array(values.iter().map(|s| Value::String((*s).into())).collect()));
+        d
+    }
+    fn values(d: &Dictionary) -> Vec<&str> {
+        d.get(APP_GROUPS).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_string).collect()).unwrap_or_default()
+    }
+    #[test] fn app_groups_preserve_explicit_and_wildcard_authorized_originals() {
+        let r=groups(&["group.original.shared"]);
+        for a in [groups(&["group.original.shared"]),groups(&["group.original.*"])] {
+            for strict in [true,false] {
+                let (out,w)=constrain(&r,&a,"PREFIX","com.gestaltx","TEAM",&BTreeMap::new(),strict).unwrap();
+                assert_eq!(values(&out),vec!["group.original.shared"]); assert!(w.is_empty());
+            }
+        }
+    }
+    #[test] fn app_groups_substitute_only_requested_capability_and_report_change() {
+        let r=groups(&["group.original"]);let a=groups(&["group.zeta","group.available"]);
+        let (out,w)=constrain(&r,&a,"PREFIX","com.gestaltx","TEAM",&BTreeMap::new(),false).unwrap();
+        assert_eq!(values(&out),vec!["group.available"]); assert_eq!(w,vec![APP_GROUPS]);
+        assert_eq!(out["application-identifier"].as_string(),Some("PREFIX.com.gestaltx"));
+        let (out,_)=constrain(&Dictionary::new(),&a,"PREFIX","com.gestaltx","TEAM",&BTreeMap::new(),false).unwrap();
+        assert!(!out.contains_key(APP_GROUPS));
+        assert!(constrain(&r,&a,"PREFIX","com.gestaltx","TEAM",&BTreeMap::new(),true).is_err());
+    }
+    #[test] fn app_groups_wildcard_substitution_is_concrete_and_authorized() {
+        let r=groups(&["group.original.shared"]);let a=groups(&["group.authorized.*"]);
+        let (out,_)=constrain(&r,&a,"P","com.gestaltx","T",&BTreeMap::new(),false).unwrap();
+        assert_eq!(values(&out),vec!["group.authorized.original.shared"]);
+        assert!(group_authorized(values(&out)[0],&a));
+    }
+    #[test] fn app_groups_parent_extensions_use_one_common_mapping_regardless_of_order() {
+        let r=groups(&["group.original"]);
+        let main=groups(&["group.main.only","group.shared"]);
+        let extension=groups(&["group.extension.only","group.shared"]);
+        for pairs in [vec![(&r,&main),(&r,&extension)],vec![(&r,&extension),(&r,&main)]] {
+            let plan=app_group_plan(&pairs);
+            for (id,a) in [("com.gestaltx",&main),("com.gestaltx.widget",&extension)] {
+                let (out,_)=constrain_with_groups(&r,a,"P",id,"T",&BTreeMap::new(),false,&plan).unwrap();
+                assert_eq!(values(&out),vec!["group.shared"]);
+                assert_eq!(out["application-identifier"].as_string(),Some(format!("P.{id}").as_str()));
+            }
+        }
+    }
+    #[test] fn app_groups_missing_or_disjoint_profiles_never_invent_or_split_shared_storage() {
+        let r=groups(&["group.original"]);let a=groups(&["group.first"]);
+        for other in [Dictionary::new(), groups(&["group.second"])] {
+            let plan=app_group_plan(&[(&r,&a),(&r,&other)]);
+            for allowed in [&a,&other] {
+                let (out,w)=constrain_with_groups(&r,allowed,"P","com.test","T",&BTreeMap::new(),false,&plan).unwrap();
+                assert!(!out.contains_key(APP_GROUPS));assert_eq!(w,vec![APP_GROUPS]);
+                assert!(constrain_with_groups(&r,allowed,"P","com.test","T",&BTreeMap::new(),true,&plan).is_err());
+            }
+        }
+    }
+    #[test] fn app_groups_ignore_malformed_and_wildcard_requested_identifiers() {
+        for r in [groups(&["group.*"]),groups(&["group.bad/../path"]),groups(&["not.a.group"])] {
+            let a=groups(&["group.authorized"]);
+            let (out,_)=constrain(&r,&a,"P","com.test","T",&BTreeMap::new(),false).unwrap();
+            assert!(!out.contains_key(APP_GROUPS));
+        }
+    }
+    #[test] fn app_groups_keychain_rebases_shared_prefix_without_bundle_identity_changes() {
+        let mut r=groups(&["group.original"]);
+        r.insert("keychain-access-groups".into(),vec![Value::String("OLD.shared".into()),Value::String("OLD.com.gestaltx".into())].into());
+        let mut a=groups(&["group.authorized"]);
+        a.insert("keychain-access-groups".into(),vec![Value::String("PREFIX.*".into())].into());
+        for id in ["com.gestaltx","com.gestaltx.widget"] {
+            let (out,_)=constrain(&r,&a,"PREFIX",id,"TEAM",&BTreeMap::new(),false).unwrap();
+            assert_eq!(values(&out),vec!["group.authorized"]);
+            assert_eq!(out["keychain-access-groups"].as_array().unwrap()[0].as_string(),Some("PREFIX.shared"));
+            assert_eq!(out["keychain-access-groups"].as_array().unwrap()[1].as_string(),Some("PREFIX.com.gestaltx"));
+            assert_eq!(out["com.apple.developer.team-identifier"].as_string(),Some("TEAM"));
+            assert_eq!(out["application-identifier"].as_string(),Some(format!("PREFIX.{id}").as_str()));
+        }
     }
 }
