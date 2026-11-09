@@ -1,0 +1,302 @@
+import Foundation
+import XCTest
+import ApplePackage
+import ZIPFoundation
+#if canImport(MirsaStoreKit)
+@testable import MirsaStoreKit
+#else
+@testable import Mirsa
+#endif
+
+private final class StoreTestVault: MirsaStoreVault {
+    var data: [String: Data] = [:]
+    var failWrite = false
+    var failDeleteAccount = false
+    var removed: [String] = []
+    func read(_ key: String) throws -> Data? { data[key] }
+    func write(_ data: Data, key: String) throws {
+        if failWrite { throw MirsaStoreError.keychain(-1) }
+        self.data[key] = data
+    }
+    func remove(_ key: String) throws {
+        removed.append(key)
+        if key == "account" && failDeleteAccount { throw MirsaStoreError.keychain(-1) }
+        data[key] = nil
+    }
+}
+
+private func testOwner() -> Account {
+    Account(email: "owner@example.invalid", password: "fixture-password", appleId: "1", store: "143443",
+            firstName: "Owner", lastName: "", passwordToken: "fixture-token",
+            directoryServicesIdentifier: "123", cookie: [])
+}
+private func testSoftware(price: Double? = 0, id: Int64 = 42) -> Software {
+    Software(id: id, bundleID: "com.example.fixture", name: "Fixture", version: "1.0", price: price,
+             artistName: "", sellerName: "", description: "", averageUserRating: 0, userRatingCount: 0,
+             artworkUrl: "", screenshotUrls: [], minimumOsVersion: "18.0", releaseDate: "", primaryGenreName: "")
+}
+private final class StoreTestAuth: MirsaStoreAuthentication {
+    var calls: [String] = []
+    var twoFactor = false
+    var paused: CheckedContinuation<Account, Error>?
+    var pause = false
+    func authenticate(email: String, password: String, code: String) async throws -> Account {
+        calls.append(code)
+        if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
+        if twoFactor && code != "123456" { throw AuthenticationError.verificationCodeRequired }
+        return testOwner()
+    }
+}
+private final class StoreTestEngine: MirsaStoreEngine {
+    let auth = StoreTestAuth()
+    var authCreations = 0
+    var failSetup = false
+    var guids: [String] = []
+    var app = testSoftware()
+    var lookupCountries: [String] = []
+    var acquisitions = 0
+    var manifests = 0
+    var seenVersion: String?
+    var failManifest = false
+    var versionsResult = ["123", "456"]
+    var output: DownloadOutput {
+        get throws {
+            let metadata: [String: Any] = ["itemId": 42, "softwareVersionBundleId": "com.example.fixture",
+                                            "softwareVersionExternalIdentifier": seenVersion ?? "999"]
+            return DownloadOutput(downloadURL: "https://apps.mzstatic.com/fixture.ipa",
+                                  sinfs: [Sinf(id: 0, sinf: Data([1, 2, 3]))],
+                                  bundleShortVersionString: "1.0", bundleVersion: "1",
+                                  iTunesMetadata: try PropertyListSerialization.data(fromPropertyList: metadata, format: .xml, options: 0))
+        }
+    }
+    func configure(guid: String) { guids.append(guid) }
+    func authentication() async throws -> any MirsaStoreAuthentication {
+        authCreations += 1
+        if failSetup { throw MirsaStoreError.serviceUnavailable }
+        return auth
+    }
+    func search(term: String, country: String, limit: Int) async throws -> [Software] { [app] }
+    func lookup(bundleID: String, country: String) async throws -> Software { lookupCountries.append(country); return app }
+    func acquire(account: inout Account, app: Software) async throws { acquisitions += 1 }
+    func manifest(account: inout Account, app: Software, version: String?) async throws -> DownloadOutput {
+        manifests += 1; seenVersion = version
+        if failManifest { throw ApplePackageError.licenseRequired }
+        return try output
+    }
+    func versions(account: inout Account, bundleID: String) async throws -> [String] { versionsResult }
+}
+private final class StoreTestPackages: MirsaStorePackages {
+    var calls = 0
+    var cancellations = 0
+    func cancel() { cancellations += 1 }
+    func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
+        calls += 1
+        return URL(fileURLWithPath: "/tmp/MirsaStore-test/App.ipa")
+    }
+}
+
+final class MirsaStoreClientTests: XCTestCase {
+    func testSignoutAttemptsBothSecretsAndCancelsDownloadEvenOnKeychainFailure() async throws {
+        let vault = StoreTestVault(), packages = StoreTestPackages()
+        let client = MirsaStoreClient(vault: vault, engine: StoreTestEngine(), packages: packages)
+        _ = try await client.currentAccount()
+        vault.data["challenge"] = Data("fixture".utf8)
+        vault.failDeleteAccount = true
+        do { try await client.signOut(); XCTFail("delete failure swallowed") } catch {}
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertTrue(vault.removed.contains("account"))
+        XCTAssertEqual(packages.cancellations, 1)
+    }
+
+    func testSAPSetupFailureFailsClosedBeforePasswordIsStored() async throws {
+        let vault = StoreTestVault(), engine = StoreTestEngine()
+        engine.failSetup = true
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        do { _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password"); XCTFail("unsigned fallback") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .serviceUnavailable) }
+        XCTAssertTrue(engine.auth.calls.isEmpty)
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertNil(vault.data["account"])
+    }
+
+    func testPolicyRejectsPaidUnknownAndInvalidPrices() throws {
+        try MirsaStorePolicy.requireFree(0)
+        for price in [nil, 1.0, -1, Double.nan, Double.infinity] as [Double?] {
+            XCTAssertThrowsError(try MirsaStorePolicy.requireFree(price))
+        }
+    }
+    func testURLAllowlistAndCredentialRejection() throws {
+        for text in ["https://apps.mzstatic.com/a", "https://apple.com/a", "https://cdn-apple.com/a"] {
+            try MirsaStorePolicy.downloadURL(URL(string: text)!)
+        }
+        for text in ["http://apps.mzstatic.com/a", "https://mzstatic.com.evil.test/a", "https://evilapple.com/a",
+                     "https://owner:secret@apple.com/a", "https://apple.com:8443/a", "file:///tmp/a"] {
+            XCTAssertThrowsError(try MirsaStorePolicy.downloadURL(URL(string: text)!))
+        }
+    }
+    func testInputAndArchiveTraversalPolicy() throws {
+        XCTAssertEqual(try MirsaStorePolicy.country("de"), "DE")
+        XCTAssertThrowsError(try MirsaStorePolicy.country("D1"))
+        XCTAssertEqual(try MirsaStorePolicy.version("123"), "123")
+        for version in ["-1", "0", "../123", "1.5", "18446744073709551616"] {
+            XCTAssertThrowsError(try MirsaStorePolicy.version(version))
+        }
+        for path in ["../file", "/Payload/a", "Payload/../a", "Payload/./a", "Payload\\a", "a\0b"] {
+            XCTAssertThrowsError(try MirsaStorePolicy.archivePath(path))
+        }
+    }
+    func testLoginSavedOnlyInInjectedVaultAndRestoresMachineIdentity() async throws {
+        let vault = StoreTestVault(), engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let result = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        guard case .signedIn(let summary) = result else { return XCTFail("login missing") }
+        XCTAssertEqual(summary.country, "DE")
+        XCTAssertNotNil(vault.data["account"])
+        XCTAssertEqual(engine.guids.first?.count, 12)
+        let restored = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let current = try await restored.currentAccount()
+        XCTAssertEqual(current, summary)
+        XCTAssertEqual(engine.guids.count, 2)
+        XCTAssertEqual(engine.guids[0], engine.guids[1])
+        try await restored.signOut()
+        XCTAssertNil(vault.data["account"])
+        XCTAssertNotNil(vault.data["machine"])
+    }
+    func testTwoFactorReusesOneSAPSession() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        XCTAssertEqual(first, .verificationRequired)
+        let second = try await client.verify(code: "123456")
+        guard case .signedIn = second else { return XCTFail("verification missing") }
+        XCTAssertEqual(engine.authCreations, 1)
+        XCTAssertEqual(engine.auth.calls, ["", "123456"])
+    }
+    func testTwoFactorSubmissionLimitAndSignoutClearsChallenge() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        for _ in 0..<3 {
+            do { _ = try await client.verify(code: "999999"); XCTFail("wrong code accepted") } catch {}
+        }
+        do { _ = try await client.verify(code: "123456"); XCTFail("expired challenge accepted") } catch {}
+        XCTAssertEqual(engine.auth.calls.count, 4)
+        try await client.signOut()
+        do { _ = try await client.verify(code: "123456"); XCTFail("signed out challenge accepted") } catch {}
+    }
+    func testAcquisitionUsesFreshAccountRegionAndRejectsUnknownOrPaidPrice() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let advertised = MirsaStoreApp(testSoftware())
+        for price in [nil, 1.0] as [Double?] {
+            engine.app = testSoftware(price: price)
+            do { try await client.acquireFreeApp(advertised); XCTFail("not free") } catch {}
+        }
+        XCTAssertEqual(engine.acquisitions, 0)
+        engine.app = testSoftware()
+        try await client.acquireFreeApp(advertised)
+        XCTAssertEqual(engine.acquisitions, 1)
+        XCTAssertEqual(engine.lookupCountries, ["DE", "DE", "DE"])
+    }
+    func testOwnedDownloadNeverAcquiresAndPreservesSelectedVersion() async throws {
+        let engine = StoreTestEngine(), packages = StoreTestPackages()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: packages)
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        _ = try await client.downloadOwnedApp(MirsaStoreApp(testSoftware()), externalVersionID: "123")
+        XCTAssertEqual(engine.seenVersion, "123")
+        XCTAssertEqual(packages.calls, 1)
+        XCTAssertEqual(engine.acquisitions, 0)
+        engine.failManifest = true
+        do { _ = try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())); XCTFail("no license") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .licenseRequired) }
+        XCTAssertEqual(engine.acquisitions, 0)
+    }
+    func testInvalidVersionDoesNotSendAnyDownload() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        do { _ = try await client.downloadOwnedApp(MirsaStoreApp(testSoftware()), externalVersionID: "../1"); XCTFail("bad version") } catch {}
+        XCTAssertEqual(engine.manifests, 0)
+    }
+    func testVaultFailureDoesNotClaimSuccessfulLogin() async throws {
+        let vault = StoreTestVault(), engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        _ = try await client.currentAccount()
+        vault.failWrite = true
+        do { _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password"); XCTFail("failed persistence accepted") } catch {}
+        let current = try await client.currentAccount()
+        XCTAssertNil(current)
+    }
+    func testSignoutDuringInFlightLoginCannotResurrectAccount() async throws {
+        let vault = StoreTestVault(), engine = StoreTestEngine()
+        engine.auth.pause = true
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let login = Task { try await client.signIn(email: "owner@example.invalid", password: "fixture-password") }
+        for _ in 0..<1000 {
+            if engine.auth.paused != nil { break }
+            await Task.yield()
+        }
+        guard let paused = engine.auth.paused else { login.cancel(); return XCTFail("did not suspend") }
+        do { _ = try await client.search(term: "x", country: "DE"); XCTFail("concurrent request") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .busy) }
+        try await client.signOut()
+        paused.resume(returning: testOwner())
+        do { _ = try await login.value; XCTFail("account resurrected") } catch {}
+        XCTAssertNil(vault.data["account"])
+    }
+}
+
+final class MirsaStorePackageTests: XCTestCase {
+    private func fixture(bundleID: String = "com.example.fixture") throws -> (URL, DownloadOutput, Data) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("App.ipa")
+        let archive = try Archive(url: url, accessMode: .create)
+        let info: [String: Any] = ["CFBundleIdentifier": bundleID, "CFBundleExecutable": "Fixture",
+                                  "CFBundleShortVersionString": "1.0", "CFBundleVersion": "1"]
+        let executable = Data([0xcf, 0xfa, 0xed, 0xfe, 0x99, 0xaa, 0xbb])
+        try add(try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0),
+                path: "Payload/Fixture.app/Info.plist", archive: archive)
+        try add(executable, path: "Payload/Fixture.app/Fixture", archive: archive)
+        let output = try StoreTestEngine().output
+        return (url, output, executable)
+    }
+    private func add(_ data: Data, path: String, archive: Archive) throws {
+        try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { offset, count in
+            data.subdata(in: Int(offset)..<(Int(offset) + count))
+        }
+    }
+    func testPackageAddsOriginalSINFAndMetadataWithoutChangingExecutable() throws {
+        let (url, output, executable) = try fixture()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try AppleStorePackages.assemble(url, output: output, bundleID: "com.example.fixture")
+        let archive = try Archive(url: url, accessMode: .read)
+        for (path, expected) in [
+            ("Payload/Fixture.app/Fixture", executable),
+            ("Payload/Fixture.app/SC_Info/Fixture.sinf", output.sinfs[0].sinf),
+            ("iTunesMetadata.plist", output.iTunesMetadata)
+        ] {
+            var bytes = Data()
+            _ = try archive.extract(try XCTUnwrap(archive[path])) { bytes.append($0) }
+            XCTAssertEqual(bytes, expected)
+        }
+    }
+    func testMismatchedBundleCannotBePackaged() throws {
+        let (url, output, _) = try fixture(bundleID: "com.wrong.fixture")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        XCTAssertThrowsError(try AppleStorePackages.assemble(url, output: output, bundleID: "com.example.fixture"))
+    }
+    func testTraversalManifestIsRejected() throws {
+        let (url, output, _) = try fixture()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        do {
+            let archive = try Archive(url: url, accessMode: .update)
+            let manifest = try PropertyListSerialization.data(fromPropertyList: ["SinfPaths": ["../Fixture"]], format: .binary, options: 0)
+            try add(manifest, path: "Payload/Fixture.app/SC_Info/Manifest.plist", archive: archive)
+        }
+        XCTAssertThrowsError(try AppleStorePackages.assemble(url, output: output, bundleID: "com.example.fixture"))
+    }
+}
