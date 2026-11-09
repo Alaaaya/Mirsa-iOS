@@ -24,14 +24,26 @@ enum MirsaSourceFeed {
     /// Replaces Mirsa-owned legacy URLs by the primary, keeps custom sources and user metadata, de-duplicates.
     static func migrate(_ list: [RepoSource], primary: String = MirsaSourceFeed.primary) -> [RepoSource] {
         var out: [RepoSource] = []
+        var mergedAway = Set<String>()   // ids of entries that came from a legacy Mirsa URL
+        var canonicalTaken = false
         for var s in list {
-            if legacyURLs.contains(norm(s.url)) { s.url = primary }
-            if let i = out.firstIndex(where: { norm($0.url) == norm(s.url) }) {
-                // keep first entry, fill gaps from the duplicate
+            let wasLegacy = legacyURLs.contains(norm(s.url))
+            if wasLegacy { s.url = primary }
+            if let i = out.firstIndex(where: { norm($0.url) == norm(s.url) }),
+               wasLegacy || mergedAway.contains(out[i].id) {
+                // legacy Mirsa URL collapses into its replacement; keep first entry, fill gaps
                 if out[i].iconURL == nil { out[i].iconURL = s.iconURL }
                 if out[i].tint == nil { out[i].tint = s.tint }
                 continue
             }
+            // stable identity: old saves have none; the first primary row gets the fixed canonical id
+            if s.uid.isEmpty || (s.uid == RepoSource.canonicalID && (canonicalTaken || norm(s.url) != norm(primary))) {
+                s.uid = UUID().uuidString
+            }
+            if norm(s.url) == norm(primary), !canonicalTaken, !out.contains(where: { $0.uid == RepoSource.canonicalID }) {
+                s.uid = RepoSource.canonicalID; canonicalTaken = true
+            }
+            if wasLegacy { mergedAway.insert(s.id) }
             out.append(s)
         }
         return out
