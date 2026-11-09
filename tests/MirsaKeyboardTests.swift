@@ -64,6 +64,8 @@ final class MirsaKeyboardTests: XCTestCase {
         func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
         let fields = descendants(host.view).compactMap { $0 as? UITextField }
         let field = try XCTUnwrap(fields.first)
+        XCTAssertTrue(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
+                      "CTA must exist before editing begins")
         var keyboardFrame: CGRect?
         let token = NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidShowNotification,
             object: nil, queue: .main) { note in
@@ -86,9 +88,25 @@ final class MirsaKeyboardTests: XCTestCase {
         XCTAssertFalse(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
                        "CTA must not be exposed or cover the page while software keyboard is visible")
         attach(window, name: "project-app-window-keyboard-visible-focused-field")
-        window.endEditing(false)
-        try await Task.sleep(nanoseconds: 800_000_000)
+        // Resigning first responder is not the end of the software keyboard's
+        // transition. Wait for UIKit's real completion event, then let SwiftUI
+        // commit the safe-area inset and rebuild its accessibility subtree.
+        // A fixed 800ms sleep races both stages on a loaded simulator.
+        let didHide = expectation(description: "Real software keyboard did hide")
+        let hideToken = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
+        ) { _ in didHide.fulfill() }
+        defer { NotificationCenter.default.removeObserver(hideToken) }
+        XCTAssertTrue(window.endEditing(false))
+        await fulfillment(of: [didHide], timeout: 5)
         XCTAssertFalse(field.isFirstResponder)
+        let deadline = Date().addingTimeInterval(5)
+        while !accessibilityContains(host.view, identifier: "mirsa.project.sign"),
+              Date() < deadline {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
         XCTAssertTrue(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
                       "CTA must return after keyboard fully dismisses")
         attach(window, name: "project-app-window-keyboard-hidden-CTA-restored")
