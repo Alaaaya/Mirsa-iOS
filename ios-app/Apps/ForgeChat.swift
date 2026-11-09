@@ -20,6 +20,8 @@ enum ForgeChatText {
     static var resultSaved: String { tr("Finished. Saved in Versions for your review. Nothing was enabled.", "خلص. انحفظ بالنسخ لتراجعه. ما تفعّل شي.", ckb: "تەواو بوو. لە وەشانەکان پاشەکەوت کرا بۆ پێداچوونەوە. هیچ شتێک چالاک نەکرا.", kmr: "Qediya. Di Guhertoyan de ji bo kontrolê hat tomarkirin. Tiştek nehat çalakkirin.") }
 }
 
+enum ForgeChatTransient: Error { case failed(String) }
+
 struct ForgeChatThread: Codable, Identifiable, Equatable {
     let id: UUID; let title: String?; let status: String?; let createdAt: String?; let updatedAt: String?
 }
@@ -56,44 +58,81 @@ enum ForgeChatImage {
     private var flushing = false
     private var handledResults = Set<UUID>()
 
-    init() { outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? [] }
+    init() { defer { startRetrying() }; outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? [] }
     private func saveOutgoing() { UserDefaults.standard.set(try? JSONEncoder().encode(outgoing), forKey: key) }
 
     func callPublic(_ body: [String: Any]) async throws -> Data { try await call(body) }
-    private func call(_ body: [String: Any]) async throws -> Data {
-        let c = try await ForgeClient.fixToken()
-        let r = try await ForgePreciseClient.request(body, credentials: c)
-        switch r.status {
-        case 200: return r.data
-        case 429: throw ForgeClient.Failure.message(ForgeChatText.limit)
-        default: throw ForgeClient.Failure.message(ForgeChatText.failed)
+    /// Last real failure (HTTP status + server code, or the network error) so the user and logs can see the true reason.
+    @Published var lastDiagnostic: String?
+    private func call(_ body: [String: Any], retryBind: Bool = true) async throws -> Data {
+        let r: ForgePreciseClient.Response
+        do {
+            let c = try await ForgeClient.fixToken()
+            r = try await ForgePreciseClient.request(body, credentials: c)
+        } catch {
+            let d = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            lastDiagnostic = d
+            throw ForgeChatTransient.failed(d)
         }
+        if r.status == 200 { lastDiagnostic = nil; return r.data }
+        let code = (try? JSONSerialization.jsonObject(with: r.data) as? [String: Any])?["error"] as? String ?? ""
+        if r.status == 429 { throw ForgeClient.Failure.message(ForgeChatText.limit) }
+        if r.status == 403, retryBind, code == "device_not_bound" || code == "device_auth_required" {
+            // A fresh install is bound to the account by one ordinary Forge call, then registration is repeated.
+            _ = try? await ForgeClient.get(["action": "gallery"])
+            return try await call(body, retryBind: false)
+        }
+        lastDiagnostic = "HTTP \(r.status) \(code)"
+        throw ForgeChatTransient.failed(lastDiagnostic ?? "")
     }
+
+    /// Threads the server has accepted a message for. A thread is "new" until then, never merely because its UUID exists locally.
+    private var ackedThreads = Set<UUID>()
+    func serverKnows(_ id: UUID) -> Bool { ackedThreads.contains(id) || threads.contains { $0.id == id } || !(messages[id] ?? []).isEmpty }
 
     func send(threadID: UUID?, text: String, jpeg: Data?) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         let img = jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString()
-        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: threadID ?? UUID(), newThread: threadID == nil, text: String(t.prefix(4000)), imageBase64: img))
+        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: threadID ?? UUID(), newThread: !serverKnows(threadID ?? UUID()), text: String(t.prefix(4000)), imageBase64: img))
         saveOutgoing()
         Task { await flush() }
+        startRetrying()
+    }
+
+    private var retrying = false
+    /// Keeps replaying saved messages (same id, server dedupes) with backoff until the server accepts them. Nothing is dropped silently.
+    func startRetrying() {
+        guard !retrying, !outgoing.isEmpty else { return }
+        retrying = true
+        Task { [weak self] in
+            var delay: UInt64 = 5
+            while let self, !self.outgoing.isEmpty {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                await self.flush()
+                delay = min(delay * 2, 60)
+            }
+            self?.retrying = false
+        }
     }
 
     func flush() async {
         guard !flushing else { return }
         flushing = true; defer { flushing = false }
         for o in outgoing {
-            var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": o.newThread, "text": o.text]
+            var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text]
             if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
-            do { _ = try await call(body); error = nil }
-            catch let f as ForgeClient.Failure {
-                if case .message(let m) = f, m == ForgeChatText.limit { error = m; outgoing.removeAll { $0.id == o.id } } else { error = ForgeChatText.failed }
-            } catch { self.error = ForgeChatText.failed; continue } // network error: keep and replay with same id
-            outgoing.removeAll { $0.id == o.id && error == nil }
-            saveOutgoing()
+            do {
+                _ = try await call(body)
+                ackedThreads.insert(o.threadID); outgoing.removeAll { $0.id == o.id }; saveOutgoing(); error = nil
+            } catch let f as ForgeClient.Failure {
+                // Daily limit: the server refuses this message for good, so it cannot be replayed today.
+                error = f.errorDescription; outgoing.removeAll { $0.id == o.id }; saveOutgoing()
+            } catch {
+                self.error = ForgeChatText.failed + (lastDiagnostic.map { " (" + $0 + ")" } ?? "")
+                break // keep the message, the retry loop replays it with the same id
+            }
         }
-        outgoing = outgoing.filter { o in !(error == ForgeChatText.limit && false) && true }
-        saveOutgoing()
         await refreshThreads()
     }
 
@@ -104,6 +143,7 @@ enum ForgeChatImage {
     }
 
     func read(_ id: UUID) async {
+        if !serverKnows(id) { return } // pending first message: nothing to read yet (avoids repeated 404)
         struct W: Decodable { let messages: [ForgeChatMessage] }
         guard let d = try? await call(["action": "chat-read", "threadID": id.uuidString.lowercased()]), let w = try? JSONDecoder().decode(W.self, from: d) else { return }
         messages[id] = w.messages
