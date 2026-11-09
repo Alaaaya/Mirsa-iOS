@@ -35,6 +35,30 @@ final class SourceDeletionTests: XCTestCase {
         XCTAssertFalse(reopened.deleteSource(id: before[1].id))
     }
 
+    func testHiddenLegacyURLsMigrateAndPersistInInjectedDefaults() throws {
+        let suite = "SourceHiddenTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacy = try XCTUnwrap(MirsaSourceFeed.legacyURLs.first)
+        defaults.set([legacy], forKey: "mirsa.sources.hidden")
+        let store = SourcesStore(defaults: defaults)
+        XCTAssertTrue(store.hiddenURLs.contains(MirsaSourceFeed.primary))
+        XCTAssertFalse(store.visibleSources.contains { $0.url == MirsaSourceFeed.primary })
+        XCTAssertEqual(SourcesStore(defaults: defaults).hiddenURLs, store.hiddenURLs)
+        let duplicate = RepoSource(url: MirsaSourceFeed.primary, name: "Duplicate")
+        store.sources = SourceDeletionPolicy.migrate(store.sources + [duplicate, duplicate])
+        let ids = store.sources.filter { $0.url == MirsaSourceFeed.primary && SourceDeletionPolicy.canDelete($0) }.map(\.id)
+        let before = store.sources
+        var pending = ids.first
+        pending = nil
+        XCTAssertNil(pending)
+        XCTAssertEqual(store.sources, before)
+        XCTAssertTrue(store.deleteSource(id: try XCTUnwrap(ids.first)))
+        XCTAssertTrue(store.hiddenURLs.contains(MirsaSourceFeed.primary))
+        XCTAssertTrue(store.sources.contains { $0.id == ids.last })
+        XCTAssertEqual(SourcesStore(defaults: defaults).hiddenURLs, store.hiddenURLs)
+    }
+
     func testConfirmationStringsExistInAllFourLanguages() {
         let original = AppLanguageStore.shared.current
         defer { AppLanguageStore.shared.set(original) }
