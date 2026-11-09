@@ -28,6 +28,15 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         try IPAEditorService.run("pack", input: stage, output: input)
         return input
     }
+    nonisolated static func signedMetadata(_ signed: PersonalCertificateSigner.Result) throws -> Data {
+        guard let bytes = signed.signedInfoPlist, bytes.count <= 2 * 1024 * 1024,
+              let info = try PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any],
+              let id = info["CFBundleIdentifier"] as? String, !id.isEmpty,
+              let version = info["CFBundleVersion"] as? String, !version.isEmpty else {
+            throw SideloadError.message("Signed app metadata is invalid.")
+        }
+        return bytes
+    }
     @discardableResult
     static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
         try control.checkpoint()
@@ -72,11 +81,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         try Task.checkCancellation()
         // Signing can change bundle ID, version and display name. The manifest
         // must describe the exact retained archive sent to either upload host.
-        let signedInfo = try await Task.detached {
-            let inspected = try CertificateInstall.stageSignedApp(ipa: kept, in: fm.temporaryDirectory)
-            defer { try? FileManager.default.removeItem(at: inspected.stage) }
-            return try Data(contentsOf: inspected.app.appendingPathComponent("Info.plist"))
-        }.value
+        // The signer already validated/extracted the input and read this exact
+        // post-signing plist. Re-extracting our deflated output can reject valid
+        // highly-compressible resources (and needlessly duplicates large apps).
+        let signedInfo = try signedMetadata(signed)
         guard let info = try PropertyListSerialization.propertyList(from: signedInfo, format: nil) as? [String: Any] else {
             throw SideloadError.message(personalText("Signed app metadata is invalid.", "معلومات التطبيق الموقّع غير صالحة."))
         }
