@@ -12,6 +12,9 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 /// Why the last install used the upload path instead of local serving (nil = local or not attempted).
 @MainActor enum OTARouteLog { static var last: OTAUploadReason?; static var active: LocalOTAServer? }
 @MainActor enum CertificateOTA {
+    /// Dedicated trusted HTTPS proxy that serves the local-manifest as proper XML. nil until the stable URL is
+    /// provided; never the remote upload endpoint. While nil the local route falls back to upload.
+    static let localManifestEndpoint: URL? = nil
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
 
     /// Archive callers retain ownership. Only app-folder callers need a new pack.
@@ -113,7 +116,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
                 var handedOff = false
                 defer { if !handedOff { server.stop(); if OTARouteLog.active === server { OTARouteLog.active = nil } } }
                 if let port = try? await server.start() {
-                    if let manifest = LocalOTAManifest.url(base: endpoint, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
+                    if let base = localManifestEndpoint, let manifest = LocalOTAManifest.url(base: base, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
                        let target = try? OTAInstallLink.make(manifestURL: manifest),
                        await LocalOTAManifest.preflight(manifest, port: port) {
                         OTARouteLog.active?.stop(); OTARouteLog.active = server
