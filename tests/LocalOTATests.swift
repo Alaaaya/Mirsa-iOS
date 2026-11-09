@@ -8,7 +8,7 @@ final class LocalOTATests: XCTestCase {
         XCTAssertEqual(OTARouteSelector.select(fileReadable: false, enabled: true), .upload(reason: .fileUnavailable))
     }
     func testFallbackReasonsAreLocalized() {
-        for r in [OTAUploadReason.disabledByUser, .fileUnavailable, .serverStartFailed, .manifestUnreachable, .installerRefused] {
+        for r in [OTAUploadReason.disabledByUser, .fileUnavailable, .serverStartFailed, .manifestUnreachable, .noInstallerRequest] {
             XCTAssertFalse(r.english.isEmpty); XCTAssertFalse(r.arabic.isEmpty)
         }
     }
