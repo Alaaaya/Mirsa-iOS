@@ -32,6 +32,7 @@ struct MirsaApp: App {
         AppsStore.registerBackgroundTask()
         AppsStore.importHandoffIfNeeded()
         MirsaChrome.apply()
+        if !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
     }
 
     var body: some Scene {
@@ -47,6 +48,7 @@ struct MirsaApp: App {
             .mirsaLeftToRightChrome()
             .task { if !MirsaUITestHarness.active { await ForgeStore.shared.syncFixInbox() } }
             .onChange(of: scenePhase) { _, phase in
+                if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
                 if phase == .active, !MirsaUITestHarness.active { Task { await ForgeStore.shared.syncFixInbox() } }
             }
         }

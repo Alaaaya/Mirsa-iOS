@@ -123,7 +123,9 @@ struct ForgeView: View {
     private func createTarget(_ url: URL) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let local = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+        let localDir = MirsaManagedTmp.begin("forge-import")
+        defer { MirsaManagedTmp.end(localDir) }
+        let local = localDir.appendingPathComponent("target.ipa")
         try FileManager.default.copyItem(at: url, to: local)
         defer { try? FileManager.default.removeItem(at: local) }
         let info = try await ForgeStore.inspect(ipa: local)
