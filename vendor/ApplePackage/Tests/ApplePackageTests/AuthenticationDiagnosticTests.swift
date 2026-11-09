@@ -46,6 +46,28 @@ final class AuthenticationDiagnosticTests: XCTestCase {
         XCTAssertEqual(outer.httpStatus, 503)
     }
 
+    func testAuthenticationRejectsAbsentOrChangedBagProtocol() throws {
+        let valid: [String: Any] = [
+            "authenticateAccount": "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "sign-sap-version": "200",
+            "sign-sap-setup": "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy",
+            "sign-sap-setup-cert": "https://s.mzstatic.com/sap/setupCert.plist"
+        ]
+        func parsed(_ fields: [String: Any]) throws -> Bag.BagOutput {
+            Bag.parse(try PropertyListSerialization.data(fromPropertyList: fields, format: .xml, options: 0))
+        }
+        XCTAssertNoThrow(try parsed(valid).requireSupportedAuthentication())
+        for key in valid.keys {
+            var changed = valid; changed.removeValue(forKey: key)
+            XCTAssertThrowsError(try parsed(changed).requireSupportedAuthentication())
+        }
+        var changed = valid; changed["sign-sap-version"] = "201"
+        XCTAssertThrowsError(try parsed(changed).requireSupportedAuthentication())
+        changed = valid; changed["sign-sap-setup"] = "https://example.invalid/setup"
+        XCTAssertThrowsError(try parsed(changed).requireSupportedAuthentication())
+        XCTAssertThrowsError(try Bag.parse(Data("not a plist".utf8)).requireSupportedAuthentication())
+    }
+
     func testCredentialFreeLiveSAPPreflight() async throws {
         guard ProcessInfo.processInfo.environment["MIRSA_AUTH_PREFLIGHT"] == "1" else {
             throw XCTSkip("Explicit opt-in credential-free Apple SAP transport probe")
@@ -56,8 +78,12 @@ final class AuthenticationDiagnosticTests: XCTestCase {
         do {
             let bag = try await Bag.fetchBag(redirectConfiguration: .disallow)
             XCTAssertNotNil(bag.authEndpoint.host)
-            _ = try await SAPSigner.connect()
-            print("MIRSA_PREFLIGHT bag=ok sap=ok accountLogin=NOT_ATTEMPTED")
+            try bag.requireSupportedAuthentication()
+            let signer = try await SAPSigner.connect()
+            // Sign only public test bytes locally. Never POST to an account endpoint.
+            let signature = try await signer.sign(Data("Mirsa credential-free preflight".utf8))
+            XCTAssertFalse(signature.isEmpty)
+            print("MIRSA_PREFLIGHT bag=ok sap=ok localSignature=ok accountLogin=NOT_ATTEMPTED")
         } catch {
             let safe = AuthenticationServiceError.wrapping(error, stage: .sapValidation)
             print("MIRSA_PREFLIGHT stage=\(safe.stage.rawValue) http=\(safe.httpStatus ?? 0) network=\(safe.networkCode ?? 0) accountLogin=NOT_ATTEMPTED")

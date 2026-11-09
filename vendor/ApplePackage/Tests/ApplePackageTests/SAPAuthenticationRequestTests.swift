@@ -52,7 +52,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
     ) async throws -> HTTPClient.Request {
         try await Authenticator.makeRequest(
             endpoint: XCTUnwrap(URL(string: endpoint)), email: "reader+ä@example.invalid", password: "test<&password", code: code,
-            cookies: [], deviceIdentifier: "00-11-22-33-44-55", sapSigner: signer,
+            cookies: [], deviceIdentifier: "001122334455", sapSigner: signer,
         )
     }
 
@@ -70,6 +70,9 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         XCTAssertEqual(parameters["appleId"], "reader+ä@example.invalid")
         XCTAssertEqual(parameters["password"], "test<&password123456")
         XCTAssertEqual(parameters["attempt"], "2")
+        XCTAssertEqual(parameters["guid"], "001122334455")
+        XCTAssertEqual(parameters["rmp"], "0")
+        XCTAssertEqual(parameters["why"], "signIn")
     }
 
     func testRetryRedirectAndVerificationReuseSignerState() async throws {
@@ -82,6 +85,8 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         let sentBodies = try requests.map(bodyData)
         let signedBodies = await signer.recordedBodies()
         XCTAssertEqual(signedBodies, sentBodies)
+        let initial = try XCTUnwrap(PropertyListSerialization.propertyList(from: sentBodies[0], format: nil) as? [String: String])
+        XCTAssertEqual(initial["attempt"], "1")
         XCTAssertEqual(sentBodies[0], sentBodies[1])
         XCTAssertEqual(sentBodies[0], sentBodies[2])
         XCTAssertNotEqual(sentBodies[2], sentBodies[3])
@@ -106,7 +111,10 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         do {
             _ = try await makeRequest(signer: FailingSigner())
             XCTFail("Expected signing failure")
-        } catch TestError.signingFailed {
+        } catch let diagnostic as AuthenticationServiceError {
+            XCTAssertEqual(diagnostic.stage, .signing)
+            XCTAssertNil(diagnostic.message)
+            XCTAssertNil(diagnostic.httpStatus)
             // No request is returned to the HTTP client.
         }
     }
