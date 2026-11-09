@@ -23,3 +23,13 @@ test("share URLs pin free static origin and keep bearer token in fragment",()=>{
  assert.throws(()=>shareLink(SHARE_PAGE,"bad","2026-01-01"));
  assert.throws(()=>shareLink(SHARE_PAGE,token,"bad"));
 });
+
+import {localManifest} from "./contract.mjs";
+test("local manifest points only at loopback with bounded port/token",()=>{
+ const t="b".repeat(32);
+ const m=localManifest(good,51234,t);
+ assert.ok(m.includes("http://127.0.0.1:51234/"+t+"/Mirsa.ipa"));
+ for(const p of [80,1023,65536,"x",1.5]) assert.throws(()=>localManifest(good,p,t));
+ for(const bad of ["","short","../x","G".repeat(32)]) assert.throws(()=>localManifest(good,51234,bad));
+ assert.throws(()=>localManifest({...good,bundleID:"x</string>"},51234,t));
+});

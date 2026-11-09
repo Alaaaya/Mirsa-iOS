@@ -38,3 +38,14 @@ export function shareLink(page, token, expiresAt) {
   if (!Number.isFinite(date.getTime())) throw new Error("expiry");
   return page + "#token=" + token + "&expires=" + encodeURIComponent(date.toISOString());
 }
+
+// Local OTA: the HTTPS manifest only points at the device's own loopback listener.
+// iOS requires an HTTPS manifest; the software-package URL may be loopback HTTP.
+export function localManifest(metadata, port, token) {
+  const p = Number(port);
+  if (!Number.isInteger(p) || p < 1024 || p > 65535) throw new Error("port");
+  if (!/^[a-f0-9]{32,64}$/.test(token ?? "")) throw new Error("token");
+  const m = validateMetadata(metadata);
+  const u = "http://127.0.0.1:" + p + "/" + token + "/Mirsa.ipa";
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>' + xml(u) + '</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>' + xml(m.bundleID) + '</string><key>bundle-version</key><string>' + xml(m.version) + '</string><key>kind</key><string>software</string><key>title</key><string>' + xml(m.title) + '</string></dict></dict></array></dict></plist>';
+}
