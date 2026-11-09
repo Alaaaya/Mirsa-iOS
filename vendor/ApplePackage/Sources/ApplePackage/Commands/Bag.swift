@@ -13,6 +13,20 @@ public enum Bag {
         public var authEndpoint: URL
         public var redownloadEndpoint: URL?
         public var updateEndpoint: URL?
+        // Authentication must validate the live protocol instead of silently using a default.
+        var sapVersion: String?
+        var sapSetupEndpoint: String?
+        var sapCertificateEndpoint: String?
+        var advertisedAuthEndpoint: Bool = false
+
+        func requireSupportedAuthentication() throws {
+            guard advertisedAuthEndpoint, sapVersion == "200",
+                  sapSetupEndpoint == "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy",
+                  sapCertificateEndpoint == "https://s.mzstatic.com/sap/setupCert.plist" else {
+                throw AuthenticationServiceError(stage: .bag)
+            }
+            _ = try Authenticator.approvedEndpoint(authEndpoint)
+        }
     }
 
     private static let defaultAuthEndpoint = "https://auth.itunes.apple.com/auth/v1/native/fast/"
@@ -102,6 +116,10 @@ public enum Bag {
             authEndpoint: authURL,
             redownloadEndpoint: downloadEndpoint(plist["redownloadProduct"] ?? urlBag["redownloadProduct"], path: "/r/redownload"),
             updateEndpoint: downloadEndpoint(plist["updateProduct"] ?? urlBag["updateProduct"], path: "/up/updateProduct"),
+            sapVersion: (plist["sign-sap-version"] ?? urlBag["sign-sap-version"]).map { String(describing: $0) },
+            sapSetupEndpoint: (plist["sign-sap-setup"] ?? urlBag["sign-sap-setup"]) as? String,
+            sapCertificateEndpoint: (plist["sign-sap-setup-cert"] ?? urlBag["sign-sap-setup-cert"]) as? String,
+            advertisedAuthEndpoint: authURLString.flatMap(normalizedAuthEndpoint) != nil,
         )
     }
 

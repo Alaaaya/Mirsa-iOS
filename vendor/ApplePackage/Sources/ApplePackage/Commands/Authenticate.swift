@@ -31,6 +31,7 @@ public actor Authenticator {
         let bag: Bag.BagOutput
         do { bag = try await Bag.fetchBag(redirectConfiguration: .disallow) }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .bag) }
+        try bag.requireSupportedAuthentication()
         endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
         do { signer = try await SAPSigner.connect() }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
@@ -102,7 +103,7 @@ public actor Authenticator {
         sapSigner: any SAPRequestSigning,
     ) async throws -> HTTPClient.Request {
         let parameters: [String: String] = [
-            "appleId": email, "attempt": "\(code.isEmpty ? "4" : "2")", "guid": deviceIdentifier, "password": "\(password)\(code)",
+            "appleId": email, "attempt": "\(code.isEmpty ? "1" : "2")", "guid": deviceIdentifier, "password": "\(password)\(code)",
             "rmp": "0", "why": "signIn",
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
