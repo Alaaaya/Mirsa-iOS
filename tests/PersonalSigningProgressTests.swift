@@ -56,11 +56,11 @@ final class PersonalSigningProgressTests: XCTestCase {
         XCTAssertEqual(state.overallFraction, 0.85, accuracy: 0.00001)
     }
 
-    func testCertificateOTAHandoffIsInlineWithoutSuccessModal() {
+    func testCertificateOTAHandoffEndsLocalProgressWithoutSuccessModal() {
         var state = PersonalSigningOperation.State(id: UUID(), projectID: UUID())
         state.stage = .handedOff
         state.running = false
-        XCTAssertTrue(state.showsInlineProgress)
+        XCTAssertFalse(state.showsInlineProgress)
         XCTAssertFalse(state.shouldPresentResultAlert)
         XCTAssertNil(state.error)
         XCTAssertEqual(state.overallFraction, 0.99)
@@ -69,6 +69,24 @@ final class PersonalSigningProgressTests: XCTestCase {
         state.error = "Network failed"
         XCTAssertTrue(state.shouldPresentResultAlert)
         XCTAssertFalse(state.showsInlineProgress)
+    }
+
+    func testTerminalStatesIgnoreLateCallbacksAndNextOperationStartsClean() {
+        for terminal in [PersonalSigningOperation.Stage.handedOff, .completed, .failed] {
+            var state = PersonalSigningOperation.State(id: UUID(), projectID: UUID())
+            _ = state.apply(.init(stage: .uploading, fraction: 0.8))
+            state.stage = terminal
+            state.running = false
+            XCTAssertFalse(state.showsInlineProgress)
+            XCTAssertFalse(state.apply(.init(stage: .uploading, fraction: 1)))
+            XCTAssertFalse(state.apply(.init(stage: .signing, fraction: 1)))
+            XCTAssertEqual(state.stage, terminal)
+            let next = PersonalSigningOperation.State(id: UUID(), projectID: state.projectID)
+            XCTAssertTrue(next.showsInlineProgress)
+            XCTAssertNil(next.fraction)
+            XCTAssertEqual(next.completedUnits, 0)
+            XCTAssertEqual(next.overallFraction, 0)
+        }
     }
 
     func testAllProgressStageLabelsHaveFourLanguageTranslations() {

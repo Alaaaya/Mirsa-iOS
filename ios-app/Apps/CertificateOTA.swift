@@ -11,8 +11,27 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 }
 @MainActor enum CertificateOTA {
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
+
+    /// Archive callers retain ownership. Only app-folder callers need a new pack.
+    /// Actual archive parsing and signature/profile validation remain in the signer.
+    nonisolated static func prepareSigningInput(source: URL, sourceIsArchive: Bool, stage: URL,
+                                                control: PersonalSigningControl) throws -> URL {
+        try control.checkpoint()
+        if sourceIsArchive {
+            try CertificateInstall.validateIPA(source)
+            return source
+        }
+        let app = stage.appendingPathComponent("Payload/Mirsa.app", isDirectory: true)
+        let input = stage.appendingPathComponent("input.ipa")
+        try FileManager.default.copyItem(at: source, to: app)
+        try control.checkpoint()
+        try IPAEditorService.run("pack", input: stage, output: input)
+        return input
+    }
     @discardableResult
-    static func install(source: URL, material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
+    static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
+        try control.checkpoint()
+        try Task.checkCancellation()
         signingProgress?(PersonalSigningEvent(stage: .preparing))
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }
@@ -23,12 +42,11 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let stage = fm.temporaryDirectory.appendingPathComponent("ota-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: stage.appendingPathComponent("Payload"), withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: stage) }
-        let app = stage.appendingPathComponent("Payload/Mirsa.app", isDirectory: true)
-        let input = stage.appendingPathComponent("input.ipa")
-        try await Task.detached {
-            try fm.copyItem(at: source, to: app)
-            try IPAEditorService.run("pack", input: stage, output: input)
+        let input = try await Task.detached {
+            try prepareSigningInput(source: source, sourceIsArchive: sourceIsArchive, stage: stage, control: control)
         }.value
+        try control.checkpoint()
+        try Task.checkCancellation()
         let material = selectedMaterial
 
         var options = explicitOptions ?? PersonalProjectOptions()
@@ -36,7 +54,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         _ = options.strictProfile // Self-install requires a profile that actually covers this identity.
         let signingOptions = options
         let signed = try await PersonalEncryptionWarning.signWithConsent { consent in
-            try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: "", options: signingOptions, cachedUDID: device, allowEncryptedSigning: consent) { event in
+            try PersonalCertificateSigner.sign(ipa: input, material: material, pairingPath: "", options: signingOptions, cachedUDID: device, control: control, allowEncryptedSigning: consent) { event in
                 Task { @MainActor in signingProgress?(event) }
             }
         }
@@ -50,6 +68,8 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)
         }
         do {
+        try control.checkpoint()
+        try Task.checkCancellation()
         // Signing can change bundle ID, version and display name. The manifest
         // must describe the exact retained archive sent to either upload host.
         let signedInfo = try await Task.detached {
@@ -63,7 +83,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         guard let bundleID = info["CFBundleIdentifier"] as? String,
               let version = info["CFBundleVersion"] as? String else { throw SideloadError.message(personalText("Missing application identity.", "هوية التطبيق ناقصة.")) }
         // Archive the actual retained signed bytes, before any OTA handoff or upload failure.
-        MirsaVersionArchive.shared.archive(kept, bundleID: bundleID,
+        await MirsaVersionArchive.shared.archiveForInstall(kept, bundleID: bundleID,
             name: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID,
             version: (info["CFBundleShortVersionString"] as? String) ?? version, signed: true)
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
@@ -71,6 +91,8 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
+        try control.checkpoint()
+        try Task.checkCancellation()
         let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
         signingProgress?(PersonalSigningEvent(stage: .uploading))
         let uploadProgress: (Double) -> Void = { fraction in
@@ -81,7 +103,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         do {
             manifestURL = try await oracleUpload(file: kept, plan: plan, token: token, bundleID: bundleID, version: version, title: title, progress: uploadProgress)
         } catch {
-            guard OTAFallbackPolicy.allows(error, size: size) else {
+            try control.checkpoint()
+            try Task.checkCancellation()
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled,
+                  OTAFallbackPolicy.allows(error, size: size) else {
                 let down = error is URLError || { if case OTAChunkError.server(let c)? = error as? OTAChunkError { return c >= 500 }; return false }()
                 if down && size > OTAFallbackPolicy.limit {
                     throw SideloadError.message(personalText("Upload server unavailable. Large apps need it; try again later.", "سيرفر الرفع مو متاح. التطبيقات الكبيرة بتحتاجه، جرب بعدين."))
@@ -90,6 +115,8 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             }
             manifestURL = try await legacyUpload(file: kept, size: size, token: token, bundleID: bundleID, version: version, title: title)
         }
+        try control.checkpoint()
+        try Task.checkCancellation()
         signingProgress?(PersonalSigningEvent(stage: .uploading, fraction: 1))
         signingProgress?(PersonalSigningEvent(stage: .connecting))
         let target = try OTAInstallLink.make(manifestURL: manifestURL)
@@ -126,21 +153,20 @@ extension CertificateOTA {
         }
     }
     static func legacyUpload(file: URL, size: Int64, token: String, bundleID: String, version: String, title: String) async throws -> URL {
-        let bytes = try Data(contentsOf: file, options: .mappedIfSafe)
         let metadata: [String: Any] = ["bundleID": bundleID, "version": version, "title": title, "bytes": Int(size)]
         let data = try JSONSerialization.data(withJSONObject: metadata)
         var request = URLRequest(url: endpoint, timeoutInterval: 120)
         request.httpMethod = "POST"
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.setValue(String(bytes.count), forHTTPHeaderField: "Content-Length")
+        request.setValue(String(size), forHTTPHeaderField: "Content-Length")
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         request.setValue(String(decoding: data, as: UTF8.self).addingPercentEncoding(withAllowedCharacters: allowed), forHTTPHeaderField: "x-mirsa-metadata")
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil
         let session = URLSession(configuration: config, delegate: OTANoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        let (response, http) = try await session.upload(for: request, from: bytes)
+        let (response, http) = try await session.upload(for: request, fromFile: file)
         guard (http as? HTTPURLResponse)?.statusCode == 200,
               let result = try JSONSerialization.jsonObject(with: response) as? [String: Any],
               let manifest = result["manifestURL"] as? String,
