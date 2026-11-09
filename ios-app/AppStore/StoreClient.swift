@@ -8,7 +8,6 @@ actor MirsaStoreClient {
     private let vault: any MirsaStoreVault
     private let engine: any MirsaStoreEngine
     private let packages: any MirsaStorePackages
-    private var account: Account?
     private var prepared = false
     private var busy = false
     private var generation: UInt64 = 0
@@ -29,7 +28,7 @@ actor MirsaStoreClient {
 
     func currentAccount() throws -> MirsaStoreAccount? {
         try prepare()
-        return try account.map(summary)
+        return try loadAccount().map(summary)
     }
 
     func search(term: String, country: String, limit: Int = 25) async throws -> [MirsaStoreApp] {
@@ -66,6 +65,7 @@ actor MirsaStoreClient {
             }
             return try await authenticate(code: "", run: run)
         } catch {
+            try check(run)
             if let auth = error as? AuthenticationError, case .verificationCodeRequired = auth {
                 return .verificationRequired
             }
@@ -103,10 +103,12 @@ actor MirsaStoreClient {
     func signOut() throws {
         generation &+= 1
         challenge = nil
-        account = nil
+        packages.cancel()
         // Keep the stable machine identifier; deleting it on each logout changes identity.
-        try vault.remove("account")
-        try vault.remove("challenge")
+        var deletionError: Error?
+        do { try vault.remove("account") } catch { deletionError = error }
+        do { try vault.remove("challenge") } catch { deletionError = deletionError ?? error }
+        if let deletionError { throw deletionError }
     }
 
     /// Explicit free-license action only. Download never silently acquires or purchases.
@@ -173,6 +175,9 @@ actor MirsaStoreClient {
         }
         let owner = try await pending.session.authenticate(email: pending.email, password: password, code: code)
         try check(run)
+        guard challenge?.id == pending.id, pending.expires > Date() else {
+            throw MirsaStoreError.operationCancelled
+        }
         let result = try summary(owner)
         try persist(owner)
         challenge = nil
@@ -202,7 +207,6 @@ actor MirsaStoreClient {
         }
         try vault.remove("challenge")
         engine.configure(guid: guid)
-        if let data = try vault.read("account") { account = try JSONDecoder().decode(Account.self, from: data) }
         prepared = true
     }
     private func begin() throws -> UInt64 {
@@ -214,8 +218,12 @@ actor MirsaStoreClient {
     private func check(_ run: UInt64) throws {
         guard run == generation, !Task.isCancelled else { throw MirsaStoreError.operationCancelled }
     }
+    private func loadAccount() throws -> Account? {
+        guard let data = try vault.read("account") else { return nil }
+        return try JSONDecoder().decode(Account.self, from: data)
+    }
     private func requiredAccount() throws -> Account {
-        guard let account else { throw MirsaStoreError.signedOut }
+        guard let account = try loadAccount() else { throw MirsaStoreError.signedOut }
         return account
     }
     private func country(_ owner: Account) throws -> String {
@@ -227,7 +235,6 @@ actor MirsaStoreClient {
     }
     private func persist(_ owner: Account) throws {
         try vault.write(try JSONEncoder().encode(owner), key: "account")
-        account = owner
     }
     private func validate(output: DownloadOutput, app: MirsaStoreApp, version: String?) throws {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
