@@ -202,6 +202,7 @@ enum ForgeChatImage {
         guard let d = try? await call(["action": "chat-read", "threadID": id.uuidString.lowercased()]), let raw = try? JSONDecoder().decode(W.self, from: d) else { return }
         // One undecodable message must never hide the others (operator replies were not showing).
         let w = (messages: raw.messages.compactMap(\.value), 0)
+        if w.messages.count < raw.messages.count { lastDiagnostic = "decode: skipped \(raw.messages.count - w.messages.count) of \(raw.messages.count) messages" }
         var all = messages; all[id] = w.messages; messages = all // reassign whole dictionary so SwiftUI always sees the change
         if w.messages.contains(where: { $0.role == "result" && !handledResults.contains($0.id) }) {
             for m in w.messages where m.role == "result" { handledResults.insert(m.id) }
