@@ -19,6 +19,7 @@ struct PersonalProjectOptions: Sendable {
     var bundleBlobs: URL? = nil
     var bundleOriginal: URL? = nil
     var injectionOrder: [String] = []
+    var existingLibraryEdits: [ExistingLibraryEdit] = []
     var additionalProfiles: [Data] = []
     var removeExtensions = false
     var removeAppClips = false
@@ -72,4 +73,22 @@ struct PersonalProjectDraft: Codable, Equatable {
     /// Staged bundle file edits (rename/delete/import/plist) made in the file manager.
     var bundleOverlay: BundleOverlay? = nil
     var appliedTweakIDs: [UUID]? = nil
+    var existingLibraryEdits: [ExistingLibraryEdit]? = nil
+}
+
+/// Original IPA dependency provenance, not an assertion that a dependency was injected.
+struct ExistingProjectLibrary: Codable, Identifiable, Equatable, Sendable {
+    let id: String
+    let owner: String
+    let loadPath: String
+    let kind: String
+    let bundledPath: String?
+    let provenance: String
+    let slices: [String]
+}
+/// Reset means clearing this plan. Original IPA bytes are never modified.
+struct ExistingLibraryEdit: Codable, Equatable, Sendable {
+    var owner: String
+    var removed: [String] = []
+    var order: [String] = []
 }
