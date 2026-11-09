@@ -52,13 +52,32 @@ struct RepoApp: Identifiable, Hashable {
 }
 
 struct RepoSource: Codable, Identifiable, Hashable {
-    var id: String { url }
+    /// Fixed identity of the built-in Mirsa source.
+    static let canonicalID = "mirsa.canonical-source"
+    /// Stable stored identity, independent of the URL, so exact same-URL duplicates stay separate rows.
+    var uid: String = ""
+    var id: String { uid.isEmpty ? url : uid }
+    var isCanonical: Bool { uid == Self.canonicalID }
     var url: String
     var name: String
     var iconURL: String?
     var tint: String?
     var updated: Date?
     var appCount: Int = 0
+
+    init(url: String, name: String, uid: String = UUID().uuidString) {
+        self.url = url; self.name = name; self.uid = uid
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uid = (try? c.decode(String.self, forKey: .uid)) ?? ""   // old saves: assigned by MirsaSourceFeed.migrate
+        url = try c.decode(String.self, forKey: .url)
+        name = try c.decode(String.self, forKey: .name)
+        iconURL = try? c.decode(String.self, forKey: .iconURL)
+        tint = try? c.decode(String.self, forKey: .tint)
+        updated = try? c.decode(Date.self, forKey: .updated)
+        appCount = (try? c.decode(Int.self, forKey: .appCount)) ?? 0
+    }
 }
 
 @MainActor
@@ -71,18 +90,33 @@ final class SourcesStore: ObservableObject {
     @Published var loading: Set<String> = []
     @Published var error: String?
     @Published var updatingAll = false
-    @Published var hiddenURLs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "mirsa.sources.hidden") ?? []) {
-        didSet { UserDefaults.standard.set(Array(hiddenURLs), forKey: "mirsa.sources.hidden") }
+    @Published var hiddenIDs: Set<String> = [] {
+        didSet { defaults.set(Array(hiddenIDs), forKey: "mirsa.sources.hiddenIDs") }
+    }
+    /// Delete awaiting confirmation. Nothing is removed until `confirmDelete()`.
+    @Published var pendingDelete: RepoSource?
+    private let defaults: UserDefaults
+
+    func requestDelete(id: String) {
+        guard let s = sources.first(where: { $0.id == id }), !s.isCanonical else { return }
+        pendingDelete = s
+    }
+    func cancelDelete() { pendingDelete = nil }
+    @discardableResult
+    func confirmDelete() -> Bool {
+        defer { pendingDelete = nil }
+        guard let p = pendingDelete else { return false }
+        return remove(id: p.id)
     }
 
-    var visibleSources: [RepoSource] { sources.filter { !hiddenURLs.contains($0.url) } }
-    var hiddenSources: [RepoSource] { sources.filter { hiddenURLs.contains($0.url) } }
+    var visibleSources: [RepoSource] { sources.filter { !hiddenIDs.contains($0.id) } }
+    var hiddenSources: [RepoSource] { sources.filter { hiddenIDs.contains($0.id) } }
 
     func moveVisible(from offsets: IndexSet, to destination: Int) {
         var reordered = visibleSources
         reordered.move(fromOffsets: offsets, toOffset: destination)
         var iterator = reordered.makeIterator()
-        sources = sources.map { hiddenURLs.contains($0.url) ? $0 : iterator.next()! }
+        sources = sources.map { hiddenIDs.contains($0.id) ? $0 : iterator.next()! }
     }
 
     /// One candidate per installed app, visible source order breaks equal-version ties.
@@ -123,37 +157,48 @@ final class SourcesStore: ObservableObject {
     ]
     private let seededKey = "mirsa.sources.builtin.v2"
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        hiddenIDs = Set(defaults.stringArray(forKey: "mirsa.sources.hiddenIDs") ?? [])
         var list: [RepoSource] = []
-        if let d = UserDefaults.standard.data(forKey: key),
+        if let d = defaults.data(forKey: key),
            let s = try? JSONDecoder().decode([RepoSource].self, from: d) { list = s }
-        if !UserDefaults.standard.bool(forKey: seededKey) {
+        if !defaults.bool(forKey: seededKey) {
             func norm(_ u: String) -> String { u.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
             for b in Self.builtIn where !list.contains(where: { norm($0.url) == norm(b.url) }) {
                 list.append(RepoSource(url: b.url, name: b.name))
             }
-            UserDefaults.standard.set(true, forKey: seededKey)
+            defaults.set(true, forKey: seededKey)
         }
         sources = MirsaSourceFeed.migrate(list)
+        // Old builds hid sources by URL; carry that over to the stable ids once.
+        if let old = defaults.stringArray(forKey: "mirsa.sources.hidden"), !old.isEmpty {
+            for src in sources where old.contains(src.url) { hiddenIDs.insert(src.id) }
+            defaults.removeObject(forKey: "mirsa.sources.hidden")
+        }
         save()
     }
 
-    /// The built-in Mirsa source (any owned URL spelling) can never be removed.
-    static func isProtected(_ url: String) -> Bool { MirsaSourceFeed.norm(url) == MirsaSourceFeed.norm(MirsaSourceFeed.primary) }
+    /// Only the canonical built-in Mirsa source (fixed identity) is protected; every other row, including
+    /// an exact same-URL or same-name duplicate, can be deleted on its own.
+    func isProtected(_ source: RepoSource) -> Bool { source.isCanonical }
 
-    /// Removes exactly one source by its stored URL; clears its cache/hidden flag so nothing stale lingers.
+    /// Removes exactly one source by identity. The shared per-URL cache/loading state is only cleared
+    /// when no remaining source uses that URL.
     @discardableResult
-    func remove(_ url: String) -> Bool {
-        guard !Self.isProtected(url), sources.contains(where: { $0.url == url }) else { return false }
-        sources.removeAll { $0.url == url }
-        apps[url] = nil
-        loading.remove(url)
-        hiddenURLs.remove(url)
+    func remove(id: String) -> Bool {
+        guard let src = sources.first(where: { $0.id == id }), !src.isCanonical else { return false }
+        sources.removeAll { $0.id == id }
+        hiddenIDs.remove(id)
+        if !sources.contains(where: { MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(src.url) }) {
+            apps[src.url] = nil
+            loading.remove(src.url)
+        }
         return true
     }
 
     private func save() {
-        if let d = try? JSONEncoder().encode(sources) { UserDefaults.standard.set(d, forKey: key) }
+        if let d = try? JSONEncoder().encode(sources) { defaults.set(d, forKey: key) }
     }
 
     static func normalize(_ raw: String) -> URL? {
@@ -169,9 +214,10 @@ final class SourcesStore: ObservableObject {
     func add(_ raw: String) async -> Bool {
         guard let u = Self.normalize(raw) else { error = tr("That link isn't valid.", "الرابط مو صحيح."); return false }
         if sources.contains(where: { $0.url == u.absoluteString }) { return true }
-        sources.append(RepoSource(url: u.absoluteString, name: u.host ?? "Source"))
+        let new = RepoSource(url: u.absoluteString, name: u.host ?? "Source")
+        sources.append(new)
         let ok = await refresh(u.absoluteString)
-        if !ok { sources.removeAll { $0.url == u.absoluteString } }
+        if !ok { sources.removeAll { $0.id == new.id } }
         return ok
     }
 
@@ -215,7 +261,7 @@ final class SourcesStore: ObservableObject {
             }
             let parsed = Self.parseApps(root, base: base)
             apps[url] = parsed
-            if let i = sources.firstIndex(where: { $0.url == url }) {
+            for i in sources.indices where sources[i].url == url {
                 var s = sources[i]
                 let meta = (root["META"] as? [String: Any]) ?? (root["meta"] as? [String: Any]) ?? [:]
                 s.name = (root["name"] as? String) ?? (meta["repoName"] as? String) ?? (meta["name"] as? String) ?? s.name
@@ -313,7 +359,6 @@ struct SourcesTab: View {
     @State private var sharingURL: URL?
     @State private var input = ""
     @State private var finding = false
-    @State private var pendingDelete: RepoSource?
 
     var body: some View {
         NavigationStack {
@@ -345,22 +390,22 @@ struct SourcesTab: View {
                         .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
                         .listRowSeparator(.hidden)
                         .swipeActions(edge: .leading) {
-                            Button { store.hiddenURLs.insert(s.url) } label: {
+                            Button { store.hiddenIDs.insert(s.id) } label: {
                                 Label(tr("Hide", "إخفاء"), systemImage: "eye.slash")
                             }.tint(.orange)
                             SourceURLButtons(stored: s.url, sharing: $sharingURL).tint(.blue)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if !SourcesStore.isProtected(s.url) {
-                                Button(role: .destructive) { pendingDelete = s } label: {
-                                    Label(tr("Delete", "حذف"), systemImage: "trash")
+                            if !store.isProtected(s) {
+                                Button(role: .destructive) { store.requestDelete(id: s.id) } label: {
+                                    Label(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jêbirin"), systemImage: "trash")
                                 }.tint(.red)
                             }
                             SourceURLButtons(stored: s.url, sharing: $sharingURL).tint(.blue)
                         }
                         .contextMenu {
                             SourceURLButtons(stored: s.url, sharing: $sharingURL)
-                            Button { store.hiddenURLs.insert(s.url) } label: {
+                            Button { store.hiddenIDs.insert(s.id) } label: {
                                 Label(tr("Hide source", "إخفاء السورس"), systemImage: "eye.slash")
                             }
                         }
@@ -369,7 +414,7 @@ struct SourcesTab: View {
                 .deleteDisabled(false)
                 .onDelete { offsets in
                     // Edit-mode delete goes through the same confirmation; protected source is skipped.
-                    if let first = offsets.map({ store.visibleSources[$0] }).first(where: { !SourcesStore.isProtected($0.url) }) { pendingDelete = first }
+                    if let first = offsets.map({ store.visibleSources[$0] }).first(where: { !store.isProtected($0) }) { store.requestDelete(id: first.id) }
                 }
                 if !store.hiddenSources.isEmpty {
                     Section(tr("Hidden Sources", "السورسات المخفية")) {
@@ -378,7 +423,7 @@ struct SourcesTab: View {
                                 Text(source.name)
                                 Spacer()
                                 Button {
-                                    store.hiddenURLs.remove(source.url)
+                                    store.hiddenIDs.remove(source.id)
                                     Task { await store.refresh(source.url) }
                                 } label: {
                                     Label(tr("Unhide", "إظهار"), systemImage: "eye")
@@ -403,11 +448,11 @@ struct SourcesTab: View {
                 }
             }
             .sheet(isPresented: $finding) { DiscoveryView() }
-            .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟"), isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible, presenting: pendingDelete) { src in
-                Button(tr("Delete", "حذف"), role: .destructive) { store.remove(src.url); pendingDelete = nil }
-                Button(tr("Cancel", "إلغاء"), role: .cancel) { pendingDelete = nil }
+            .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟", ckb: "ئەم سەرچاوەیە بسڕدرێتەوە؟", kmr: "Ev çavkanî were jêbirin?"), isPresented: Binding(get: { store.pendingDelete != nil }, set: { if !$0 { store.cancelDelete() } }), titleVisibility: .visible, presenting: store.pendingDelete) { src in
+                Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jêbirin"), role: .destructive) { store.confirmDelete() }
+                Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { store.cancelDelete() }
             } message: { src in
-                Text(src.name + " — " + tr("Apps already installed stay installed.", "التطبيقات المثبّتة بتضل مثبّتة."))
+                Text(src.name + " — " + tr("Apps already installed stay installed.", "التطبيقات المثبّتة بتضل مثبّتة.", ckb: "ئەو ئەپانەی دامەزراون وەک خۆیان دەمێننەوە.", kmr: "Sepanên ku hatine saz kirin dimînin."))
             }
             .sheet(item: Binding(get: { sharingURL.map { SharedSourceURL(url: $0) } }, set: { if $0 == nil { sharingURL = nil } })) { SourceShareSheet(url: $0.url).presentationDetents([.medium, .large]) }
             .alert(tr("Add Source", "أضف سورس"), isPresented: $adding) {
