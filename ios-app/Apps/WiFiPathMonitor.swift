@@ -7,10 +7,10 @@ enum WiFiPathState: Equatable { case unknown, wifi, notWifi }
 enum WiFiGuardVerdict: Equatable { case allow, needWiFi, undetermined }
 
 enum WiFiPathPolicy {
-    /// A usable path with a Wi-Fi interface in use or available counts as Wi-Fi.
-    /// "Available" matters because LocalDevVPN's utun can hide Wi-Fi from "in use".
-    static func state(satisfied: Bool, usesWiFi: Bool, wifiAvailable: Bool) -> WiFiPathState {
-        satisfied && (usesWiFi || wifiAvailable) ? .wifi : .notWifi
+    /// Only the ACTIVE path counts: usesInterfaceType(.wifi). Wi-Fi merely being
+    /// available while LTE carries traffic must block. No availableInterfaces, no en0.
+    static func state(satisfied: Bool, usesWiFi: Bool) -> WiFiPathState {
+        satisfied && usesWiFi ? .wifi : .notWifi
     }
 
     /// NWPathMonitor is the only authority. A known non-Wi-Fi path blocks.
@@ -37,8 +37,7 @@ final class WiFiPathMonitor {
         started = true
         monitor.pathUpdateHandler = { [weak self] path in
             let next = WiFiPathPolicy.state(satisfied: path.status == .satisfied,
-                                            usesWiFi: path.usesInterfaceType(.wifi),
-                                            wifiAvailable: path.availableInterfaces.contains { $0.type == .wifi })
+                                            usesWiFi: path.usesInterfaceType(.wifi))
             Task { @MainActor in self?.state = next }
         }
         monitor.start(queue: DispatchQueue(label: "mirsa.wifi-path", qos: .utility))

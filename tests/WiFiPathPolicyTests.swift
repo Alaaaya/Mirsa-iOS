@@ -3,10 +3,14 @@ import XCTest
 
 final class WiFiPathPolicyTests: XCTestCase {
     func testStateMapping() {
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: true, wifiAvailable: true), .wifi)
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: false, wifiAvailable: true), .wifi)
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: false, wifiAvailable: false), .notWifi)
-        XCTAssertEqual(WiFiPathPolicy.state(satisfied: false, usesWiFi: true, wifiAvailable: true), .notWifi)
+        XCTAssertEqual(WiFiPathPolicy.state(satisfied: true, usesWiFi: true), .wifi)
+        XCTAssertEqual(WiFiPathPolicy.state(satisfied: false, usesWiFi: true), .notWifi)
+    }
+    func testCellularActiveWithWiFiAvailableBlocks() {
+        // LTE carrying traffic (usesWiFi false) must block even if Wi-Fi is merely available.
+        let state = WiFiPathPolicy.state(satisfied: true, usesWiFi: false)
+        XCTAssertEqual(state, .notWifi)
+        XCTAssertEqual(WiFiPathPolicy.verdict(path: state), .needWiFi)
     }
     func testVerdictIsAuthoritative() {
         XCTAssertEqual(WiFiPathPolicy.verdict(path: .wifi), .allow)
