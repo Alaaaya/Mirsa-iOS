@@ -16,6 +16,17 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
 
+packages:
+  ApplePackage:
+    url: https://github.com/Lakr233/ApplePackage.git
+    revision: 391bfe6ee6598d73e4f94b88b38b50bd6f6ec67b
+  swift-log:
+    url: https://github.com/apple/swift-log.git
+    from: 1.5.0
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.20
+
 targets:
   Mirsa:
     type: application
@@ -29,6 +40,10 @@ targets:
         buildPhase: resources
       - path: LiveActivityShared
     dependencies:
+      - package: ApplePackage
+      - package: ZIPFoundation
+      - package: swift-log
+        product: Logging
       - target: MirsaLiveActivity
         embed: true
       - framework: AirliftFFI.xcframework
