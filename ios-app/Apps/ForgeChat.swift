@@ -88,7 +88,7 @@ enum ForgeChatImage {
             do { _ = try await call(body); error = nil }
             catch let f as ForgeClient.Failure {
                 if case .message(let m) = f, m == ForgeChatText.limit { error = m; outgoing.removeAll { $0.id == o.id } } else { error = ForgeChatText.failed }
-            } catch { error = ForgeChatText.failed; continue } // network error: keep and replay with same id
+            } catch { self.error = ForgeChatText.failed; continue } // network error: keep and replay with same id
             outgoing.removeAll { $0.id == o.id && error == nil }
             saveOutgoing()
         }
