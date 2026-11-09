@@ -6,6 +6,7 @@ struct EncryptedAppsTab: View {
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
     @State private var picking = false
+    @State private var showingAppStore = false
     @State private var pendingDelete: EncryptedIPAEntry?
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
@@ -20,6 +21,7 @@ struct EncryptedAppsTab: View {
                 introCard
                 benefitsCard
                 importButton
+                appStoreButton
                 if store.entries.isEmpty {
                     emptyCard
                 } else {
@@ -41,6 +43,12 @@ struct EncryptedAppsTab: View {
         .sheet(isPresented: $picking) {
             DocumentPickerView(allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { url in
                 Task { await store.importIPA(from: url) }
+            }
+        }
+        .sheet(isPresented: $showingAppStore) {
+            AppStoreAccountView { url in
+                let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+                await MainActor.run { EncryptedAppsStore.shared.add(entry) }
             }
         }
         .alert(MirsaTr.lit("Notice"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
@@ -137,6 +145,25 @@ struct EncryptedAppsTab: View {
         .controlSize(.large)
         .disabled(store.busy != nil)
         .accessibilityIdentifier("encrypted-import")
+    }
+
+    private var appStoreButton: some View {
+        VStack(alignment: .leading, spacing: MirsaSpacing.xs) {
+            Button { showingAppStore = true } label: {
+                Label(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"),
+                      systemImage: "person.crop.circle.badge.checkmark")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.mirsaSecondary)
+            .controlSize(.large)
+            .accessibilityIdentifier("encrypted-appstore-account")
+            Text(t("Sign in to Apple, search and download apps your account owns. Downloading does not guarantee installation.",
+                   "سجّل بحساب Apple ودوّر ونزّل تطبيقات حسابك بيملكها. نزول الملف ما بيضمن التثبيت.",
+                   "بە ئەکاونتی Apple بچۆ ژوورەوە و ئەو ئەپانە بگەڕێ و دابگرە کە خاوەنیانیت. داگرتن دامەزراندن مسۆگەر ناکات.",
+                   "Bi hesabê Apple têkeve, sepanên xwe bigere û dakêşe. Daxistin sazkirinê garantî nake."))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var emptyCard: some View {
