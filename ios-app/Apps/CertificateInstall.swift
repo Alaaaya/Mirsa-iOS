@@ -80,7 +80,6 @@ enum CertificateInstall {
         try? dir.setResourceValues(values)
         let target = dir.appendingPathComponent(url.lastPathComponent)
         try fm.moveItem(at: url, to: target)
-        MirsaManagedTmp.end(url.deletingLastPathComponent())
         return target
     }
 

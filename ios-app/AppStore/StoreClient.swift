@@ -163,7 +163,7 @@ actor MirsaStoreClient {
             try check(run)
             return url
         } catch {
-            if let completed { MirsaManagedTmp.end(completed.deletingLastPathComponent()) }
+            if let completed { try? FileManager.default.removeItem(at: completed.deletingLastPathComponent()) }
             throw safe(error)
         }
     }

@@ -80,7 +80,7 @@ final class SigningQueue: ObservableObject {
                         Task { @MainActor in item.fraction = max(item.fraction ?? 0, f) }
                     }
                 }
-                if item.cancelRequested { MirsaManagedTmp.end(result.url.deletingLastPathComponent()); item.state = .cancelled }
+                if item.cancelRequested { try? FileManager.default.removeItem(at: result.url.deletingLastPathComponent()); item.state = .cancelled }
                 else {
                     item.output = try CertificateInstall.retain(result.url)
                     item.fraction = 1; item.state = .done

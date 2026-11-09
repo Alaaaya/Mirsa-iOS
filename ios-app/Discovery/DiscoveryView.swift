@@ -73,7 +73,7 @@ final class DiscoveryStore: ObservableObject {
         downloaders[c.id] = d
         states[c.id] = .downloading(0)
         var temp: URL?
-        defer { if let t = temp { MirsaManagedTmp.end(t.deletingLastPathComponent()) }; downloaders[c.id] = nil }
+        defer { if let t = temp { try? FileManager.default.removeItem(at: t) }; downloaders[c.id] = nil }
         do {
             let file = try await d.download(url) { [weak self] p in Task { @MainActor in
                 if case .downloading = self?.states[c.id] ?? .idle { self?.states[c.id] = .downloading(p) } } }
