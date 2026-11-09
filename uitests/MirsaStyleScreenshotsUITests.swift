@@ -5,7 +5,7 @@ import XCTest
 /// content: a page that fails to render still yields a screenshot of what is shown.
 final class MirsaStyleScreenshotsUITests: XCTestCase {
     private static let pages: [String] = [
-        "apps", "sources", "tools", "more", "home-main", "home-personal", "setup",
+        "apps", "sources", "tools", "encrypted", "more", "home-main", "home-personal", "setup",
         "settings", "login", "url-import", "discovery", "certificates", "personal-certificate",
         "signing-queue", "telemetry", "credits", "pairing-guide", "support-popup", "licenses",
         "github-sources", "expiry", "web-upload", "browser", "update", "hidden", "prompt",
