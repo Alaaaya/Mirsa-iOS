@@ -14,3 +14,5 @@ Hook after merging hark/encrypted-apps: push or sheet from EncryptedAppsTab (e.g
 The view removes the downloaded file's private temp directory only after the closure returns without throwing. Nothing is signed or modified.
 
 Status: not compiled locally (no Swift toolchain on Linux); needs the device CI build. Uses onChange two-parameter form (iOS 17+). Password lives only in SwiftUI state, copied to a local and cleared before the call; code cleared likewise; all fields cleared on sign out and on disappear. Device behavior untested.
+
+Integration verifier fixed actor awaits for account loading/signout and made first-use Keychain wording match actual storage. Backend output parent is tmp/MirsaStore/UUID, cleanup restricted to that exact root.

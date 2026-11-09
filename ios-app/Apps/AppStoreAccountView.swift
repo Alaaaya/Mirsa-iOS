@@ -54,7 +54,7 @@ struct AppStoreAccountView: View {
         .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
-        .onAppear { account = try? client.currentAccount() }
+        .task { account = try? await client.currentAccount() }
         .onDisappear { password = ""; code = "" }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
@@ -93,10 +93,10 @@ struct AppStoreAccountView: View {
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             if showSteps {
                 VStack(alignment: .leading, spacing: 8) {
-                    step("1", t("Sign in with your Apple Account. Your password is sent only to Apple and is never saved by Mirsa.",
-                                "سجّل دخول بحساب Apple. كلمة السر بتنبعت لـApple بس وما بيحفظها مرسى.",
-                                "بە ئەکاونتی Apple بچۆ ژوورەوە. وشەی نهێنی تەنها بۆ Apple دەنێردرێت و Mirsa هەڵیناگرێت.",
-                                "Bi hesabê Apple têkeve. Şîfre tenê ji Apple re tê şandin û Mirsa tomar nake."))
+                    step("1", t("Sign in with your Apple Account. Login secrets stay in this device’s protected Keychain and are sent only to Apple.",
+                                "سجّل دخول بحساب Apple. بيانات الدخول بتضل بس بسلسلة المفاتيح المحمية عهالجهاز وبتنبعت لـApple بس.",
+                                "بە ئەکاونتی Apple بچۆ ژوورەوە. زانیارییە نهێنییەکان تەنها لە Keychainی پارێزراوی ئەم ئامێرە هەڵدەگیرێن و بۆ Apple دەنێردرێن.",
+                                "Bi hesabê Apple têkeve. Agahiyên têketinê tenê di Keychaina parastî ya vî amûrî de dimînin û tenê ji Apple re tên şandin."))
                     step("2", t("If Apple asks, type the 6-digit code it sends to your devices.",
                                 "إذا طلبت Apple، اكتب الرمز من 6 أرقام يلي بيوصلك.",
                                 "ئەگەر Apple داوای کرد، کۆدی ٦ ژمارەیی بنووسە کە بۆت دێت.",
@@ -316,10 +316,12 @@ struct AppStoreAccountView: View {
     private func signOut() {
         work?.cancel()
         password = ""; code = ""; email = ""; needsCode = false
-        do {
-            try client.signOut()
-            account = nil; results = []; versions = [:]; chosen = [:]; manualID = [:]; searched = false
-        } catch { notice = describe(error); account = try? client.currentAccount() }
+        Task {
+            do {
+                try await client.signOut()
+                account = nil; results = []; versions = [:]; chosen = [:]; manualID = [:]; searched = false
+            } catch { notice = describe(error); account = try? await client.currentAccount() }
+        }
     }
 
     private func search() {
@@ -353,7 +355,7 @@ struct AppStoreAccountView: View {
             try await onDownloaded(url)
             // Only after the host copied it successfully: remove the private temp directory.
             // Parent is deleted only if it is a UUID-named direct child of the temp directory.
-            let tmp = FileManager.default.temporaryDirectory.standardizedFileURL.resolvingSymlinksInPath()
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("MirsaStore", isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
             let parent = dir.standardizedFileURL.resolvingSymlinksInPath()
             if parent.deletingLastPathComponent() == tmp, UUID(uuidString: parent.lastPathComponent) != nil {
                 try? FileManager.default.removeItem(at: dir)
