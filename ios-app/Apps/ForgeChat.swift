@@ -29,6 +29,21 @@ struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; l
 struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UUID?; let bundleID: String?; let name: String?; let version: Int?; let artifact: ForgeChatArtifact? }
 struct ForgeChatMessage: Codable, Identifiable, Equatable {
     let id: UUID; let threadID: UUID; let role: String; let text: String?; let createdAt: String?; let hasImage: Bool?; let result: ForgeChatResult?
+    init(id: UUID, threadID: UUID, role: String, text: String?, createdAt: String? = nil, hasImage: Bool? = nil, result: ForgeChatResult? = nil) {
+        self.id = id; self.threadID = threadID; self.role = role; self.text = text; self.createdAt = createdAt; self.hasImage = hasImage; self.result = result
+    }
+    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result }
+    /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        threadID = (try? c.decode(UUID.self, forKey: .threadID)) ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        role = (try? c.decode(String.self, forKey: .role)) ?? "kat"
+        text = try? c.decode(String.self, forKey: .text)
+        createdAt = try? c.decode(String.self, forKey: .createdAt)
+        hasImage = try? c.decode(Bool.self, forKey: .hasImage)
+        result = try? c.decode(ForgeChatResult.self, forKey: .result)
+    }
 }
 
 /// A message keeps its UUID until the server accepted it, so retries replay instead of duplicating.
@@ -161,8 +176,8 @@ enum ForgeChatImage {
         struct W: Decodable { let messages: [Lossy] }
         guard let d = try? await call(["action": "chat-read", "threadID": id.uuidString.lowercased()]), let raw = try? JSONDecoder().decode(W.self, from: d) else { return }
         // One undecodable message must never hide the others (operator replies were not showing).
-        let w = (messages: raw.messages.compactMap(\.value), ())
-        messages[id] = w.messages
+        let w = (messages: raw.messages.compactMap(\.value), 0)
+        var all = messages; all[id] = w.messages; messages = all // reassign whole dictionary so SwiftUI always sees the change
         if w.messages.contains(where: { $0.role == "result" && !handledResults.contains($0.id) }) {
             for m in w.messages where m.role == "result" { handledResults.insert(m.id) }
             await ForgeStore.shared.syncFixInbox() // existing fix-inbox/fix-download path, review required, never auto-enabled
@@ -238,9 +253,10 @@ struct ForgeChatThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(msgs) { m in bubble(m) }
+                    ForEach(msgs) { m in bubble(m).id(m.id) }
                     ForEach(queued) { o in
                         HStack { Spacer(); VStack(alignment: .trailing) { Text(o.text); Text(ForgeChatText.sending).font(.caption2).opacity(0.7) }.padding(10).background(Color.blue.opacity(0.5)).cornerRadius(12) }
                     }
@@ -248,7 +264,11 @@ struct ForgeChatThreadView: View {
                         Label(ForgeChatText.waiting, systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
                     }
                     if let e = store.error { Text(e).font(.caption).foregroundStyle(.red) }
+                    Color.clear.frame(height: 1).id("bottom")
                 }.padding()
+            }
+            .onChange(of: msgs.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             Divider()
             if let jpeg, let img = UIImage(data: jpeg) {

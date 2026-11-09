@@ -20,4 +20,21 @@ final class ForgeChatLifecycleTests: XCTestCase {
         XCTAssertEqual(store.outgoing.first?.id, o.id)
         store.outgoing = []
     }
+
+    func testReplyWithRoleKatAndExtraFieldsDecodesAndSurvivesBadSibling() throws {
+        let tid = UUID().uuidString.lowercased()
+        let json = """
+        {"messages":[
+         {"id":"\(UUID().uuidString.lowercased())","threadID":"\(tid)","role":"user","text":"hi","createdAt":"2026-11-09T17:43:16Z","hasImage":false,"result":null},
+         {"id":"\(UUID().uuidString.lowercased())","role":"kat","text":"reply","createdAt":null,"extra":{"a":1},"hasImage":"no"},
+         {"id":"not-a-uuid","role":"kat","text":"bad"}
+        ]}
+        """.data(using: .utf8)!
+        struct Lossy: Decodable { let value: ForgeChatMessage?; init(from d: Decoder) throws { value = try? ForgeChatMessage(from: d) } }
+        struct W: Decodable { let messages: [Lossy] }
+        let m = try JSONDecoder().decode(W.self, from: json).messages.compactMap(\.value)
+        XCTAssertEqual(m.count, 2)
+        XCTAssertEqual(m[1].role, "kat")
+        XCTAssertEqual(m[1].text, "reply")
+    }
 }
