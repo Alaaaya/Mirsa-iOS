@@ -88,7 +88,6 @@ struct ForgeView: View {
                     .contextMenu { Button(role: .destructive) { toDelete = p } label: { Label(forgeDeleteTitle, systemImage: "trash") } }
                     .gesture(DragGesture(minimumDistance: 30).onEnded { g in if g.translation.width < -60 && abs(g.translation.height) < 40 { toDelete = p } })
                 }
-                ForgeChatEntry()
                 forgeButton("person.2.fill", tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê")) { gallery = true }
                 if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
