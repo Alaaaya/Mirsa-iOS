@@ -94,5 +94,9 @@
   "1.3.215": {
     "en": "New: every row in Tweak tools now has a short plain subtitle and a first-use guide that explains what it does and how to use it. Guides are available in Arabic, English, Sorani and Kurmanji. Not yet tested on a physical device.",
     "ar": "جديد: كل خيار بأدوات التويك صار تحته سطر شرح بسيط ودليل استخدام أول مرة بيشرح شو بيعمل وكيف تستعمله. الأدلة متوفرة بالعربي والإنكليزي والسوراني والكرمانجي. لسا مو مجرّب على جهاز فعلي."
+  },
+  "1.3.220": {
+    "en": "Updated the existing Community tweaks page with real locally available target-app icons, clear descriptions and compact action explanations. Authors can review the published revision against their latest local version, describe what changed and confirm a community update. Community revisions and dates are preserved; imported or used revisions can show when a newer update is available. Edit, update and delete are restricted to the original authenticated author device on the server, not just hidden in the interface. Existing local versions, upload provenance, source screenshots and feature guides are preserved. Not yet tested on a physical device.",
+    "ar": "رتّبنا صفحة تويكس المجتمع بأيقونات التطبيقات الحقيقية المتوفرة محلياً ووصف واضح وشرح لكل زر. صاحب التويك بيقدر يقارن النسخة المنشورة بآخر نسخة محلية، يكتب شو الجديد ويأكد تحديثه بالمجتمع. النسخ وتواريخها محفوظة، وبتظهر شارة في تحديث للنسخة المستخدمة لما ينزل تحديث أحدث. التعديل والتحديث والحذف لصاحب التويك الأصلي مع تحقق من جلسة جهازه بالسيرفر، مو بس إخفاء الأزرار. النسخ المحلية ومصدر الملفات المرفوعة وصور السورس والشروحات السابقة محفوظة. لسا مو مجرّب على جهاز فعلي."
   }
 }
