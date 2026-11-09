@@ -108,7 +108,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             if let server = try? LocalOTAServer(file: kept) {
                 var bg = UIBackgroundTaskIdentifier.invalid
                 bg = UIApplication.shared.beginBackgroundTask(withName: "Mirsa local OTA") { server.stop() }
-                server.onStop = { DispatchQueue.main.async { if bg != .invalid { UIApplication.shared.endBackgroundTask(bg); bg = .invalid } } }
+                let bgBox = OTABackgroundBox(bg)
+                server.onStop = { bgBox.end() }
+                var handedOff = false
+                defer { if !handedOff { server.stop(); if OTARouteLog.active === server { OTARouteLog.active = nil } } }
                 if let port = try? await server.start() {
                     if let manifest = LocalOTAManifest.url(base: endpoint, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
                        let target = try? OTAInstallLink.make(manifestURL: manifest),
@@ -117,7 +120,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
                         signingProgress?(PersonalSigningEvent(stage: .serving))
                         try control.checkpoint()
                         _ = await UIApplication.shared.open(target)  // success here does NOT prove download
-                        if await server.awaitFirstRequest(timeout: 15) {
+                        let got = await withTaskCancellationHandler { await server.awaitFirstRequest(timeout: 15) } onCancel: { server.stop() }
+                        try control.checkpoint()
+                        if got {
+                            handedOff = true
                             signingProgress?(PersonalSigningEvent(stage: .handedOff))
                             return signed.verification
                         }
@@ -290,5 +296,16 @@ struct OwnCertificateDeviceSetup: View {
                 status = OwnCertificateDevice.message
             }.disabled(busy)
         }
+    }
+}
+
+/// Ends a UIKit background task exactly once from any thread.
+final class OTABackgroundBox: @unchecked Sendable {
+    private let lock = NSLock(); private var id: UIBackgroundTaskIdentifier
+    init(_ id: UIBackgroundTaskIdentifier) { self.id = id }
+    func end() {
+        lock.lock(); let i = id; id = .invalid; lock.unlock()
+        guard i != .invalid else { return }
+        DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(i) }
     }
 }

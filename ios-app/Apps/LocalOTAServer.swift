@@ -80,6 +80,8 @@ enum LocalOTARange {
 final class LocalOTAServer: @unchecked Sendable {
     static let maxConnections = 8
     static let maxHeaderBytes = 16 * 1024
+    /// Injectable for tests. Applies to receiving the request header only.
+    nonisolated(unsafe) static var headerTimeout: TimeInterval = 30
     let token = (0..<2).map { _ in String(format: "%016llx", UInt64.random(in: .min ... .max)) }.joined()
     private let file: URL
     private let size: Int64
@@ -87,6 +89,7 @@ final class LocalOTAServer: @unchecked Sendable {
     private let lock = NSLock()
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    private var headerDone = Set<ObjectIdentifier>()
     private var stopped = false
     private var _servedBytes: Int64 = 0
     private var _port: UInt16 = 0
@@ -106,8 +109,10 @@ final class LocalOTAServer: @unchecked Sendable {
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         let l = try NWListener(using: params)
+        lock.lock(); listener = l; lock.unlock()
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
-        let ready: UInt16 = try await withCheckedThrowingContinuation { cont in
+        let ready: UInt16
+        do { ready = try await withCheckedThrowingContinuation { cont in
             let box = OnceBox<UInt16>(cont)
             l.stateUpdateHandler = { st in
                 switch st {
@@ -119,13 +124,13 @@ final class LocalOTAServer: @unchecked Sendable {
             }
             queue.asyncAfter(deadline: .now() + timeout) { box.resume(.failure(Failure.timeout)); }
             l.start(queue: queue)
-        }
-        lock.lock(); listener = l; _port = ready; let already = stopped; lock.unlock()
+        } } catch { stop(); throw error }
+        lock.lock(); _port = ready; let already = stopped; lock.unlock()
         if already { l.cancel(); throw Failure.start }
         queue.asyncAfter(deadline: .now() + lifetime) { [weak self] in self?.stop() }
         return ready
     }
-    /// True once a valid-token GET/HEAD was answered successfully. False on timeout or stop. Single bounded wait.
+    /// True once a valid-token GET delivered its first body chunk (HEAD never counts). False on timeout or stop. Single bounded wait.
     func awaitFirstRequest(timeout: TimeInterval) async -> Bool {
         await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             lock.lock()
@@ -160,14 +165,16 @@ final class LocalOTAServer: @unchecked Sendable {
             switch st { case .failed, .cancelled: self?.drop(id); default: break }
         }
         conn.start(queue: queue)
-        // Idle/slowloris bound.
-        queue.asyncAfter(deadline: .now() + 30) { [weak self] in
-            self?.lock.lock(); let alive = self?.connections[id] != nil; self?.lock.unlock()
-            if alive { conn.cancel() }
+        // Header deadline only: a connection that has not delivered a full request header is cut.
+        // Active transfers are never killed by this timer.
+        queue.asyncAfter(deadline: .now() + Self.headerTimeout) { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); let pending = self.connections[id] != nil && !self.headerDone.contains(id); self.lock.unlock()
+            if pending { conn.cancel() }
         }
         readHeader(conn, buffer: Data())
     }
-    private func drop(_ id: ObjectIdentifier) { lock.lock(); connections[id] = nil; lock.unlock() }
+    private func drop(_ id: ObjectIdentifier) { lock.lock(); connections[id] = nil; headerDone.remove(id); lock.unlock() }
     private func readHeader(_ conn: NWConnection, buffer: Data) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, complete, err in
             guard let self, err == nil else { conn.cancel(); return }
@@ -175,6 +182,7 @@ final class LocalOTAServer: @unchecked Sendable {
             if buf.count > Self.maxHeaderBytes { return self.fail(conn, 431, "Request Header Fields Too Large") }
             if let end = buf.range(of: Data("\r\n\r\n".utf8)) {
                 guard let req = String(data: buf[..<end.lowerBound], encoding: .utf8) else { return self.fail(conn, 400, "Bad Request") }
+                self.lock.lock(); self.headerDone.insert(ObjectIdentifier(conn)); self.lock.unlock()
                 self.respond(conn, request: req)
             } else if complete { conn.cancel() } else { self.readHeader(conn, buffer: buf) }
         }
@@ -200,9 +208,6 @@ final class LocalOTAServer: @unchecked Sendable {
         let isGet = line[0] == "GET"
         conn.send(content: Data(head.utf8), completion: .contentProcessed { [weak self] e in
             guard let self, e == nil else { conn.cancel(); return }
-            // A valid-token request whose response header was actually delivered.
-            self.lock.lock(); self.requested = true; self.lock.unlock()
-            self.resolveWaiter(true)
             guard isGet, let fh = try? FileHandle(forReadingFrom: self.file) else { conn.cancel(); return }
             try? fh.seek(toOffset: UInt64(lo))
             self.stream(conn, fh, remaining: hi - lo + 1)
@@ -215,7 +220,8 @@ final class LocalOTAServer: @unchecked Sendable {
         conn.send(content: chunk, completion: .contentProcessed { [weak self] e in
             if e != nil { try? fh.close(); conn.cancel(); return }
             guard let self else { try? fh.close(); return }
-            self.lock.lock(); self._servedBytes += Int64(chunk.count); self.lock.unlock()  // after successful send
+            self.lock.lock(); self._servedBytes += Int64(chunk.count); let first = !self.requested; self.requested = true; self.lock.unlock()  // after successful send
+            if first { self.resolveWaiter(true) }  // real GET, first body chunk delivered
             self.stream(conn, fh, remaining: remaining - Int64(chunk.count))
         })
     }
