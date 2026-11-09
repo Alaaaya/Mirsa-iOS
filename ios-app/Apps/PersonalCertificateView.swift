@@ -310,6 +310,19 @@ enum PersonalCertificateSigner {
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)
         }
+        if !options.importedLoadEdits.isEmpty {
+            let info = try IPAEditorService.info(in: app)
+            guard let executable = info["CFBundleExecutable"] as? String else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let edited = stage.appendingPathComponent("imported-edited.app", isDirectory: true)
+            try IPAEditorService.run("edit_imported_loads", input: app, output: edited,
+                                    executable: executable, importedEdits: options.importedLoadEdits)
+            // The extracted archive is disposable. The library IPA and bundle-file original
+            // are never changed. Every export replays the plan from that original IPA.
+            try fm.removeItem(at: app)
+            try fm.moveItem(at: edited, to: app)
+        }
         let originalInfo = try IPAEditorService.info(in: app)
         var info = originalInfo
         if let name = options.displayName {

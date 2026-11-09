@@ -19,6 +19,7 @@ struct PersonalProjectOptions: Sendable {
     var bundleBlobs: URL? = nil
     var bundleOriginal: URL? = nil
     var injectionOrder: [String] = []
+    var importedLoadEdits: [ImportedLoadEdit] = []
     var additionalProfiles: [Data] = []
     var removeExtensions = false
     var removeAppClips = false
@@ -72,4 +73,5 @@ struct PersonalProjectDraft: Codable, Equatable {
     /// Staged bundle file edits (rename/delete/import/plist) made in the file manager.
     var bundleOverlay: BundleOverlay? = nil
     var appliedTweakIDs: [UUID]? = nil
+    var importedLoadEdits: [ImportedLoadEdit]? = nil
 }

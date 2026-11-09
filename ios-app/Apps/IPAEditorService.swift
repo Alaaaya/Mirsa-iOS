@@ -11,8 +11,11 @@ enum IPAEditorService {
 
     static func run(_ operation: String, input: URL, output: URL? = nil,
                     executable: String? = nil, libraries: [URL] = [], newFirst: Bool = false,
-                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil) throws {
+                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil, importedEdits: [ImportedLoadEdit]? = nil) throws {
         var request: [String: Any] = ["operation": operation, "input": input.path]
+        if let importedEdits {
+            request["edits"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(importedEdits))
+        }
         if let output { request["output"] = output.path }
         if let executable { request["executable"] = executable }
         request["libraries"] = libraries.map(\.path)
@@ -74,6 +77,15 @@ enum IPAEditorService {
                     "ما قدرت أقرأ هالـ IPA. ممكن يكون تالف أو ناقصه ملفات التطبيق.",
                     "نەتوانرا ئەم IPA بخوێندرێتەوە. ڕەنگە خراپ بێت یان فایلی کەم بێت.",
                     "Ev IPA nehat xwendin. Dibe ku xerab be an dosyeyên appê kêm bin.")
+    }
+
+    static func importedLoads(app: URL, executable: String) throws -> ImportedLoadReport {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("imported-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: out) }
+        try run("imported_loads", input: app, output: out, executable: executable)
+        let size = try out.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= 8_000_000 else { throw CocoaError(.fileReadTooLarge) }
+        return try JSONDecoder().decode(ImportedLoadReport.self, from: Data(contentsOf: out))
     }
 
     /// Lists injection targets of an extracted .app (main, frameworks, extensions); thin arm64 only.
