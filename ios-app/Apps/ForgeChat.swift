@@ -11,7 +11,6 @@ enum ForgeChatText {
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
     static var deleteTitle: String { tr("Delete this request?", "حذف هالطلب؟", ckb: "ئەم داواکارییە بسڕیتەوە؟", kmr: "Ev daxwaz were jêbirin?") }
     static var deleteAction: String { tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jê bibe") }
-    static var cancel: String { tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal") }
     static var deleteFailed: String { tr("Couldn't delete. Check your connection and try again.", "تعذّر الحذف. تأكد من الاتصال وجرّب مرة تانية.", ckb: "نەسڕایەوە. پەیوەندییەکەت بپشکنە و دووبارە هەوڵبدەرەوە.", kmr: "Jê neçû. Girêdana xwe kontrol bike û dîsa biceribîne.") }
     static func status(_ s: String?) -> String {
         switch (s ?? "").lowercased() {
