@@ -84,15 +84,12 @@ final class PersonalSigningOperation: ObservableObject {
     func start(projectID: UUID, title: String, input: URL, material: PersonalIdentityVault.Material,
                pairingPath: String, options: PersonalProjectOptions) {
         guard !running else { return }
-        if let previous = state?.result?.url {
-            try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
-        }
         let projectRevision = ProjectArtifactRevision.current(projectID)
         let id = UUID()
         let control = PersonalSigningControl()
         self.control = control
         lastActivityStage = nil
-        state = State(id: id, projectID: projectID)
+        beginState(id: id, projectID: projectID)
         let operation = MirsaOperationProgress.shared.begin(appID: projectID.uuidString, phase: .preparing)
         MirsaOperationProgress.shared.update(operation, phase: .preparing, fraction: 0)
         activityID = MirsaInstallActivity.shared.begin(title: title, phase: .preparing)
@@ -132,6 +129,13 @@ final class PersonalSigningOperation: ObservableObject {
             self.endBackgroundTime()
             self.control = nil
         }
+    }
+
+    /// Reset only transient operation state. Results can be retained historical
+    /// exports, including another project's archive; their directory is never ours
+    /// to delete merely because a new signing operation starts.
+    func beginState(id: UUID, projectID: UUID) {
+        state = State(id: id, projectID: projectID)
     }
 
     private func receive(_ event: PersonalSigningEvent, id: UUID, operation: UUID) {
