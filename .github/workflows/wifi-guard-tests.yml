@@ -3,14 +3,40 @@ on:
   workflow_dispatch:
   push:
     branches: [kat/wifi-guard]
+permissions:
+  contents: read
 jobs:
-  test:
+  simulator:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Generate Xcode project
-        run: brew install xcodegen && xcodegen generate
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build real simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
       - name: Run WiFiPathPolicyTests
         run: |
-          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:MirsaTests/WiFiPathPolicyTests CODE_SIGNING_ALLOWED=NO 2>&1 | tail -60
-          exit ${PIPESTATUS[0]}
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -only-testing:MirsaTests/WiFiPathPolicyTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wifi-tests.log
+          grep -E "Executed [1-9][0-9]* tests?, with 0 failures" build/wifi-tests.log
