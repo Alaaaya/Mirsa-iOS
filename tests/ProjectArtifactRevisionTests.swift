@@ -36,4 +36,33 @@ final class ProjectArtifactRevisionTests: XCTestCase {
         ProjectArtifactRevision.record(captured, project: project, defaults: defaults)
         XCTAssertFalse(ProjectArtifactRevision.signedIsCurrent(project, defaults: defaults))
     }
+    @MainActor
+    func testStartingAnotherProjectPreservesHistoricalArchiveAndSiblingFiles() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let historical = root.appendingPathComponent("historical.ipa")
+        let sibling = root.appendingPathComponent("other-project.ipa")
+        let bytes = Data("retained historical signed archive".utf8)
+        try bytes.write(to: historical)
+        try Data("unrelated archive".utf8).write(to: sibling)
+        let firstProject = UUID()
+        var prior = PersonalSigningOperation.State(id: UUID(), projectID: firstProject)
+        prior.running = false
+        prior.result = PersonalCertificateSigner.Result(url: historical,
+            bundleIdentifierChanged: false, verification: .unknown)
+        let operation = PersonalSigningOperation(initialState: prior)
+        let otherProject = UUID()
+        operation.beginState(id: UUID(), projectID: otherProject)
+        XCTAssertEqual(operation.state?.projectID, otherProject)
+        XCTAssertNil(operation.state?.result)
+        XCTAssertEqual(try Data(contentsOf: historical), bytes)
+        XCTAssertTrue(fm.fileExists(atPath: sibling.path))
+        // Starting again for the original project must also preserve both files.
+        operation.beginState(id: UUID(), projectID: firstProject)
+        XCTAssertEqual(try Data(contentsOf: historical), bytes)
+        XCTAssertTrue(fm.fileExists(atPath: sibling.path))
+    }
+
 }
