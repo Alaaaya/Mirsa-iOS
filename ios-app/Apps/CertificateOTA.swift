@@ -9,7 +9,12 @@ enum MirsaInstallMode {
 final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
+/// Why the last install used the upload path instead of local serving (nil = local or not attempted).
+@MainActor enum OTARouteLog { static var last: OTAUploadReason?; static var active: LocalOTAServer? }
 @MainActor enum CertificateOTA {
+    /// Dedicated trusted HTTPS proxy that serves the local-manifest as proper XML. nil until the stable URL is
+    /// provided; never the remote upload endpoint. While nil the local route falls back to upload.
+    static let localManifestEndpoint: URL? = URL(string: "https://mirsa-app.mooo.com/local-manifest.plist")
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
 
     /// Archive callers retain ownership. Only app-folder callers need a new pack.
@@ -27,6 +32,15 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         try control.checkpoint()
         try IPAEditorService.run("pack", input: stage, output: input)
         return input
+    }
+    nonisolated static func signedMetadata(_ signed: PersonalCertificateSigner.Result) throws -> Data {
+        guard let bytes = signed.signedInfoPlist, bytes.count <= 2 * 1024 * 1024,
+              let info = try PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any],
+              let id = info["CFBundleIdentifier"] as? String, !id.isEmpty,
+              let version = info["CFBundleVersion"] as? String, !version.isEmpty else {
+            throw SideloadError.message("Signed app metadata is invalid.")
+        }
+        return bytes
     }
     @discardableResult
     static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
@@ -72,11 +86,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         try Task.checkCancellation()
         // Signing can change bundle ID, version and display name. The manifest
         // must describe the exact retained archive sent to either upload host.
-        let signedInfo = try await Task.detached {
-            let inspected = try CertificateInstall.stageSignedApp(ipa: kept, in: fm.temporaryDirectory)
-            defer { try? FileManager.default.removeItem(at: inspected.stage) }
-            return try Data(contentsOf: inspected.app.appendingPathComponent("Info.plist"))
-        }.value
+        // The signer already validated/extracted the input and read this exact
+        // post-signing plist. Re-extracting our deflated output can reject valid
+        // highly-compressible resources (and needlessly duplicates large apps).
+        let signedInfo = try signedMetadata(signed)
         guard let info = try PropertyListSerialization.propertyList(from: signedInfo, format: nil) as? [String: Any] else {
             throw SideloadError.message(personalText("Signed app metadata is invalid.", "معلومات التطبيق الموقّع غير صالحة."))
         }
@@ -87,13 +100,49 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             name: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID,
             version: (info["CFBundleShortVersionString"] as? String) ?? version, signed: true)
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
+        // Local route: HTTPS manifest from our broker, IPA bytes served from 127.0.0.1 on this device.
+        // "Serving" is announced only with a running listener AND a reachable manifest. Handoff is only reported
+        // after iOS actually requested the IPA from us; otherwise we stop and use upload with the real reason.
+        var fallback: OTAUploadReason?
+        switch OTARouteSelector.select(fileReadable: fm.isReadableFile(atPath: kept.path) && size > 0) {
+        case .upload(let reason): fallback = reason
+        case .local:
+            if let server = try? LocalOTAServer(file: kept) {
+                var bg = UIBackgroundTaskIdentifier.invalid
+                bg = UIApplication.shared.beginBackgroundTask(withName: "Mirsa local OTA") { server.stop() }
+                let bgBox = OTABackgroundBox(bg)
+                server.onStop = { bgBox.end() }
+                var handedOff = false
+                defer { if !handedOff { server.stop(); if OTARouteLog.active === server { OTARouteLog.active = nil } } }
+                if let port = try? await server.start() {
+                    if let base = localManifestEndpoint, let manifest = LocalOTAManifest.url(base: base, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
+                       let target = try? OTAInstallLink.make(manifestURL: manifest),
+                       await LocalOTAManifest.preflight(manifest, port: port) {
+                        OTARouteLog.active?.stop(); OTARouteLog.active = server
+                        signingProgress?(PersonalSigningEvent(stage: .serving))
+                        try control.checkpoint()
+                        _ = await UIApplication.shared.open(target)  // success here does NOT prove download
+                        let got = await withTaskCancellationHandler { await server.awaitFirstRequest(timeout: 15) } onCancel: { server.stop() }
+                        try control.checkpoint()
+                        if got {
+                            handedOff = true
+                            signingProgress?(PersonalSigningEvent(stage: .handedOff))
+                            return signed.verification
+                        }
+                        server.stop(); OTARouteLog.active = nil; fallback = .noInstallerRequest
+                    } else { server.stop(); fallback = .manifestUnreachable }
+                } else { server.stop(); fallback = .serverStartFailed }
+            } else { fallback = .fileUnavailable }
+        }
+        OTARouteLog.last = fallback
+        if let fallback { signingProgress?(PersonalSigningEvent(stage: .uploading, fallbackReason: fallback)) }
         let plan = try OTAChunkPlan(total: size)
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
         try control.checkpoint()
         try Task.checkCancellation()
-        let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
         signingProgress?(PersonalSigningEvent(stage: .uploading))
         let uploadProgress: (Double) -> Void = { fraction in
             progress?(fraction)
@@ -250,5 +299,16 @@ struct OwnCertificateDeviceSetup: View {
                 status = OwnCertificateDevice.message
             }.disabled(busy)
         }
+    }
+}
+
+/// Ends a UIKit background task exactly once from any thread.
+final class OTABackgroundBox: @unchecked Sendable {
+    private let lock = NSLock(); private var id: UIBackgroundTaskIdentifier
+    init(_ id: UIBackgroundTaskIdentifier) { self.id = id }
+    func end() {
+        lock.lock(); let i = id; id = .invalid; lock.unlock()
+        guard i != .invalid else { return }
+        DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(i) }
     }
 }

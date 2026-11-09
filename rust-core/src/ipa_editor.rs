@@ -1735,6 +1735,31 @@ mod archive_inspection_tests {
         }
         z.finish().unwrap();
     }
+    #[test] fn rave_like_repack_can_exceed_input_ratio_without_changing_resource_bytes() {
+        let t = temp();
+        let source = t.join("Rave.ipa");
+        // Accepted import with a normal stored, highly compressible app resource.
+        // Our own signer repacks resources using Deflate, unlike the original ZIP.
+        let resource = vec![0u8; 8 * 1024 * 1024];
+        fixture(&source, &[("Payload/Test.app/padding.dat", &resource)], "Main");
+        let root = t.join("signed-stage");
+        extract_zip(&source, &root).unwrap();
+        let output = t.join("Rave-signed.ipa");
+        pack(&root, &output).unwrap();
+        let mut archive = ZipArchive::new(File::open(&output).unwrap()).unwrap();
+        let mut entry = archive.by_name("Payload/Test.app/padding.dat").unwrap();
+        assert!(entry.size() > entry.compressed_size() * 1000,
+                "Fixture must reproduce the signed-output compression-ratio regression");
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, resource);
+        drop(entry);
+        // Input protection is intentionally NOT relaxed. OTA instead uses the
+        // post-signing metadata snapshot and serves these bytes without extraction.
+        assert!(extract_zip(&output, &t.join("should-not-extract")).unwrap_err().contains("ratio"));
+        assert!(!t.join("should-not-extract").exists());
+        fs::remove_dir_all(t).unwrap();
+    }
     #[test] fn inspection_only_copies_identity_and_executable() {
         let t = temp(); let ipa = t.join("a.ipa");
         fixture(&ipa, &[("Payload/Test.app/Assets.car", b"untouched resource"),
