@@ -187,6 +187,7 @@ struct ForgeProjectView: View {
                     }
                 }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 ForgeFeaturesView(id: id, prompt: $prompt, showInspector: $showInspector)
+                ForgePreciseSection(id: id, prompt: $prompt)
                 if let notice = store.fixNotice {
                     HStack(alignment: .top) {
                         Image(systemName: "checkmark.shield")
