@@ -30,7 +30,14 @@ protocol MirsaStoreAuthentication {
     func authenticate(email: String, password: String, code: String) async throws -> Account
 }
 
-extension Authenticator: MirsaStoreAuthentication {}
+private struct AppleStoreAuthentication: MirsaStoreAuthentication {
+    let authenticator: Authenticator
+    func authenticate(email: String, password: String, code: String) async throws -> Account {
+        do { return try await authenticator.authenticate(email: email, password: password, code: code) }
+        catch AuthenticationError.verificationCodeRequired { throw AuthenticationError.verificationCodeRequired }
+        catch { throw MirsaStoreAuthDiagnostic(.wrapping(error, stage: .authentication)) }
+    }
+}
 
 protocol MirsaStoreEngine {
     func configure(guid: String)
@@ -50,7 +57,8 @@ struct ApplePackageStoreEngine: MirsaStoreEngine {
         // Do not call ApplePackage's file-backed account helpers.
     }
     func authentication() async throws -> any MirsaStoreAuthentication {
-        try await Authenticator()
+        do { return AppleStoreAuthentication(authenticator: try await Authenticator()) }
+        catch { throw MirsaStoreAuthDiagnostic(.wrapping(error, stage: .sapValidation)) }
     }
     func search(term: String, country: String, limit: Int) async throws -> [Software] {
         try await Searcher.search(term: term, countryCode: country, limit: limit)
