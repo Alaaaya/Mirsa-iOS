@@ -91,4 +91,15 @@ final class LocalOTATests: XCTestCase {
         XCTAssertEqual((resp as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertEqual(bytes.count, 8 * 1024 * 1024)
     }
+    func testManifestURLUsesGivenBaseOnlyAndBoundsInputs() throws {
+        let base = URL(string: "https://ota.example.test/local-manifest")!
+        let tok = String(repeating: "a", count: 32)
+        let u = try XCTUnwrap(LocalOTAManifest.url(base: base, port: 51234, token: tok, bundleID: "com.alaa.mirsa", version: "1", title: "Mirsa", bytes: 10))
+        XCTAssertEqual(u.host, "ota.example.test"); XCTAssertEqual(u.path, "/local-manifest")
+        XCTAssertTrue(u.absoluteString.contains("action=local-manifest&port=51234&token=\(tok)"))
+        XCTAssertNil(LocalOTAManifest.url(base: URL(string: "http://ota.example.test/x")!, port: 51234, token: tok, bundleID: "a", version: "1", title: "t", bytes: 1))
+        XCTAssertNil(LocalOTAManifest.url(base: base, port: 80, token: tok, bundleID: "a", version: "1", title: "t", bytes: 1))
+        XCTAssertNil(LocalOTAManifest.url(base: base, port: 51234, token: "short", bundleID: "a", version: "1", title: "t", bytes: 1))
+        XCTAssertNil(CertificateOTA.localManifestEndpoint.flatMap { $0.host == CertificateOTA.endpoint.host ? $0 : nil })
+    }
 }
