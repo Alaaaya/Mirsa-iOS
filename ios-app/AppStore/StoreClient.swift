@@ -249,14 +249,16 @@ actor MirsaStoreClient {
             throw MirsaStoreError.invalidPackage
         }
     }
-    private func safe(_ error: Error) -> MirsaStoreError {
+    private func safe(_ error: Error) -> Error {
+        if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic }
+        if let diagnostic = error as? AuthenticationServiceError { return MirsaStoreAuthDiagnostic(diagnostic) }
         if let error = error as? MirsaStoreError { return error }
-        if error is CancellationError { return .operationCancelled }
+        if error is CancellationError { return MirsaStoreError.operationCancelled }
         if let auth = error as? AuthenticationError, case .verificationCodeRequired = auth {
-            return .verificationRequired
+            return MirsaStoreError.verificationRequired
         }
-        if case ApplePackageError.licenseRequired = error { return .licenseRequired }
+        if case ApplePackageError.licenseRequired = error { return MirsaStoreError.licenseRequired }
         // Do not surface arbitrary URL/body/account descriptions to telemetry or UI.
-        return .serviceUnavailable
+        return MirsaStoreError.serviceUnavailable
     }
 }

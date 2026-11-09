@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import ApplePackage
 
 enum MirsaStoreError: Error, Equatable, LocalizedError {
     case busy, signedOut, verificationRequired, invalidInput, freeAppsOnly
@@ -99,5 +100,40 @@ enum MirsaStorePolicy {
               !parts.contains(".."), !parts.contains("."), !path.contains("\0") else {
             throw MirsaStoreError.invalidPackage
         }
+    }
+}
+
+/// Safe structured diagnostics from the authentication boundary only.
+struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
+    let stage: AuthenticationServiceError.Stage
+    let transport: Bool
+    let httpStatus: Int?
+    let appleCode: String?
+    let appleMessage: String?
+    let networkCode: Int?
+
+    init(_ error: AuthenticationServiceError) {
+        stage = error.stage; transport = error.transport; httpStatus = error.httpStatus; appleCode = error.appleCode
+        appleMessage = error.message; networkCode = error.networkCode
+    }
+
+    var errorDescription: String? {
+        // Stable stage names make owner reports comparable in every app language.
+        let step: String
+        switch stage {
+        case .bag: step = tr("Store configuration", "إعداد المتجر", ckb: "ڕێکخستنی فرۆشگا", kmr: "Mîhengên firoşgehê")
+        case .sapCertificate: step = tr("Apple security certificate", "شهادة أمان Apple", ckb: "بڕوانامەی پاراستنی Apple", kmr: "Sertîfîkaya ewlehiya Apple")
+        case .sapSetup: step = tr("Apple security setup", "تجهيز أمان Apple", ckb: "ئامادەکردنی پاراستنی Apple", kmr: "Amadekirina ewlehiya Apple")
+        case .sapValidation: step = tr("Apple security validation", "التحقق من أمان Apple", ckb: "پشکنینی پاراستنی Apple", kmr: "Piştrastkirina ewlehiya Apple")
+        case .signing: step = tr("Login security preparation", "تجهيز أمان تسجيل الدخول", ckb: "ئامادەکردنی پاراستنی چوونەژوورەوە", kmr: "Amadekirina ewlehiya têketinê")
+        case .authentication: step = tr("Apple sign-in response", "رد Apple على تسجيل الدخول", ckb: "وەڵامی Apple بۆ چوونەژوورەوە", kmr: "Bersiva Apple ji bo têketinê")
+        }
+        var fields = [step + " [" + stage.rawValue + "]"]
+        if transport { fields.append(tr("Connection failed before an HTTP response", "الاتصال فشل قبل ما يوصل رد", ckb: "پەیوەندی پێش گەیشتنی وەڵام شکستی هێنا", kmr: "Pêwendî berî bersivê têk çû")) }
+        if let httpStatus { fields.append("HTTP " + String(httpStatus)) }
+        if let appleCode { fields.append("Apple " + appleCode) }
+        if let networkCode { fields.append("Network " + String(networkCode)) }
+        if let appleMessage { fields.append(appleMessage) }
+        return fields.joined(separator: " · ")
     }
 }

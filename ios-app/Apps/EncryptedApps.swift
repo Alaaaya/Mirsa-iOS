@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 import ImageIO
 
-// MARK: - "Encrypted" tab: App Store IPAs installed exactly as they are.
+// MARK: - "App Store" tab: App Store IPAs installed exactly as they are.
 //
 // Mirsa never decrypts, re-signs or edits these packages. It reads the package
 // metadata (iTunesMetadata.plist, Info.plist, SC_Info/*.sinf) to show who bought
@@ -13,7 +13,7 @@ enum EncryptedText {
     static func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String {
         tr(en, ar, ckb: ckb, kmr: kmr)
     }
-    static var tabTitle: String { t("Encrypted", "مشفّرة", "شفرەکراو", "Şîfrekirî") }
+    static var tabTitle: String { t("App Store", "متجر أبل", "فرۆشگای ئەپڵ", "Firoşgeha Apple") }
 }
 
 /// What the package says about itself. Pure data, parsed without touching the archive.

@@ -38,10 +38,12 @@ private func testSoftware(price: Double? = 0, id: Int64 = 42) -> Software {
 private final class StoreTestAuth: MirsaStoreAuthentication {
     var calls: [String] = []
     var twoFactor = false
+    var diagnostic: MirsaStoreAuthDiagnostic?
     var paused: CheckedContinuation<Account, Error>?
     var pause = false
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
+        if let diagnostic { throw diagnostic }
         if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
         if twoFactor && code != "123456" { throw AuthenticationError.verificationCodeRequired }
         return testOwner()
@@ -96,6 +98,25 @@ private final class StoreTestPackages: MirsaStorePackages {
 }
 
 final class MirsaStoreClientTests: XCTestCase {
+    func testSafeAuthDiagnosticReachesUIAndClearsFailedChallenge() async throws {
+        let vault = StoreTestVault(), engine = StoreTestEngine()
+        engine.auth.diagnostic = MirsaStoreAuthDiagnostic(.init(stage: .authentication,
+            httpStatus: 403, appleCode: "-5000", message: "An explicit safe Apple rejection"))
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        do {
+            _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+            XCTFail("Failed auth was accepted")
+        } catch let safe as MirsaStoreAuthDiagnostic {
+            XCTAssertEqual(safe.stage, .authentication)
+            XCTAssertEqual(safe.httpStatus, 403)
+            XCTAssertEqual(safe.appleCode, "-5000")
+            XCTAssertTrue(safe.localizedDescription.contains("An explicit safe Apple rejection"))
+        }
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertNil(vault.data["account"])
+        XCTAssertEqual(engine.auth.calls.count, 1)
+    }
+
     func testSignoutAttemptsBothSecretsAndCancelsDownloadEvenOnKeychainFailure() async throws {
         let vault = StoreTestVault(), packages = StoreTestPackages()
         let client = MirsaStoreClient(vault: vault, engine: StoreTestEngine(), packages: packages)
