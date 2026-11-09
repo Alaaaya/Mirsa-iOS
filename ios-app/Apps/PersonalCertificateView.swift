@@ -374,26 +374,29 @@ enum PersonalCertificateSigner {
     /// Configuration-only export: same edits, NO signing. Caller must label the result unsigned.
     static func exportConfigurationOnly(ipa: URL, options: PersonalProjectOptions) throws -> URL {
         let fm = FileManager.default
-        let stage = fm.temporaryDirectory.appendingPathComponent("personal-config-\(UUID().uuidString)", isDirectory: true)
+        let stage = try MirsaManagedTmp.begin("personal-config")
+        defer { MirsaManagedTmp.end(stage) }
         try fm.createDirectory(at: stage, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.complete])
-        defer { try? fm.removeItem(at: stage) }
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options)
         try IPAEditorService.run("validate", input: app.appendingPathComponent(info["CFBundleExecutable"] as! String))
         return try pack(root: root, options: options, suffix: "-unsigned")
     }
     private static func pack(root: URL, options: PersonalProjectOptions, suffix: String = "") throws -> URL {
         let fm = FileManager.default
-        let exports = fm.temporaryDirectory.appendingPathComponent("Mirsa-Signed-\(UUID().uuidString)", isDirectory: true)
         var filename = options.outputFilename.trimmingCharacters(in: .whitespacesAndNewlines)
         for known in [".ipa", ".tipa"] where filename.lowercased().hasSuffix(known) { filename = String(filename.dropLast(known.count)) }
         guard !filename.isEmpty, filename.count <= 120, !filename.contains("/"), !filename.contains("\\"),
               !filename.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
               filename != ".", filename != ".." else { throw SideloadError.message("اسم ملف التصدير غير صالح.") }
+        let exports = try MirsaManagedTmp.begin("signed-export")
+        var exported = false
+        defer { if !exported { MirsaManagedTmp.end(exports) } }
         try fm.createDirectory(at: exports, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.complete])
         let ext = options.exportExtension == "tipa" ? "tipa" : "ipa"
         let output = exports.appendingPathComponent(filename + suffix + "." + ext)
         do { try IPAEditorService.run("pack", input: root, output: output) }
-        catch { try? fm.removeItem(at: exports); throw error }
+        catch { throw error }
+        exported = true
         return output
     }
     private static func customEntitlementsPath(_ options: PersonalProjectOptions, stage: URL) throws -> String {
@@ -412,10 +415,10 @@ enum PersonalCertificateSigner {
         try control.checkpoint()
         progress(PersonalSigningEvent(stage: .preparing))
         let fm = FileManager.default
-        let stage = MirsaManagedTmp.begin("sign")
+        let stage = try MirsaManagedTmp.begin("sign")
+        defer { MirsaManagedTmp.end(stage) }
         try fm.createDirectory(at: stage, withIntermediateDirectories: true,
                                attributes: [.protectionKey: FileProtectionType.complete])
-        defer { MirsaManagedTmp.end(stage) }
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options, applyBundleID: false)
         let reportURL = stage.appendingPathComponent("encryption.json")
         try IPAEditorService.run("signing_encryption", input: app, output: reportURL, signingOptions: options)
@@ -470,6 +473,8 @@ enum PersonalCertificateSigner {
         try control.checkpoint()
         progress(PersonalSigningEvent(stage: .packaging))
         let output = try pack(root: root, options: options)
+        var handedOff = false
+        defer { if !handedOff { MirsaManagedTmp.end(output.deletingLastPathComponent()) } }
         let signedInfo = try IPAEditorService.info(in: app)
         var r = Result(url: output, bundleIdentifierChanged:
             (signedInfo["CFBundleIdentifier"] as? String) != (info["CFBundleIdentifier"] as? String),
@@ -488,6 +493,7 @@ enum PersonalCertificateSigner {
             }
             catch { r.installError = error.localizedDescription }
         }
+        handedOff = true
         return r
     }
 }

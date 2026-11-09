@@ -3,86 +3,172 @@ import XCTest
 
 final class MirsaManagedTmpTests: XCTestCase {
     private var root: URL!
+    private let fm = FileManager.default
     override func setUp() {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("mt-test-" + UUID().uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        root = fm.temporaryDirectory.appendingPathComponent("mt-test-" + UUID().uuidString, isDirectory: true)
+        try! fm.createDirectory(at: root, withIntermediateDirectories: true)
     }
-    override func tearDown() { try? FileManager.default.removeItem(at: root) }
-
+    override func tearDown() { try? fm.removeItem(at: root) }
     private func age(_ u: URL, hours: Double) {
-        try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-hours * 3600)], ofItemAtPath: u.path)
+        try! fm.setAttributes([.modificationDate: Date().addingTimeInterval(-hours * 3600)], ofItemAtPath: u.path)
     }
+    private func exists(_ u: URL) -> Bool { fm.fileExists(atPath: u.path) }
 
-    func testSuccessAndFailureAndCancelAllClean() {
-        for label in ["ok", "fail", "cancel"] {
-            let d = MirsaManagedTmp.begin(label, root: root)
-            try? Data(repeating: 1, count: 100).write(to: d.appendingPathComponent("f"))
-            XCTAssertTrue(FileManager.default.fileExists(atPath: d.path))
-            MirsaManagedTmp.end(d, root: root)
-            XCTAssertFalse(FileManager.default.fileExists(atPath: d.path))
-            MirsaManagedTmp.end(d, root: root) // idempotent
+    func testSuccessAndThrowingFailureReleaseOwnership() throws {
+        let success = try MirsaManagedTmp.begin("ok", root: root)
+        MirsaManagedTmp.end(success, root: root)
+        XCTAssertFalse(exists(success))
+        var failed: URL?
+        func operation() throws {
+            let d = try MirsaManagedTmp.begin("fail", root: root); failed = d
+            defer { MirsaManagedTmp.end(d, root: root) }
+            try Data(count: 100).write(to: d.appendingPathComponent("file"))
+            throw CocoaError(.fileReadCorruptFile)
         }
+        XCTAssertThrowsError(try operation())
+        XCTAssertFalse(exists(try XCTUnwrap(failed)))
+        MirsaManagedTmp.end(success, root: root)
     }
 
-    func testStaleSweptActiveAndServedKept() {
-        let stale = root.appendingPathComponent("stale-1"); try? FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true); age(stale, hours: 2)
-        let fresh = root.appendingPathComponent("fresh-1"); try? FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: true)
-        let active = MirsaManagedTmp.begin("act", root: root); age(active, hours: 5)
-        let served = MirsaManagedTmp.begin("ota", root: root); age(served, hours: 5)
-        MirsaManagedTmp.markServed(served, until: Date().addingTimeInterval(600))
-        // served dir is also still active until end(); release the active flag by name via end-less check
-        XCTAssertEqual(MirsaManagedTmp.sweep(root: root), 1)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: served.path))
-        MirsaManagedTmp.end(active, root: root); MirsaManagedTmp.end(served, root: root)
-    }
-
-    func testConcurrentOperationsDoNotCollide() {
-        let exp = expectation(description: "c"); exp.expectedFulfillmentCount = 20
-        let q = DispatchQueue(label: "t", attributes: .concurrent)
-        for _ in 0..<20 {
-            q.async {
-                let d = MirsaManagedTmp.begin("c", root: self.root)
-                try? Data(count: 10).write(to: d.appendingPathComponent("x"))
-                MirsaManagedTmp.sweep(maxAge: -1, root: self.root)
-                XCTAssertTrue(FileManager.default.fileExists(atPath: d.path), "active dir must survive concurrent sweep")
-                MirsaManagedTmp.end(d, root: self.root)
-                exp.fulfill()
-            }
+    func testCancellationUnwindsAfterConsumerStops() async throws {
+        let d = try MirsaManagedTmp.begin("cancel", root: root)
+        let started = expectation(description: "started")
+        let task = Task {
+            defer { MirsaManagedTmp.end(d, root: root) }
+            started.fulfill()
+            try await Task.sleep(nanoseconds: 60_000_000_000)
         }
-        wait(for: [exp], timeout: 20)
-        XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: root.path))?.count, 0)
+        await fulfillment(of: [started], timeout: 5)
+        MirsaManagedTmp.sweep(maxAge: -1, root: root)
+        XCTAssertTrue(exists(d))
+        task.cancel()
+        do { try await task.value; XCTFail("must cancel") } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(exists(d))
     }
 
-    func testSymlinkNeverFollowedAndUserFilesSurvive() throws {
-        let user = FileManager.default.temporaryDirectory.appendingPathComponent("user-" + UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: user, withIntermediateDirectories: true)
-        let precious = user.appendingPathComponent("library.ipa"); try Data(count: 50).write(to: precious)
-        defer { try? FileManager.default.removeItem(at: user) }
-        let link = root.appendingPathComponent("evil-link")
-        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: user)
-        age(link, hours: 3)
+    func testActiveAndSeparatelyServedExpiry() throws {
+        let active = try MirsaManagedTmp.begin("active", root: root); age(active, hours: 5)
+        let served = try MirsaManagedTmp.begin("served", root: root); age(served, hours: 5)
+        let now = Date()
+        MirsaManagedTmp.markServed(served, until: now.addingTimeInterval(600), root: root)
+        XCTAssertEqual(MirsaManagedTmp.sweep(maxAge: -1, now: now, root: root), 0)
+        XCTAssertEqual(MirsaManagedTmp.sweep(maxAge: -1, now: now.addingTimeInterval(601), root: root), 1)
+        XCTAssertTrue(exists(active)); XCTAssertFalse(exists(served))
+        MirsaManagedTmp.end(active, root: root)
+    }
+
+    func testConcurrentBeginSweepAndEnd() throws {
+        let base = root!
+        DispatchQueue.concurrentPerform(iterations: 100) { _ in
+            do {
+                let d = try MirsaManagedTmp.begin("concurrent", root: base)
+                defer { MirsaManagedTmp.end(d, root: base) }
+                try Data(count: 100).write(to: d.appendingPathComponent("f"))
+                MirsaManagedTmp.sweep(maxAge: -1, root: base)
+                XCTAssertTrue(exists(d))
+            } catch { XCTFail("workspace failed: \(error)") }
+        }
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: base.path).count, 0)
+    }
+
+    func testRootAndAncestorSymlinksFailClosed() throws {
+        let user = root.appendingPathComponent("Projects")
+        try fm.createDirectory(at: user, withIntermediateDirectories: true)
+        let precious = user.appendingPathComponent("archive.ipa")
+        try Data(count: 300).write(to: precious)
+        let link = root.appendingPathComponent("root-link")
+        try fm.createSymbolicLink(at: link, withDestinationURL: user)
+        XCTAssertThrowsError(try MirsaManagedTmp.begin("bad", root: link))
+        XCTAssertThrowsError(try MirsaManagedTmp.begin("bad", root: link.appendingPathComponent("nested")))
+        XCTAssertEqual(MirsaManagedTmp.sweep(maxAge: -1, root: link), 0)
+        XCTAssertEqual(MirsaManagedTmp.size(root: link), 0)
+        MirsaManagedTmp.end(precious, root: link)
+        XCTAssertEqual(try Data(contentsOf: precious).count, 300)
+    }
+
+    func testChildLinksAndSizeNeverFollowUserTargets() throws {
+        let user = fm.temporaryDirectory.appendingPathComponent("user-" + UUID().uuidString)
+        try fm.createDirectory(at: user, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: user) }
+        let precious = user.appendingPathComponent("library.ipa")
+        try Data(count: 50_000).write(to: precious)
+        let d = try MirsaManagedTmp.begin("owned", root: root)
+        defer { MirsaManagedTmp.end(d, root: root) }
+        try Data(count: 20).write(to: d.appendingPathComponent("actual"))
+        try fm.createSymbolicLink(at: d.appendingPathComponent("nested"), withDestinationURL: user)
+        let link = root.appendingPathComponent("direct-link")
+        try fm.createSymbolicLink(at: link, withDestinationURL: user)
         XCTAssertFalse(MirsaManagedTmp.isOwned(link, root: root))
-        MirsaManagedTmp.sweep(root: root)
-        MirsaManagedTmp.end(link, root: root)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: precious.path))
-        // path outside root is never owned
-        XCTAssertFalse(MirsaManagedTmp.isOwned(user, root: root))
+        XCTAssertEqual(MirsaManagedTmp.size(root: root), 20)
         MirsaManagedTmp.end(user, root: root)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: precious.path))
+        MirsaManagedTmp.end(link, root: root)
+        MirsaManagedTmp.sweep(maxAge: -1, root: root)
+        XCTAssertEqual(try Data(contentsOf: precious).count, 50_000)
     }
 
-    func testSizeAndPersistenceAcrossLaunchSweep() {
-        let d = MirsaManagedTmp.begin("sz", root: root)
-        try? Data(count: 20_000).write(to: d.appendingPathComponent("a"))
-        XCTAssertGreaterThanOrEqual(MirsaManagedTmp.size(root: root), 20_000)
-        let leftover = root.appendingPathComponent("old-run"); try? FileManager.default.createDirectory(at: leftover, withIntermediateDirectories: true)
-        try? Data(count: 5).write(to: leftover.appendingPathComponent("b")); age(leftover, hours: 2)
+    func testStalePersistenceAndDistinctRootOwnership() throws {
+        let old = root.appendingPathComponent("old-run")
+        try fm.createDirectory(at: old, withIntermediateDirectories: true); age(old, hours: 2)
+        let d = try MirsaManagedTmp.begin("new", root: root)
+        defer { MirsaManagedTmp.end(d, root: root) }
+        MirsaManagedTmp.end(d, root: root.appendingPathComponent("wrong-root"))
+        XCTAssertTrue(MirsaManagedTmp.isActive(d.path))
         XCTAssertEqual(MirsaManagedTmp.sweep(root: root), 1)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: d.path))
-        MirsaManagedTmp.end(d, root: root)
-        XCTAssertEqual(MirsaManagedTmp.size(root: root), 0)
+        XCTAssertTrue(exists(d)); XCTAssertFalse(exists(old))
+    }
+
+    func testRetainedOTAArchiveSurvivesCleaning() throws {
+        let work = try MirsaManagedTmp.begin("retain-fixture")
+        defer { MirsaManagedTmp.end(work) }
+        let input = work.appendingPathComponent("Fixture.ipa")
+        try Data(count: 200).write(to: input)
+        let retained = try CertificateInstall.retain(input)
+        defer { try? fm.removeItem(at: retained.deletingLastPathComponent()) }
+        XCTAssertFalse(exists(work))
+        MirsaManagedTmp.cleanNow()
+        XCTAssertEqual(try Data(contentsOf: retained).count, 200)
+        XCTAssertFalse(MirsaManagedTmp.isOwned(retained.deletingLastPathComponent()))
+    }
+
+    @MainActor
+    func testFailedImportKeepsSourceAndReleasesWorkspace() async throws {
+        let store = AppsStore.shared
+        let source = root.appendingPathComponent("user-original.ipa")
+        try Data("not an archive".utf8).write(to: source)
+        let before = Set((try? fm.contentsOfDirectory(atPath: MirsaManagedTmp.root.path)) ?? [])
+        await store.importIPA(from: source)
+        XCTAssertNotNil(store.error); XCTAssertNil(store.pending)
+        XCTAssertTrue(exists(source))
+        let after = Set((try? fm.contentsOfDirectory(atPath: MirsaManagedTmp.root.path)) ?? [])
+        XCTAssertEqual(before, after)
+        store.error = nil
+    }
+
+    @MainActor
+    func testPendingCancelAndFailedCommitReleaseAndBusyEditorIsProtected() async throws {
+        let store = AppsStore.shared
+        XCTAssertNil(store.pending); XCTAssertNil(store.busy)
+        let d = try MirsaManagedTmp.begin("pending-test")
+        let pending = PendingImport(id: UUID(), originalIPA: d.appendingPathComponent("missing.ipa"),
+            extractedApp: d.appendingPathComponent("missing.app"), workDir: d,
+            bundleID: "test.mirsa." + UUID().uuidString.lowercased(), name: "Fixture", version: "1",
+            icon: nil, wantsNotifications: false, hasExtensions: false, sizeBytes: 0)
+        store.pending = pending
+        store.busy = "editing"
+        store.cancelPending()
+        await store.commitPending(to: .container, vm: nil)
+        MirsaManagedTmp.cleanNow()
+        XCTAssertEqual(store.pending?.id, pending.id); XCTAssertTrue(exists(d))
+        store.busy = nil
+        store.cancelPending()
+        XCTAssertNil(store.pending); XCTAssertFalse(exists(d))
+        let fail = try MirsaManagedTmp.begin("commit-failure")
+        store.pending = PendingImport(id: UUID(), originalIPA: fail.appendingPathComponent("missing.ipa"),
+            extractedApp: fail.appendingPathComponent("missing.app"), workDir: fail,
+            bundleID: pending.bundleID, name: "Fixture", version: "1", icon: nil,
+            wantsNotifications: false, hasExtensions: false, sizeBytes: 0)
+        await store.commitPending(to: .container, vm: nil)
+        XCTAssertNil(store.pending); XCTAssertFalse(exists(fail)); XCTAssertNotNil(store.error)
+        store.error = nil
     }
 }

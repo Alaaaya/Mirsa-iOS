@@ -1,8 +1,7 @@
 import Foundation
 
-/// Owned temporary workspace. Every operation (download, unzip, sign, OTA upload) gets its own directory
-/// under tmp/mirsa-managed, registered while active and deleted when it ends (success, failure or cancel).
-/// Only items directly inside that canonical root are ever deleted. Never Projects, library, archived IPAs or user files.
+/// Only newly-created, explicitly owned operation directories are eligible for cleanup.
+/// User sources, persistent exports, archives and the old unclassified tmp contents are never swept.
 enum MirsaManagedTmp {
     static let rootName = "mirsa-managed"
     static var root: URL { FileManager.default.temporaryDirectory.appendingPathComponent(rootName, isDirectory: true) }
@@ -10,80 +9,100 @@ enum MirsaManagedTmp {
     private static var active = Set<String>()
     private static var served: [String: Date] = [:]
 
-    private static func canonicalRoot(_ r: URL) -> String { r.resolvingSymlinksInPath().standardizedFileURL.path }
+    // Reject symlinks at every caller-controlled component, including the root itself.
+    // Darwin's system /var and /tmp aliases are permitted, not arbitrary parent links.
+    private static func safeRoot(_ r: URL) -> URL? {
+        let u = r.standardizedFileURL
+        guard u.isFileURL, u.path != "/" else { return nil }
+        var cursor = URL(fileURLWithPath: "/", isDirectory: true)
+        for component in u.pathComponents.dropFirst() {
+            cursor.appendPathComponent(component)
+            if (try? cursor.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
+                guard cursor.path != u.path, cursor.path == "/var" || cursor.path == "/tmp" else { return nil }
+            }
+        }
+        return u.resolvingSymlinksInPath().standardizedFileURL
+    }
 
-    /// Creates and registers a fresh directory for one operation.
+    private static func owned(_ dir: URL, base: URL) -> Bool {
+        guard let checked = safeRoot(dir), checked.deletingLastPathComponent().path == base.path,
+              (try? checked.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return false }
+        return true
+    }
+
     @discardableResult
-    static func begin(_ label: String, root r: URL? = nil) -> URL {
-        let base = r ?? root
+    static func begin(_ label: String, root r: URL? = nil) throws -> URL {
+        lock.lock(); defer { lock.unlock() }
+        guard let base = safeRoot(r ?? root) else { throw CocoaError(.fileWriteInvalidFileName) }
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        guard safeRoot(base)?.path == base.path else { throw CocoaError(.fileWriteInvalidFileName) }
         let safe = String(label.filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(24))
         let dir = base.appendingPathComponent(safe + "-" + UUID().uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        lock.lock(); active.insert(dir.lastPathComponent); lock.unlock()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)
+        active.insert(dir.path)
         return dir
     }
 
-    /// Unregisters and deletes the operation directory. Safe to call twice.
     static func end(_ dir: URL, root r: URL? = nil) {
-        lock.lock(); active.remove(dir.lastPathComponent); served[dir.lastPathComponent] = nil; lock.unlock()
-        guard isOwned(dir, root: r) else { return }
-        try? FileManager.default.removeItem(at: dir)
-    }
-
-    /// Keeps a directory (for example an OTA payload) safe from sweeps until it expires.
-    static func markServed(_ dir: URL, until: Date) { lock.lock(); served[dir.lastPathComponent] = until; lock.unlock() }
-
-    static func isActive(_ name: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if active.contains(name) { return true }
-        if let u = served[name] { if u > Date() { return true }; served[name] = nil }
-        return false
+        guard let base = safeRoot(r ?? root), owned(dir, base: base),
+              let checked = safeRoot(dir) else { return }
+        active.remove(checked.path); served[checked.path] = nil
+        try? FileManager.default.removeItem(at: checked)
     }
 
-    /// True only for a real directory (not a symlink) sitting directly inside the canonical managed root.
-    static func isOwned(_ url: URL, root r: URL? = nil) -> Bool {
-        let base = r ?? root
-        let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
-        if values?.isSymbolicLink == true { return false }
-        let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path
-        return parent == canonicalRoot(base) && url.lastPathComponent != ".." && url.lastPathComponent != "."
+    /// Transfers active ownership to a bounded consumer lease. Expiry is separate from active work.
+    static func markServed(_ dir: URL, until: Date, root r: URL? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        guard let base = safeRoot(r ?? root), owned(dir, base: base), let checked = safeRoot(dir) else { return }
+        active.remove(checked.path)
+        served[checked.path] = until
     }
 
-    /// Removes stale items (older than maxAge) that are not active or served. Returns how many were removed.
+    /// Successful producer hands ownership to its caller; caller must end after copying/consuming.
+    /// This stays active, so even manual cleaning cannot remove an in-flight consumer.
+    static func isActive(_ path: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return active.contains(path) || (served[path].map { $0 > Date() } ?? false)
+    }
+
+    static func isOwned(_ dir: URL, root r: URL? = nil) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let base = safeRoot(r ?? root) else { return false }
+        return owned(dir, base: base)
+    }
+
     @discardableResult
     static func sweep(maxAge: TimeInterval = 3600, now: Date = Date(), root r: URL? = nil) -> Int {
-        let fm = FileManager.default
-        let base = r ?? root
-        guard let items = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey, .isSymbolicLinkKey], options: []) else { return 0 }
+        lock.lock(); defer { lock.unlock() }
+        guard let base = safeRoot(r ?? root),
+              let items = try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey]) else { return 0 }
         var removed = 0
         for item in items {
-            let name = item.lastPathComponent
-            if isActive(name) { continue }
-            let v = try? item.resourceValues(forKeys: [.contentModificationDateKey, .isSymbolicLinkKey])
-            let age = now.timeIntervalSince(v?.contentModificationDate ?? now)
-            guard age > maxAge else { continue }
-            if v?.isSymbolicLink == true { try? fm.removeItem(at: item); removed += 1; continue } // removes only the link, never its target
-            guard isOwned(item, root: base) else { continue }
-            if (try? fm.removeItem(at: item)) != nil { removed += 1 }
+            guard owned(item, base: base), !active.contains(item.path) else { continue }
+            if let until = served[item.path], until > now { continue }
+            served[item.path] = nil
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? now
+            guard now.timeIntervalSince(modified) > maxAge else { continue }
+            do { try FileManager.default.removeItem(at: item); removed += 1 } catch {}
         }
         return removed
     }
 
-    /// Total bytes in the managed root (symlinks are not followed).
     static func size(root r: URL? = nil) -> Int64 {
-        let base = r ?? root
-        guard let e = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey], options: []) else { return 0 }
-        var total: Int64 = 0
+        lock.lock(); defer { lock.unlock() }
+        guard let base = safeRoot(r ?? root),
+              let e = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isSymbolicLinkKey, .fileSizeKey, .isRegularFileKey]) else { return 0 }
+        var bytes: Int64 = 0
         for case let u as URL in e {
-            let v = try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
-            if v?.isRegularFile == true { total += Int64(v?.totalFileAllocatedSize ?? 0) }
+            guard let v = try? u.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey, .isRegularFileKey]) else { continue }
+            if v.isSymbolicLink == true { e.skipDescendants(); continue }
+            if v.isRegularFile == true { bytes += Int64(v.fileSize ?? 0) }
         }
-        return total
+        return bytes
     }
 
     static var sizeText: String { ByteCountFormatter.string(fromByteCount: size(), countStyle: .file) }
-
-    /// Removes everything that is not active right now (manual cleaning button).
     @discardableResult
     static func cleanNow() -> Int { sweep(maxAge: -1) }
 }

@@ -50,7 +50,10 @@ final class DiscoveryDownloader {
     func download(_ url: URL, expectedBytes: Int64? = nil, progress: @escaping (Double) -> Void) async throws -> URL {
         if let v = DiscoveryURLPolicy.check(url) { throw Failure.unsafe(v.description) }
         #if canImport(AirliftFFI)
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent("discovery-\(UUID().uuidString).ipa")
+        let directory = try MirsaManagedTmp.begin("discovery")
+        var handedOff = false
+        defer { if !handedOff { MirsaManagedTmp.end(directory) } }
+        let dest = directory.appendingPathComponent("Download.ipa")
         let token = cancellation
         let maxBytes = UInt64(max(0, limits.maxBytes))
         let seconds = UInt64(max(1, min(1800, limits.totalTimeout)))
@@ -66,7 +69,7 @@ final class DiscoveryDownloader {
             }
         } : nil
         defer { poller?.cancel() }
-        return try await withTaskCancellationHandler(operation: {
+        let downloaded = try await withTaskCancellationHandler(operation: {
             let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
                 // Dedicated GCD worker, not a Tokio thread or a MainActor task.
                 DispatchQueue.global(qos: .utility).async {
@@ -99,6 +102,9 @@ final class DiscoveryDownloader {
             progress(1)
             return result
         }, onCancel: { token.cancel() })
+        try Task.checkCancellation()
+        handedOff = true
+        return downloaded
         #else
         // Pure Swift policy-test builds have no Rust transport. Never silently
         // restore the vulnerable unpinned URLSession path.

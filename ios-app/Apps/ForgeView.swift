@@ -123,7 +123,7 @@ struct ForgeView: View {
     private func createTarget(_ url: URL) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let localDir = MirsaManagedTmp.begin("forge-import")
+        let localDir = try MirsaManagedTmp.begin("forge-import")
         defer { MirsaManagedTmp.end(localDir) }
         let local = localDir.appendingPathComponent("target.ipa")
         try FileManager.default.copyItem(at: url, to: local)
