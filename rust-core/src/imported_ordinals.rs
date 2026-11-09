@@ -96,6 +96,49 @@ pub(super) fn rewrite(m:&mut Mach,map:&[Option<usize>])->Result<()>{
             let base=u32at(d,8)?as usize;let count=u32at(d,16)?as usize;let format=u32at(d,20)?;
             let width=match format{1=>4,2=>8,3=>16,_=>return Err("Unsupported chained imports format".into())};
             if base<28 || base.checked_add(count.checked_mul(width).ok_or("Chained count overflow")?).ok_or("Chained range overflow")?>d.len(){return Err("Chained imports outside payload".into())}
+            // Delimit every internal region before touching packed ordinals.
+            let starts=u32at(d,4)?as usize;let symbols=u32at(d,12)?as usize;
+            let imports_end=base+count*width;
+            if starts<28||symbols<28||symbols>d.len(){return Err("Invalid chained internal offsets".into())}
+            let mut spans=vec![(0usize,28usize),(base,imports_end),(symbols,d.len())];
+            let mut span=|a:usize,n:usize|->Result<()>{
+                let b=a.checked_add(n).ok_or("Chained starts overflow")?;
+                if a<28||b>d.len()||spans.iter().any(|&(x,y)|a<y&&x<b){return Err("Chained internal regions overlap or exceed payload".into())}
+                spans.push((a,b));Ok(())
+            };
+            let segs=u32at(d,starts)?as usize;
+            if segs>65536{return Err("Chained segment budget exceeded".into())}
+            let table=4usize.checked_add(segs.checked_mul(4).ok_or("Chained table overflow")?).ok_or("Chained table overflow")?;
+            span(starts,table)?;
+            for i in 0..segs{
+                let off=u32at(d,starts+4+i*4)?as usize;if off==0{continue}
+                let at=starts.checked_add(off).ok_or("Chained segment overflow")?;
+                let size=u32at(d,at)?as usize;
+                if size<22||size%2!=0{return Err("Malformed chained segment size".into())}
+                span(at,size)?;
+                let pages=u16::from_le_bytes(d[at+20..at+22].try_into().unwrap())as usize;
+                let page_size=u16::from_le_bytes(d[at+4..at+6].try_into().unwrap());
+                if !matches!(page_size,4096|16384){return Err("Unsupported chained page size".into())}
+                let slots=(size-22)/2;if pages>slots{return Err("Truncated chained page starts".into())}
+                let get=|i:usize|u16::from_le_bytes([d[at+22+i*2],d[at+23+i*2]]);
+                for page in 0..pages{
+                    let v=get(page);if v==0xffff{continue}
+                    if v&0x8000==0{if v>=page_size{return Err("Chained page start outside page".into())}}
+                    else{
+                        let mut index=(v&0x7fff)as usize;if index<pages{return Err("Chained overflow aliases page table".into())}
+                        loop{if index>=slots{return Err("Unterminated chained multi starts".into())}let v=get(index);
+                            if v&0x7fff>=page_size{return Err("Chained multi start outside page".into())}
+                            index+=1;if v&0x8000!=0{break}
+                        }
+                    }
+                }
+            }
+            for i in 0..count{
+                let p=base+i*width;let name=if format==3{u32at(d,p+4)?as usize}else{(u32at(d,p)?>>9)as usize};
+                let at=symbols.checked_add(name).ok_or("Chained symbol overflow")?;
+                if !d.get(at..).is_some_and(|s|s.contains(&0)){return Err("Invalid chained symbol name".into())}
+                if format==3 && u16::from_le_bytes([d[p+2],d[p+3]])&0xfffe!=0{return Err("Nonzero chained import reserved bits".into())}
+            }
             for i in 0..count{let p=base+i*width;let (ord,max)=if format==3{(u16::from_le_bytes([d[p],d[p+1]]) as u64,0xfff0)}else{(d[p]as u64,0xf0)};
                 // Apple's packed ordinals reserve -15..-1, not all signed i8 negatives.
                 if ord==0||ord>max{continue}let n=mapped(ord,map)?;if n>max{return Err("Chained library ordinal overflow".into())}d[p]=n as u8;if format==3{d[p+1]=(n>>8)as u8;}
