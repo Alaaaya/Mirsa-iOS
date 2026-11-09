@@ -42,6 +42,20 @@ final class PersonalProjectPerformanceTests: XCTestCase {
         try Data("new".utf8).write(to: url)
         XCTAssertNotEqual(changed, try PersonalProjectInspection.Key(url))
     }
+    func testSameSizeRewriteRechecksMetadataOnReusedURL() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("inspection-same-size-\(UUID().uuidString).ipa")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("old".utf8).write(to: url)
+        let first = try PersonalProjectInspection.Key(url)
+        try Data("new".utf8).write(to: url)
+        // Avoid relying on filesystem timestamp resolution in this regression.
+        try FileManager.default.setAttributes([.modificationDate: first.modified.addingTimeInterval(2)], ofItemAtPath: url.path)
+        let second = try PersonalProjectInspection.Key(url)
+        XCTAssertEqual(first.size, second.size)
+        XCTAssertEqual(first.path, second.path)
+        XCTAssertNotEqual(first, second, "Reused URL must not reuse cached resource values")
+    }
+
     func testInspectionRejectsSymlinkWithoutExtracting() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("inspection-link-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
