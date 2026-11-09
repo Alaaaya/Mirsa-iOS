@@ -12,6 +12,8 @@
 
 غيّرت اسم التاب الأخير تحت من «المزيد» لـ«الشهادة»، وبدّلت أيقونة الزائد بأيقونة ختم شهادة. الاسم تغيّر بكل اللغات الأربع، الشهادة بالعربي وCertificate بالإنجليزي و«بڕوانامە» بالسوراني وSertîfîka بالكرمانجي. التاب نفسه وكل اللي جواتو بقوا متل ما هنّ.
 
+وكمان وضّحت تحت «شو الجديد» إنو الوايفاي إجباري للتحديث، مع تشغيل LocalDevVPN والتأكد من ملف الاقتران. إذا كنت عالبيانات الخلوية بيطلع تنبيه واضح وبيوقف زر «حدّث هلّق». الزر بيرجع يتفعّل لحالو لما يصير الاتصال الفعلي عالوايفاي، وإذا الاتصال لسا مو مؤكّد ما بسمح يبدأ التحديث. ضفت هالشرح باللغات الأربع.
+
 English draft for the same eventual release.
 
 I added My App Store so you can sign in to your own Apple Account, enter Apple's verification code when requested, and search for apps without leaving Mirsa. The page includes a guide and explanations for its controls.
@@ -25,3 +27,5 @@ You can download apps your account owns as encrypted IPA files with their origin
 I also added requests for Apple's available older version IDs, with selection or manual entry. These are Apple's internal version identifiers, not necessarily familiar version labels. Availability and download eligibility depend on Apple and your account.
 
 The bottom More tab is now Certificate with a seal icon. I changed its title in Arabic, English, Sorani and Kurmanji. The tab still opens the same page and nothing inside it moved.
+
+I made the in-app update sheet say clearly that Wi-Fi is mandatory, along with LocalDevVPN and a valid pairing file, in all four languages. Cellular connections show a warning and disable Update now. The button reacts to the active network path and becomes available when Wi-Fi is confirmed. Unknown or disconnected paths never count as Wi-Fi.
