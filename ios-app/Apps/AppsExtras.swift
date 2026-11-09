@@ -634,6 +634,10 @@ final class MirsaUpdater: ObservableObject {
     }
 
     func install(_ rel: Release, vm: AppViewModel) async {
+        guard UpdateNetworkPath.shared.permitsUpdate else {
+            AppsStore.shared.error = UpdateNetworkPath.shared.blockedExplanation
+            return
+        }
         guard let url = rel.ipa,
               UpdaterMetadata.isNewer(remote: await actualBuild(rel), installed: Self.currentBuild) else { return }
         let store = AppsStore.shared
@@ -680,6 +684,7 @@ final class MirsaUpdater: ObservableObject {
 struct MirsaUpdateSheet: View {
     let release: MirsaUpdater.Release
     @ObservedObject var updater: MirsaUpdater
+    @ObservedObject private var updateNetwork = UpdateNetworkPath.shared
     let onUpdate: () -> Void
     @Environment(\.openURL) private var openURL
 
@@ -700,15 +705,26 @@ struct MirsaUpdateSheet: View {
                 ScrollView { releaseNotes }
             }
             .mirsaCard(radius: MirsaRadius.m)
-            Text(tr("Enable LocalDevVPN and check your pairing file.",
-                    "فعّل LocalDevVPN وتأكد من صحة ملف الاقتران."))
-                .font(.footnote).foregroundStyle(MirsaPalette.textSecondary).multilineTextAlignment(.center)
+            Text(UpdateNetworkPath.requirement)
+                .font(.footnote)
+                .foregroundStyle(updateNetwork.permitsUpdate ? MirsaPalette.textSecondary : MirsaPalette.warning)
+                .multilineTextAlignment(.center)
+            if !updateNetwork.permitsUpdate {
+                Label(updateNetwork.blockedExplanation, systemImage: "wifi.exclamationmark")
+                    .font(.footnote).foregroundStyle(MirsaPalette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("update-wifi-required")
+            }
             Spacer(minLength: 0)
-            Button(action: onUpdate) {
+            Button {
+                guard updateNetwork.permitsUpdate else { return }
+                onUpdate()
+            } label: {
                 Text(tr("Update now", "حدّث هلّق")).frame(maxWidth: .infinity)
             }
             .buttonStyle(.mirsaPrimary)
             .controlSize(.large)
+            .disabled(!updateNetwork.permitsUpdate)
             if let ipa = release.ipa {
                 Button { openURL(ipa) } label: {
                     Label(tr("Download IPA manually", "نزّل الـ IPA يدوياً"), systemImage: "arrow.down.circle")
