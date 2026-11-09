@@ -4,14 +4,16 @@ import Foundation
 public struct AuthenticationServiceError: Error, Sendable {
     public enum Stage: String, Sendable { case bag, sapCertificate, sapSetup, sapValidation, signing, authentication }
     public let stage: Stage
+    public let transport: Bool
     public let httpStatus: Int?
     public let appleCode: String?
     public let message: String?
     public let networkCode: Int?
 
     public init(stage: Stage, httpStatus: Int? = nil, appleCode: Any? = nil, message: String? = nil,
-                networkCode: Int? = nil, secrets: [String] = []) {
+                networkCode: Int? = nil, transport: Bool = false, secrets: [String] = []) {
         self.stage = stage
+        self.transport = transport
         self.httpStatus = httpStatus
         let code = (appleCode as? String) ?? (appleCode as? NSNumber)?.stringValue
         self.appleCode = code.flatMap { $0.range(of: "^-?[0-9]{1,8}$", options: .regularExpression) != nil ? $0 : nil }
@@ -19,11 +21,11 @@ public struct AuthenticationServiceError: Error, Sendable {
         self.networkCode = networkCode
     }
 
-    public static func wrapping(_ error: Error, stage: Stage) -> AuthenticationServiceError {
+    public static func wrapping(_ error: Error, stage: Stage, transport: Bool = false) -> AuthenticationServiceError {
         if let diagnostic = error as? AuthenticationServiceError { return diagnostic }
         let ns = error as NSError
         // No arbitrary errorDescription: networking errors may contain URLs or headers.
-        return .init(stage: stage, networkCode: ns.domain == NSURLErrorDomain ? ns.code : nil)
+        return .init(stage: stage, networkCode: ns.domain == NSURLErrorDomain ? ns.code : nil, transport: transport)
     }
 
     public static func redact(_ input: String?, secrets: [String]) -> String? {

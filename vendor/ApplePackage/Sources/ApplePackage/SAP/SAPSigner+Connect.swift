@@ -17,7 +17,7 @@ public extension SAPSigner {
             let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
             let response: HTTPClient.Response
             do { response = try await client.execute(request: request, delegate: accumulator).futureResult.get() }
-            catch { throw AuthenticationServiceError.wrapping(error, stage: stage) }
+            catch { throw AuthenticationServiceError.wrapping(error, stage: stage, transport: true) }
             guard response.status == .ok, let buffer = response.body, buffer.readableBytes <= 2 * 1024 * 1024,
                   let plist = try PropertyListSerialization.propertyList(from: Data(buffer.readableBytesView), format: nil) as? [String: Any],
                   let data = plist[key] as? Data, !data.isEmpty, data.count <= 1 << 20

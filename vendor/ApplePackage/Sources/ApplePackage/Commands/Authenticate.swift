@@ -57,7 +57,7 @@ public actor Authenticator {
             let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
             let response: HTTPClient.Response
             do { response = try await client.execute(request: request, delegate: accumulator).futureResult.get() }
-            catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication) }
+            catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
             let result = try parseResponse(response, email: email, password: password, code: code)
             switch result {
             case let .success(account): return account
@@ -120,9 +120,10 @@ public actor Authenticator {
     }
 
     static func rejection(_ fields: [String: Any], status: Int, secrets: [String]) -> AuthenticationServiceError {
-        .init(stage: .authentication, httpStatus: status, appleCode: fields["failureType"],
+        let knownSecrets = ["passwordToken", "dsPersonId", "appleId", "password", "token", "cookie"].compactMap { fields[$0] as? String }
+        return .init(stage: .authentication, httpStatus: status, appleCode: fields["failureType"],
               message: (fields["dialog"] as? [String: Any])?["explanation"] as? String
-                ?? fields["customerMessage"] as? String, secrets: secrets)
+                ?? fields["customerMessage"] as? String, secrets: secrets + knownSecrets)
     }
 
     private func parseResponse(_ response: HTTPClient.Response, email: String, password: String, code: String) throws -> LoginResponse {
