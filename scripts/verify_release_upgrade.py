@@ -16,7 +16,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     names = [n for n in archive.namelist() if n.startswith("Payload/") and n.count("/") == 2 and n.endswith(".app/Info.plist")]
     assert len(names) == 1
     current = plistlib.loads(archive.read(names[0]))
-    assert current["CFBundleShortVersionString"] == "1.4"
+    assert current["CFBundleShortVersionString"] == "1.5"
     for name in archive.namelist():
         if name.endswith(".appex/Info.plist"):
             ext = plistlib.loads(archive.read(name))
@@ -32,7 +32,9 @@ with tempfile.TemporaryDirectory() as tmp:
         ", installed: " + json.dumps(old) + "))\n" +
         "precondition(!UpdaterMetadata.isNewer(remote: " + json.dumps(old) +
         ", installed: " + json.dumps(new) + "))\n" +
-        'precondition(UpdaterMetadata.isNewer(remote: "1.4", installed: "1.3.243"))\n' +
+        'precondition(UpdaterMetadata.isNewer(remote: "1.5", installed: "1.3.243"))\n' +
+        'precondition(UpdaterMetadata.isNewer(remote: "1.5", installed: "1.4"))\n' +
+        'precondition(!UpdaterMetadata.isNewer(remote: "1.4", installed: "1.5"))\n' +
         'print("Actual 243 updater migration PASS")\n'
     ).encode())
     subprocess.run(["swift", str(script)], check=True)
