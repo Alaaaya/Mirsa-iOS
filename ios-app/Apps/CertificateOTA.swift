@@ -46,6 +46,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
     static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
         try control.checkpoint()
         try Task.checkCancellation()
+        let projectRevision = projectID.map { ProjectArtifactRevision.current($0) }
         signingProgress?(PersonalSigningEvent(stage: .preparing))
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }
@@ -80,10 +81,15 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
             let relative = kept.path.replacingOccurrences(of: base.path + "/", with: "")
             UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)
+            if let projectRevision { ProjectArtifactRevision.record(projectRevision, project: projectID) }
         }
         do {
         try control.checkpoint()
         try Task.checkCancellation()
+        if let projectID, let projectRevision,
+           !ProjectArtifactRevision.isCurrent(projectRevision, project: projectID) {
+            throw SideloadError.message("Draft changed. Sign again before installing.")
+        }
         // Signing can change bundle ID, version and display name. The manifest
         // must describe the exact retained archive sent to either upload host.
         // The signer already validated/extracted the input and read this exact
@@ -122,6 +128,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
                         OTARouteLog.active?.stop(); OTARouteLog.active = server
                         signingProgress?(PersonalSigningEvent(stage: .serving))
                         try control.checkpoint()
+                        if let projectID, let projectRevision,
+                           !ProjectArtifactRevision.isCurrent(projectRevision, project: projectID) {
+                            throw SideloadError.message("Draft changed. Sign again before installing.")
+                        }
                         _ = await UIApplication.shared.open(target)  // success here does NOT prove download
                         let got = await withTaskCancellationHandler { await server.awaitFirstRequest(timeout: 15) } onCancel: { server.stop() }
                         try control.checkpoint()
@@ -169,6 +179,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         signingProgress?(PersonalSigningEvent(stage: .uploading, fraction: 1))
         signingProgress?(PersonalSigningEvent(stage: .connecting))
         let target = try OTAInstallLink.make(manifestURL: manifestURL)
+        if let projectID, let projectRevision,
+           !ProjectArtifactRevision.isCurrent(projectRevision, project: projectID) {
+            throw SideloadError.message("Draft changed. Sign again before installing.")
+        }
         guard await UIApplication.shared.open(target) else {
             throw SideloadError.message(personalText("iOS could not open installation. Try again.", "iOS ما فتح التثبيت. جرب مرة تانية."))
         }

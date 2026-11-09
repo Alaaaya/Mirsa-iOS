@@ -20,6 +20,7 @@ struct PersonalProjectDetailView: View {
     private var busy: Bool { configBusy || signing.running }
     @State private var message: String?
     @State private var resultAlert: String?
+    @State private var revisionDraft: PersonalProjectDraft?
     @State private var output: URL?
     @State private var sharing = false
     @State private var icon: UIImage?
@@ -148,7 +149,17 @@ struct PersonalProjectDetailView: View {
         } message: { Text(resultAlert ?? "") }
         .task { await load(); await inspect(); consumeSigningResult() }
         .onChange(of: signing.state?.running) { _ in consumeSigningResult() }
-        .onChange(of: draft) { _ in if loaded, let destination = draftDestination { draftWriter.schedule(draft, to: destination) } }
+        .onChange(of: draft) { _ in if loaded, let destination = draftDestination {
+            var snapshot = draft
+            snapshot.appliedTweakIDs = nil
+            if snapshot != revisionDraft {
+                ProjectArtifactRevision.invalidate(app.id)
+                output = nil
+                sharing = false
+            }
+            revisionDraft = snapshot
+            draftWriter.schedule(draft, to: destination)
+        } }
         .onChange(of: scenePhase) { phase in if phase != .active { draftWriter.flush() } }
         .onDisappear { draftWriter.flush(); if !sharing { cleanOutput() } }
     }
@@ -438,11 +449,11 @@ struct PersonalProjectDetailView: View {
         let signedBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
         if let relative = UserDefaults.standard.string(forKey: "mirsa.project.signed." + app.id.uuidString),
            let signed = try? PersonalProjectFolder.validated(signedBase.appendingPathComponent(relative), in: signedBase) {
-            add(MirsaTr.lit("Signed IPA"), signed)
+            add(sgText("Historical signed IPA", "IPA موقّع سابق", "IPAی واژۆکراوی پێشوو", "IPA ya berê îmzekirî"), signed)
         }
         if let output { add(MirsaTr.lit("Exported IPA"), output) }
         if let state = signing.state, state.projectID == app.id, let file = state.result?.url {
-            add(MirsaTr.lit("Signed IPA"), file)
+            add(sgText("Historical signed IPA", "IPA موقّع سابق", "IPAی واژۆکراوی پێشوو", "IPA ya berê îmzekirî"), file)
         }
         return result
     }
@@ -527,6 +538,9 @@ struct PersonalProjectDetailView: View {
         if let data = try? Data(contentsOf: library.draftURL(app)),
            let saved = try? JSONDecoder().decode(PersonalProjectDraft.self, from: data) { d = saved }
         draftDestination = library.draftURL(app)
+        var snapshot = d
+        snapshot.appliedTweakIDs = nil
+        revisionDraft = snapshot
         draft = d; loaded = true
     }
     private func reloadIdentities() {
@@ -536,7 +550,6 @@ struct PersonalProjectDetailView: View {
         } catch { message = error.localizedDescription }
     }
     private func cleanOutput() {
-        if let output, output != signing.state?.result?.url { try? FileManager.default.removeItem(at: output.deletingLastPathComponent()) }
         output = nil
     }
 
@@ -581,6 +594,7 @@ struct PersonalProjectDetailView: View {
         } catch { message = error.localizedDescription; return }
         let input = library.url(app)
         let signingOptions = options
+        let exportRevision = ProjectArtifactRevision.current(app.id)
         if let material {
             signing.start(projectID: app.id, title: app.name, input: input, material: material,
                           pairingPath: PairingController.pairingFilePath(), options: signingOptions)
@@ -589,10 +603,16 @@ struct PersonalProjectDetailView: View {
         configBusy = true
         Task {
             do {
-                output = try await Task.detached(priority: .userInitiated) {
+                let exported = try await Task.detached(priority: .userInitiated) {
                     try PersonalCertificateSigner.exportConfigurationOnly(ipa: input, options: signingOptions)
                 }.value
+                guard ProjectArtifactRevision.isCurrent(exportRevision, project: app.id) else {
+                    message = sgText("Draft changed. Export is historical; export again.", "تغيّرت الإعدادات. النسخة سابقة؛ صدّر من جديد.", "ڕەشنووس گۆڕا. دووبارە هەناردە بکە.", "Pêşnivîs guherî. Dîsa derxe.")
+                    configBusy = false
+                    return
+                }
                 draft.appliedTweakIDs = draft.tweakIDs
+                output = exported
                 message = personalText("Configuration applied. This IPA is NOT signed.", "انطبقت الإعدادات. هاد الـ IPA غير موقّع.")
                 sharing = true
             } catch { message = error.localizedDescription }
@@ -616,6 +636,7 @@ struct PersonalProjectDetailView: View {
             message = (text?.isEmpty == false) ? text : personalText("Signing stopped before it finished. Try again.", "توقف التوقيع قبل ما يكتمل. جرّب من جديد.")
             resultAlert = message; return
         }
+        guard ProjectArtifactRevision.signedIsCurrent(app.id) else { return }
         output = result.url
         draft.appliedTweakIDs = draft.tweakIDs
         if result.installed { message = personalText("Signed and installed.", "تم التوقيع والتثبيت.") }

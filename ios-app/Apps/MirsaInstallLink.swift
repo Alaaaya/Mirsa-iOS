@@ -13,7 +13,15 @@ import CoreImage.CIFilterBuiltins
         let title: String
         let bytes: Int
     }
-    static func create(signedIPA: URL) async throws -> Link {
+    static func create(signedIPA: URL, projectID: UUID? = nil) async throws -> Link {
+        let revision = projectID.map { ProjectArtifactRevision.current($0) }
+        func requireCurrent() throws {
+            if let projectID, let revision,
+               (!ProjectArtifactRevision.isCurrent(revision, project: projectID) || !ProjectArtifactRevision.signedIsCurrent(projectID)) {
+                throw SideloadError.message("Draft changed. Sign again before creating a link.")
+            }
+        }
+        try requireCurrent()
         let unsignedMessage = linkText("Choose a signed IPA.", "اختار IPA موقّع.", "IPAی واژۆکراو هەڵبژێرە.", "IPA ya îmzekirî hilbijêre.")
         let identityMessage = linkText("Missing application identity.", "معلومات هوية التطبيق ناقصة.", "ناسنامەی ئەپەکە کەمە.", "Nasnameya sepanê kêm e.")
         let metadata: Metadata = try await Task.detached {
@@ -46,6 +54,7 @@ import CoreImage.CIFilterBuiltins
         config.httpCookieStorage = nil
         let session = URLSession(configuration: config, delegate: OTANoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
+        try requireCurrent()
         let (data, response) = try await session.upload(for: request, from: bytes)
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -61,6 +70,7 @@ import CoreImage.CIFilterBuiltins
               expires.timeIntervalSinceNow <= 172860 else {
             throw SideloadError.message(linkText("Link unavailable. Check your session or upload quota.", "الرابط مو متاح. تأكد من تسجيل الدخول وحد الرفع.", "بەستەر بەردەست نییە. چوونەژوورەوە و سنووری بارکردن بپشکنە.", "Girêdan ne berdest e. Têketin û sînorê barkirinê kontrol bike."))
         }
+        try requireCurrent()
         return Link(shareURL: url, expiresAt: expires)
     }
     private static func parseDate(_ value: String) -> Date? {
@@ -76,6 +86,7 @@ private func linkText(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) 
 /// Embed for an existing signed export, never for an unsigned configuration export.
 struct MirsaInstallLinkView: View {
     let signedIPA: URL
+    var projectID: UUID? = nil
     @State private var link: MirsaInstallLink.Link?
     @State private var busy = false
     @State private var error: String?
@@ -106,7 +117,7 @@ struct MirsaInstallLinkView: View {
             Button(linkText("Create link", "إنشاء رابط", "بەستەر دروست بکە", "Girêdanê çêke")) {
                 busy = true; error = nil; link = nil
                 Task {
-                    do { link = try await MirsaInstallLink.create(signedIPA: signedIPA) }
+                    do { link = try await MirsaInstallLink.create(signedIPA: signedIPA, projectID: projectID) }
                     catch { self.error = error.localizedDescription }
                     busy = false
                 }
@@ -128,12 +139,13 @@ struct MirsaProjectInstallLink: View {
     let projectID: UUID
     let latest: URL?
     private var signed: URL? {
+        guard ProjectArtifactRevision.signedIsCurrent(projectID) else { return nil }
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
         if let latest, let safe = try? PersonalProjectFolder.validated(latest, in: root) { return safe }
         guard let relative = UserDefaults.standard.string(forKey: "mirsa.project.signed." + projectID.uuidString) else { return nil }
         return try? PersonalProjectFolder.validated(root.appendingPathComponent(relative), in: root)
     }
     var body: some View {
-        if let signed { MirsaInstallLinkView(signedIPA: signed).id(signed.path) }
+        if let signed { MirsaInstallLinkView(signedIPA: signed, projectID: projectID).id(signed.path) }
     }
 }
