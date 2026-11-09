@@ -72,8 +72,10 @@ final class AppsStore: ObservableObject {
     var downloadOperationID: UUID?
     @Published var pending: PendingImport? = nil
     @Published var prompt: SideloadPrompt? = nil
+    @Published var errorOffersSettings = false
     @Published var error: String? = nil {
         didSet {
+            if error == nil { errorOffersSettings = false }
             if let error {
                 let safe = InstallErrorText.sanitize(error, arabic: L.isArabic)
                 if safe != error { self.error = safe }
@@ -226,22 +228,40 @@ final class AppsStore: ObservableObject {
 
     /// This prerequisite belongs only to Apple ID real-app installs/renewals.
     /// Import, editing, library and certificate OTA never call it.
-    func realAppNetworkReady(_ vm: AppViewModel?, selfUpdate: Bool = false) -> Bool {
+    func realAppNetworkReady(_ vm: AppViewModel?, selfUpdate: Bool = false) async -> Bool {
         let ip = vm?.deviceIP ?? "10.7.0.1"
-        let status = NetworkStatus.summarize(deviceIP: ip)
-        guard status.wifi else {
-            error = selfUpdate
-                ? tr("Updating needs Wi-Fi + LocalDevVPN", "التحديث بدو واي فاي + LocalDevVPN")
-                : tr("Real app installation needs Wi-Fi + LocalDevVPN", "التثبيت الحقيقي بدو واي فاي + LocalDevVPN")
+        let path = await WiFiPathMonitor.shared.resolve()
+        let en0 = NetworkStatus.summarize(deviceIP: ip).wifi
+        let what = selfUpdate ? tr("Updating", "التحديث") : tr("Real app installation", "التثبيت الحقيقي")
+        switch WiFiPathPolicy.verdict(path: path, en0HasAddress: en0) {
+        case .allow: break
+        case .needWiFi:
+            fail(tr("\(what) needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.",
+                    "\(what) بدو واي فاي مو بيانات الموبايل. وصّل على الواي فاي وخلّي LocalDevVPN شغّال وجرّب مرة تانية."),
+                 offersSettings: true)
+            return false
+        case .undetermined:
+            fail(tr("Could not confirm your connection yet. Wait a moment and try again.",
+                    "ما قدرت أتأكد من الاتصال هلأ. استنى شوي وجرّب مرة تانية."),
+                 offersSettings: false)
             return false
         }
         guard networkReady(vm) else {
-            error = selfUpdate
-                ? tr("Updating needs Wi-Fi + LocalDevVPN", "التحديث بدو واي فاي + LocalDevVPN")
-                : tr("Real app installation needs Wi-Fi + LocalDevVPN", "التثبيت الحقيقي بدو واي فاي + LocalDevVPN")
+            fail(tr("\(what) needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.",
+                    "\(what) بدو LocalDevVPN شغّال وملف اقتران. شغّل LocalDevVPN وجرّب مرة تانية."),
+                 offersSettings: true)
             return false
         }
-        return DeviceConnectionPolicy.mayInstallRealApp(wifi: status.wifi, tunnelRoute: status.vpn, hasPairing: true)
+        return true
+    }
+
+    private func fail(_ message: String, offersSettings: Bool) {
+        errorOffersSettings = offersSettings
+        error = message
+    }
+
+    static func openWiFiSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
     }
 
     // MARK: Account
@@ -740,7 +760,7 @@ final class AppsStore: ObservableObject {
         }
         let alreadyReal = app.location == .real && apps.contains(where: { $0.id == app.id && $0.location == .real })
         if !alreadyReal && slotsLeft <= 0 { error = L.t("choice.full"); return false }
-        guard realAppNetworkReady(vm) else { return false }
+        guard await realAppNetworkReady(vm) else { return false }
         guard await ensureSession() else { error = L.t("err.notSignedIn"); return false }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }
@@ -881,7 +901,7 @@ final class AppsStore: ObservableObject {
                     outcome: activitySucceeded ? .success : operationOutcome)
             }
         }
-        guard realAppNetworkReady(vm, selfUpdate: true) else { return }
+        guard await realAppNetworkReady(vm, selfUpdate: true) else { return }
         guard await ensureSession() else { error = L.t("err.notSignedIn"); return }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }
