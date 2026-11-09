@@ -27,6 +27,8 @@ final class PersonalSigningOperation: ObservableObject {
         var fraction: Double?
         var completedUnits: UInt64 = 0
         var totalUnits: UInt64 = 0
+        /// Set only when the local route was tried/skipped and upload was used instead.
+        var fallbackReason: OTAUploadReason?
         /// Overall weighted work completion, not a prediction of elapsed time.
         /// Within a stage use measured units/bytes only. A pending installer never reaches 100%.
         var overallFraction: Double {
@@ -64,9 +66,10 @@ final class PersonalSigningOperation: ObservableObject {
                 nextFraction = max(current, event.fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } ?? current)
             } else { nextFraction = event.fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } }
             let nextCompleted = sameStage ? max(completedUnits, event.completed) : event.completed
-            guard stage != event.stage || fraction != nextFraction ||
+            let nextReason = event.fallbackReason ?? fallbackReason
+            guard stage != event.stage || fraction != nextFraction || nextReason != fallbackReason ||
                     completedUnits != nextCompleted || totalUnits != event.total else { return false }
-            stage = event.stage; fraction = nextFraction
+            stage = event.stage; fraction = nextFraction; fallbackReason = nextReason
             completedUnits = nextCompleted; totalUnits = event.total
             return true
         }
@@ -185,6 +188,7 @@ struct PersonalSigningEvent {
     var fraction: Double? = nil
     var completed: UInt64 = 0
     var total: UInt64 = 0
+    var fallbackReason: OTAUploadReason? = nil
 }
 /// Shared only for cooperative cancellation checks, never secrets or file paths.
 final class PersonalSigningControl: @unchecked Sendable {
@@ -212,6 +216,11 @@ struct PersonalSigningProgressView: View {
             Text(PersonalSigningLabels.weighted).font(.caption2).foregroundStyle(.secondary)
             if state.stage == .signing, state.totalUnits > 0 {
                 Text(personalText("Signed bundles", "الحزم الموقّعة") + " \(state.completedUnits)/\(state.totalUnits)").font(.caption).foregroundStyle(.secondary)
+            }
+            if let reason = state.fallbackReason {
+                Text(personalText("Local install unavailable, using upload instead. ", "التثبيت المحلي مو متاح، استخدمت الرفع. ") + personalText(reason.english, reason.arabic))
+                    .font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("personalSigningFallbackReason")
             }
             if state.backgroundExpired {
                 Text(personalText("Background time ended. Keep Mirsa open to see the result.",

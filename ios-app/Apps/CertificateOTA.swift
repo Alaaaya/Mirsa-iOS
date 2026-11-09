@@ -99,28 +99,35 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let size = ((try? fm.attributesOfItem(atPath: kept.path))?[.size] as? NSNumber)?.int64Value ?? 0
         let title = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bundleID
         // Local route: HTTPS manifest from our broker, IPA bytes served from 127.0.0.1 on this device.
-        // The stage only says "serving" when the listener is truly running; any failure falls back with a reason.
+        // "Serving" is announced only with a running listener AND a reachable manifest. Handoff is only reported
+        // after iOS actually requested the IPA from us; otherwise we stop and use upload with the real reason.
         var fallback: OTAUploadReason?
         switch OTARouteSelector.select(fileReadable: fm.isReadableFile(atPath: kept.path) && size > 0) {
         case .upload(let reason): fallback = reason
         case .local:
-            let server = try? LocalOTAServer(file: kept)
-            if let server, let port = try? await server.start(),
-               let manifest = LocalOTAManifest.url(base: endpoint, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
-               let target = try? OTAInstallLink.make(manifestURL: manifest) {
-                OTARouteLog.active?.stop(); OTARouteLog.active = server
-                signingProgress?(PersonalSigningEvent(stage: .serving))
-                if await UIApplication.shared.open(target) {
-                    signingProgress?(PersonalSigningEvent(stage: .handedOff))
-                    return signed.verification
-                }
-                server.stop(); fallback = .installerRefused
-            } else {
-                server?.stop()
-                fallback = server == nil ? .fileUnavailable : (server!.port == 0 ? .serverStartFailed : .manifestUnreachable)
-            }
+            if let server = try? LocalOTAServer(file: kept) {
+                var bg = UIBackgroundTaskIdentifier.invalid
+                bg = UIApplication.shared.beginBackgroundTask(withName: "Mirsa local OTA") { server.stop() }
+                server.onStop = { DispatchQueue.main.async { if bg != .invalid { UIApplication.shared.endBackgroundTask(bg); bg = .invalid } } }
+                if let port = try? await server.start() {
+                    if let manifest = LocalOTAManifest.url(base: endpoint, port: port, token: server.token, bundleID: bundleID, version: version, title: title, bytes: size),
+                       let target = try? OTAInstallLink.make(manifestURL: manifest),
+                       await LocalOTAManifest.preflight(manifest, port: port) {
+                        OTARouteLog.active?.stop(); OTARouteLog.active = server
+                        signingProgress?(PersonalSigningEvent(stage: .serving))
+                        try control.checkpoint()
+                        _ = await UIApplication.shared.open(target)  // success here does NOT prove download
+                        if await server.awaitFirstRequest(timeout: 15) {
+                            signingProgress?(PersonalSigningEvent(stage: .handedOff))
+                            return signed.verification
+                        }
+                        server.stop(); OTARouteLog.active = nil; fallback = .noInstallerRequest
+                    } else { server.stop(); fallback = .manifestUnreachable }
+                } else { server.stop(); fallback = .serverStartFailed }
+            } else { fallback = .fileUnavailable }
         }
         OTARouteLog.last = fallback
+        if let fallback { signingProgress?(PersonalSigningEvent(stage: .uploading, fallbackReason: fallback)) }
         let plan = try OTAChunkPlan(total: size)
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
