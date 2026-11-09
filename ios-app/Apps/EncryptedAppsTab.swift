@@ -18,7 +18,6 @@ struct EncryptedAppsTab: View {
                     LanguageGlobeMenu(size: MirsaIconSize.button)
                 }
                 introCard
-                EncryptedStoreSection()
                 importButton
                 if store.entries.isEmpty {
                     emptyCard
@@ -111,21 +110,16 @@ struct EncryptedAppsTab: View {
             Image(systemName: "lock.doc").font(.largeTitle).foregroundStyle(MirsaPalette.textTertiary)
             Text(t("No encrypted IPAs yet", "لسّا ما في IPA مشفّرة", "هێشتا هیچ IPAیەکی شفرەکراو نییە", "Hêj IPA ya şîfrekirî tune"))
                 .font(MirsaFont.cardTitle).foregroundStyle(.white)
-            Text(t("Import one from Files, or download from the App Store above.",
-                   "استورد واحد من الملفات، أو نزّل من App Store فوق.",
-                   "یەکێک لە Files هاوردە بکە، یان لە App Store سەرەوە دایبگرە.",
-                   "Yekê ji Files bîne, an ji App Store li jor daxe."))
+            Text(t("Import an App Store IPA from Files.",
+                   "استورد IPA من App Store من الملفات.",
+                   "IPAیەکی App Store لە Files هاوردە بکە.",
+                   "IPA yeke App Store ji Files bîne."))
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary).multilineTextAlignment(.center)
         }
         .padding(MirsaSpacing.xl)
         .frame(maxWidth: .infinity)
         .mirsaCard()
     }
-}
-
-/// Phase 2 fills this with the on-device App Store sign-in and download.
-struct EncryptedStoreSection: View {
-    var body: some View { EmptyView() }
 }
 
 private struct EncryptedEntryCard: View {
