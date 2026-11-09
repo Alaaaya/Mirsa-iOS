@@ -78,13 +78,13 @@ fn resolve(root:&Path,owner:&Path,name:&str,cmds:&[Cmd])->Result<Option<String>>
  Ok(if candidates.len()==1{Some(candidates[0].strip_prefix(root).map_err(err)?.to_str().ok_or("Non UTF8 path")?.into())}else{None})
 }
 fn binaries(app:&Path)->Result<Vec<PathBuf>> {
- checked_tree(app)?;let mut files=Vec::new();walk(app,&mut files)?;
+ tweak_targets::checked_tree(app)?;let mut files=Vec::new();walk(app,&mut files)?;
  let mut out=Vec::new();for p in files {if !p.is_file(){continue}let mut f=File::open(&p).map_err(err)?;let mut magic=[0;4];if f.read(&mut magic).map_err(err)?!=4{continue}
  if matches!(magic,[0xcf,0xfa,0xed,0xfe]|[0xca,0xfe,0xba,0xbe]|[0xbe,0xba,0xfe,0xca]|[0xca,0xfe,0xba,0xbf]|[0xbf,0xba,0xfe,0xca]){out.push(p)}
  }out.sort();Ok(out)
 }
 fn graph(app:&Path)->Result<Vec<Library>> {
- checked_tree(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut out:Vec<Library>=Vec::new();
+ tweak_targets::checked_tree(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut out:Vec<Library>=Vec::new();
  for p in binaries(&app)? {
   let d=read_macho(&p)?;let owner=p.strip_prefix(&app).map_err(err)?.to_str().ok_or("Non UTF8 owner")?.to_owned();
   for (a,b) in ranges(&d)? {let s=&d[a..b];if s[..4]!=[0xcf,0xfa,0xed,0xfe]{continue}let cmds=commands(s)?;let arch=format!("{:x}:{:x}",u32at(s,4)?,u32at(s,8)?);
