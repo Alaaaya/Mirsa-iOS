@@ -148,15 +148,20 @@ enum ForgeChatImage {
     }
 
     func refreshThreads() async {
-        struct W: Decodable { let threads: [ForgeChatThread] }
-        guard let d = try? await call(["action": "chat-list"]), let w = try? JSONDecoder().decode(W.self, from: d) else { return }
+        struct Lossy: Decodable { let value: ForgeChatThread?; init(from d: Decoder) throws { value = try? ForgeChatThread(from: d) } }
+        struct W: Decodable { let threads: [Lossy] }
+        guard let d = try? await call(["action": "chat-list"]), let w0 = try? JSONDecoder().decode(W.self, from: d) else { return }
+        let w = (threads: w0.threads.compactMap(\.value), ())
         threads = w.threads.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
     func read(_ id: UUID) async {
         if !serverKnows(id) { return } // pending first message: nothing to read yet (avoids repeated 404)
-        struct W: Decodable { let messages: [ForgeChatMessage] }
-        guard let d = try? await call(["action": "chat-read", "threadID": id.uuidString.lowercased()]), let w = try? JSONDecoder().decode(W.self, from: d) else { return }
+        struct Lossy: Decodable { let value: ForgeChatMessage?; init(from d: Decoder) throws { value = try? ForgeChatMessage(from: d) } }
+        struct W: Decodable { let messages: [Lossy] }
+        guard let d = try? await call(["action": "chat-read", "threadID": id.uuidString.lowercased()]), let raw = try? JSONDecoder().decode(W.self, from: d) else { return }
+        // One undecodable message must never hide the others (operator replies were not showing).
+        let w = (messages: raw.messages.compactMap(\.value), ())
         messages[id] = w.messages
         if w.messages.contains(where: { $0.role == "result" && !handledResults.contains($0.id) }) {
             for m in w.messages where m.role == "result" { handledResults.insert(m.id) }
@@ -226,6 +231,7 @@ struct ForgeChatThreadView: View {
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
     @State private var started = false
+    @Environment(\.scenePhase) private var scenePhase
     private var msgs: [ForgeChatMessage] { store.messages[threadID] ?? [] }
     private var queued: [ForgeChatOutgoing] { store.outgoing.filter { o in o.threadID == threadID && !msgs.contains { $0.id == o.id } } }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
@@ -264,6 +270,8 @@ struct ForgeChatThreadView: View {
             guard let item else { return }
             Task { jpeg = (try? await item.loadTransferable(type: Data.self)).flatMap { ForgeChatImage.prepare($0) } }
         }
+        .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
+        .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
             while !Task.isCancelled { await store.read(threadID); try? await Task.sleep(nanoseconds: 8_000_000_000) }
         }
