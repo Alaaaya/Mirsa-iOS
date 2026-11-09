@@ -4,13 +4,14 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        case pairing, device, tweaks
+        case tweaks, create, device, pairing
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .pairing: return "antenna.radiowaves.left.and.right"
             case .device: return "iphone.gen3"
                 case .tweaks: return "wand.and.stars"
+            case .create: return "bubble.left.and.bubble.right"
             }
         }
     }
@@ -27,6 +28,7 @@ struct ToolsTab: View {
                 switch section {
                 case .pairing: SetupPairingSheet(showsClose: false)
                 case .device: DeviceToolsView()
+                case .create: ForgeChatRoot(embedded: true).environment(\.layoutDirection, .leftToRight)
                 case .tweaks: NavigationView { ForgeView() }.navigationViewStyle(.stack)
                 }
             }
@@ -45,7 +47,7 @@ struct ToolsTab: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
-                        Text(s == .device ? tr("Device", "الجهاز") : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity)
@@ -64,5 +66,6 @@ struct ToolsTab: View {
         }
         .padding(4)
         .appsGlassCapsule()
+        .environment(\.layoutDirection, .leftToRight)
     }
 }
