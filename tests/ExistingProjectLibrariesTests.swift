@@ -70,4 +70,41 @@ final class ExistingProjectLibrariesTests: XCTestCase {
         XCTAssertNil(lib.bundledPath)
         XCTAssertEqual(lib.provenance, "unresolvedDependency")
     }
+    func testBackendGraphAcceptsThinArm64eWithoutGenericSlice() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("arm64e-graph-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var thin = macho(["@rpath/Arm64eOnly.dylib"])
+        put(2, into: &thin, at: 8)
+        try thin.write(to: root.appendingPathComponent("Main"))
+        let graph = try IPAEditorService.existingLibraries(in: root)
+        XCTAssertEqual(graph.map(\.loadPath), ["@rpath/Arm64eOnly.dylib"])
+        XCTAssertEqual(graph.first?.slices, ["100000c:2"])
+    }
+
+    func testBackendGraphAcceptsUniversalArm64eWithoutGenericSlice() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("fat-arm64e-graph-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var thin = macho(["@rpath/UniversalArm64eOnly.dylib"])
+        put(2, into: &thin, at: 8)
+        var fat = Data(repeating: 0, count: 4096)
+        func big(_ value: UInt32, at offset: Int) {
+            var be = value.bigEndian
+            withUnsafeBytes(of: &be) { fat.replaceSubrange(offset..<offset + 4, with: $0) }
+        }
+        big(0xcafebabe, at: 0)
+        big(1, at: 4)
+        big(0x0100000c, at: 8)
+        big(2, at: 12)
+        big(4096, at: 16)
+        big(UInt32(thin.count), at: 20)
+        big(12, at: 24)
+        fat.append(thin)
+        try fat.write(to: root.appendingPathComponent("Main"))
+        let graph = try IPAEditorService.existingLibraries(in: root)
+        XCTAssertEqual(graph.map(\.loadPath), ["@rpath/UniversalArm64eOnly.dylib"])
+        XCTAssertEqual(graph.first?.slices, ["100000c:2"])
+    }
+
 }
