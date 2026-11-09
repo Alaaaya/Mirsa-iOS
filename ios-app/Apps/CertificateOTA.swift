@@ -43,10 +43,10 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         return bytes
     }
     @discardableResult
-    static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
+    static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, capturedProjectRevision: String? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
         try control.checkpoint()
         try Task.checkCancellation()
-        let projectRevision = projectID.map { ProjectArtifactRevision.current($0) }
+        let projectRevision = capturedProjectRevision ?? projectID.map { ProjectArtifactRevision.current($0) }
         signingProgress?(PersonalSigningEvent(stage: .preparing))
         let selectedMaterial: PersonalIdentityVault.Material
         if let explicitMaterial { selectedMaterial = explicitMaterial }

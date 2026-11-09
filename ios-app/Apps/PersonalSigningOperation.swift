@@ -87,6 +87,7 @@ final class PersonalSigningOperation: ObservableObject {
         if let previous = state?.result?.url {
             try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
         }
+        let projectRevision = ProjectArtifactRevision.current(projectID)
         let id = UUID()
         let control = PersonalSigningControl()
         self.control = control
@@ -104,7 +105,7 @@ final class PersonalSigningOperation: ObservableObject {
         Task {
             do {
                 do {
-                    _ = try await CertificateOTA.install(source: input, sourceIsArchive: true, control: control, material: material, options: options, projectID: projectID,
+                    _ = try await CertificateOTA.install(source: input, sourceIsArchive: true, control: control, material: material, options: options, projectID: projectID, capturedProjectRevision: projectRevision,
                         signingProgress: { event in self.receive(event, id: id, operation: operation) })
                     self.state?.running = false
                     self.state?.stage = .handedOff
