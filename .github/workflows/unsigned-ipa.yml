@@ -20,6 +20,9 @@ jobs:
           sudo xcode-select -s "$XC"
           xcodebuild -version
 
+      - name: Validate on-device App Store backend without simulator
+        run: bash scripts/appstore/package-tests.sh
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
