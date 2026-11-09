@@ -353,12 +353,17 @@ extension Color {
 
 struct SourcesTab: View {
     var onSelectIPA: ((URL) async throws -> Void)? = nil
-    @StateObject private var store = SourcesStore.shared
+    @StateObject private var store: SourcesStore
     @ObservedObject private var installedApps = AppsStore.shared
     @State private var adding = false
     @State private var sharingURL: URL?
     @State private var input = ""
     @State private var finding = false
+
+    init(onSelectIPA: ((URL) async throws -> Void)? = nil, store: SourcesStore = .shared) {
+        self.onSelectIPA = onSelectIPA
+        _store = StateObject(wrappedValue: store)
+    }
 
     var body: some View {
         NavigationStack {

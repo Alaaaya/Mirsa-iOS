@@ -26,8 +26,7 @@ final class ExistingProjectLibrariesUITests: XCTestCase {
         XCTAssertEqual(edits, [ExistingLibraryEdit(owner: "App", removed: ["@rpath/B.framework/B"], order: [])])
         edits = ExistingLibraryPlan.move(libs[2], by: -1, libs: libs, in: edits)
         let e = ExistingLibraryPlan.effective(libs, owner: "App", edits: edits)
-        XCTAssertEqual(e.map(\.lib.loadPath), ["@rpath/A.framework/A", "@rpath/C.dylib", "@rpath/B.framework/B"].sorted { a, b in
-            ["@rpath/A.framework/A", "@rpath/C.dylib", "@rpath/B.framework/B"].firstIndex(of: a)! < ["@rpath/A.framework/A", "@rpath/C.dylib", "@rpath/B.framework/B"].firstIndex(of: b)! })
+        XCTAssertEqual(e.map(\.lib.loadPath), ["@rpath/C.dylib", "@rpath/A.framework/A", "@rpath/B.framework/B"])
         XCTAssertEqual(e.last?.removed, true)
         edits = ExistingLibraryPlan.toggleRemoved(libs[1], in: edits)   // restore
         XCTAssertTrue(edits.allSatisfy { $0.removed.isEmpty })
@@ -92,17 +91,8 @@ final class ExistingProjectLibrariesUITests: XCTestCase {
         store.sources.append(RepoSource(url: "https://dup.example/s.json", name: "Dup"))
         store.requestDelete(id: store.sources.last!.id)
         XCTAssertEqual(store.pendingDelete?.name, "Dup")
-        struct Host: View {
-            @ObservedObject var store: SourcesStore
-            var body: some View {
-                List(store.sources) { Text($0.name) }
-                    .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟", ckb: "ئەم سەرچاوەیە بسڕدرێتەوە؟", kmr: "Ev çavkanî were jêbirin?"),
-                                        isPresented: .constant(store.pendingDelete != nil), titleVisibility: .visible) {
-                        Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jêbirin"), role: .destructive) {}
-                    }
-            }
-        }
-        try await render(Host(store: store), name: "sources-delete-confirm-ar", height: 700)
+        try await render(SourcesTab(store: store), name: "sources-delete-confirm-ar", height: 700)
+        XCTAssertEqual(store.pendingDelete?.name, "Dup")
         defaults.removePersistentDomain(forName: "ExistingLibsUISnap")
     }
 }
