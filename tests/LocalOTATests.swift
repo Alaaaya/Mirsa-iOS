@@ -47,4 +47,48 @@ final class LocalOTATests: XCTestCase {
         let (_, bad) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/wrong/Mirsa.ipa")!)
         XCTAssertEqual((bad as? HTTPURLResponse)?.statusCode, 404)
     }
+
+    private func tmpFile(_ n: Int) throws -> URL {
+        let f = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+        try Data(repeating: 7, count: n).write(to: f); return f
+    }
+    func testAwaitFirstRequestTimesOutWithoutRequest() async throws {
+        let f = try tmpFile(100); defer { try? FileManager.default.removeItem(at: f) }
+        let s = try LocalOTAServer(file: f); _ = try await s.start(lifetime: 30); defer { s.stop() }
+        let got = await s.awaitFirstRequest(timeout: 0.3)
+        XCTAssertFalse(got)
+    }
+    func testHeadDoesNotCountButGetDoes() async throws {
+        let f = try tmpFile(5000); defer { try? FileManager.default.removeItem(at: f) }
+        let s = try LocalOTAServer(file: f); let port = try await s.start(lifetime: 30); defer { s.stop() }
+        var head = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(s.token)/Mirsa.ipa")!); head.httpMethod = "HEAD"
+        _ = try await URLSession.shared.data(for: head)
+        let afterHead = await s.awaitFirstRequest(timeout: 0.3)
+        XCTAssertFalse(afterHead)
+        _ = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/\(s.token)/Mirsa.ipa")!)
+        let afterGet = await s.awaitFirstRequest(timeout: 2)
+        XCTAssertTrue(afterGet)
+        XCTAssertEqual(s.servedBytes, 5000)
+    }
+    func testStopResolvesWaiterAndClosesListener() async throws {
+        let f = try tmpFile(100); defer { try? FileManager.default.removeItem(at: f) }
+        let s = try LocalOTAServer(file: f); let port = try await s.start(lifetime: 30)
+        async let w = s.awaitFirstRequest(timeout: 10)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        s.stop()
+        let result = await w
+        XCTAssertFalse(result); XCTAssertTrue(s.isStopped)
+        let r = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/\(s.token)/Mirsa.ipa")!)
+        XCTAssertNil(r)
+    }
+    func testHeaderDeadlineCutsIdleButNotActiveTransfer() async throws {
+        let old = LocalOTAServer.headerTimeout; LocalOTAServer.headerTimeout = 0.5; defer { LocalOTAServer.headerTimeout = old }
+        let f = try tmpFile(8 * 1024 * 1024); defer { try? FileManager.default.removeItem(at: f) }
+        let s = try LocalOTAServer(file: f); let port = try await s.start(lifetime: 30); defer { s.stop() }
+        // Transfer outlives the header deadline: a slow reader still receives everything.
+        let url = URL(string: "http://127.0.0.1:\(port)/\(s.token)/Mirsa.ipa")!
+        let (bytes, resp) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((resp as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(bytes.count, 8 * 1024 * 1024)
+    }
 }
