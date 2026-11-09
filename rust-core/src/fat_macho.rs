@@ -1,6 +1,6 @@
 //! Checked universal-container selection. Never modifies the supplied archive.
 type Result<T> = std::result::Result<T, String>;
-fn word(d: &[u8], o: usize, wide: bool, little: bool) -> Result<u64> {
+pub(super) fn word(d: &[u8], o: usize, wide: bool, little: bool) -> Result<u64> {
     let n = if wide { 8 } else { 4 };
     let bytes = d.get(o..o.checked_add(n).ok_or("FAT offset overflow")?)
         .ok_or("Truncated FAT header")?;
@@ -13,13 +13,22 @@ fn word(d: &[u8], o: usize, wide: bool, little: bool) -> Result<u64> {
     Ok(out)
 }
 pub(super) fn arm64(d: &[u8]) -> Result<&[u8]> {
+    if d.len()<4 {return Err("Truncated Mach-O".into())}
+    if !matches!(d.get(..4), Some([0xca,0xfe,0xba,0xbe]|[0xbe,0xba,0xfe,0xca]|[0xca,0xfe,0xba,0xbf]|[0xbf,0xba,0xfe,0xca])) {return Ok(d)}
+    let ranges = arm64_ranges(d)?;
+    ranges.into_iter().map(|(a,b)| &d[a..b]).find(|s| word(s,8,false,true).map(|n| n & 0xffffff == 0).unwrap_or(false)).ok_or("FAT binary has no generic arm64 slice (arm64e is not a fallback)".into())
+}
+pub(super) fn arm64_ranges(d: &[u8]) -> Result<Vec<(usize,usize)>> {
     let magic = d.get(..4).ok_or("Truncated Mach-O")?;
     let (wide, little) = match magic {
         [0xca, 0xfe, 0xba, 0xbe] => (false, false),
         [0xbe, 0xba, 0xfe, 0xca] => (false, true),
         [0xca, 0xfe, 0xba, 0xbf] => (true, false),
         [0xbf, 0xba, 0xfe, 0xca] => (true, true),
-        _ => return Ok(d), // Existing thin parser remains authoritative.
+        _ => {
+            if word(d,0,false,true)? != 0xfeedfacf || word(d,4,false,true)? != 0x100000c {return Err("Unsupported thin architecture".into())}
+            return Ok(vec![(0,d.len())]);
+        },
     };
     let count = word(d, 4, false, little)? as usize;
     let stride = if wide { 32 } else { 20 };
@@ -28,7 +37,7 @@ pub(super) fn arm64(d: &[u8]) -> Result<&[u8]> {
     if table_end > d.len() { return Err("Truncated FAT architecture table".into()); }
     let mut ranges = Vec::new();
     let mut cpus = std::collections::HashSet::new();
-    let mut selected = None;
+    let mut selected = Vec::new();
     for i in 0..count {
         let a = 8 + i * stride;
         let cpu = word(d, a, false, little)? as u32;
@@ -65,12 +74,12 @@ pub(super) fn arm64(d: &[u8]) -> Result<&[u8]> {
             || word(slice,8,false,le)? != u64::from(sub) {
             return Err("FAT table and Mach-O CPU header disagree".into());
         }
-        if cpu == 0x0100_000c && sub & 0x00ff_ffff == 0 {
+        if cpu == 0x0100_000c {
             if !is64 || !le { return Err("Unsupported arm64 slice format".into()); }
-            selected = Some(slice);
+            selected.push((off as usize,end as usize));
         }
     }
-    selected.ok_or("FAT binary has no generic arm64 slice (arm64e is not a fallback)".into())
+    if selected.is_empty() {Err("FAT binary has no arm64 slices".into())} else {Ok(selected)}
 }
 
 #[cfg(test)]
@@ -101,6 +110,11 @@ pub(super) mod tests {
     fn thin(cpu:u32,sub:u32)->Vec<u8>{
         let mut d=vec![0;32];d[..4].copy_from_slice(&0xfeedfacfu32.to_le_bytes());
         d[4..8].copy_from_slice(&cpu.to_le_bytes());d[8..12].copy_from_slice(&sub.to_le_bytes());d
+    }
+    #[test] fn thin_selection_keeps_existing_parser_authority() {
+        let e=thin(0x100000c,2);assert_eq!(arm64(&e).unwrap(),e);
+        let x=thin(0x1000007,3);assert_eq!(arm64(&x).unwrap(),x);
+        assert!(arm64_ranges(&x).is_err());
     }
     #[test] fn all_formats_select_generic_not_first() {
         for wide in [false,true] {for le in [false,true] {

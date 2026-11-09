@@ -7,6 +7,8 @@ mod fat_macho;
 mod load_control;
 #[path = "tweak_targets.rs"]
 mod tweak_targets;
+#[path = "imported_loads.rs"]
+mod imported_loads;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -447,15 +449,18 @@ fn read_macho(p: &Path) -> Result<Vec<u8>> {
     fs::read(p).map_err(err)
 }
 fn macho(d: Vec<u8>, dylib: bool) -> Result<Mach> {
+    macho_subtype(d,dylib,false)
+}
+fn macho_subtype(d: Vec<u8>, dylib: bool, imported: bool) -> Result<Mach> {
     // Thin only in the working model. Shared source dylibs remain universal.
-    let d = fat_macho::arm64(&d)?.to_vec();
+    let d = if imported {d} else {fat_macho::arm64(&d)?.to_vec()};
     if d.len() < 32 || u32at(&d, 0)? != 0xfeedfacf || u32at(&d, 4)? != 0x0100000c {
         return Err(
             "Only generic 64-bit little-endian arm64 Mach-O is supported".into(),
         );
     }
     let subtype = u32at(&d, 8)? & 0x00ffffff;
-    if subtype != 0 {
+    if subtype != 0 && !(imported && subtype == 2) {
         return Err("arm64e and specialized CPU subtypes are not supported".into());
     }
     let ft = u32at(&d, 12)?;
@@ -1044,6 +1049,8 @@ struct Request {
     #[serde(default)]
     new_first: bool,
     #[serde(default)]
+    edits: Vec<imported_loads::Edit>,
+    #[serde(default)]
     private_key: String,
     #[serde(default)]
     certificate: String,
@@ -1070,6 +1077,8 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
         "deb_tweak" => extract_deb_bounded(Path::new(&r.input), Path::new(&r.output), 128 * 1024 * 1024, 128 * 1024 * 1024, 20_000),
         "incoming_profile" => crate::personal_sign::incoming_ipa::inspect_profile(Path::new(&r.input),Path::new(&r.output)),
         "incoming_preview" => crate::personal_sign::incoming_ipa::inspect(Path::new(&r.input),Path::new(&r.output)),
+        "imported_loads" => imported_loads::report(Path::new(&r.input), &r.executable, Path::new(&r.output)),
+        "edit_imported_loads" => imported_loads::edit_copy(Path::new(&r.input), &r.executable, Path::new(&r.output), &r.edits),
         "dependencies" => {
             let list = dependencies(Path::new(&r.input))?;
             let json = serde_json::to_vec(&list).map_err(err)?;
