@@ -1,0 +1,38 @@
+name: Precise create build
+on:
+  workflow_dispatch:
+  push:
+    branches: [kat/precise-create]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
+          if [ -z "$XC" ]; then XC=$(xcode-select -p | sed 's#/Contents/Developer##'); fi
+          sudo xcode-select -s "$XC"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Build AirliftFFI for iOS (device)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cd rust-core && cargo build --release --target aarch64-apple-ios && cd ..
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - run: brew install xcodegen && xcodegen generate
+      - name: Build unsigned IPA (no publish)
+        run: bash build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-precise-unsigned
+          path: build/Mirsa.ipa
