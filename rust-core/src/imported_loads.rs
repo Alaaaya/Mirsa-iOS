@@ -223,7 +223,7 @@ mod tests {
         d[2048..2060].copy_from_slice(&[0x13,0x40,b'x',0,0x90,0x20,4,0x90,0x3f,0x90,0,0]);
         let mut cmd=vec![0;24];put32(&mut cmd,0,2);put32(&mut cmd,4,24);put32(&mut cmd,8,2200);put32(&mut cmd,12,2);add_command(&mut d,cmd);d[2204]=1;d[2207]=4;d[2220]=1;d[2223]=0xfe;
         let mut cmd=vec![0;16];put32(&mut cmd,0,0x80000034);put32(&mut cmd,4,16);put32(&mut cmd,8,2300);put32(&mut cmd,12,100);add_command(&mut d,cmd);
-        put32(&mut d,2308,28);put32(&mut d,2316,2);put32(&mut d,2320,format);let width=match format{1=>4,2=>8,_=>16};d[2328]=3;d[2328+width]=0xff;if format==3{d[2328+width+1]=0xff}
+        put32(&mut d,2304,64);put32(&mut d,2312,80);put32(&mut d,2308,28);put32(&mut d,2316,2);put32(&mut d,2320,format);let width=match format{1=>4,2=>8,_=>16};d[2328]=3;d[2328+width]=0xff;if format==3{d[2328+width+1]=0xff}
         d
     }
     #[test]fn modern_bind_chained_symbols_remap_all_slots_preserve_special_and_reject_bound(){
@@ -235,6 +235,37 @@ mod tests {
             assert_eq!(out[2048],0x13);assert_eq!(out[2054],2);assert_eq!(out[2056],0x3f);assert_eq!(out[2207],2);assert_eq!(out[2223],0xfe);assert_eq!(out[2328],3);
             assert_eq!(out[2328+match format{1=>4,2=>8,_=>16}],0xff);
             let bound=Edit{owner:"Main".into(),remove:vec!["@rpath/B".into()],order:vec![],delete_files:false};assert!(patch(&original,&bound).unwrap_err().contains("still has symbol bindings"));assert_eq!(original,modern_fixture(format));
+        }
+    }
+    #[test]fn chained_segment_multistarts_valid_and_truncated(){
+        for format in [1,2,3]{
+            let mut d=modern_fixture(format);
+            let m=macho_subtype(d.clone(),false,true).unwrap();let mut at=32;
+            for c in m.commands{if c.kind==0x80000034{put32(&mut d,at+12,180)}at+=c.data.len()}
+            put32(&mut d,2312,150);put32(&mut d,2364,1);put32(&mut d,2368,8);
+            // starts table at64, segment at72, size28, one page plus two overflow starts.
+            put32(&mut d,2372,28);d[2376..2378].copy_from_slice(&4096u16.to_le_bytes());
+            d[2378..2380].copy_from_slice(&2u16.to_le_bytes());d[2392..2394].copy_from_slice(&1u16.to_le_bytes());
+            d[2394..2396].copy_from_slice(&0x8001u16.to_le_bytes());d[2396..2398].copy_from_slice(&8u16.to_le_bytes());d[2398..2400].copy_from_slice(&0x8010u16.to_le_bytes());
+            assert!(capability(&d).is_ok());
+            let mut broken=d.clone();broken[2398..2400].copy_from_slice(&16u16.to_le_bytes());assert!(capability(&broken).is_err());
+            let mut broken=d.clone();broken[2394..2396].copy_from_slice(&0x8000u16.to_le_bytes());assert!(capability(&broken).is_err());
+        }
+    }
+    #[test]fn chained_internal_aliases_and_names_fail_before_edit(){
+        for format in [1,2,3]{
+            for mode in 0..6{
+                let mut d=modern_fixture(format);
+                match mode{
+                    0=>put32(&mut d,2304,28), // starts aliases imports
+                    1=>put32(&mut d,2312,28), // symbol pool aliases imports
+                    2=>{put32(&mut d,2364,1);put32(&mut d,2368,4)}, // segment aliases table
+                    3=>put32(&mut d,2324,1), // compressed symbols unsupported
+                    4=>{if format==3{put32(&mut d,2332,1000)}else{put32(&mut d,2328,(1000<<9)|3)}},
+                    _=>{d[2380..2400].fill(1)}, // unterminated name
+                }
+                assert!(capability(&d).is_err(),"{format} {mode}");
+            }
         }
     }
     #[test]fn modern_fat_all_slices_remap(){
