@@ -7,13 +7,13 @@ import UIKit
 final class PersonalSigningOperation: ObservableObject {
     static let shared = PersonalSigningOperation()
     enum Stage: String {
-        case preparing, signing, packaging, uploading, connecting, installing, handedOff, completed, failed
+        case preparing, signing, packaging, uploading, serving, connecting, installing, handedOff, completed, failed
         var order: Int {
             switch self {
             case .preparing: return 0
             case .signing: return 1
             case .packaging: return 2
-            case .uploading: return 3
+            case .uploading, .serving: return 3
             case .connecting: return 4
             case .installing: return 5
             case .handedOff, .completed, .failed: return 6
@@ -27,6 +27,8 @@ final class PersonalSigningOperation: ObservableObject {
         var fraction: Double?
         var completedUnits: UInt64 = 0
         var totalUnits: UInt64 = 0
+        /// Set only when the local route was tried/skipped and upload was used instead.
+        var fallbackReason: OTAUploadReason?
         /// Overall weighted work completion, not a prediction of elapsed time.
         /// Within a stage use measured units/bytes only. A pending installer never reaches 100%.
         var overallFraction: Double {
@@ -36,6 +38,7 @@ final class PersonalSigningOperation: ObservableObject {
             case .signing: return 0.10 + measured * 0.55
             case .packaging: return 0.65 + measured * 0.10
             case .uploading: return 0.75 + measured * 0.20
+            case .serving: return 0.95
             case .connecting: return 0.95
             case .installing: return 0.97 + min(0.99, measured) * 0.02
             case .handedOff: return 0.99
@@ -63,9 +66,10 @@ final class PersonalSigningOperation: ObservableObject {
                 nextFraction = max(current, event.fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } ?? current)
             } else { nextFraction = event.fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil } }
             let nextCompleted = sameStage ? max(completedUnits, event.completed) : event.completed
-            guard stage != event.stage || fraction != nextFraction ||
+            let nextReason = event.fallbackReason ?? fallbackReason
+            guard stage != event.stage || fraction != nextFraction || nextReason != fallbackReason ||
                     completedUnits != nextCompleted || totalUnits != event.total else { return false }
-            stage = event.stage; fraction = nextFraction
+            stage = event.stage; fraction = nextFraction; fallbackReason = nextReason
             completedUnits = nextCompleted; totalUnits = event.total
             return true
         }
@@ -136,7 +140,7 @@ final class PersonalSigningOperation: ObservableObject {
         let activity: MirsaInstallActivity.Phase
         switch event.stage {
         case .signing: phase = .signing; activity = .signing
-        case .uploading, .installing, .connecting, .handedOff: phase = .installing; activity = .installing
+        case .uploading, .serving, .installing, .connecting, .handedOff: phase = .installing; activity = .installing
         default: phase = .preparing; activity = .preparing
         }
         MirsaOperationProgress.shared.update(operation, phase: phase, fraction: next.overallFraction, stageLabel: PersonalSigningLabels.stage(next.stage))
@@ -184,6 +188,7 @@ struct PersonalSigningEvent {
     var fraction: Double? = nil
     var completed: UInt64 = 0
     var total: UInt64 = 0
+    var fallbackReason: OTAUploadReason? = nil
 }
 /// Shared only for cooperative cancellation checks, never secrets or file paths.
 final class PersonalSigningControl: @unchecked Sendable {
@@ -212,6 +217,11 @@ struct PersonalSigningProgressView: View {
             if state.stage == .signing, state.totalUnits > 0 {
                 Text(personalText("Signed bundles", "الحزم الموقّعة") + " \(state.completedUnits)/\(state.totalUnits)").font(.caption).foregroundStyle(.secondary)
             }
+            if let reason = state.fallbackReason {
+                Text(personalText("Local install unavailable, using upload instead. ", "التثبيت المحلي مو متاح، استخدمت الرفع. ") + personalText(reason.english, reason.arabic))
+                    .font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("personalSigningFallbackReason")
+            }
             if state.backgroundExpired {
                 Text(personalText("Background time ended. Keep Mirsa open to see the result.",
                     "خلص وقت الخلفية. افتح Mirsa لتشوف النتيجة.")).font(.caption).foregroundStyle(.orange)
@@ -238,6 +248,7 @@ enum PersonalSigningLabels {
         case .signing: return text("Signing", "توقيع", "واژۆکردن", "Îmzekirin", language: language)
         case .packaging: return text("Archiving signed IPA", "ضغط الـ IPA الموقّع", "ئەرشیفکردنی IPAی واژۆکراو", "Arşîvkirina IPA ya îmzekirî", language: language)
         case .uploading: return text("Uploading signed IPA", "رفع الـ IPA الموقّع", "بارکردنی IPAی واژۆکراو", "Barkirina IPA ya îmzekirî", language: language)
+        case .serving: return text("Serving signed IPA from this device", "تقديم الـ IPA الموقّع من هالجهاز", "پێشکەشکردنی IPAی واژۆکراو لەم ئامێرە", "Pêşkêşkirina IPA ya îmzekirî ji vê cihazê", language: language)
         case .connecting: return text("Opening iOS installer", "فتح مثبّت iOS", "کردنەوەی دامەزرێنەری iOS", "Vekirina sazkera iOS", language: language)
         case .installing: return text("Installing", "تثبيت", "دامەزراندن", "Sazkirin", language: language)
         case .handedOff: return text("Waiting for system installation", "في انتظار تثبيت النظام", "چاوەڕێی دامەزراندنی سیستەم", "Li benda sazkirina pergalê", language: language)

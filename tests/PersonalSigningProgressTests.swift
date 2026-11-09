@@ -90,7 +90,7 @@ final class PersonalSigningProgressTests: XCTestCase {
     }
 
     func testAllProgressStageLabelsHaveFourLanguageTranslations() {
-        let stages: [PersonalSigningOperation.Stage] = [.preparing, .signing, .packaging, .uploading, .connecting, .installing, .handedOff, .completed, .failed]
+        let stages: [PersonalSigningOperation.Stage] = [.preparing, .signing, .packaging, .uploading, .serving, .connecting, .installing, .handedOff, .completed, .failed]
         for stage in stages {
             let languages: [AppLanguage] = [.english, .arabic, .sorani, .kurmanji]
             let labels = languages.map { PersonalSigningLabels.stage(stage, language: $0) }
