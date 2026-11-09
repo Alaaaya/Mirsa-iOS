@@ -71,14 +71,11 @@ private final class PersonalIPADownload: NSObject, URLSessionDownloadDelegate, @
             guard size > 0, size <= PersonalIPAURL.maximumBytes else {
                 throw SideloadError.message(personalText("The file is empty or larger than 512 MB.", "الملف فاضي أو أكبر من 512 ميغا."))
             }
-            let dir = try MirsaManagedTmp.begin("personal-url")
-            var handedOff = false
-            defer { if !handedOff { MirsaManagedTmp.end(dir) } }
+            let dir = fm.temporaryDirectory.appendingPathComponent("personal-url-\(UUID().uuidString)", isDirectory: true)
             try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.complete])
             let dest = dir.appendingPathComponent("Download.ipa")
             try fm.moveItem(at: location, to: dest)
             result = .success(dest)
-            handedOff = true
         } catch { result = .failure(error) }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -88,7 +85,7 @@ private final class PersonalIPADownload: NSObject, URLSessionDownloadDelegate, @
         if case .failure(let e)? = result { c.resume(throwing: e); return }
         if case .success(let url)? = result {
             if error != nil {
-                MirsaManagedTmp.end(url.deletingLastPathComponent())
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
             } else { c.resume(returning: url); return }
         }
         if let error = error as? URLError, error.code == .cancelled {
@@ -208,7 +205,7 @@ struct PersonalURLImportSheet: View {
                 try Task.checkCancellation()
                 try await onFile(temp)
                 MirsaCompletionFeedback.shared.finish(operationID: operation, outcome: .success)
-                MirsaManagedTmp.end(temp.deletingLastPathComponent())
+                try? FileManager.default.removeItem(at: temp.deletingLastPathComponent())
                 dismiss()
             } catch is CancellationError {
                 message = personalText("Download cancelled.", "انلغى التحميل.")
@@ -216,7 +213,7 @@ struct PersonalURLImportSheet: View {
                 MirsaCompletionFeedback.shared.finish(operationID: operation, outcome: MirsaCompletionFeedback.outcome(for: error))
                 message = error.localizedDescription
             }
-            if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }
+            if let file { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
             working = false
         }
     }
