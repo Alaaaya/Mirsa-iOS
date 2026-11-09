@@ -4,12 +4,12 @@ import PhotosUI
 /// "Create anything": a request thread with Kat. This is a manual queue, not an instant AI chat; replies take time.
 enum ForgeChatText {
     static var title: String { tr("Create anything", "إنشاء كل شي", ckb: "هەموو شتێک دروست بکە", kmr: "Her tiştî çêke") }
-    static var subtitle: String { tr("Write what you want. Kat takes your request and works on it. It takes time.", "اكتب شو بدك، كات بتاخد طلبك وبتشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، کات داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات. کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Kat daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
-    static var guide: String { tr("This is not an instant chat. Your message goes into a queue and Kat answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "هاد مو شات فوري. رسالتك بتدخل بالدور وكات بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويكات الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "ئەمە گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و کات بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Ev ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Kat bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
+    static var subtitle: String { tr("Write what you want, Mirsa takes your request and works on it. It takes time.", "اكتب شو بدك، مرسى بياخد طلبك وبيشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، میرسا داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات، کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Mirsa daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
+    static var guide: String { tr("This is not an instant chat. Your message goes into a queue and Mirsa answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "هاد مو شات فوري. رسالتك بتدخل بالدور ومرسى بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويمرسى الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "ئەمە گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و میرسا بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Ev ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Mirsa bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
     static var placeholder: String { tr("Write your request…", "اكتب طلبك…", ckb: "داواکارییەکەت بنووسە…", kmr: "Daxwaza xwe binivîse…") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
-    static var waiting: String { tr("Waiting for Kat. This can take a while.", "بانتظار كات. ممكن ياخد وقت.", ckb: "چاوەڕێی کات. ڕەنگە کاتی بوێت.", kmr: "Li benda Katê. Dibe ku demek bikşîne.") }
+    static var waiting: String { tr("Waiting for Mirsa. This can take a while.", "بانتظار مرسى. ممكن ياخد وقت.", ckb: "چاوەڕێی میرسا. ڕەنگە کاتی بوێت.", kmr: "Li benda Mirsa. Dibe ku demek bikşîne.") }
     static var sending: String { tr("Sending…", "عم يتبعت…", ckb: "دەنێردرێت…", kmr: "Tê şandin…") }
     static var photo: String { tr("Add image", "أضف صورة", ckb: "وێنە زیاد بکە", kmr: "Wêne zêde bike") }
     static var removeImage: String { tr("Remove image", "إزالة الصورة", ckb: "لابردنی وێنە", kmr: "Wêne rake") }
@@ -128,6 +128,7 @@ struct ForgeChatRoot: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Text(ForgeChatText.subtitle).font(.subheadline).foregroundStyle(.secondary)
                 if !guideSeen {
                     HStack(alignment: .top) { Text(ForgeChatText.guide).font(.footnote); Button { guideSeen = true } label: { Image(systemName: "xmark") } }
                 }
