@@ -386,6 +386,7 @@ struct SourcesTab: View {
                         NavigationLink { SourceDetailView(source: s, onSelectIPA: onSelectIPA) } label: { EmptyView() }.opacity(0)
                         SourceRow(source: s, loading: store.loading.contains(s.url))
                     }
+                        .deleteDisabled(store.isProtected(s))
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
                         .listRowSeparator(.hidden)
@@ -411,7 +412,6 @@ struct SourcesTab: View {
                         }
                 }
                 .onMove { store.moveVisible(from: $0, to: $1) }
-                .deleteDisabled(false)
                 .onDelete { offsets in
                     // Edit-mode delete goes through the same confirmation; protected source is skipped.
                     if let first = offsets.map({ store.visibleSources[$0] }).first(where: { !store.isProtected($0) }) { store.requestDelete(id: first.id) }

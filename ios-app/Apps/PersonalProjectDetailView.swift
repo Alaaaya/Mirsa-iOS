@@ -25,6 +25,7 @@ struct PersonalProjectDetailView: View {
     @State private var icon: UIImage?
     @State private var extensionCount: Int?
     @State private var deps: [String]?
+    @State private var existingLibraries: [ExistingProjectLibrary] = []
     @State private var showDeps = false
     @State private var pickingEntitlements = false
     @StateObject private var draftWriter = PersonalProjectDraftWriter()
@@ -59,6 +60,9 @@ struct PersonalProjectDetailView: View {
                     tweaksCard
                     settingsCard
                     depsCard
+                    if !existingLibraries.isEmpty {
+                        ExistingLibrariesCard(libraries: existingLibraries, edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
+                    }
                     certificateCard
                     MirsaVersionArchiveSection(bundleID: app.bundleID)
                     Button { openBundleFiles() } label: {
@@ -163,10 +167,10 @@ struct PersonalProjectDetailView: View {
                 field(personalText("Version", "الإصدار"), $draft.version)
                 field(personalText("Workspace note", "ملاحظة المشروع"), Binding(get: { draft.workspaceNote ?? "" }, set: { draft.workspaceNote = String($0.prefix(300)) }))
                 HStack(spacing: 8) {
-                    chip("puzzlepiece.extension", extensionCount.map { "\($0) " + personalText("app extensions", "إضافات تطبيق") } ?? "…")
+                    chip("puzzlepiece.extension", extensionCount.map { "\($0) " + tr("app extensions", "إضافات تطبيق", ckb: "پێوەکراوەکانی ئەپ", kmr: "pêvekên sepanê") } ?? "…")
                     chip("arrow.triangle.branch", personalText("Main executable", "الملف الرئيسي"))
                 }
-                Text(personalText("App extensions are parts already inside the app (widgets, share sheet…). They are not tweaks injected by Mirsa.", "إضافات التطبيق هي أجزاء موجودة أصلاً داخل التطبيق (ودجات، المشاركة…). مو إضافات حقنها Mirsa."))
+                Text(tr("App extensions are parts already inside the app (widgets, share sheet…). They are not tweaks injected by Mirsa.", "إضافات التطبيق هي أجزاء موجودة أصلاً داخل التطبيق (ودجات، المشاركة…). مو إضافات حقنها Mirsa.", ckb: "پێوەکراوەکانی ئەپ ئەو بەشانەن کە پێشتر لەناو ئەپەکەدان (ویجێت، هاوبەشکردن…). ئەوە ئەو زیادکراوانە نین کە Mirsa تێیکردوون.", kmr: "Pêvekên sepanê beşên ku jixwe di nav sepanê de ne (widget, parvekirin…). Ew ne tweakên ku Mirsa danîne ne."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }.padding(16).appsGlass(cornerRadius: 24)
@@ -456,6 +460,7 @@ struct PersonalProjectDetailView: View {
         guard !Task.isCancelled else { return }
         extensionCount = result?.extensions ?? 0
         deps = result?.dependencies ?? []
+        existingLibraries = result?.existingLibraries ?? []
     }
 
     private var certificateCard: some View {
@@ -542,6 +547,7 @@ struct PersonalProjectDetailView: View {
         options.fixWhiteIcon = draft.fixWhiteIcon ?? false
         options.newTweaksFirst = draft.newTweaksFirst ?? false
         options.useLoader = draft.directInjection == false
+        options.existingLibraryEdits = draft.existingLibraryEdits ?? []
         options.customEntitlements = draft.customEntitlements
         options.exportExtension = draft.exportExtension ?? "ipa"
         options.additionalProfiles = identities.filter { (draft.additionalProfileIDs ?? []).contains($0.id) }.map { $0.material.profile }
