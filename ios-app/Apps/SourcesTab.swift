@@ -1,3 +1,6 @@
+successfully downloaded text file (SHA: 52412339c22da40b74c672050839c072223d45fe)
+
+[repo://Alaaaya/Mirsa-iOS/sha/590c3dc7f55d4a6abe8bdb32b31460b3604edb91/contents/ios-app/Apps/SourcesTab.swift]
 import SwiftUI
 
 // MARK: - Model (AltStore / SideStore / Feather source format)
@@ -390,9 +393,6 @@ struct SourcesTab: View {
                 Button(tr("Add", "أضف")) { let t = input; Task { _ = await store.add(t) } }
             }
             .alert(tr("Source", "السورس"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
-                if store.errorOffersSettings {
-                    Button(tr("Open Settings", "فتح الإعدادات")) { AppsStore.openWiFiSettings(); store.error = nil }
-                }
                 Button(MirsaTr.lit("OK")) { store.error = nil }
             } message: { Text(store.error ?? "") }
             .task { if store.apps.isEmpty { await store.refreshAll() } }
