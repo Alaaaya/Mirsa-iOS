@@ -11,6 +11,31 @@ enum ForgeChatText {
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
     static var waiting: String { tr("Waiting for Mirsa. This can take a while.", "بانتظار مرسى، ممكن ياخد وقت", ckb: "چاوەڕێی مرسا. ڕەنگە کاتی بوێت.", kmr: "Li benda Mirsayê. Dibe ku demek bikşîne.") }
     static var sending: String { tr("Sending…", "عم يتبعت…", ckb: "دەنێردرێت…", kmr: "Tê şandin…") }
+    static var welcome: String { tr("""
+Hi! I can make you:
+• Tweaks for your apps (dylib or deb) the way you want, for example changing the look, hiding things, adding options
+• Full iPhone apps (IPA) that you install right from here
+• Android apps (APK) or ZIP files
+Write what you want in detail, and if you have an image of what you have in mind, send it. I'll work on it and bring you the result back here.
+""", """
+أهلين! بقدر أعملك:
+• تويكات لتطبيقاتك (dylib أو deb) حسب ما بدك، مثلاً تغيير شكل، إخفاء أشياء، إضافة خيارات
+• تطبيقات كاملة للآيفون (IPA) بتثبّتها مباشرة من هون
+• تطبيقات أندرويد (APK) أو ملفات ZIP
+اكتبلي شو بدك بالتفصيل، وإذا في صورة للشي اللي ببالك ابعتها، وبشتغل عليه وبرجعلك هون بالنتيجة.
+""", ckb: """
+سڵاو! دەتوانم بۆت دروست بکەم:
+• تویکە (dylib یان deb) بۆ ئەپەکانت بەو شێوەیەی دەتەوێت، بۆ نموونە گۆڕینی دیزاین، شاردنەوەی شتەکان، زیادکردنی هەڵبژاردن
+• ئەپی تەواو بۆ ئایفۆن (IPA) کە ڕاستەوخۆ لێرەوە دایدەمەزرێنیت
+• ئەپی ئەندرۆید (APK) یان فایلی ZIP
+بە وردی بنووسە چیت دەوێت، و ئەگەر وێنەیەکت هەیە بۆ ئەوەی لە مێشکتدایە بینێرە. کاری لەسەر دەکەم و ئەنجامەکەت لێرە بۆ دەگەڕێنمەوە.
+""", kmr: """
+Silav! Ez dikarim ji te re çêkim:
+• Tweakên (dylib an deb) ji bo sepanên te çawa bixwazî, mînak guhertina dîmenê, veşartina tiştan, zêdekirina vebijarkan
+• Sepanên tev ên iPhone (IPA) ku tu rasterast ji vir saz dikî
+• Sepanên Android (APK) an pelên ZIP
+Bi hûrgilî binivîse tu çi dixwazî, û heke wêneyekî tiştê di hişê te de hebe bişîne. Ez li ser dixebitim û encamê li vir ji te re vedigerînim.
+""") }
     static var photo: String { tr("Add image", "أضف صورة", ckb: "وێنە زیاد بکە", kmr: "Wêne zêde bike") }
     static var removeImage: String { tr("Remove image", "إزالة الصورة", ckb: "لابردنی وێنە", kmr: "Wêne rake") }
     static var close: String { tr("Close", "إغلاق", ckb: "داخستن", kmr: "Bigire") }
@@ -256,6 +281,8 @@ struct ForgeChatThreadView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    Text(ForgeChatText.welcome).font(.callout).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12).background(Color.gray.opacity(0.2)).cornerRadius(12).accessibilityIdentifier("chat-welcome")
                     ForEach(msgs) { m in bubble(m).id(m.id) }
                     ForEach(queued) { o in
                         HStack { Spacer(); VStack(alignment: .trailing) { Text(o.text); Text(ForgeChatText.sending).font(.caption2).opacity(0.7) }.padding(10).background(Color.blue.opacity(0.5)).cornerRadius(12) }
