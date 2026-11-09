@@ -137,7 +137,7 @@ enum ForgeChatImage {
         if let s = UserDefaults.standard.string(forKey: draftKey), let u = UUID(uuidString: s), !serverKnows(u) { return u }
         let u = UUID(); UserDefaults.standard.set(u.uuidString, forKey: draftKey); return u
     }
-    var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return outgoing.map(\.threadID).filter { !threads.contains { t in t.id == $0 } && seen.insert($0).inserted } }
+    var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return outgoing.map(\.threadID).filter { id in !threads.contains { t in t.id == id } && seen.insert(id).inserted } }
     func hasInFlight(_ id: UUID) -> Bool { outgoing.contains { $0.threadID == id } }
 
     func send(threadID: UUID?, text: String, jpeg: Data?) {
