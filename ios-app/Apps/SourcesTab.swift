@@ -138,6 +138,20 @@ final class SourcesStore: ObservableObject {
         save()
     }
 
+    /// The built-in Mirsa source (any owned URL spelling) can never be removed.
+    static func isProtected(_ url: String) -> Bool { MirsaSourceFeed.norm(url) == MirsaSourceFeed.norm(MirsaSourceFeed.primary) }
+
+    /// Removes exactly one source by its stored URL; clears its cache/hidden flag so nothing stale lingers.
+    @discardableResult
+    func remove(_ url: String) -> Bool {
+        guard !Self.isProtected(url), sources.contains(where: { $0.url == url }) else { return false }
+        sources.removeAll { $0.url == url }
+        apps[url] = nil
+        loading.remove(url)
+        hiddenURLs.remove(url)
+        return true
+    }
+
     private func save() {
         if let d = try? JSONEncoder().encode(sources) { UserDefaults.standard.set(d, forKey: key) }
     }
@@ -299,6 +313,7 @@ struct SourcesTab: View {
     @State private var sharingURL: URL?
     @State private var input = ""
     @State private var finding = false
+    @State private var pendingDelete: RepoSource?
 
     var body: some View {
         NavigationStack {
@@ -336,6 +351,11 @@ struct SourcesTab: View {
                             SourceURLButtons(stored: s.url, sharing: $sharingURL).tint(.blue)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if !SourcesStore.isProtected(s.url) {
+                                Button(role: .destructive) { pendingDelete = s } label: {
+                                    Label(tr("Delete", "حذف"), systemImage: "trash")
+                                }.tint(.red)
+                            }
                             SourceURLButtons(stored: s.url, sharing: $sharingURL).tint(.blue)
                         }
                         .contextMenu {
@@ -346,9 +366,10 @@ struct SourcesTab: View {
                         }
                 }
                 .onMove { store.moveVisible(from: $0, to: $1) }
+                .deleteDisabled(false)
                 .onDelete { offsets in
-                    let urls = Set(offsets.map { store.visibleSources[$0].url })
-                    store.sources.removeAll { urls.contains($0.url) }
+                    // Edit-mode delete goes through the same confirmation; protected source is skipped.
+                    if let first = offsets.map({ store.visibleSources[$0] }).first(where: { !SourcesStore.isProtected($0.url) }) { pendingDelete = first }
                 }
                 if !store.hiddenSources.isEmpty {
                     Section(tr("Hidden Sources", "السورسات المخفية")) {
@@ -382,6 +403,12 @@ struct SourcesTab: View {
                 }
             }
             .sheet(isPresented: $finding) { DiscoveryView() }
+            .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟"), isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible, presenting: pendingDelete) { src in
+                Button(tr("Delete", "حذف"), role: .destructive) { store.remove(src.url); pendingDelete = nil }
+                Button(tr("Cancel", "إلغاء"), role: .cancel) { pendingDelete = nil }
+            } message: { src in
+                Text(src.name + " — " + tr("Apps already installed stay installed.", "التطبيقات المثبّتة بتضل مثبّتة."))
+            }
             .sheet(item: Binding(get: { sharingURL.map { SharedSourceURL(url: $0) } }, set: { if $0 == nil { sharingURL = nil } })) { SourceShareSheet(url: $0.url).presentationDetents([.medium, .large]) }
             .alert(tr("Add Source", "أضف سورس"), isPresented: $adding) {
                 TextField("https://…/source.json", text: $input)
