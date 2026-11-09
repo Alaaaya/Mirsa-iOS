@@ -23,7 +23,8 @@ enum ForgeChatText {
 struct ForgeChatThread: Codable, Identifiable, Equatable {
     let id: UUID; let title: String?; let status: String?; let createdAt: String?; let updatedAt: String?
 }
-struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UUID?; let bundleID: String?; let name: String?; let version: Int? }
+struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let size: Int64?; let sha256: String?; let expiresAt: String? }
+struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UUID?; let bundleID: String?; let name: String?; let version: Int?; let artifact: ForgeChatArtifact? }
 struct ForgeChatMessage: Codable, Identifiable, Equatable {
     let id: UUID; let threadID: UUID; let role: String; let text: String?; let createdAt: String?; let hasImage: Bool?; let result: ForgeChatResult?
 }
@@ -58,6 +59,7 @@ enum ForgeChatImage {
     init() { outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? [] }
     private func saveOutgoing() { UserDefaults.standard.set(try? JSONEncoder().encode(outgoing), forKey: key) }
 
+    func callPublic(_ body: [String: Any]) async throws -> Data { try await call(body) }
     private func call(_ body: [String: Any]) async throws -> Data {
         let c = try await ForgeClient.fixToken()
         let r = try await ForgePreciseClient.request(body, credentials: c)
@@ -221,8 +223,9 @@ struct ForgeChatThreadView: View {
                 if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
                 if let t = m.text, !t.isEmpty { Text(t) }
                 if m.role == "result" {
-                    Label(ForgeChatText.resultSaved, systemImage: "checkmark.shield").font(.caption).foregroundStyle(.green)
+                    if m.result?.artifact == nil { Label(ForgeChatText.resultSaved, systemImage: "checkmark.shield").font(.caption).foregroundStyle(.green) }
                     if let n = m.result?.name { Text(n).font(.caption.bold()) }
+                    if let a = m.result?.artifact { ForgeChatArtifactCard(threadID: m.threadID, artifact: a) }
                 }
             }
             .padding(10).background(mine ? Color.blue.opacity(0.5) : Color.gray.opacity(0.25)).cornerRadius(12)
