@@ -245,6 +245,9 @@ actor MirsaStoreClient {
     private func safe(_ error: Error) -> MirsaStoreError {
         if let error = error as? MirsaStoreError { return error }
         if error is CancellationError { return .operationCancelled }
+        if let auth = error as? AuthenticationError, case .verificationCodeRequired = auth {
+            return .verificationRequired
+        }
         if case ApplePackageError.licenseRequired = error { return .licenseRequired }
         // Do not surface arbitrary URL/body/account descriptions to telemetry or UI.
         return .serviceUnavailable
