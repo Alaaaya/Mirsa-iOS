@@ -119,20 +119,8 @@ enum ForgeChatImage {
     }
 }
 
-struct ForgeChatEntry: View {
-    @State private var open = false
-    var body: some View {
-        Button { open = true } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Label(ForgeChatText.title, systemImage: "bubble.left.and.bubble.right")
-                Text(ForgeChatText.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6)).multilineTextAlignment(.leading)
-            }.frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(.white).padding(14).appsGlass(cornerRadius: MirsaRadius.l)
-        }.buttonStyle(.mirsaPress)
-        .fullScreenCover(isPresented: $open) { ForgeChatRoot().environment(\.layoutDirection, .leftToRight) }
-    }
-}
-
 struct ForgeChatRoot: View {
+    var embedded: Bool = false
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = ForgeChatStore.shared
     @AppStorage("mirsa.chat.guideSeen") private var guideSeen = false
@@ -154,7 +142,7 @@ struct ForgeChatRoot: View {
             .navigationTitle(ForgeChatText.title).navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(ForgeChatText.close) { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { if !embedded { Button(ForgeChatText.close) { dismiss() } } }
                 ToolbarItem(placement: .primaryAction) { Button { path.append(UUID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest) }
             }
             .task { // poll only while this screen is visible
