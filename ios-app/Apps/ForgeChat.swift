@@ -111,13 +111,32 @@ enum ForgeChatImage {
     private var flushing = false
     private var handledResults = Set<UUID>()
 
-    init() { defer { startRetrying() }; outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? [] }
+    /// UI-test only (DEBUG harness + -MirsaChatFixture): seeded store, no network, no retry loop, nothing persisted.
+    static var fixture: Bool { MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaChatFixture") }
+    static let fixtureThreadID = UUID(uuidString: "00000000-0000-0000-0000-00000000C0DE")!
+    private var deleting = Set<UUID>()
+    private var deleteEpoch: [UUID: Int] = [:]
+    private static let imageCache = NSCache<NSUUID, UIImage>()
+
+    init() {
+        if Self.fixture {
+            let t = Self.fixtureThreadID
+            threads = [ForgeChatThread(id: t, title: "Fixture", status: "open", createdAt: nil, updatedAt: nil)]
+            messages = [t: [
+                ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Make me a tweak that hides the dock labels."),
+                ForgeChatMessage(id: UUID(), threadID: t, role: "kat", text: "Got it. I'll build it and send it here when it's ready."),
+                ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Thanks, no rush.")]]
+            ackedThreads.insert(t)
+            return
+        }
+        defer { startRetrying() }; outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? [] }
     private func saveOutgoing() { UserDefaults.standard.set(try? JSONEncoder().encode(outgoing), forKey: key) }
 
     func callPublic(_ body: [String: Any]) async throws -> Data { try await call(body) }
     /// Last real failure (HTTP status + server code, or the network error) so the user and logs can see the true reason.
     @Published var lastDiagnostic: String?
     private func call(_ body: [String: Any], retryBind: Bool = true) async throws -> Data {
+        if Self.fixture { throw ForgeChatTransient.failed("fixture") }
         let r: ForgePreciseClient.Response
         do {
             let c = try await ForgeClient.fixToken()
@@ -156,6 +175,7 @@ enum ForgeChatImage {
     func send(threadID: UUID?, text: String, jpeg: Data?) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        if let tid = threadID, deleting.contains(tid) { return }
         if let tid = threadID, hasInFlight(tid) { return } // no double send while a message is still unsent
         let img = jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString()
         outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: threadID ?? UUID(), newThread: !serverKnows(threadID ?? UUID()), text: String(t.prefix(4000)), imageBase64: img))
@@ -183,11 +203,12 @@ enum ForgeChatImage {
     func flush() async {
         guard !flushing else { return }
         flushing = true; defer { flushing = false }
-        for o in outgoing {
+        for o in outgoing where !deleting.contains(o.threadID) {
             var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text]
             if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
             do {
                 _ = try await call(body)
+                if deleting.contains(o.threadID) { continue } // delete started mid-send; delete waits for flush and wipes it
                 ackedThreads.insert(o.threadID); outgoing.removeAll { $0.id == o.id }; saveOutgoing(); error = nil
             } catch let f as ForgeClient.Failure {
                 // Daily limit: the server refuses this message for good, so it cannot be replayed today.
@@ -200,29 +221,42 @@ enum ForgeChatImage {
         await refreshThreads()
     }
 
-    /// Server delete first (device-owned thread); local removal only after the server confirms.
+    /// Server delete first (device-owned thread). Local state is wiped only after the server confirms.
+    /// While deleting, sends/flushes/reads for that thread are blocked so nothing can resurrect it.
     func deleteThread(_ id: UUID) async {
+        guard !deleting.contains(id) else { return }
+        deleting.insert(id); defer { deleting.remove(id) }
+        while flushing { try? await Task.sleep(nanoseconds: 100_000_000) } // let an in-flight send settle first
         do {
             _ = try await call(["action": "chat-delete", "threadID": id.uuidString.lowercased()])
-            threads.removeAll { $0.id == id }; messages[id] = nil
-            outgoing.removeAll { $0.threadID == id }; saveOutgoing()
-            error = nil
-        } catch { self.error = ForgeChatText.deleteFailed }
+        } catch { self.error = ForgeChatText.deleteFailed; return } // server still has it: keep everything local
+        deleteEpoch[id, default: 0] += 1
+        for m in messages[id] ?? [] { Self.imageCache.removeObject(forKey: m.id as NSUUID) }
+        threads.removeAll { $0.id == id }
+        var all = messages; all[id] = nil; messages = all
+        outgoing.removeAll { $0.threadID == id }; saveOutgoing()
+        ackedThreads.remove(id)
+        if UserDefaults.standard.string(forKey: draftKey).flatMap(UUID.init(uuidString:)) == id { UserDefaults.standard.removeObject(forKey: draftKey) }
+        error = nil
     }
 
     func refreshThreads() async {
         struct Lossy: Decodable { let value: ForgeChatThread?; init(from d: Decoder) throws { value = try? ForgeChatThread(from: d) } }
         struct W: Decodable { let threads: [Lossy] }
+        let epochs = deleteEpoch
         guard let d = try? await call(["action": "chat-list"]), let w0 = try? JSONDecoder().decode(W.self, from: d) else { return }
-        let w = (threads: w0.threads.compactMap(\.value), ())
+        let w = (threads: w0.threads.compactMap(\.value).filter { !deleting.contains($0.id) && deleteEpoch[$0.id] == epochs[$0.id] }, ())
         threads = w.threads.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
     func read(_ id: UUID) async {
-        if !serverKnows(id) { return } // pending first message: nothing to read yet (avoids repeated 404)
+        if deleting.contains(id) || Self.fixture { return }
+        if !serverKnows(id) { return }
+        let epoch = deleteEpoch[id] // pending first message: nothing to read yet (avoids repeated 404)
         struct Lossy: Decodable { let value: ForgeChatMessage?; init(from d: Decoder) throws { value = try? ForgeChatMessage(from: d) } }
         struct W: Decodable { let messages: [Lossy] }
         guard let d = try? await call(["action": "chat-read", "threadID": id.uuidString.lowercased()]), let raw = try? JSONDecoder().decode(W.self, from: d) else { return }
+        if deleting.contains(id) || deleteEpoch[id] != epoch { return } // deleted while this read was in flight
         // One undecodable message must never hide the others (operator replies were not showing).
         let w = (messages: raw.messages.compactMap(\.value), 0)
         if w.messages.count < raw.messages.count { lastDiagnostic = "decode: skipped \(raw.messages.count - w.messages.count) of \(raw.messages.count) messages" }
@@ -234,8 +268,10 @@ enum ForgeChatImage {
     }
 
     func image(_ messageID: UUID) async -> UIImage? {
-        guard let d = try? await call(["action": "chat-image", "id": messageID.uuidString.lowercased()]) else { return nil }
-        return UIImage(data: d)
+        if let c = Self.imageCache.object(forKey: messageID as NSUUID) { return c }
+        guard let d = try? await call(["action": "chat-image", "id": messageID.uuidString.lowercased()]), let img = UIImage(data: d) else { return nil }
+        Self.imageCache.setObject(img, forKey: messageID as NSUUID)
+        return img
     }
 }
 
@@ -386,7 +422,7 @@ struct ForgeChatThreadView: View {
         .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
-            while !Task.isCancelled { await store.read(threadID); try? await Task.sleep(nanoseconds: 8_000_000_000) }
+            while !Task.isCancelled && !ForgeChatStore.fixture { await store.read(threadID); try? await Task.sleep(nanoseconds: 8_000_000_000) }
         }
     }
 

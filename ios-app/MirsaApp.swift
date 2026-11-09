@@ -45,9 +45,9 @@ struct MirsaApp: App {
             .id(language.current)
             .mirsaKeyboardDismissal()
             .mirsaLeftToRightChrome()
-            .task { await ForgeStore.shared.syncFixInbox() }
+            .task { if !MirsaUITestHarness.active { await ForgeStore.shared.syncFixInbox() } }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await ForgeStore.shared.syncFixInbox() } }
+                if phase == .active, !MirsaUITestHarness.active { Task { await ForgeStore.shared.syncFixInbox() } }
             }
         }
     }
