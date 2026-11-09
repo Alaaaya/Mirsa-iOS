@@ -2,6 +2,8 @@
 //! in-place command compaction only; no executable code is ever loaded.
 use super::*;
 use serde::{Deserialize, Serialize};
+#[path="imported_ordinals.rs"]
+mod ordinals;
 #[derive(Deserialize)]
 pub(super) struct Edit {
     owner: String,
@@ -13,7 +15,9 @@ pub(super) struct Edit {
 struct Entry {
     owner: String, main_owner: bool, slice: usize, subtype: u32,
     load_path: String, weak: bool, resolved_path: Option<String>,
+    editable: bool, edit_block_reason: Option<String>,
 }
+fn is_load(c:&Command)->bool{matches!(c.kind,0xc|0x80000018|0x8000001f|0x80000023|0x20)}
 fn visible(c: &Command) -> bool {
     matches!(c.kind,0xc|0x80000018|0x8000001f|0x80000023|0x20)
         && c.name.as_ref().is_some_and(|n| !n.starts_with("/System/Library/") && !n.starts_with("/usr/lib/"))
@@ -79,15 +83,31 @@ fn entries(app: &Path, executable: &str) -> Result<Vec<Entry>> {
             Err(e) if e=="FAT binary has no arm64 slices" || e=="Unsupported thin architecture" => continue,
             other => other?,
         };
+        let block=capability(&bytes).err();
         for (slice,(a,b)) in ranges.into_iter().enumerate(){
             let m=macho_subtype(bytes[a..b].to_vec(),false,true)?;
             let mut paths=rpaths(&m,&app,&owner)?;paths.extend(main_paths.clone());
             for c in m.commands.iter().filter(|c|visible(c)) {
                 let load=c.name.clone().unwrap();
-                out.push(Entry{owner:owner.strip_prefix(&app).map_err(err)?.to_str().ok_or("Invalid owner")?.into(),main_owner:owner==main,slice,subtype:m.subtype,resolved_path:resolved(&app,&owner,&load).or_else(||resolve_rpath(&app,&load,&paths)),load_path:load,weak:c.kind==0x80000018});
+                out.push(Entry{editable:block.is_none(),edit_block_reason:block.clone(),owner:owner.strip_prefix(&app).map_err(err)?.to_str().ok_or("Invalid owner")?.into(),main_owner:owner==main,slice,subtype:m.subtype,resolved_path:resolved(&app,&owner,&load).or_else(||resolve_rpath(&app,&load,&paths)),load_path:load,weak:c.kind==0x80000018});
             }
         }
     } Ok(out)
+}
+fn capability(bytes:&[u8])->Result<()> {
+    let ranges=fat_macho::arm64_ranges(bytes)?;
+    if bytes.get(..4)!=Some(&[0xcf,0xfa,0xed,0xfe]) {
+        let le=matches!(bytes.get(..4),Some([0xbe,0xba,0xfe,0xca]|[0xbf,0xba,0xfe,0xca]));
+        if fat_macho::word(bytes,4,false,le)?as usize!=ranges.len(){return Err("Unsupported additional architectures".into())}
+    }
+    let mut expected=None;
+    for (a,b) in ranges{
+        let mut m=macho_subtype(bytes[a..b].to_vec(),false,true)?;
+        let names:Vec<_>=m.commands.iter().filter(|c|is_load(c)).map(|c|c.name.clone()).collect();
+        if names.iter().collect::<HashSet<_>>().len()!=names.len(){return Err("Ambiguous dependency names".into())}
+        if expected.as_ref().is_some_and(|v|v!=&names){return Err("Arm64 slice dependency lists differ".into())}expected=Some(names.clone());
+        let identity:Vec<_>=(0..=names.len()).map(Some).collect();ordinals::rewrite(&mut m,&identity)?;
+    }Ok(())
 }
 pub(super) fn report(app: &Path, executable: &str, output: &Path) -> Result<()> {
     let list=entries(app,executable)?;
@@ -98,25 +118,11 @@ fn patch(bytes: &[u8], edit: &Edit) -> Result<Vec<u8>> {
     let mut expected=None;
     for (a,b) in fat_macho::arm64_ranges(bytes)? {
         let mut m=macho_subtype(bytes[a..b].to_vec(),false,true)?;
-        // Dylib order is also a symbol-binding ordinal namespace. Without a
-        // verified dyld rebind implementation changing it could silently bind
-        // symbols to the wrong framework. Reject such binaries, never corrupt.
-        if !edit.remove.is_empty() || !edit.order.is_empty() {
-            for c in &m.commands {
-                let has_ordinals = match c.kind {
-                    0x22 | 0x80000022 => [20,28,36].iter().any(|&o| u32at(&c.data,o).unwrap_or(1)!=0),
-                    0x80000034 => u32at(&c.data,12)? != 0,
-                    0x2 => u32at(&c.data,12)? != 0,
-                    0xb => [28,52,60,68,76].iter().any(|&o| u32at(&c.data,o).unwrap_or(1)!=0),
-                    _ => false,
-                };
-                if has_ordinals {return Err("Dependency editing requires dyld ordinal rebinding for this binary; safe editing is not yet supported".into())}
-            }
-        }
         let names:Vec<_>=m.commands.iter().filter(|c|visible(c)).map(|c|c.name.clone().unwrap()).collect();
         if names.iter().collect::<HashSet<_>>().len()!=names.len(){return Err("Ambiguous duplicate dependency commands".into())}
         if expected.as_ref().is_some_and(|n|n!=&names){return Err("Arm64 slice dependency lists differ; refusing inconsistent edit".into())}expected=Some(names.clone());
         if edit.remove.iter().collect::<HashSet<_>>().len()!=edit.remove.len() || edit.remove.iter().any(|n|!names.contains(n)){return Err("Unknown or duplicate removal".into())}
+        let old_names:Vec<_>=m.commands.iter().filter(|c|is_load(c)).map(|c|c.name.clone().unwrap()).collect();
         m.commands.retain(|c| !visible(c)||!edit.remove.contains(c.name.as_ref().unwrap()));
         if !edit.order.is_empty(){
             let remaining:Vec<_>=m.commands.iter().filter(|c|visible(c)).collect();
@@ -124,6 +130,15 @@ fn patch(bytes: &[u8], edit: &Edit) -> Result<Vec<u8>> {
             let ordered:Vec<_>=edit.order.iter().map(|n|remaining.iter().find(|c|c.name.as_ref()==Some(n)).unwrap().data.clone()).collect();
             let mut it=ordered.into_iter();for c in &mut m.commands{if visible(c){c.data=it.next().unwrap()}}
         }
+        // Commands were reordered as raw data, so rebuild names before ordinal mapping.
+        let new_names:Vec<String>=m.commands.iter().filter(|c|is_load(c)).map(|c|{
+            let off=u32at(&c.data,8)?as usize;
+            let bytes=c.data.get(off..).ok_or("Invalid dependency name")?;
+            let end=bytes.iter().position(|&b|b==0).ok_or("Invalid dependency name")?;
+            Ok(std::str::from_utf8(&bytes[..end]).map_err(err)?.to_owned())
+        }).collect::<Result<_>>()?;
+        let mut map=vec![Some(0)];map.extend(old_names.iter().map(|n|new_names.iter().position(|v|v==n).map(|v|v+1)));
+        ordinals::rewrite(&mut m,&map)?;
         let old_end=32+u32at(&m.data,20)? as usize;
         let size:usize=m.commands.iter().map(|c|c.data.len()).sum();
         if size+32>old_end{return Err("Command expansion forbidden".into())}
@@ -158,6 +173,7 @@ pub(super) fn edit_copy(input: &Path, executable: &str, output: &Path, edits: &[
         if !seen.insert(rel.clone()){return Err("Duplicate edited owner".into())}
         let p=app.join(&rel);
         if !allowed.contains(&p){return Err("Owner is not a contained Mach-O executable".into())}
+        capability(&read_macho(&p)?)?;
         patches.push((rel,patch(&read_macho(&p)?,edit)?));
     }
     // create_dir (not create_dir_all) ensures we only clean up an owned new copy.
@@ -198,15 +214,48 @@ mod tests {
             for (a,b) in fat_macho::arm64_ranges(&out).unwrap(){assert_eq!(names(&out[a..b]),vec![loads[3],loads[2]]);assert_eq!(&out[a+1024..b],&original[a+1024..b]);let m=macho_subtype(out[a..b].to_vec(),false,true).unwrap();assert!(m.commands.iter().any(|c|c.name.as_deref()==Some(loads[1])))}
         }}
     }
+    fn add_command(d:&mut Vec<u8>,cmd:Vec<u8>){let at=32+u32at(d,20).unwrap()as usize;d[at..at+cmd.len()].copy_from_slice(&cmd);let n=u32at(d,16).unwrap();put32(d,16,n+1);put32(d,20,(at+cmd.len()-32)as u32);}
+    fn modern_fixture(format:u32)->Vec<u8>{
+        let mut d=fixture(0,&["@rpath/Unused","/usr/lib/libz.dylib","@rpath/A","@rpath/B"]);
+        let mut cmd=vec![0;48];put32(&mut cmd,0,0x80000022);put32(&mut cmd,4,48);put32(&mut cmd,16,2048);put32(&mut cmd,20,12);add_command(&mut d,cmd);
+        d[2048..2060].copy_from_slice(&[0x13,0x40,b'x',0,0x90,0x20,4,0x90,0x3f,0x90,0,0]);
+        let mut cmd=vec![0;24];put32(&mut cmd,0,2);put32(&mut cmd,4,24);put32(&mut cmd,8,2200);put32(&mut cmd,12,2);add_command(&mut d,cmd);d[2204]=1;d[2207]=4;d[2220]=1;d[2223]=0xfe;
+        let mut cmd=vec![0;16];put32(&mut cmd,0,0x80000034);put32(&mut cmd,4,16);put32(&mut cmd,8,2300);put32(&mut cmd,12,100);add_command(&mut d,cmd);
+        put32(&mut d,2308,28);put32(&mut d,2316,2);put32(&mut d,2320,format);let width=match format{1=>4,2=>8,_=>16};d[2328]=3;d[2328+width]=0xff;if format==3{d[2328+width+1]=0xff}
+        d
+    }
+    #[test]fn modern_bind_chained_symbols_remap_all_slots_preserve_special_and_reject_bound(){
+        for format in [1,2,3]{
+            let original=modern_fixture(format);assert!(capability(&original).is_ok());
+            let edit=Edit{owner:"Main".into(),remove:vec!["@rpath/Unused".into()],order:vec!["@rpath/B".into(),"@rpath/A".into()],delete_files:false};
+            let out=patch(&original,&edit).unwrap();
+            // system is ordinal1, B ordinal2, A ordinal3. Old A3 remains3, B4 becomes2.
+            assert_eq!(out[2048],0x13);assert_eq!(out[2054],2);assert_eq!(out[2056],0x3f);assert_eq!(out[2207],2);assert_eq!(out[2223],0xfe);assert_eq!(out[2328],3);
+            assert_eq!(out[2328+match format{1=>4,2=>8,_=>16}],0xff);
+            let bound=Edit{owner:"Main".into(),remove:vec!["@rpath/B".into()],order:vec![],delete_files:false};assert!(patch(&original,&bound).unwrap_err().contains("still has symbol bindings"));assert_eq!(original,modern_fixture(format));
+        }
+    }
+    #[test]fn modern_fat_all_slices_remap(){
+        for wide in [false,true]{for le in [false,true]{let a=modern_fixture(3);let mut b=modern_fixture(2);put32(&mut b,8,2);let original=fat_macho::tests::fat(&[a,b],wide,le);
+            assert!(capability(&original).is_ok());let edit=Edit{owner:"Main".into(),remove:vec!["@rpath/Unused".into()],order:vec!["@rpath/B".into(),"@rpath/A".into()],delete_files:false};let out=patch(&original,&edit).unwrap();assert_eq!(out.len(),original.len());
+            for(a,b)in fat_macho::arm64_ranges(&out).unwrap(){assert_eq!(out[a+2054],2);assert_eq!(out[a+2207],2);assert!(capability(&out[a..b]).is_ok());}
+        }}
+    }
+    #[test]fn ordinal_encoding_growth_threaded_and_bad_chained_fail_closed(){
+        let mut d=modern_fixture(1);d[2048]=0xd0;assert!(capability(&d).is_err());
+        let mut d=modern_fixture(1);put32(&mut d,2308,99);assert!(capability(&d).is_err());
+        let mut payload=[0x1f,0x90,0];let map:Vec<_>=(0..=16).map(|v|Some(if v==15{16}else{v})).collect();assert!(ordinals::test_stream(&mut payload,&map).is_err());
+        let mut payload=[0x20,0x7f,0x90,0];let map:Vec<_>=(0..=128).map(|v|Some(if v==127{128}else{v})).collect();assert!(ordinals::test_stream(&mut payload,&map).is_err());
+    }
     #[test]fn ordinal_bearing_payloads_fail_closed(){
-        for (kind,size,count_at) in [(0x80000022,48,20),(0x80000034,16,12),(0x2,24,12),(0xb,80,28)] {
+        for (kind,size,count_at) in [(0x80000022,48,20),(0x80000034,16,12),(0xb,80,28)] {
             let mut d=fixture(0,&["@rpath/A"]);let at=32+u32at(&d,20).unwrap() as usize;
             put32(&mut d,at,kind);put32(&mut d,at+4,size);put32(&mut d,at+count_at,1);
             // Proper on-disk payload for parser validation.
-            match kind {0x80000022=>put32(&mut d,at+16,2048),0x80000034=>put32(&mut d,at+8,2048),0x2=>put32(&mut d,at+8,2048),_=>{}}
+            match kind {0x80000022=>{put32(&mut d,at+16,2048);d[2048]=0xd0;},0x80000034=>put32(&mut d,at+8,2048),0x2=>put32(&mut d,at+8,2048),_=>{}}
             put32(&mut d,16,3);put32(&mut d,20,(at+size as usize-32) as u32);
             let edit=Edit{owner:"Main".into(),remove:vec!["@rpath/A".into()],order:vec![],delete_files:false};
-            let failure=patch(&d,&edit).unwrap_err();assert!(failure.contains("ordinal rebinding"),"{kind:x} {failure}");
+            let failure=patch(&d,&edit).unwrap_err();assert!(!failure.is_empty(),"{kind:x}");
         }
     }
     #[test]fn contained_rpaths_opt_in_unreferenced_file_delete_and_shared_retention(){
