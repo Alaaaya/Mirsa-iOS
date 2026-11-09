@@ -90,4 +90,34 @@ final class SourceDeletionTests: XCTestCase {
         XCTAssertEqual(out[0].uid, RepoSource.canonicalID)
         XCTAssertEqual(Set(out.map { $0.id }).count, 3)
     }
+
+    func testReorderDuplicateBeforeCanonicalKeepsIdentityAfterReload() {
+        let store = makeStore()
+        let dup = RepoSource(url: MirsaSourceFeed.primary, name: "Mirsa")
+        store.sources.insert(dup, at: 0)
+        let reloaded = makeStore()
+        XCTAssertEqual(reloaded.sources.filter { $0.isCanonical }.count, 1)
+        XCTAssertEqual(reloaded.sources.map(\.id), store.sources.map(\.id))
+        XCTAssertFalse(reloaded.sources.first { $0.id == dup.id }!.isCanonical)
+        XCTAssertTrue(reloaded.sources.contains { $0.id == dup.id })
+    }
+
+    func testCorruptDuplicateUIDsBecomeUnique() {
+        var a = RepoSource(url: "https://u.example/a.json", name: "A", uid: "same")
+        var b = RepoSource(url: "https://u.example/b.json", name: "B", uid: "same")
+        a.appCount = 1; b.appCount = 2
+        let out = MirsaSourceFeed.migrate([a, b])
+        XCTAssertEqual(Set(out.map(\.id)).count, 2)
+    }
+
+    func testHiddenIDsAreIndependentForDuplicates() {
+        let store = makeStore()
+        let a = RepoSource(url: "https://h.example/s.json", name: "H")
+        let b = RepoSource(url: "https://h.example/s.json", name: "H")
+        store.sources += [a, b]
+        store.hiddenIDs.insert(a.id)
+        XCTAssertFalse(store.visibleSources.contains { $0.id == a.id })
+        XCTAssertTrue(store.visibleSources.contains { $0.id == b.id })
+        XCTAssertEqual(makeStore().hiddenIDs, [a.id])
+    }
 }
