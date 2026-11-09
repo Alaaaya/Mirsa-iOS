@@ -103,7 +103,7 @@ pub(super) fn inject_plan(app:&Path,items:&[Injection],order:&[String],loader:bo
   let _=fs::remove_dir_all(&backup);Ok(())
  })();if result.is_err(){let _=fs::remove_dir_all(&temp);}result
 }
-fn checked_tree(root:&Path)->Result<()> {
+pub(super) fn checked_tree(root:&Path)->Result<()> {
  let m=fs::symlink_metadata(root).map_err(err)?;if m.file_type().is_symlink()||!(m.is_file()||m.is_dir()){return Err("Links or special files not supported".into())}
  if m.is_file(){if m.len()>FILE_LIMIT{return Err("Library too large".into())}return Ok(())}
  let mut files=Vec::new();walk(root,&mut files)?;let mut names=BTreeMap::new();let mut total=0u64;
