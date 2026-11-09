@@ -26,6 +26,8 @@ struct PersonalProjectDetailView: View {
     @State private var extensionCount: Int?
     @State private var deps: [String]?
     @State private var showDeps = false
+    @State private var importedReport: ImportedLoadReport?
+    @State private var importedError: String?
     @State private var pickingEntitlements = false
     @StateObject private var draftWriter = PersonalProjectDraftWriter()
     @State private var draftDestination: URL?
@@ -163,7 +165,7 @@ struct PersonalProjectDetailView: View {
                 field(personalText("Version", "الإصدار"), $draft.version)
                 field(personalText("Workspace note", "ملاحظة المشروع"), Binding(get: { draft.workspaceNote ?? "" }, set: { draft.workspaceNote = String($0.prefix(300)) }))
                 HStack(spacing: 8) {
-                    chip("puzzlepiece.extension", extensionCount.map { "\($0) " + personalText("extensions", "إضافات") } ?? "…")
+                    chip("puzzlepiece.extension", extensionCount.map { "\($0) " + sgText("app extensions", "امتدادات التطبيق", "پاشکۆکانی ئەپ", "pêvekên appê") } ?? "…")
                     chip("arrow.triangle.branch", personalText("Main executable", "الملف الرئيسي"))
                 }
             }
@@ -204,6 +206,7 @@ struct PersonalProjectDetailView: View {
                     }
                 } label: { Label(personalText("Add", "إضافة"), systemImage: "plus") }
             }
+            ImportedDependenciesView(report: importedReport, error: importedError, edits: $draft.importedLoadEdits)
             let ids = draft.tweakIDs.filter { tweak($0) != nil }
             let applied = Set(draft.appliedTweakIDs ?? [])
             let added = ids.filter { !applied.contains($0) }.count
@@ -454,6 +457,23 @@ struct PersonalProjectDetailView: View {
         guard !Task.isCancelled else { return }
         extensionCount = result?.extensions ?? 0
         deps = result?.dependencies ?? []
+        do {
+            importedReport = try await Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                let root = fm.temporaryDirectory.appendingPathComponent("imported-inspect-\(UUID().uuidString)")
+                defer { try? fm.removeItem(at: root) }
+                try IPAEditorService.run("extract", input: input, output: root)
+                let app = try IPAEditorService.app(in: root)
+                let info = try IPAEditorService.info(in: app)
+                guard let executable = info["CFBundleExecutable"] as? String else { throw CocoaError(.fileReadCorruptFile) }
+                return try IPAEditorService.importedLoads(app: app, executable: executable)
+            }.value
+        } catch {
+            importedError = sgText("Could not inspect imported dependencies. No changes were made.",
+                "ما قدرت أقرأ المكتبات الموجودة. ما تغيّر شي.",
+                "نەتوانرا کتێبخانەکان بپشکنرێن. هیچ نەگۆڕدرا.",
+                "Pirtûkxane nehatin kontrolkirin. Tiştek nehat guhartin.")
+        }
     }
 
     private var certificateCard: some View {
@@ -541,6 +561,7 @@ struct PersonalProjectDetailView: View {
         options.newTweaksFirst = draft.newTweaksFirst ?? false
         options.useLoader = draft.directInjection == false
         options.customEntitlements = draft.customEntitlements
+        options.importedLoadEdits = draft.importedLoadEdits ?? []
         options.exportExtension = draft.exportExtension ?? "ipa"
         options.additionalProfiles = identities.filter { (draft.additionalProfileIDs ?? []).contains($0.id) }.map { $0.material.profile }
         let minimum = draft.minimumOS.trimmingCharacters(in: .whitespacesAndNewlines)
