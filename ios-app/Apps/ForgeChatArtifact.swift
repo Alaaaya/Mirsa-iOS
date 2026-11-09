@@ -12,7 +12,7 @@ extension ForgeChatText {
     static var download: String { tr("Download", "حمّل", ckb: "دابەزاندن", kmr: "Daxe") }
     static var share: String { tr("Share", "شارك", ckb: "هاوبەشکردن", kmr: "Parve bike") }
     static var cancel: String { tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal bike") }
-    static var expired: String { tr("This file expired. Ask Kat again.", "انتهت صلاحية الملف. اطلب من كات مرة تانية.", ckb: "فایلەکە بەسەرچووە. دووبارە لە کات بپرسە.", kmr: "Dema pelê qediya. Dîsa ji Katê bipirse.") }
+    static var expired: String { tr("This file expired. Ask Mirsa again.", "انتهت صلاحية الملف. اطلب من مرسى مرة تانية.", ckb: "فایلەکە بەسەرچووە. دووبارە لە مرسا بپرسە.", kmr: "Dema pelê qediya. Dîsa ji Mirsayê bipirse.") }
     static var dlFailed: String { tr("Download failed or the file did not match. Try again.", "فشل التحميل أو الملف مو مطابق. جرّب مرة تانية.", ckb: "داگرتن شکستی هێنا یان فایلەکە نەگونجا. دووبارە هەوڵ بدە.", kmr: "Daxistin têk çû an pel li hev nehat. Dîsa biceribîne.") }
     static var ipaNote: String { tr("Goes through the normal import, sign and install steps.", "بيمشي بخطوات الاستيراد والتوقيع والتثبيت العادية.", ckb: "بە هەنگاوە ئاساییەکانی هێنان و واژۆ و دامەزراندن دەڕوات.", kmr: "Bi gavên asayî yên import, îmze û sazkirinê diçe.") }
 }
