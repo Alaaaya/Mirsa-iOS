@@ -1,6 +1,5 @@
 import Foundation
 import Network
-import UIKit
 
 /// Route chosen for the signed IPA handoff. Only `.local` means bytes are served from this device.
 enum OTARoute: Equatable {
@@ -8,14 +7,14 @@ enum OTARoute: Equatable {
     case upload(reason: OTAUploadReason)
 }
 enum OTAUploadReason: String, Equatable {
-    case disabledByUser, fileUnavailable, serverStartFailed, manifestUnreachable, installerRefused
+    case disabledByUser, fileUnavailable, serverStartFailed, manifestUnreachable, noInstallerRequest
     var english: String {
         switch self {
         case .disabledByUser: return "Local install is turned off."
         case .fileUnavailable: return "The signed IPA is not readable for local serving."
         case .serverStartFailed: return "The on-device server could not start."
-        case .manifestUnreachable: return "The HTTPS install manifest could not be created."
-        case .installerRefused: return "iOS refused the local install link."
+        case .manifestUnreachable: return "The HTTPS install manifest was not reachable."
+        case .noInstallerRequest: return "iOS did not request the app from this device in time."
         }
     }
     var arabic: String {
@@ -23,8 +22,8 @@ enum OTAUploadReason: String, Equatable {
         case .disabledByUser: return "التثبيت المحلي مطفي."
         case .fileUnavailable: return "ما قدرت اقرأ الـ IPA الموقّع للتشغيل المحلي."
         case .serverStartFailed: return "السيرفر المحلي ما اشتغل."
-        case .manifestUnreachable: return "ما انعمل ملف التثبيت HTTPS."
-        case .installerRefused: return "iOS رفض رابط التثبيت المحلي."
+        case .manifestUnreachable: return "ملف التثبيت HTTPS ما انوصل."
+        case .noInstallerRequest: return "iOS ما طلب التطبيق من هالجهاز بالوقت المحدد."
         }
     }
 }
@@ -46,6 +45,17 @@ enum LocalOTAManifest {
             .init(name: "title", value: title), .init(name: "bytes", value: String(bytes))]
         return c.url
     }
+    /// Real HTTPS GET so an undeployed/broken broker is caught before iOS silently shows nothing.
+    static func preflight(_ url: URL, port: UInt16, timeout: TimeInterval = 8) async -> Bool {
+        var req = URLRequest(url: url, timeoutInterval: timeout)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        let cfg = URLSessionConfiguration.ephemeral; cfg.httpCookieStorage = nil
+        let s = URLSession(configuration: cfg, delegate: OTANoRedirect(), delegateQueue: nil)
+        defer { s.invalidateAndCancel() }
+        guard let (d, r) = try? await s.data(for: req), (r as? HTTPURLResponse)?.statusCode == 200,
+              d.count < 64 * 1024, let body = String(data: d, encoding: .utf8) else { return false }
+        return body.contains("http://127.0.0.1:\(port)/") && body.contains("software-package")
+    }
 }
 /// Parses a single "bytes=a-b" range. nil = whole file; throws = unsatisfiable.
 enum LocalOTARange {
@@ -65,90 +75,157 @@ enum LocalOTARange {
         return a...min(b, size - 1)
     }
 }
-/// Serves exactly one file on 127.0.0.1 under an unguessable token path. Not reachable from the network.
+/// Serves exactly one file on 127.0.0.1 under an unguessable token path. All mutable state is guarded by `lock`
+/// and all network callbacks run on one serial queue. Not reachable from the network.
 final class LocalOTAServer: @unchecked Sendable {
+    static let maxConnections = 8
+    static let maxHeaderBytes = 16 * 1024
     let token = (0..<2).map { _ in String(format: "%016llx", UInt64.random(in: .min ... .max)) }.joined()
     private let file: URL
     private let size: Int64
     private let queue = DispatchQueue(label: "mirsa.local-ota")
+    private let lock = NSLock()
     private var listener: NWListener?
-    private var connections = Set<ObjectIdentifier>()
-    private var bg: UIBackgroundTaskIdentifier = .invalid
-    private(set) var servedBytes: Int64 = 0
-    private(set) var port: UInt16 = 0
+    private var connections: [ObjectIdentifier: NWConnection] = [:]
+    private var stopped = false
+    private var _servedBytes: Int64 = 0
+    private var _port: UInt16 = 0
+    private var requested = false
+    private var waiter: CheckedContinuation<Bool, Never>?
+    var onStop: (@Sendable () -> Void)?
+    var servedBytes: Int64 { lock.lock(); defer { lock.unlock() }; return _servedBytes }
+    var port: UInt16 { lock.lock(); defer { lock.unlock() }; return _port }
+    var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
+    enum Failure: Error { case unreadable, start, timeout }
     init(file: URL) throws {
         self.file = file
-        guard let s = (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize, s > 0 else { throw OTAUploadError.unreadable }
+        guard let s = (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize, s > 0 else { throw Failure.unreadable }
         size = Int64(s)
     }
-    enum OTAUploadError: Error { case unreadable, start }
-    func start(lifetime: TimeInterval = 600) async throws -> UInt16 {
+    func start(lifetime: TimeInterval = 600, timeout: TimeInterval = 5) async throws -> UInt16 {
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         let l = try NWListener(using: params)
-        l.newConnectionHandler = { [weak self] c in self?.serve(c) }
+        l.newConnectionHandler = { [weak self] c in self?.accept(c) }
         let ready: UInt16 = try await withCheckedThrowingContinuation { cont in
-            var done = false
+            let box = OnceBox<UInt16>(cont)
             l.stateUpdateHandler = { st in
-                guard !done else { return }
                 switch st {
-                case .ready: if let p = l.port?.rawValue { done = true; cont.resume(returning: p) }
-                case .failed(let e): done = true; cont.resume(throwing: e)
-                case .cancelled: done = true; cont.resume(throwing: OTAUploadError.start)
+                case .ready: if let p = l.port?.rawValue { box.resume(.success(p)) }
+                case .failed(let e): box.resume(.failure(e))
+                case .cancelled: box.resume(.failure(Failure.start))
                 default: break
                 }
             }
+            queue.asyncAfter(deadline: .now() + timeout) { box.resume(.failure(Failure.timeout)); }
             l.start(queue: queue)
         }
-        listener = l; port = ready
-        await MainActor.run { bg = UIApplication.shared.beginBackgroundTask { [weak self] in self?.stop() } }
+        lock.lock(); listener = l; _port = ready; let already = stopped; lock.unlock()
+        if already { l.cancel(); throw Failure.start }
         queue.asyncAfter(deadline: .now() + lifetime) { [weak self] in self?.stop() }
         return ready
     }
-    func stop() {
-        listener?.cancel(); listener = nil
-        let id = bg; bg = .invalid
-        if id != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(id) } }
+    /// True once a valid-token GET/HEAD was answered successfully. False on timeout or stop. Single bounded wait.
+    func awaitFirstRequest(timeout: TimeInterval) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            lock.lock()
+            if requested { lock.unlock(); cont.resume(returning: true); return }
+            if stopped { lock.unlock(); cont.resume(returning: false); return }
+            waiter = cont
+            lock.unlock()
+            queue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.resolveWaiter(false) }
+        }
     }
-    private func serve(_ conn: NWConnection) {
+    private func resolveWaiter(_ value: Bool) {
+        lock.lock(); let w = waiter; waiter = nil; lock.unlock()
+        w?.resume(returning: value)
+    }
+    func stop() {
+        lock.lock()
+        let was = stopped; stopped = true
+        let l = listener; listener = nil
+        let conns = Array(connections.values); connections.removeAll()
+        lock.unlock()
+        l?.cancel(); conns.forEach { $0.cancel() }
+        resolveWaiter(false)
+        if !was { onStop?() }
+    }
+    private func accept(_ conn: NWConnection) {
+        let id = ObjectIdentifier(conn)
+        lock.lock()
+        guard !stopped, connections.count < Self.maxConnections else { lock.unlock(); conn.cancel(); return }
+        connections[id] = conn
+        lock.unlock()
+        conn.stateUpdateHandler = { [weak self] st in
+            switch st { case .failed, .cancelled: self?.drop(id); default: break }
+        }
         conn.start(queue: queue)
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [weak self] data, _, _, err in
-            guard let self, err == nil, let data, let req = String(data: data, encoding: .utf8) else { conn.cancel(); return }
-            self.respond(conn, request: req)
+        // Idle/slowloris bound.
+        queue.asyncAfter(deadline: .now() + 30) { [weak self] in
+            self?.lock.lock(); let alive = self?.connections[id] != nil; self?.lock.unlock()
+            if alive { conn.cancel() }
+        }
+        readHeader(conn, buffer: Data())
+    }
+    private func drop(_ id: ObjectIdentifier) { lock.lock(); connections[id] = nil; lock.unlock() }
+    private func readHeader(_ conn: NWConnection, buffer: Data) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, complete, err in
+            guard let self, err == nil else { conn.cancel(); return }
+            var buf = buffer; if let data { buf.append(data) }
+            if buf.count > Self.maxHeaderBytes { return self.fail(conn, 431, "Request Header Fields Too Large") }
+            if let end = buf.range(of: Data("\r\n\r\n".utf8)) {
+                guard let req = String(data: buf[..<end.lowerBound], encoding: .utf8) else { return self.fail(conn, 400, "Bad Request") }
+                self.respond(conn, request: req)
+            } else if complete { conn.cancel() } else { self.readHeader(conn, buffer: buf) }
         }
     }
     private func header(_ req: String, _ name: String) -> String? {
         req.components(separatedBy: "\r\n").first { $0.lowercased().hasPrefix(name.lowercased() + ":") }
             .map { String($0.dropFirst(name.count + 1)).trimmingCharacters(in: .whitespaces) }
     }
+    private func fail(_ conn: NWConnection, _ code: Int, _ text: String) {
+        conn.send(content: Data("HTTP/1.1 \(code) \(text)\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in conn.cancel() })
+    }
     private func respond(_ conn: NWConnection, request: String) {
         let line = request.components(separatedBy: "\r\n").first?.split(separator: " ").map(String.init) ?? []
-        func fail(_ code: Int, _ text: String) {
-            conn.send(content: Data("HTTP/1.1 \(code) \(text)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in conn.cancel() })
-        }
-        guard line.count >= 2, ["GET", "HEAD"].contains(line[0]) else { return fail(405, "Method Not Allowed") }
-        guard line[1] == "/\(token)/Mirsa.ipa" else { return fail(404, "Not Found") }
+        guard line.count >= 2, ["GET", "HEAD"].contains(line[0]) else { return fail(conn, 405, "Method Not Allowed") }
+        guard line[1] == "/\(token)/Mirsa.ipa" else { return fail(conn, 404, "Not Found") }
         let range: ClosedRange<Int64>?
-        do { range = try LocalOTARange.parse(header(request, "Range"), size: size) } catch { return fail(416, "Range Not Satisfiable") }
+        do { range = try LocalOTARange.parse(header(request, "Range"), size: size) } catch { return fail(conn, 416, "Range Not Satisfiable") }
         let lo = range?.lowerBound ?? 0, hi = range?.upperBound ?? size - 1
         let status = range == nil ? "200 OK" : "206 Partial Content"
-        var head = "HTTP/1.1 \(status)\r\nContent-Type: application/octet-stream\r\nAccept-Ranges: bytes\r\nContent-Length: \(hi - lo + 1)\r\nConnection: close\r\n"
+        var head = "HTTP/1.1 \(status)\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\nAccept-Ranges: bytes\r\nContent-Length: \(hi - lo + 1)\r\nConnection: close\r\n"
         if range != nil { head += "Content-Range: bytes \(lo)-\(hi)/\(size)\r\n" }
         head += "\r\n"
+        let isGet = line[0] == "GET"
         conn.send(content: Data(head.utf8), completion: .contentProcessed { [weak self] e in
-            guard let self, e == nil, line[0] == "GET", let fh = try? FileHandle(forReadingFrom: self.file) else { conn.cancel(); return }
+            guard let self, e == nil else { conn.cancel(); return }
+            // A valid-token request whose response header was actually delivered.
+            self.lock.lock(); self.requested = true; self.lock.unlock()
+            self.resolveWaiter(true)
+            guard isGet, let fh = try? FileHandle(forReadingFrom: self.file) else { conn.cancel(); return }
             try? fh.seek(toOffset: UInt64(lo))
             self.stream(conn, fh, remaining: hi - lo + 1)
         })
     }
     private func stream(_ conn: NWConnection, _ fh: FileHandle, remaining: Int64) {
-        guard remaining > 0, let chunk = try? fh.read(upToCount: Int(min(256 * 1024, remaining))), !chunk.isEmpty else {
+        guard !isStopped, remaining > 0, let chunk = try? fh.read(upToCount: Int(min(256 * 1024, remaining))), !chunk.isEmpty else {
             try? fh.close(); conn.cancel(); return
         }
-        servedBytes += Int64(chunk.count)
         conn.send(content: chunk, completion: .contentProcessed { [weak self] e in
             if e != nil { try? fh.close(); conn.cancel(); return }
-            self?.stream(conn, fh, remaining: remaining - Int64(chunk.count))
+            guard let self else { try? fh.close(); return }
+            self.lock.lock(); self._servedBytes += Int64(chunk.count); self.lock.unlock()  // after successful send
+            self.stream(conn, fh, remaining: remaining - Int64(chunk.count))
         })
+    }
+}
+/// Resumes a throwing continuation exactly once.
+final class OnceBox<T>: @unchecked Sendable {
+    private let lock = NSLock(); private var cont: CheckedContinuation<T, Error>?
+    init(_ c: CheckedContinuation<T, Error>) { cont = c }
+    func resume(_ r: Result<T, Error>) {
+        lock.lock(); let c = cont; cont = nil; lock.unlock()
+        c?.resume(with: r)
     }
 }
