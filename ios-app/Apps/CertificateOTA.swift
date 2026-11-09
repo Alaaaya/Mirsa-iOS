@@ -14,7 +14,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
 @MainActor enum CertificateOTA {
     /// Dedicated trusted HTTPS proxy that serves the local-manifest as proper XML. nil until the stable URL is
     /// provided; never the remote upload endpoint. While nil the local route falls back to upload.
-    static let localManifestEndpoint: URL? = nil
+    static let localManifestEndpoint: URL? = URL(string: "https://mirsa-app.mooo.com/local-manifest.plist")
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/certificate-ota")!
 
     /// Archive callers retain ownership. Only app-folder callers need a new pack.

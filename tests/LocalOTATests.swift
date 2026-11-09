@@ -100,6 +100,10 @@ final class LocalOTATests: XCTestCase {
         XCTAssertNil(LocalOTAManifest.url(base: URL(string: "http://ota.example.test/x")!, port: 51234, token: tok, bundleID: "a", version: "1", title: "t", bytes: 1))
         XCTAssertNil(LocalOTAManifest.url(base: base, port: 80, token: tok, bundleID: "a", version: "1", title: "t", bytes: 1))
         XCTAssertNil(LocalOTAManifest.url(base: base, port: 51234, token: "short", bundleID: "a", version: "1", title: "t", bytes: 1))
-        XCTAssertNil(CertificateOTA.localManifestEndpoint.flatMap { $0.host == CertificateOTA.endpoint.host ? $0 : nil })
+        let live = try XCTUnwrap(CertificateOTA.localManifestEndpoint)
+        XCTAssertEqual(live.absoluteString, "https://mirsa-app.mooo.com/local-manifest.plist")
+        XCTAssertEqual(live.scheme, "https"); XCTAssertNotEqual(live.host, CertificateOTA.endpoint.host)
+        let built = try XCTUnwrap(LocalOTAManifest.url(base: live, port: 51234, token: tok, bundleID: "a", version: "1", title: "t", bytes: 1))
+        XCTAssertTrue(built.absoluteString.hasPrefix("https://mirsa-app.mooo.com/local-manifest.plist?action=local-manifest&port=51234"))
     }
 }
