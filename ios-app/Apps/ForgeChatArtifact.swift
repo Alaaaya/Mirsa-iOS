@@ -24,7 +24,9 @@ extension ForgeChatStore {
         let d = try await callPublic(["action": "chat-artifact-download", "threadID": threadID.uuidString.lowercased(), "id": a.id.uuidString.lowercased()])
         guard let issued = try? JSONDecoder().decode(Issued.self, from: d), issued.url.scheme == "https" else { throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
         let ext = ["ipa": "ipa", "apk": "apk", "zip": "zip"][a.kind] ?? "bin"
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chat-artifacts", isDirectory: true)
+        let dir = try MirsaManagedTmp.begin("chat-artifact")
+        var handedOff = false
+        defer { if !handedOff { MirsaManagedTmp.end(dir) } }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent(a.id.uuidString + "." + ext)
         try? FileManager.default.removeItem(at: dest)
@@ -48,6 +50,8 @@ extension ForgeChatStore {
         let hex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         if let sz = a.size, sz != total { try? FileManager.default.removeItem(at: dest); throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
         if let h = a.sha256, h.lowercased() != hex { try? FileManager.default.removeItem(at: dest); throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
+        try Task.checkCancellation()
+        handedOff = true
         return dest
     }
 }
@@ -73,7 +77,9 @@ struct ForgeChatArtifactCard: View {
             }
             if let error { Text(error).font(.caption2).foregroundStyle(.red) }
         }
-        .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeChatShare(url: $0.url) }
+        .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { value in
+            if value == nil { if let shareURL { MirsaManagedTmp.end(shareURL.deletingLastPathComponent()) }; shareURL = nil }
+        })) { ForgeChatShare(url: $0.url) }
     }
     private func start() {
         error = nil; progress = 0
@@ -81,7 +87,11 @@ struct ForgeChatArtifactCard: View {
             do {
                 let f = try await ForgeChatStore.shared.downloadArtifact(threadID: threadID, artifact: artifact) { p in Task { @MainActor in progress = p } }
                 progress = nil
-                if isIPA { await AppsStore.shared.importIPA(from: f) } else { shareURL = f }
+                if Task.isCancelled { MirsaManagedTmp.end(f.deletingLastPathComponent()); return }
+                if isIPA {
+                    defer { MirsaManagedTmp.end(f.deletingLastPathComponent()) }
+                    await AppsStore.shared.importIPA(from: f)
+                } else { shareURL = f }
             } catch {
                 progress = nil
                 if Task.isCancelled || error is CancellationError { return }
