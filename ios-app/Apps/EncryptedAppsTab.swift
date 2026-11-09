@@ -18,6 +18,7 @@ struct EncryptedAppsTab: View {
                     LanguageGlobeMenu(size: MirsaIconSize.button)
                 }
                 introCard
+                benefitsCard
                 importButton
                 if store.entries.isEmpty {
                     emptyCard
@@ -89,6 +90,39 @@ struct EncryptedAppsTab: View {
         .padding(MirsaSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .mirsaCard()
+    }
+
+    private var benefitsCard: some View {
+        VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+            Text(t("What you get", "شو بتستفيد", "چی بەدەست دێنیت", "Tu çi werdigirî"))
+                .font(MirsaFont.cardTitle).foregroundStyle(.white)
+            benefitRow("clock.arrow.circlepath",
+                       t("Keep a copy of an app you bought: an older version you like, or an app removed from the App Store.",
+                         "احتفظ بنسخة من تطبيق اشتريته: نسخة قديمة بتحبها، أو تطبيق انشال من App Store.",
+                         "کۆپییەک لە ئەپێک کە کڕیوتە هەڵبگرە: وەشانێکی کۆن کە حەزت لێیەتی، یان ئەپێک کە لە App Store لابراوە.",
+                         "Kopiyek ji sepana ku te kirî biparêze: guhertoyek kevn ku tu jê hez dikî, an sepanek ku ji App Store hatiye rakirin."))
+            benefitRow("checkmark.seal.fill",
+                       t("Installs with Apple's original signature. No certificate needed.",
+                         "بيتثبّت بتوقيع Apple الأصلي، بلا شهادة.",
+                         "بە واژۆی ڕەسەنی Apple دادەمەزرێت. پێویستی بە بڕوانامە نییە.",
+                         "Bi îmzeya resen a Apple tê sazkirin. Sertîfîka ne pêwîst e."))
+            benefitRow("calendar.badge.checkmark",
+                       t("No 7-day expiry and no re-signing.",
+                         "ما بينتهي بعد 7 أيام، وما بدو إعادة توقيع.",
+                         "دوای ٧ ڕۆژ بەسەرناچێت و پێویستی بە دووبارە واژۆکردن نییە.",
+                         "Piştî 7 rojan naqede û ji nû ve îmzekirin ne pêwîst e."))
+        }
+        .padding(MirsaSpacing.card)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .mirsaCard()
+    }
+
+    private func benefitRow(_ icon: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: MirsaSpacing.s) {
+            Image(systemName: icon).foregroundStyle(MirsaPalette.accentSoft).frame(width: MirsaIconSize.well)
+            Text(text).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var importButton: some View {
