@@ -135,6 +135,16 @@ struct ForgeFeaturesView: View {
                         cleanJPEG = nil; photo = nil; markRegion = nil
                     }
                 }.disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if ForgePreciseStore.shared.enabled {
+                    Button(ForgePreciseText.screenshot) {
+                        run {
+                            guard let region = markRegion else { throw ForgeClient.Failure.message(ForgeImageMarkView.hint) }
+                            try await ForgePreciseStore.shared.enqueue(projectID: id, prompt: prompt, screenshot: ForgePreciseImage.screenshot(jpeg: jpeg, region: region))
+                            message = ForgePreciseText.queued; cleanJPEG = nil; photo = nil; markRegion = nil
+                        }
+                    }.disabled(markRegion == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text(ForgePreciseText.subtitle).font(.caption).foregroundStyle(.white.opacity(0.55))
+                }
                 Button(text("Remove image", "إزالة الصورة")) { cleanJPEG = nil; photo = nil; markRegion = nil }
             }
         }
