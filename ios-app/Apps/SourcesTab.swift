@@ -73,8 +73,8 @@ final class SourcesStore: ObservableObject {
     @Published var loading: Set<String> = []
     @Published var error: String?
     @Published var updatingAll = false
-    @Published var hiddenURLs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "mirsa.sources.hidden") ?? []) {
-        didSet { UserDefaults.standard.set(Array(hiddenURLs), forKey: "mirsa.sources.hidden") }
+    @Published var hiddenURLs: Set<String> = [] {
+        didSet { defaults.set(Array(hiddenURLs), forKey: "mirsa.sources.hidden") }
     }
 
     var visibleSources: [RepoSource] { sources.filter { !hiddenURLs.contains($0.url) } }
@@ -137,6 +137,10 @@ final class SourcesStore: ObservableObject {
             }
             defaults.set(true, forKey: seededKey)
         }
+        hiddenURLs = Set((defaults.stringArray(forKey: "mirsa.sources.hidden") ?? []).map {
+            MirsaSourceFeed.legacyURLs.contains(MirsaSourceFeed.norm($0)) ? MirsaSourceFeed.primary : $0
+        })
+        defaults.set(Array(hiddenURLs), forKey: "mirsa.sources.hidden")
         sources = SourceDeletionPolicy.migrate(list)
         save()
     }
