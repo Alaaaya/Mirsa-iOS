@@ -38,6 +38,16 @@ final class ImportedLoadPlanTests: XCTestCase {
         XCTAssertEqual(ImportedLoadPlan.removing("A", owner: "../outside", entries: entries, edits: []), [])
     }
 
+    func testMissingOrMixedCapabilitiesRemainReadOnly() {
+        let original = entry("Main", "A")
+        XCTAssertFalse(ImportedLoadPlan.canEdit(owner: "Main", entries: [original]))
+        var supported = original
+        supported.editable = true
+        XCTAssertTrue(ImportedLoadPlan.canEdit(owner: "Main", entries: [supported]))
+        XCTAssertFalse(ImportedLoadPlan.canEdit(owner: "Main", entries: [supported, original]))
+        XCTAssertFalse(ImportedLoadPlan.canEdit(owner: "Missing", entries: [supported]))
+    }
+
     func testContractDecodesNullableUnresolvedAndSnakeCase() throws {
         let data = Data(#"{"version":1,"entries":[{"owner":"Main","main_owner":true,"slice":0,"subtype":2,"load_path":"@rpath/Vendor","weak":true,"resolved_path":null}],"warning":"retained"}"#.utf8)
         let report = try JSONDecoder().decode(ImportedLoadReport.self, from: data)
