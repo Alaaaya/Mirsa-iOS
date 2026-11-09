@@ -1,0 +1,2 @@
+Upstream https://github.com/Lakr233/ApplePackage revision 391bfe6ee6598d73e4f94b88b38b50bd6f6ec67b (MIT).
+Local changes add structured, redacted auth diagnostics. SAP signing protocol and GUID format preserved.
