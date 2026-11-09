@@ -213,6 +213,12 @@ int32_t al_sl_install(const char *pairing_path, const char *app_path, const char
 int32_t al_sl_install_signed(const char *pairing_path, const char *app_path,
                              ALProgressCb progress_cb, ALLogCallback log_cb, void *ctx,
                              char **out_json, char **out_error);
+// Install an App Store (FairPlay-encrypted) .ipa unmodified: streamed to
+// PublicStaging and installed with its own iTunesMetadata/sinf. No signing,
+// no extraction, no decryption. JSON: bundle_id, name, version, has_sinf, has_itunes_metadata
+int32_t al_sl_install_store_ipa(const char *pairing_path, const char *ipa_path,
+                                ALProgressCb progress_cb, ALLogCallback log_cb, void *ctx,
+                                char **out_json, char **out_error);
 int32_t al_sl_uninstall(const char *pairing_path, const char *bundle_id,
                         ALLogCallback log_cb, void *ctx, char **out_error);
 
