@@ -161,8 +161,8 @@ struct AppStoreAccountView: View {
                     .autocorrectionDisabled().focused($focus).fieldStyle()
                 SecureField(t("Password", "كلمة السر", "وشەی نهێنی", "Şîfre"), text: $password)
                     .textContentType(.password).focused($focus).fieldStyle()
-                Text(t("Goes straight to Apple. Mirsa never stores your password.", "بتروح مباشرة لـApple. مرسى ما بيخزّن كلمة السر.",
-                       "ڕاستەوخۆ بۆ Apple دەچێت. Mirsa وشەی نهێنی هەڵناگرێت.", "Rasterast diçe Apple. Mirsa şîfreyê tomar nake."))
+                Text(t("Sent only to Apple. Saved only in this device’s protected Keychain.", "بتنبعت لـApple بس. بتنحفظ بس بسلسلة المفاتيح المحمية عهالجهاز.",
+                       "تەنها بۆ Apple دەنێردرێت. تەنها لە Keychainی پارێزراوی ئەم ئامێرە هەڵدەگیرێت.", "Tenê ji Apple re tê şandin. Tenê di Keychaina parastî ya vî amûrî de tê tomarkirin."))
                     .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
                 Button { signIn() } label: { Text(t("Sign in", "تسجيل الدخول", "چوونەژوورەوە", "Têkeve")).frame(maxWidth: .infinity) }
                     .buttonStyle(.mirsaPrimary)
