@@ -637,6 +637,11 @@ struct ContentView: View {
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
                 .tag(AppTab.pairing)
 
+            EncryptedAppsTab()
+                .modifier(LiquidTabChrome(liquid: liquidTheme))
+                .tabItem { Label(EncryptedText.tabTitle, systemImage: "lock.shield") }
+                .tag(AppTab.encrypted)
+
             PersonalAppsHub()
                 .modifier(LiquidTabChrome(liquid: liquidTheme))
                 .tabItem { Label(tr("More", "المزيد"), systemImage: "plus") }
@@ -649,6 +654,7 @@ struct ContentView: View {
                     LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
                     LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
                     LiquidTabItem(tab: .pairing, title: L.t("tools.tab"), icon: "wand.and.stars"),
+                    LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
                     LiquidTabItem(tab: .personalHub, title: tr("More", "المزيد"), icon: "plus"),
                 ])
                 .ignoresSafeArea(.keyboard)
