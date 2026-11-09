@@ -295,6 +295,9 @@ enum PersonalCertificateSigner {
         let url: URL
         let bundleIdentifierChanged: Bool
         let verification: PersonalProfileVerification
+        // Snapshot from the exact signed staging bundle, before it is packed/deleted.
+        // OTA must never unpack the output merely to recover these small fields.
+        var signedInfoPlist: Data? = nil
         var installed = false
         var installError: String? = nil
     }
@@ -471,6 +474,7 @@ enum PersonalCertificateSigner {
         var r = Result(url: output, bundleIdentifierChanged:
             (signedInfo["CFBundleIdentifier"] as? String) != (info["CFBundleIdentifier"] as? String),
             verification: PersonalProfileVerification.parse(result ?? [:]))
+        r.signedInfoPlist = try PropertyListSerialization.data(fromPropertyList: signedInfo, format: .binary, options: 0)
         if install {
             // Real device install of the just-signed bundle. The packed IPA is kept on failure.
             do {
