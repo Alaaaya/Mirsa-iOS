@@ -48,7 +48,14 @@ public enum Bag {
             headers: .init(headers),
         )
 
-        let response = try await client.execute(request: request).get()
+        let response: HTTPClient.Response
+        do {
+            let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
+            response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
+        } catch { throw AuthenticationServiceError.wrapping(error, stage: .bag, transport: true) }
+        guard response.status == .ok else {
+            throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+        }
 
         APLogger.logResponse(
             status: response.status.code,

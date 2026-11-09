@@ -30,3 +30,22 @@ The code depends on MIT ApplePackage pinned at 391bfe6ee6598d73e4f94b88b38b50bd6
 Offline mock-backed auth/session/license policy tests and synthetic archive tests are run on macOS, never an iOS simulator. The isolated branch also receives the complete unsigned generic iOS device build. Neither CI nor unit tests can establish real account login, real 2FA, license acquisition, older-version eligibility, successful device download or installation. Those require owner device testing with their own account after separate UI integration.
 
 This branch started from release 1.3.222. It must be rebased/merged with the separately owned Hark integration only after that integration is live. Do not push to apps-sideloader or publish from this worker.
+
+## Authentication diagnostics after the 1.3.240 device report
+
+The owner observed immediate generic failure on LTE and no verification code on any device.
+This is consistent with a failure before Apple's challenge but does not identify its cause.
+A public unauthenticated Linux observation saw bag.xml HTTP 200 (legacy buy authenticate
+endpoint), SAP certificate HTTP 200, and HTTP 403 on GET of native/fast. That GET is not a
+signed login POST and cannot establish why the owner's sign-in failed.
+
+The MIT-pinned ApplePackage source is vendored at vendor/ApplePackage with revision provenance.
+Local patches retain the exact native SAP handshake and signed login bytes; they expose only
+stage, HTTP status, numeric Apple failureType, and redacted Apple dialog explanation/customerMessage.
+Transport is explicitly marked separately. No request/body/headers/credentials are logged.
+Known credential values, email addresses, URLs, long opaque strings, and long numbers are removed.
+No account probes, invented accounts, owner credential guesses, or credential retries are performed.
+Explicit Apple error -5000 no longer resubmits a password automatically.
+A credential-free live preflight performs only bag and SAP setup, not account authentication.
+It is observational and not proof of real-account acceptance; its failure does not bypass offline/build gates.
+The original Keychain-only persistence, same-session bounded verification, and signout protections remain.
