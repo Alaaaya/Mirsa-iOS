@@ -264,6 +264,29 @@ enum SideloadService {
         return json(o)
     }
 
+    /// Installs an App Store (FairPlay) .ipa EXACTLY as it is: no signing, no
+    /// extraction, no decryption. iOS checks the purchase against the device's account.
+    static func installStoreIPA(ipaPath: String, progress: @escaping (Double, String) -> Void) throws -> [String: Any] {
+        var out: UnsafeMutablePointer<CChar>?
+        var err: UnsafeMutablePointer<CChar>?
+        let box = ProgressBox(progress)
+        let ctx = Unmanaged.passRetained(box).toOpaque()
+        defer { Unmanaged<ProgressBox>.fromOpaque(ctx).release() }
+        let rc = al_sl_install_store_ipa(pairingPath(), ipaPath, { ctx, f, stage in
+            guard let ctx else { return }
+            let b = Unmanaged<ProgressBox>.fromOpaque(ctx).takeUnretainedValue()
+            let s = stage.map { String(cString: $0) } ?? ""
+            DispatchQueue.main.async { b.f(f, s) }
+        }, { _, msg in
+            guard let msg else { return }
+            let line = InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic)
+            DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
+        }, ctx, &out, &err)
+        let o = take(out), e = take(err)
+        if rc != 0 { throw SideloadError.message(e ?? "Install failed") }
+        return json(o)
+    }
+
     static func uninstall(bundleID: String) throws {
         var err: UnsafeMutablePointer<CChar>?
         let rc = al_sl_uninstall(pairingPath(), bundleID, nil, nil, &err)

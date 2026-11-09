@@ -44,6 +44,7 @@ struct MirsaStyleShotHost: View {
         case "sources": tab(.sources)
         case "tools": tab(.pairing)
         case "more": tab(.personalHub)
+        case "encrypted": tab(.encrypted)
         case "home-main":
             ZStack {
                 AuroraBackground()
