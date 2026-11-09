@@ -509,7 +509,7 @@ private struct RepoAppRow: View {
             selecting = true
             Task { @MainActor in
                 var file: URL?
-                defer { if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }; selecting = false }
+                defer { if let file { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }; selecting = false }
                 do {
                     let url = try await downloader.download(app.downloadURL.absoluteString)
                     file = url

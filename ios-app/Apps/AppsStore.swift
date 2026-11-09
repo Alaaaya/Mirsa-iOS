@@ -406,13 +406,12 @@ final class AppsStore: ObservableObject {
             if !prepared { MirsaInstallActivity.shared.finish(success: false) }
         }
         let fm = FileManager.default
-
+        let work = fm.temporaryDirectory.appendingPathComponent("import-\(UUID().uuidString)", isDirectory: true)
+        let ipa = work.appendingPathComponent("original.ipa")
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            let work = try MirsaManagedTmp.begin("import")
-            defer { if !prepared { MirsaManagedTmp.end(work) } }
-            let ipa = work.appendingPathComponent("original.ipa")
+            try fm.createDirectory(at: work, withIntermediateDirectories: true)
             try fm.copyItem(at: url, to: ipa)
             let extractDir = work.appendingPathComponent("x", isDirectory: true)
             let app = try await Task.detached {
@@ -439,6 +438,7 @@ final class AppsStore: ObservableObject {
         } catch {
             self.error = error.localizedDescription
             MirsaCompletionFeedback.shared.finish(operationID: feedbackID, outcome: MirsaCompletionFeedback.outcome(for: error))
+            try? fm.removeItem(at: work)
         }
     }
 
@@ -502,16 +502,16 @@ final class AppsStore: ObservableObject {
     func cancelPending() {
         guard busy == nil, let p = pending else { return }
         MirsaInstallActivity.shared.cancel()
-        MirsaManagedTmp.end(p.workDir)
+        try? FileManager.default.removeItem(at: p.workDir)
         pending = nil
     }
 
     /// Finish the import into the chosen location.
     func commitPending(to location: AppLocation, vm: AppViewModel?) async {
-        guard busy == nil, let p = pending else { return }
+        guard let p = pending else { return }
         pending = nil
         let fm = FileManager.default
-        defer { MirsaManagedTmp.end(p.workDir) }
+        defer { try? fm.removeItem(at: p.workDir) }
 
         // Keep the original IPA: needed for refresh and for moving between locations.
         let orig = Self.originalIPA(p.bundleID)
@@ -577,9 +577,8 @@ final class AppsStore: ObservableObject {
             if let extracted {
                 try fm.moveItem(at: extracted, to: dest)
             } else {
-                let work = try MirsaManagedTmp.begin("container-extract")
-                defer { MirsaManagedTmp.end(work) }
-                let tmp = work.appendingPathComponent("archive")
+                let tmp = fm.temporaryDirectory.appendingPathComponent("c-\(UUID().uuidString)")
+                defer { try? fm.removeItem(at: tmp) }
                 let ipa = Self.originalIPA(app.id).path
                 let a = try await Task.detached {
                     try IPAEditorService.run("extract", input: URL(fileURLWithPath: ipa), output: tmp)

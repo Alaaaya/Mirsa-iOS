@@ -85,7 +85,7 @@ final class PersonalSigningOperation: ObservableObject {
                pairingPath: String, options: PersonalProjectOptions) {
         guard !running else { return }
         if let previous = state?.result?.url {
-            MirsaManagedTmp.end(previous.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
         }
         let id = UUID()
         let control = PersonalSigningControl()

@@ -25,9 +25,9 @@ final class AppleStorePackages: MirsaStorePackages {
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
         try MirsaStorePolicy.downloadURL(url)
-        let directory = try MirsaManagedTmp.begin("store-download")
-        var handedOff = false
-        defer { if !handedOff { MirsaManagedTmp.end(directory) } }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MirsaStore", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                attributes: Self.protection)
         let destination = directory.appendingPathComponent("App.ipa")
@@ -39,10 +39,9 @@ final class AppleStorePackages: MirsaStorePackages {
             try Task.checkCancellation()
             try Self.assemble(destination, output: output, bundleID: bundleID)
             try FileManager.default.setAttributes(Self.protection, ofItemAtPath: destination.path)
-            handedOff = true
             return destination
         } catch {
-            MirsaManagedTmp.end(directory)
+            try? FileManager.default.removeItem(at: directory)
             throw error
         }
     }
