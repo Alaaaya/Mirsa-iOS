@@ -143,7 +143,17 @@ pub(super) fn app_group_plan(pairs: &[(&Dictionary, &Dictionary)]) -> BTreeMap<S
         }
     }
     let mut plan = BTreeMap::new();
+    // Reserve every preserved identity before substitutions. Distinct original
+    // groups must never collapse into one container or leak across extensions.
+    let mut used = BTreeSet::new();
+    for (original, profiles) in &consumers {
+        if profiles.iter().all(|a| group_authorized(original,a)) {
+            used.insert(original.clone());
+            plan.insert(original.clone(), Some(original.clone()));
+        }
+    }
     for (original, profiles) in consumers {
+        if plan.contains_key(&original) { continue; }
         let mut candidates = BTreeSet::new();
         for profile in &profiles {
             if let Some(groups) = profile.get(APP_GROUPS).and_then(Value::as_array) {
@@ -159,11 +169,9 @@ pub(super) fn app_group_plan(pairs: &[(&Dictionary, &Dictionary)]) -> BTreeMap<S
                 }
             }
         }
-        let mapped = if profiles.iter().all(|a| group_authorized(&original,a)) {
-            Some(original.clone())
-        } else {
-            candidates.into_iter().find(|s| profiles.iter().all(|a| group_authorized(s,a)))
-        };
+        let mapped = candidates.into_iter().find(|s| !used.contains(s) &&
+            profiles.iter().all(|a| group_authorized(s,a)));
+        if let Some(s) = &mapped { used.insert(s.clone()); }
         plan.insert(original, mapped);
     }
     plan
@@ -432,6 +440,23 @@ mod app_group_mapping_tests {
             let (out,_)=constrain(&r,&a,"P","com.test","T",&BTreeMap::new(),false).unwrap();
             assert!(!out.contains_key(APP_GROUPS));
         }
+    }
+    #[test] fn app_groups_distinct_originals_never_collapse_or_steal_preserved_storage() {
+        let main=groups(&["group.private","group.shared"]);
+        let ext=groups(&["group.shared"]);
+        let allowed=groups(&["group.a","group.b"]);
+        let plan=app_group_plan(&[(&main,&allowed),(&ext,&allowed)]);
+        let (out,_)=constrain_with_groups(&main,&allowed,"P","com.test","T",&BTreeMap::new(),false,&plan).unwrap();
+        assert_eq!(values(&out),vec!["group.a","group.b"]);
+        let (out,_)=constrain_with_groups(&ext,&allowed,"P","com.test.widget","T",&BTreeMap::new(),false,&plan).unwrap();
+        assert_eq!(values(&out),vec!["group.b"]);
+        let main=groups(&["group.old","group.a"]);
+        let allowed=groups(&["group.a"]);
+        let (out,w)=constrain(&main,&allowed,"P","com.test","T",&BTreeMap::new(),false).unwrap();
+        assert_eq!(values(&out),vec!["group.a"]); assert_eq!(w,vec![APP_GROUPS]);
+        let plan=app_group_plan(&[(&main,&allowed)]);
+        assert_eq!(plan["group.old"],None);
+        assert_eq!(plan["group.a"],Some("group.a".into()));
     }
     #[test] fn app_groups_keychain_rebases_shared_prefix_without_bundle_identity_changes() {
         let mut r=groups(&["group.original"]);
