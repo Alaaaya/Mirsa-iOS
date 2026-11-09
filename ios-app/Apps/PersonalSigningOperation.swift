@@ -47,7 +47,9 @@ final class PersonalSigningOperation: ObservableObject {
         var backgroundExpired = false
         var result: PersonalCertificateSigner.Result?
         var error: String?
-        var showsInlineProgress: Bool { running || stage == .handedOff }
+        // OTA has no installation-completion callback. Once handed off, the
+        // local operation is over, not an indefinitely running 99% progress bar.
+        var showsInlineProgress: Bool { running }
         var shouldPresentResultAlert: Bool { !running && stage != .handedOff }
 
         /// Main-actor callbacks can be enqueued out of order. Do not regress a
@@ -98,11 +100,7 @@ final class PersonalSigningOperation: ObservableObject {
         Task {
             do {
                 do {
-                    let staged = try await Task.detached {
-                        try CertificateInstall.stageSignedApp(ipa: input, in: FileManager.default.temporaryDirectory)
-                    }.value
-                    defer { try? FileManager.default.removeItem(at:staged.stage) }
-                    _ = try await CertificateOTA.install(source: staged.app, material: material, options: options, projectID: projectID,
+                    _ = try await CertificateOTA.install(source: input, sourceIsArchive: true, control: control, material: material, options: options, projectID: projectID,
                         signingProgress: { event in self.receive(event, id: id, operation: operation) })
                     self.state?.running = false
                     self.state?.stage = .handedOff

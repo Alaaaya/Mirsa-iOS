@@ -46,6 +46,29 @@ struct ForgeArchivedIPA: Codable, Identifiable, Equatable {
         do { try fm.copyItem(at: ipa, to: url(item)) } catch { return }
         items.insert(item, at: 0); save(); prune(bundleID)
     }
+    /// Install callers must not hash/copy a large IPA on the main actor.
+    /// Index publication stays serialized with the regular archive UI.
+    func archiveForInstall(_ ipa: URL, bundleID: String, name: String, version: String, signed: Bool) async {
+        guard let content = try? await Task.detached(operation: { () throws -> (Int64, String) in
+            let size = try FileManager.default.attributesOfItem(atPath: ipa.path)[.size] as? NSNumber
+            guard let size, size.int64Value > 0 else { throw CocoaError(.fileReadCorruptFile) }
+            return (size.int64Value, try Self.hash(ipa))
+        }).value else { return }
+        let (size, digest) = content
+        if items.contains(where: { $0.bundleID == bundleID && $0.version == version && $0.signed == signed && $0.sha256 == digest }) { return }
+        let item = ForgeArchivedIPA(bundleID: bundleID, name: name, version: version, signed: signed, date: Date(), bytes: size, sha256: digest)
+        let target = url(item)
+        do {
+            try await Task.detached { try FileManager.default.copyItem(at: ipa, to: target) }.value
+        } catch { return }
+        // Another archive call may have finished while the copy was suspended.
+        if items.contains(where: { $0.bundleID == bundleID && $0.version == version && $0.signed == signed && $0.sha256 == digest }) {
+            try? FileManager.default.removeItem(at: target)
+            return
+        }
+        items.insert(item, at: 0); save(); prune(bundleID)
+    }
+
     nonisolated static func hash(_ url: URL) throws -> String {
         let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
         var digest = SHA256()
