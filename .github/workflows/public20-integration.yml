@@ -3,7 +3,6 @@ permissions:
   contents: read
 env:
   MIRSA_VERSION: '2.0'
-  GITHUB_RUN_NUMBER: '260'
 jobs:
   build:
     runs-on: macos-15
@@ -68,11 +67,12 @@ jobs:
         brew install xcodegen && xcodegen generate
 
         '
-    - name: Stamp build number
-      run: /usr/libexec/PlistBuddy -c "Add :MirsaBuild string ${{ github.run_number
-        }}" ios-app/Info.plist
+    - name: Stamp isolated fixture build number (not production identity)
+      run: /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 260" ios-app/Info.plist
     - name: Build unsigned IPA
-      run: 'bash build-ipa.sh
+      run: 'export GITHUB_RUN_NUMBER=260
+
+        bash build-ipa.sh
 
         '
     - name: Verify actual IPA upgrade from live 243
