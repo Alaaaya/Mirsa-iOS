@@ -11,8 +11,18 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         if !state.isEmpty { app.launchArguments.append(state) }
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch()
+        // A relaunch after landscape must finish restoring the full portrait
+        // window before a toolbar tap. A transient transformed window can expose
+        // an element whose hit point is outside the actual screen.
+        let portrait = NSPredicate { _, _ in
+            let frame = app.windows.firstMatch.frame
+            return frame.width >= 300 && frame.height > frame.width
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: portrait, object: app)], timeout: 15), .completed)
         let newChat = app.buttons["chat-new"]
         XCTAssertTrue(newChat.waitForExistence(timeout: 20))
+        let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: newChat)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 10), .completed)
         newChat.tap()
         XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 10))
         return app

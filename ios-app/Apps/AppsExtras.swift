@@ -113,6 +113,9 @@ extension AppsStore {
 
     /// One local notification per real app (and Mirsa itself), a day before it expires.
     func scheduleExpiryReminders() {
+        // Seeded UI fixtures must not schedule real notifications or present an
+        // unrelated system permission sheet during composer/rotation assertions.
+        guard !MirsaUITestHarness.active else { return }
         let center = UNUserNotificationCenter.current()
         var items: [(String, String, Date)] = realApps.compactMap { a in a.expires.map { (a.id, a.name, $0) } }
         if let own = ownExpiry { items.append(("mirsa.self", "Mirsa", own)) }
