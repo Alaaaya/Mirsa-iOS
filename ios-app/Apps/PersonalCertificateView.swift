@@ -310,6 +310,9 @@ enum PersonalCertificateSigner {
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)
         }
+        if !options.existingLibraryEdits.isEmpty {
+            try IPAEditorService.run("edit_existing_libraries", input: app, signingOptions: options)
+        }
         let originalInfo = try IPAEditorService.info(in: app)
         var info = originalInfo
         if let name = options.displayName {

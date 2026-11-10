@@ -56,7 +56,7 @@ actor PersonalProjectInspection {
             self.identifier = String(describing: v.fileResourceIdentifier)
         }
     }
-    struct Result { let extensions: Int; let dependencies: [String] }
+    struct Result { let extensions: Int; let dependencies: [String]; let existingLibraries: [ExistingProjectLibrary] }
     static let shared = PersonalProjectInspection()
     private var cache: [Key: Result] = [:]
     private var pending: [Key: Task<Result?, Never>] = [:]
@@ -76,8 +76,10 @@ actor PersonalProjectInspection {
                 guard let executable = info["CFBundleExecutable"] as? String else { return nil }
                 let extensions = (try? fm.contentsOfDirectory(atPath: app.appendingPathComponent("PlugIns").path))?
                     .filter { $0.hasSuffix(".appex") }.count ?? 0
-                let dependencies = try IPAEditorService.dependencies(of: app.appendingPathComponent(executable))
-                return Result(extensions: extensions, dependencies: dependencies)
+                // The older dependency summary accepts fewer architectures than the all-slice
+                // graph. An arm64e-only executable must not hide the new library controls.
+                let dependencies = (try? IPAEditorService.dependencies(of: app.appendingPathComponent(executable))) ?? []
+                return Result(extensions: extensions, dependencies: dependencies, existingLibraries: try IPAEditorService.existingLibraries(in: app))
             } catch { return nil }
         }
         pending[key] = task

@@ -42,6 +42,9 @@ struct MirsaStyleShotHost: View {
         switch page {
         case "apps": tab(.apps)
         case "sources": tab(.sources)
+        #if DEBUG
+        case "sources-delete-validation": SourcesDeleteValidationHost()
+        #endif
         case "tools": tab(.pairing)
         case "more": tab(.personalHub)
         case "encrypted": tab(.encrypted)
@@ -112,3 +115,21 @@ struct MirsaStyleShotHost: View {
         }
     }
 }
+
+#if DEBUG
+/// Isolated UI-test fixture. Uses the real source list and real swipe/delete dialog.
+private struct SourcesDeleteValidationHost: View {
+    @StateObject private var store: SourcesStore
+    init() {
+        let defaults = UserDefaults(suiteName: "mirsa.sources.delete.validation")!
+        defaults.removePersistentDomain(forName: "mirsa.sources.delete.validation")
+        let store = SourcesStore(defaults: defaults)
+        store.sources = [RepoSource(url: MirsaSourceFeed.primary, name: "Mirsa", uid: RepoSource.canonicalID),
+                         RepoSource(url: "https://dup.example/source.json", name: "Delete Fixture")]
+        // Keep the screenshot offline without changing the production refresh logic.
+        store.apps[MirsaSourceFeed.primary] = []
+        _store = StateObject(wrappedValue: store)
+    }
+    var body: some View { SourcesTab(store: store) }
+}
+#endif

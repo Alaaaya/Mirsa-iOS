@@ -3,6 +3,8 @@
 //! Mach-O rewriting only consumes verified zero header padding; no relocation.
 #[path = "fat_macho.rs"]
 mod fat_macho;
+#[path = "existing_libraries.rs"]
+mod existing_libraries;
 #[path = "load_control.rs"]
 mod load_control;
 #[path = "tweak_targets.rs"]
@@ -1026,6 +1028,8 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
 
 #[derive(Deserialize)]
 struct Request {
+    #[serde(default)]
+    existing_library_edits: Vec<existing_libraries::Edit>,
     operation: String,
     #[serde(default)]
     injections: Vec<tweak_targets::Injection>,
@@ -1070,6 +1074,8 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
         "deb_tweak" => extract_deb_bounded(Path::new(&r.input), Path::new(&r.output), 128 * 1024 * 1024, 128 * 1024 * 1024, 20_000),
         "incoming_profile" => crate::personal_sign::incoming_ipa::inspect_profile(Path::new(&r.input),Path::new(&r.output)),
         "incoming_preview" => crate::personal_sign::incoming_ipa::inspect(Path::new(&r.input),Path::new(&r.output)),
+        "existing_libraries" => existing_libraries::inspect(Path::new(&r.input),Path::new(&r.output)),
+        "edit_existing_libraries" => existing_libraries::apply(Path::new(&r.input), &r.existing_library_edits),
         "dependencies" => {
             let list = dependencies(Path::new(&r.input))?;
             let json = serde_json::to_vec(&list).map_err(err)?;
