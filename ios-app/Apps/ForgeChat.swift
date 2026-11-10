@@ -396,20 +396,22 @@ struct ForgeChatThreadView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
                         assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
-                        ForEach(msgs) { m in bubble(m).id(m.id) }
+                        ForEach(msgs) { m in bubble(m).id(m.id).transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .opacity)) }
                         ForEach(queued) { o in
-                            VStack(alignment: .trailing, spacing: 4) { userBubble(o.text); if store.outgoing.contains(where: { $0.id == o.id }) { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) } }.frame(maxWidth: .infinity, alignment: .trailing).id(o.id)
+                            VStack(alignment: .trailing, spacing: 4) { userBubble(o.text); if store.outgoing.contains(where: { $0.id == o.id }) { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) } }.frame(maxWidth: .infinity, alignment: .trailing).id(o.id).transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
                         }
                         if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
                             HStack(spacing: 10) { MirsaTypingDots(); Text(ForgeChatText.waiting).font(.system(size: 15)).foregroundStyle(MirsaChatTheme.muted) }
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting")
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
                         }
                         if let e = store.error { Text(e).font(.caption).foregroundStyle(.red) }
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding(.horizontal, 18).padding(.top, 8)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.9), value: msgs.map(\.id) + queued.map(\.id))
+                    .animation(.easeOut(duration: 0.2), value: store.outgoing.count)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: msgs.count + queued.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: msgs.count + queued.count) { _, _ in withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             if let jpeg, let img = UIImage(data: jpeg) {
@@ -457,6 +459,8 @@ struct ForgeChatThreadView: View {
                 text = ""; jpeg = nil; photo = nil
             } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaChatTheme.blue.opacity(canSend ? 1 : 0.45)).clipShape(Circle()) }
                 .disabled(!canSend).accessibilityLabel(ForgeChatText.send)
+                .scaleEffect(canSend ? 1 : 0.94).animation(.spring(response: 0.25, dampingFraction: 0.8), value: canSend)
+                .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
     }
 
