@@ -147,6 +147,18 @@ actor MirsaStoreServerClient {
                 (97...122).contains($0) || $0 == 45 || $0 == 95 }
     }
 
+    /// A successful typed account response is the server's owner-device capability.
+    /// Denials, malformed responses and network failures all keep login closed.
+    /// Does not submit Apple credentials or invoke on-device Apple authentication.
+    func loginAvailable() async -> Bool {
+        do {
+            _ = try await currentAccount()
+            return !Task.isCancelled
+        } catch {
+            return false
+        }
+    }
+
     func currentAccount() async throws -> MirsaStoreAccount? {
         let run = try begin(); defer { busy = false }
         let (owner, token) = try await credentials(run)
