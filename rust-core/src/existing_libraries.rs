@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Clone)]
 #[serde(rename_all="camelCase")]
 pub(super) struct Library {
-    id: String, pub(super) owner: String, pub(super) load_path: String, kind: String,
+    id: String, pub(super) owner: String, pub(super) load_path: String, pub(super) kind: String,
     pub(super) bundled_path: Option<String>, provenance: String, slices: Vec<String>,
 }
 #[derive(Deserialize, Clone, Default)]

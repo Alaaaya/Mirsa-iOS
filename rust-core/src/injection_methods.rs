@@ -58,6 +58,7 @@ pub(super) fn shared_candidates(app: &Path, processes: &[String]) -> Result<Vec<
     }
     let mut edges:BTreeMap<String, Vec<Option<String>>> = BTreeMap::new();
     for library in existing_libraries::graph(&app)? {
+        if !matches!(library.kind.as_str(),"load"|"reexport") { continue; }
         // A library's executable-relative path is process-context dependent.
         // Existing graph inspection intentionally has no inherited process context.
         // Never treat its root-app resolution as proof for an extension.
@@ -82,7 +83,19 @@ pub(super) fn shared_candidates(app: &Path, processes: &[String]) -> Result<Vec<
 struct Method { id: &'static str, enabled: bool, reason: Option<&'static str> }
 #[derive(Serialize)]
 struct Candidate { id:String, label:String, processes:Vec<String> }
-pub(super) fn capabilities(app:&Path,out:&Path)->Result<()> {
+pub(super) fn capabilities(app:&Path,out:&Path)->Result<()> { capabilities_for(app,&[],out) }
+pub(super) fn capabilities_for(app:&Path,items:&[tweak_targets::Injection],out:&Path)->Result<()> {
+    if items.len()>64{return Err("capability_item_limit".into())}
+    let mut components=Vec::new();
+    for item in items {
+        let mut methods=Vec::new();
+        for method in ["direct","load_control","shared_library","separate_extension"] {
+            let mut probe=item.clone();probe.method=Some(method.into());
+            let result=probe_method(app,&probe);
+            methods.push(serde_json::json!({"id":method,"enabled":result.is_ok(),"reason":result.err()}));
+        }
+        components.push(serde_json::json!({"id":item.id,"methods":methods}));
+    }
     let targets = tweak_targets::targets(app)?;
     let processes:Vec<_> = targets.iter().filter(|t|matches!(t.kind.as_str(),"main"|"extension")).map(|t|t.id.clone()).collect();
     let has_extension = targets.iter().any(|t|t.kind=="extension");
@@ -97,6 +110,20 @@ pub(super) fn capabilities(app:&Path,out:&Path)->Result<()> {
         Method{id:"separate_extension",enabled:has_extension,reason:if has_extension{None}else{Some("no_extensions")}},
     ];
     fs::write(out,serde_json::to_vec(&serde_json::json!({
-        "targets":targets,"methods":methods,"sharedCandidates":shared,"sharedDisabledReason":reason
+        "targets":targets,"methods":methods,"sharedCandidates":shared,"sharedDisabledReason":reason,"components":components
     })).map_err(err)?).map_err(err)
+}
+
+
+// Capabilities for an imported component use the real transaction/injector,
+// with isolated copies. No user code runs, and original IPA data is never edited.
+fn probe_method(app:&Path,item:&tweak_targets::Injection)->Result<()> {
+    use std::sync::atomic::{AtomicU64,Ordering};
+    static NEXT:AtomicU64=AtomicU64::new(0);
+    let root=std::env::temp_dir().join(format!("mirsa-capability-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
+    fs::create_dir(&root).map_err(err)?;
+    let work=root.join("Probe.app");
+    let result=(||{tweak_targets::checked_tree(app)?;copy_tree(app,&work)?;
+        tweak_targets::inject_plan(&work,&[item.clone()],&[],false,false)})();
+    let _=fs::remove_dir_all(&root);result
 }
