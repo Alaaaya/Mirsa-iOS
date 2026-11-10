@@ -6,6 +6,8 @@ struct EncryptedAppsTab: View {
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
     @State private var picking = false
+    @State private var storeLoginAvailable = false
+    @State private var showingAppStore = false
     @State private var pendingDelete: EncryptedIPAEntry?
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
@@ -34,6 +36,16 @@ struct EncryptedAppsTab: View {
             }
             .padding(.horizontal, MirsaSpacing.page)
             .padding(.bottom, MirsaSpacing.tabBarClearance)
+        }
+        .task {
+            storeLoginAvailable = false
+            storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable()
+        }
+        .sheet(isPresented: $showingAppStore) {
+            AppStoreAccountView(onDownloaded: { url in
+                let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+                store.add(entry)
+            })
         }
         .mirsaStatusBarScrim()
         .background(AuroraBackground().ignoresSafeArea())
@@ -142,6 +154,15 @@ struct EncryptedAppsTab: View {
 
     private var appStoreButton: some View {
         VStack(alignment: .leading, spacing: MirsaSpacing.xs) {
+            if storeLoginAvailable {
+                Button { showingAppStore = true } label: {
+                    Label(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"),
+                          systemImage: "person.crop.circle")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.mirsaPrimary)
+                .accessibilityIdentifier("encrypted-appstore-account")
+            } else {
             Label(t("My App Store • Coming soon", "حسابي بالـApp Store • قريباً", "ئەپستۆری من • بەم زووانە", "App Store ya min • Nêzîk e"),
                   systemImage: "clock.badge")
                 .font(MirsaFont.button).foregroundStyle(MirsaPalette.textSecondary)
@@ -154,6 +175,7 @@ struct EncryptedAppsTab: View {
                    "Têketina Apple di hundirê Mirsa de hêj ne amade ye. Hîn jî tu dikarî IPA ji Files têxî."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
