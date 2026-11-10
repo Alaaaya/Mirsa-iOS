@@ -24,6 +24,9 @@ idevice = { git = "https://github.com/jkcoxson/idevice.git", rev = "7bd551c16c6d
   "usbmuxd",
   "syslog_relay",
   "installation_proxy",
+  "crashreportcopymobile",
+  "diagnostics_relay",
+  "misagent",
 ] }
 
 # idevice-ffi for tunnel_create_rppairing + AFC C FFI (re-exports its #[no_mangle] symbols).
@@ -37,18 +40,50 @@ idevice-ffi = { path = "vendor/idevice-ffi", features = [
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "fs", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-plist = "1.8"
-zip = { version = "2", default-features = false, features = ["deflate"] }
-sha2 = "0.10"
+# Stream parser bounds require the pinned unstable event API.
+plist = { version = "=1.10.1", features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
+# Socket-pinned transport retains original TLS hostname and disables proxies.
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
+
+zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
+caseless = "0.2"
+unicode-normalization = "0.1"
+tar = "0.4"
+flate2 = "1"
+lzma-rust2 = { version = "0.22", default-features = false, features = ["std", "xz"] }
+sha2 = { version = "0.10", features = ["oid"] }
+sha1 = { version = "0.10", features = ["oid"] }
+cms = "=0.2.3"
 hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 libc = "0.2"
 
+# isideload (MIT, github.com/nab138/isideload): Apple ID login (GSA/SRP + 2FA),
+# anisette, development certificate / App ID / provisioning profile management
+# and code signing. Keyring storage is disabled: AirCard supplies its own
+# Keychain-backed storage through FFI callbacks.
+isideload = { version = "0.5.2", default-features = false, features = ["install", "tokio-mt"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "aws-lc-rs", "tls12", "std"] }
+base64 = "0.22"
+# Same versions isideload uses, so their types line up (container signer).
+apple-codesign-quick = "0.1.0"
+x509-cert = "0.2.5"
+rootcause = "0.12"
+isideload-p12-keystore = "=0.3.0-rc4"
+rsa = "0.9.9"
+
 # Apply the same OPACK back-reference patch as SideInstaller:
 # devices emit tag 0xAB when name==model, which causes "unsupported OPACK tag".
 [patch."https://github.com/jkcoxson/idevice.git"]
 idevice = { path = "vendor/idevice" }
+
+# isideload depends on idevice from crates.io; point it at the same patched
+# vendored copy so both share one set of types (IdeviceProvider, RsdProvider...).
+[patch.crates-io]
+idevice = { path = "vendor/idevice" }
+# Adds a designated requirement option (like zsign) to the container signer.
+apple-codesign-quick = { path = "vendor/apple-codesign-quick" }
 
 [profile.release]
 opt-level = 3
