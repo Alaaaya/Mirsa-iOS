@@ -40,10 +40,13 @@ enum ForgePreciseClient {
     struct Response { let status: Int; let data: Data }
 
     /// Unlike fixRequest this exposes the status code: nonadmin capability answers HTTP 403.
-    static func request(_ body: [String: Any], credentials c: ForgeFixCredentials) async throws -> Response {
-        var req = URLRequest(url: ForgeClient.endpoint, timeoutInterval: 60)
+    /// `endpoint`/`apikey` default to the production Forge call exactly as before. Only the Mirsa 2.1
+    /// attachments stage (feature flag ON + configured stage URL) passes another endpoint and the existing apikey.
+    static func request(_ body: [String: Any], credentials c: ForgeFixCredentials, endpoint: URL = ForgeClient.endpoint, apikey: String? = nil) async throws -> Response {
+        var req = URLRequest(url: endpoint, timeoutInterval: 60)
         req.httpMethod = "POST"
         req.setValue("Bearer " + c.accessToken, forHTTPHeaderField: "Authorization")
+        if let apikey { req.setValue(apikey, forHTTPHeaderField: "apikey") }
         req.setValue(c.deviceID, forHTTPHeaderField: "x-mirsa-device")
         req.setValue(c.deviceToken, forHTTPHeaderField: "x-mirsa-device-token")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -53,7 +56,7 @@ enum ForgePreciseClient {
         let session = URLSession(configuration: config, delegate: OTANoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (data, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse, resp.url == ForgeClient.endpoint, data.count <= 2 * 1024 * 1024 else {
+        guard let http = resp as? HTTPURLResponse, resp.url == endpoint, data.count <= 2 * 1024 * 1024 else {
             throw ForgeClient.Failure.message("Precise request failed.")
         }
         return Response(status: http.statusCode, data: data)

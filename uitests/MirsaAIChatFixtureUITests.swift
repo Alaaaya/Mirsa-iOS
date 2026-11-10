@@ -87,6 +87,8 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         let app = openEmptyChat()
         assertComposer(app, name: "empty_portrait")
         XCTAssertFalse(app.buttons["chat-send"].isEnabled)
+        // Attachments 2.1 flag OFF: the 2.0 photo button stays, no attachments menu.
+        XCTAssertFalse(app.buttons["chat-attach"].exists, "attachments menu must be hidden while the feature flag is off")
         let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
         input.tap(); input.typeText("hello")
         XCTAssertTrue(app.buttons["chat-send"].isEnabled)
@@ -179,6 +181,48 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         a.name = "mirsa_ai_chat_ar"; a.lifetime = .keepAlways; add(a)
         XCTAssertEqual(app.state, .runningForeground)
+        app.terminate()
+    }
+
+    /// Mirsa 2.1 attachment rules (URL validation, text files, JPEG normalisation) run in-app.
+    func testAttachmentRulesSelfTest() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                               "-MirsaAttachmentRulesSelfTest", "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let badge = app.staticTexts["attachment-rules-selftest"]
+        XCTAssertTrue(badge.waitForExistence(timeout: 20), "self-test badge missing")
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != 'RUNNING'"), object: badge)
+        XCTAssertEqual(XCTWaiter.wait(for: [done], timeout: 30), .completed)
+        XCTAssertEqual(badge.label, "PASS")
+        app.terminate()
+    }
+
+    /// Attachments menu (DEBUG fixture only, the release flag stays OFF): From link refuses an IPA link.
+    func testAttachmentMenuFixtureRejectsIPALink() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                               "-MirsaChatAttachmentsFixture", "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 15))
+        let attach = app.buttons["chat-attach"]
+        XCTAssertTrue(attach.waitForExistence(timeout: 10), "attachments menu missing in fixture")
+        attach.tap()
+        XCTAssertTrue(app.buttons["Photos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Files"].exists)
+        let link = app.buttons["From link"]
+        XCTAssertTrue(link.exists)
+        let menu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menu.name = "attachments_menu"; menu.lifetime = .keepAlways; add(menu)
+        link.tap()
+        let field = app.textFields["chat-link-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("https://example.com/Mirsa.ipa")
+        app.buttons["chat-link-add"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-link-error").firstMatch.waitForExistence(timeout: 5), "IPA link was not refused")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "attachments_link_ipa_refused"; shot.lifetime = .keepAlways; add(shot)
         app.terminate()
     }
 }
