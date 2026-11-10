@@ -70,6 +70,21 @@ final class MirsaContainerCleanupTests: XCTestCase {
         XCTAssertEqual(scan(protected: [active.path]).removed, 0)
         XCTAssertEqual(scan().removed, 1)
     }
+    func testKnownDarwinAliasesUseTheSameLeaseAndWalkerPath() throws {
+        for (alias, canonical) in [("/var/leases/job", "/private/var/leases/job"),
+                                    ("/tmp/job", "/private/tmp/job")] {
+            XCTAssertEqual(MirsaContainerCleanup.canonicalDarwinPath(URL(fileURLWithPath: alias)), canonical)
+            XCTAssertEqual(MirsaContainerCleanup.canonicalDarwinPath(URL(fileURLWithPath: canonical)), canonical)
+        }
+        XCTAssertEqual(MirsaContainerCleanup.canonicalDarwinPath(URL(fileURLWithPath: "/some/var/job")), "/some/var/job")
+        let active = try file("leased/nested/file.ipa")
+        let canonical = MirsaContainerCleanup.canonicalDarwinPath(active.deletingLastPathComponent())
+        let alias = canonical.hasPrefix("/private/") ? String(canonical.dropFirst("/private".count)) : canonical
+        XCTAssertEqual(scan(protected: [canonical]).removed, 0)
+        XCTAssertEqual(scan(protected: [alias]).removed, 0)
+        XCTAssertTrue(fm.fileExists(atPath: active.path))
+        XCTAssertEqual(scan().removed, 1)
+    }
     func testUnregisteredCurrentProcessFilesFailClosedDespiteOldMtime() throws {
         let new = try file("legacy-operation/out.ipa")
         try fm.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: new.path)
@@ -100,7 +115,7 @@ final class MirsaContainerCleanupTests: XCTestCase {
         let outside = try file("outside.ipa", under: base, bytes: 99)
         var raced = false
         XCTAssertEqual(scan(race: { url in
-            guard url == victim else { return }
+            guard MirsaContainerCleanup.canonicalDarwinPath(url) == MirsaContainerCleanup.canonicalDarwinPath(victim) else { return }
             try! self.fm.removeItem(at: url)
             try! self.fm.createSymbolicLink(at: url, withDestinationURL: outside)
             raced = true
@@ -111,7 +126,7 @@ final class MirsaContainerCleanupTests: XCTestCase {
     func testModifiedFileRaceFailsClosed() throws {
         let victim = try file("stale.ipa")
         XCTAssertEqual(scan(race: { url in
-            if url == victim { try! Data(count: 42).write(to: url) }
+            if MirsaContainerCleanup.canonicalDarwinPath(url) == MirsaContainerCleanup.canonicalDarwinPath(victim) { try! Data(count: 42).write(to: url) }
         }).removed, 0)
         XCTAssertEqual(try Data(contentsOf: victim).count, 42)
     }
@@ -120,7 +135,7 @@ final class MirsaContainerCleanupTests: XCTestCase {
         let parent = victim.deletingLastPathComponent()
         let moved = base.appendingPathComponent("moved")
         XCTAssertEqual(scan(race: { url in
-            if url == victim { try! self.fm.moveItem(at: parent, to: moved) }
+            if MirsaContainerCleanup.canonicalDarwinPath(url) == MirsaContainerCleanup.canonicalDarwinPath(victim) { try! self.fm.moveItem(at: parent, to: moved) }
         }).removed, 0)
         XCTAssertTrue(fm.fileExists(atPath: moved.appendingPathComponent("file.ipa").path))
     }
