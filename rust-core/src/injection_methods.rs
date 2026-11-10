@@ -86,15 +86,48 @@ struct Candidate { id:String, label:String, processes:Vec<String> }
 pub(super) fn capabilities(app:&Path,out:&Path)->Result<()> { capabilities_for(app,&[],out) }
 pub(super) fn capabilities_for(app:&Path,items:&[tweak_targets::Injection],out:&Path)->Result<()> {
     if items.len()>64{return Err("capability_item_limit".into())}
+    let targets = tweak_targets::targets(app)?;
+    if targets.len()>128 {return Err("capability_target_limit".into())}
+    let main=targets.iter().find(|t|t.kind=="main").ok_or("Missing main target")?;
+    let extensions:Vec<_>=targets.iter().filter(|t|t.kind=="extension").collect();
+    if extensions.len()>64{return Err("capability_extension_limit".into())}
     let mut components=Vec::new();
     for item in items {
         let mut methods=Vec::new();
-        for method in ["direct","load_control","shared_library","separate_extension"] {
-            let mut probe=item.clone();probe.method=Some(method.into());
-            let result=probe_method(app,&probe);
-            methods.push(serde_json::json!({"id":method,"enabled":result.is_ok(),"reason":result.err()}));
+        let mut eligible=serde_json::Map::new();
+        for method in ["direct","load_control","separate_extension"] {
+            let mut ids=Vec::new();let mut reason=None;
+            for target in &targets {
+                if method=="load_control" && target.kind=="framework" {continue}
+                if method=="separate_extension" && target.kind!="extension" {continue}
+                let mut probe=item.clone();probe.method=Some(method.into());
+                probe.target=target.id.clone();probe.targets=vec![target.id.clone()];probe.shared_target=None;
+                match probe_method(app,&probe) {Ok(())=>ids.push(target.id.clone()),Err(e)=>reason=Some(e)}
+            }
+            let enabled=!ids.is_empty();
+            methods.push(serde_json::json!({"id":method,"enabled":enabled,"reason":if enabled{None}else{reason.or(Some("no_eligible_targets".into()))}}));
+            eligible.insert(method.into(),serde_json::json!(ids));
         }
-        components.push(serde_json::json!({"id":item.id,"methods":methods}));
+        let mut verified=Vec::new();let mut shared_reason=None;
+        // Each actual main+appex pair is inspected independently. Unselected
+        // extensions cannot hide valid shared targets. No combinatorial subsets.
+        for extension in &extensions {
+            let processes=vec![main.id.clone(),extension.id.clone()];
+            match shared_candidates(app,&processes) {
+                Ok(candidates)=>for id in candidates {
+                    let mut probe=item.clone();probe.method=Some("shared_library".into());
+                    probe.target=main.id.clone();probe.targets=processes.clone();probe.shared_target=Some(id.clone());
+                    match probe_method(app,&probe) {
+                        Ok(())=>verified.push(Candidate{id:id.clone(),label:id,processes:processes.clone()}),
+                        Err(e)=>shared_reason=Some(e)
+                    }
+                },
+                Err(e)=>shared_reason=Some(e)
+            }
+        }
+        let enabled=!verified.is_empty();
+        methods.insert(2,serde_json::json!({"id":"shared_library","enabled":enabled,"reason":if enabled{None}else{shared_reason.or(Some("shared_requires_main_and_extension".into()))}}));
+        components.push(serde_json::json!({"id":item.id,"methods":methods,"eligibleTargets":eligible,"sharedCandidates":verified}));
     }
     let targets = tweak_targets::targets(app)?;
     let processes:Vec<_> = targets.iter().filter(|t|matches!(t.kind.as_str(),"main"|"extension")).map(|t|t.id.clone()).collect();
