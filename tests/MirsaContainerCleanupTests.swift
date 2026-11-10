@@ -8,7 +8,7 @@ final class MirsaContainerCleanupTests: XCTestCase {
     private var tmp: URL!
     private var cache: URL!
     override func setUpWithError() throws {
-        base = fm.temporaryDirectory.appendingPathComponent("container-clean-" + UUID().uuidString)
+        base = fm.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("container-clean-" + UUID().uuidString)
         tmp = base.appendingPathComponent("tmp")
         cache = base.appendingPathComponent("Caches")
         try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
