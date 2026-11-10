@@ -35,8 +35,8 @@ final class MirsaStoreServerTransport: NSObject, URLSessionTaskDelegate, @unchec
         config.urlCredentialStorage = nil
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 1800
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 180
         return URLSession(configuration: config, delegate: delegate ?? self, delegateQueue: nil)
     }
 
