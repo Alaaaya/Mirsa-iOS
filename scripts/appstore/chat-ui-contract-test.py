@@ -21,6 +21,8 @@ assert ".id(row.id)" in source
 assert "ForgeChatTimeline.pending(outgoing: store.outgoing, echoes: store.sentEcho" in source
 assert "ForgeChatTimeline.mergeConfirmed(previous: messages[id] ?? [], incoming: w.messages)" in source
 assert "ForgeChatTimeline.acceptedEcho(o)" in source
+assert "ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued)" in source
+assert "afterMessageID: anchor" in source
 assert "if sorted != threads { threads = sorted }" in source
 assert "accessibilityReduceMotion" in source and "reduceMotion ? nil : .spring" in source
 assert ".scrollDismissesKeyboard(.interactively)" in source
