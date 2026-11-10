@@ -18,6 +18,8 @@ cp "$ROOT/ios-app/Apps/MirsaManagedTmp.swift" "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/ios-app/Apps/MirsaContainerCleanup.swift" "$WORK/Sources/MirsaStoreKit/"
 sed 's/@testable import Mirsa/@testable import MirsaStoreKit/' "$ROOT/tests/MirsaContainerCleanupTests.swift" > "$WORK/Tests/MirsaStoreKitTests/MirsaContainerCleanupTests.swift"
 python3 "$ROOT/scripts/appstore/source-test-harness.py" "$WORK"
+python3 "$ROOT/scripts/appstore/public-gate-harness-tests.py"
+python3 "$ROOT/scripts/appstore/public-gate-test-harness.py" "$WORK"
 export MIRSA_SOURCE_FIXTURES="$WORK/source-fixtures"
 # UI localization is outside this standalone backend package.
 cat > "$WORK/Sources/MirsaStoreKit/TestLocalization.swift" <<'SWIFT'
