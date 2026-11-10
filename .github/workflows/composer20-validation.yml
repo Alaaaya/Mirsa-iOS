@@ -7,7 +7,7 @@ on:
         required: false
         default: ""
   push:
-    branches: [kat/composer20, kat/zip-import20]
+    branches: [kat/composer20, kat/zip-import20, kat/openin-attach20]
 permissions:
   contents: read
 jobs:
@@ -55,6 +55,18 @@ jobs:
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+      - name: Test integrated Open In project attachments on the same build
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/OpenIn.xcresult -only-testing:MirsaTests/OpenInProjectAttachmentTests -only-testing:MirsaTests/PersonalProjectPerformanceTests -only-testing:MirsaTests/OpenInIPATests -only-testing:MirsaTests/IncomingIPAConfirmationTests -only-testing:MirsaTests/IncomingIPAExplicitTests -only-testing:MirsaTests/IncomingIPAChoiceTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/openin.log
+      - name: Export Open In sheet attachments
+        if: always()
+        run: |
+          if [ -d build/OpenIn.xcresult ]; then
+            mkdir -p build/openin-shots
+            xcrun xcresulttool export attachments --path build/OpenIn.xcresult --output-path build/openin-shots
+          fi
       - name: Export named screenshots
         if: always()
         run: |
@@ -89,6 +101,9 @@ jobs:
             build/crashes
             build/ai-ui.log
             build/AIUI.xcresult
+            build/OpenIn.xcresult
+            build/openin.log
+            build/openin-shots
           if-no-files-found: warn
 
   unsigned-ipa:
