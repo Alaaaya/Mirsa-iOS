@@ -326,12 +326,14 @@ B.dylib
   let mut i=method_item("s",&l,"shared_library",&["Main","PlugIns/X.appex/X"]);i.shared_target=Some("../escape".into());assert!(inject_plan(&a,&[i],&[],false,false).is_err());fs::remove_dir_all(p).unwrap();
  }
 
- #[test] fn weak_edges_do_not_prove_common_dependency() {
-  let(p,a,_)=shared_setup("weak-common");fs::write(a.join("PlugIns/X.appex/X"),fixture(2)).unwrap();
+ #[test] fn weak_lazy_and_upward_edges_do_not_prove_common_dependency() {
+  for kind in [0x80000018,0x20,0x80000023] {
+  let(p,a,_)=shared_setup(&format!("weak-common-{kind}"));fs::write(a.join("PlugIns/X.appex/X"),fixture(2)).unwrap();
   let file=a.join("PlugIns/X.appex/X");let m=macho(read_macho(&file).unwrap(),false).unwrap();
   let mut cs:Vec<_>=m.commands.iter().map(|c|c.data.clone()).collect();
-  cs.push(dylib_command(0x80000018,"@loader_path/../../Frameworks/Shared.dylib",None).unwrap());fs::write(file,write_commands(m,cs).unwrap()).unwrap();
+  cs.push(dylib_command(kind,"@loader_path/../../Frameworks/Shared.dylib",None).unwrap());fs::write(file,write_commands(m,cs).unwrap()).unwrap();
   assert!(super::super::injection_methods::shared_candidates(&a,&["Main".into(),"PlugIns/X.appex/X".into()]).unwrap_err().contains("no_common"));fs::remove_dir_all(p).unwrap();
+  }
  }
  #[test] fn shared_subset_ignores_unselected_extension_and_component_caps_use_actual_dryrun() {
   let(p,a,l)=shared_setup("subset");bundle(&a.join("PlugIns/Y.appex"),"Y",2);
