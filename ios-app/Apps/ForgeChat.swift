@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 /// "Mirsa AI": a request thread with Mirsa. This is a manual queue, not an instant AI chat; replies take time.
 enum ForgeChatText {
@@ -60,6 +61,18 @@ Silav! Ez dikarim ji te re çêkim:
 Bi hûrgilî binivîse tu çi dixwazî, û heke wêneyekî tiştê di hişê te de hebe bişîne. Ez li ser dixebitim û encamê li vir ji te re vedigerînim.
 """) }
     static var photo: String { tr("Add image", "أضف صورة", ckb: "وێنە زیاد بکە", kmr: "Wêne zêde bike") }
+    static var attach: String { tr("Attach", "إرفاق", ckb: "هاوپێچ", kmr: "Pêvek") }
+    static var attachPhoto: String { tr("Photo", "صورة", ckb: "وێنە", kmr: "Wêne") }
+    static var attachFile: String { tr("Text or JSON file", "ملف نص أو JSON", ckb: "فایلی نووسین یان JSON", kmr: "Pelê nivîs an JSON") }
+    static var attachLink: String { tr("Link", "رابط", ckb: "بەستەر", kmr: "Lînk") }
+    static var linkPrompt: String { tr("Paste an https link", "الصق رابط https", ckb: "بەستەرێکی https بلکێنە", kmr: "Lînkek https bilêxe") }
+    static var add: String { tr("Add", "إضافة", ckb: "زیاد بکە", kmr: "Zêde bike") }
+    static var cancel: String { tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal bike") }
+    static var attachHint: String { tr("Up to 3 attachments. Photos up to 1 MB, text or JSON files up to 256 KB. Links are only sent as text, Mirsa never opens or downloads them. Attachments are kept for 24 hours.", "لحد ٣ مرفقات. الصور لحد ١ ميغا، ملفات النص أو JSON لحد ٢٥٦ كيلو. الروابط بتنبعت كنص بس، مرسى ما بتفتحها ولا بتنزّلها. المرفقات بتنحفظ ٢٤ ساعة.", ckb: "تا ٣ هاوپێچ. وێنە تا ١ مێگا، فایلی نووسین یان JSON تا ٢٥٦ کیلۆ. بەستەرەکان تەنها وەک نووسین دەنێردرێن، میرسا نایانکاتەوە و دایانابەزێنێت. هاوپێچەکان ٢٤ کاتژمێر دەمێننەوە.", kmr: "Heta 3 pêvek. Wêne heta 1 MB, pelên nivîs an JSON heta 256 KB. Lînk tenê wekî nivîs têne şandin, Mirsa wan venake û daneqîne. Pêvek 24 saetan tên parastin.") }
+    static var uploading: String { tr("Uploading…", "عم يرفع…", ckb: "بارکردن…", kmr: "Tê barkirin…") }
+    static var attachmentRejected: String { tr("An attachment was rejected (wrong type, too big or an unsafe link). Remove it and try again.", "انرفض مرفق (نوع غلط أو كبير أو رابط مو آمن). شيله وجرّب مرة تانية.", ckb: "هاوپێچێک ڕەتکرایەوە (جۆری هەڵە، زۆر گەورە یان بەستەری نائارام). لایببە و دووبارە هەوڵبدەرەوە.", kmr: "Pêvekek hat redkirin (cureyê şaş, pir mezin an lînka ne ewle). Rake û dîsa biceribîne.") }
+    static var attachmentExpired: String { tr("expired", "انتهت", ckb: "بەسەرچوو", kmr: "qediya") }
+    static var attachmentBad: String { tr("Could not read this file. Use a UTF-8 .txt or valid .json up to 256 KB.", "ما قدرت أقرا الملف. استخدم .txt بترميز UTF-8 أو .json صحيح لحد ٢٥٦ كيلو.", ckb: "نەتوانرا فایلەکە بخوێندرێتەوە. .txt بە UTF-8 یان .json ی دروست تا ٢٥٦ کیلۆ بەکاربهێنە.", kmr: "Pel nehat xwendin. .txt bi UTF-8 an .json a derbasdar heta 256 KB bi kar bîne.") }
     static var removeImage: String { tr("Remove image", "إزالة الصورة", ckb: "لابردنی وێنە", kmr: "Wêne rake") }
     static var close: String { tr("Close", "إغلاق", ckb: "داخستن", kmr: "Bigire") }
     static var empty: String { tr("No requests yet.", "ما في طلبات لسا.", ckb: "هێشتا داواکاری نییە.", kmr: "Hê daxwaz tune.") }
@@ -120,11 +133,17 @@ enum ForgeChatImage {
                 return
             }
             #endif
+            let long = ProcessInfo.processInfo.arguments.contains("-MirsaChatLongFixture")
             threads = [ForgeChatThread(id: t, title: "Fixture", status: "open", createdAt: nil, updatedAt: nil)]
             messages = [t: [
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Make me a tweak that hides the dock labels."),
                 ForgeChatMessage(id: UUID(), threadID: t, role: "kat", text: "Got it. I'll build it and send it here when it's ready."),
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Thanks, no rush.")]]
+            if long {
+                var many: [ForgeChatMessage] = []
+                for i in 1...40 { many.append(ForgeChatMessage(id: UUID(), threadID: t, role: i % 2 == 1 ? "user" : "kat", text: i == 40 ? "LAST-MESSAGE-MARK" : (i == 1 ? "FIRST-MESSAGE-MARK" : "Filler message number \(i) to make the chat taller than the screen.")))}
+                messages = [t: many]
+            }
             ackedThreads.insert(t)
             return
         }
@@ -153,6 +172,7 @@ enum ForgeChatImage {
         let code = (try? JSONSerialization.jsonObject(with: r.data) as? [String: Any])?["error"] as? String ?? ""
         if code == "message_too_long" { lastDiagnostic = code; throw ForgeChatTransient.failed(code) }
         if r.status == 429 { throw ForgeClient.Failure.message(ForgeChatText.limit) }
+        if (body["action"] as? String) == "chat-attachment-put", [400, 409, 410, 413, 415, 422].contains(r.status) { throw ForgeClient.Failure.message(ForgeChatText.attachmentRejected) }
         if r.status == 403, retryBind, code == "device_not_bound" || code == "device_auth_required" {
             // A fresh install is bound to the account by one ordinary Forge call, then registration is repeated.
             _ = try? await ForgeClient.get(["action": "gallery"])
@@ -176,7 +196,7 @@ enum ForgeChatImage {
     var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return (outgoing + sentEcho).map(\.threadID).filter { id in !threads.contains { t in t.id == id } && seen.insert(id).inserted } }
     func hasInFlight(_ id: UUID) -> Bool { outgoing.contains { $0.threadID == id } }
 
-    func send(threadID: UUID?, text: String, jpeg: Data?) {
+    func send(threadID: UUID?, text: String, jpeg: Data?, attachments: [ForgeChatAttachmentDraft] = []) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return }
@@ -187,7 +207,8 @@ enum ForgeChatImage {
         let confirmed = messages[tid] ?? []
         let pending = ForgeChatTimeline.pending(outgoing: outgoing, echoes: sentEcho, confirmed: confirmed, threadID: tid)
         let anchor = ForgeChatTimeline.orderedIDs(confirmed: confirmed, pending: pending).last
-        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: !serverKnows(tid), text: t, imageBase64: img, afterMessageID: anchor))
+        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: !serverKnows(tid), text: t, imageBase64: attachments.isEmpty ? img : nil, afterMessageID: anchor))
+        if !attachments.isEmpty { outgoing[outgoing.count - 1].attachments = Array(attachments.prefix(3)) }
         saveOutgoing()
         Task { await flush() }
         startRetrying()
@@ -216,6 +237,22 @@ enum ForgeChatImage {
             var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text, "language": AppLanguageStore.snapshot.rawValue]
             if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
             do {
+                if let drafts = o.attachments, !drafts.isEmpty {
+                    var ids = o.uploadedIDs ?? []
+                    while ids.count < drafts.count {
+                        let d = drafts[ids.count]
+                        var put: [String: Any] = ["action": "chat-attachment-put", "threadID": o.threadID.uuidString.lowercased(), "kind": d.kind, "name": String(d.name.prefix(100))]
+                        if let m = d.mime { put["mime"] = m }
+                        if let b = d.base64 { put["base64"] = b }
+                        if let u = d.url { put["url"] = u }
+                        let data = try await call(put)
+                        struct A: Decodable { struct I: Decodable { let id: String }; let attachment: I }
+                        guard let a = try? JSONDecoder().decode(A.self, from: data) else { throw ForgeChatTransient.failed("attachment_response") }
+                        ids.append(a.attachment.id)
+                        if let i = outgoing.firstIndex(where: { $0.id == o.id }) { outgoing[i].uploadedIDs = ids; saveOutgoing() }
+                    }
+                    body["attachmentIDs"] = ids
+                }
                 _ = try await call(body)
                 if deleting.contains(o.threadID) { continue } // delete started mid-send; delete waits for flush and wipes it
                 ackedThreads.insert(o.threadID); let echo = ForgeChatTimeline.acceptedEcho(o); sentEcho.removeAll { $0.id == o.id }; sentEcho.append(echo); saveEcho()
@@ -451,6 +488,12 @@ struct ForgeChatThreadView: View {
     @FocusState private var composerFocused: Bool
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
+    @State private var drafts: [ForgeChatAttachmentDraft] = []
+    @State private var pickingPhoto = false
+    @State private var pickingFile = false
+    @State private var linkAlert = false
+    @State private var linkText = ""
+    @State private var localError: String?
     @State private var started = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var msgs: [ForgeChatMessage] { store.messages[threadID] ?? [] }
@@ -488,7 +531,8 @@ struct ForgeChatThreadView: View {
                                 case .pending(let o, let sending):
                                     VStack(alignment: .trailing, spacing: 4) {
                                         userBubble(o.text)
-                                        if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) }
+                                        if let d = o.attachments { ForEach(d) { a in chip(a.kind, a.name) } }
+                                        if sending { Text(o.attachments?.isEmpty == false ? ForgeChatText.uploading : ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) }
                                     }.frame(maxWidth: .infinity, alignment: .trailing)
                                 }
                             }
@@ -518,6 +562,25 @@ struct ForgeChatThreadView: View {
         // This also tracks the keyboard's safe area without fixed device heights.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
+                if !drafts.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(drafts) { d in
+                                HStack(spacing: 6) {
+                                    Image(systemName: d.kind == "image" ? "photo" : (d.kind == "link" ? "link" : "doc.text")).font(.system(size: 13))
+                                    Text(d.name).font(.caption).lineLimit(1)
+                                    Button { drafts.removeAll { $0.id == d.id } } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 15)) }
+                                        .accessibilityLabel(ForgeChatText.removeImage)
+                                }.foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(Color(red: 0.118, green: 0.169, blue: 0.251)).clipShape(Capsule())
+                                    .accessibilityIdentifier("chat-draft-attachment")
+                            }
+                        }.padding(.horizontal, 18)
+                    }.padding(.top, 8).environment(\.layoutDirection, .leftToRight)
+                }
+                if let localError {
+                    Text(localError).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.top, 4)
+                }
                 if let jpeg, let img = UIImage(data: jpeg) {
                     HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
                         Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(MirsaChatTheme.muted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
@@ -548,7 +611,32 @@ struct ForgeChatThreadView: View {
         }
         .onChange(of: photo) { _, item in
             guard let item else { return }
-            Task { jpeg = (try? await item.loadTransferable(type: Data.self)).flatMap { ForgeChatImage.prepare($0) } }
+            Task {
+                defer { photo = nil }
+                guard drafts.count < 3, let raw = try? await item.loadTransferable(type: Data.self), let j = ForgeChatImage.prepare(raw) else { return }
+                drafts.append(ForgeChatAttachmentDraft(kind: "image", name: "photo-\(drafts.count + 1).jpg", mime: "image/jpeg", base64: j.base64EncodedString()))
+            }
+        }
+        .photosPicker(isPresented: $pickingPhoto, selection: $photo, matching: .images)
+        .fileImporter(isPresented: $pickingFile, allowedContentTypes: [.plainText, .json]) { result in
+            guard drafts.count < 3, case .success(let url) = result else { return }
+            let ok = url.startAccessingSecurityScopedResource(); defer { if ok { url.stopAccessingSecurityScopedResource() } }
+            let ext = url.pathExtension.lowercased()
+            guard ext == "txt" || ext == "json", let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 262_144,
+                  let data = try? Data(contentsOf: url), String(data: data, encoding: .utf8) != nil,
+                  ext != "json" || (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil else { localError = ForgeChatText.attachmentBad; return }
+            localError = nil
+            drafts.append(ForgeChatAttachmentDraft(kind: "file", name: String(url.lastPathComponent.prefix(100)), mime: ext == "json" ? "application/json" : "text/plain", base64: data.base64EncodedString()))
+        }
+        .alert(ForgeChatText.linkPrompt, isPresented: $linkAlert) {
+            TextField("https://", text: $linkText).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+            Button(ForgeChatText.add) {
+                let s = linkText.trimmingCharacters(in: .whitespacesAndNewlines); linkText = ""
+                guard drafts.count < 3, s.count <= 2048, let u = URL(string: s), u.scheme?.lowercased() == "https", let h = u.host, !h.isEmpty else { localError = ForgeChatText.attachmentRejected; return }
+                localError = nil
+                drafts.append(ForgeChatAttachmentDraft(kind: "link", name: String(h.prefix(100)), url: s))
+            }
+            Button(ForgeChatText.cancel, role: .cancel) { linkText = "" }
         }
         .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
@@ -589,13 +677,19 @@ struct ForgeChatThreadView: View {
             }
             HStack(alignment: .center, spacing: 10) {
                 HStack(spacing: 8) {
-                    PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
+                    Menu {
+                        Button { pickingPhoto = true } label: { Label(ForgeChatText.attachPhoto, systemImage: "photo") }
+                        Button { pickingFile = true } label: { Label(ForgeChatText.attachFile, systemImage: "doc.text") }
+                        Button { linkAlert = true } label: { Label(ForgeChatText.attachLink, systemImage: "link") }
+                        Text(ForgeChatText.attachHint)
+                    } label: { Image(systemName: "paperclip").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }
+                        .disabled(drafts.count >= 3).accessibilityLabel(ForgeChatText.attach).accessibilityIdentifier("chat-attach")
                     TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(.white).tint(MirsaChatTheme.blue)
                 }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 Button {
                     started = true
-                    store.send(threadID: threadID, text: text, jpeg: jpeg)
-                    text = ""; jpeg = nil; photo = nil
+                    store.send(threadID: threadID, text: text, jpeg: nil, attachments: drafts)
+                    text = ""; jpeg = nil; photo = nil; drafts = []; localError = nil
                 } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
                     .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
                     .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
@@ -621,10 +715,25 @@ struct ForgeChatThreadView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func chip(_ kind: String, _ name: String?, expired: Bool = false) -> some View {
+        let icon = kind == "image" ? "photo" : (kind == "link" ? "link" : "doc.text")
+        return HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 13))
+            Text((name?.isEmpty == false ? name! : kind) + (expired ? " · " + ForgeChatText.attachmentExpired : "")).font(.caption).lineLimit(1)
+        }.foregroundStyle(.white.opacity(expired ? 0.5 : 0.9)).padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Color(red: 0.118, green: 0.169, blue: 0.251)).clipShape(Capsule())
+            .accessibilityIdentifier("chat-attachment-chip")
+    }
+
+    @ViewBuilder private func attachmentChips(_ list: [ForgeChatAttachmentMeta]?) -> some View {
+        if let list, !list.isEmpty { VStack(alignment: .trailing, spacing: 4) { ForEach(list) { a in chip(a.kind, a.name, expired: a.available == false) } } }
+    }
+
     @ViewBuilder private func bubble(_ m: ForgeChatMessage) -> some View {
         if m.role == "user" {
             VStack(alignment: .trailing, spacing: 8) {
                 if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
+                attachmentChips(m.attachments)
                 if let t = m.text, !t.isEmpty { userBubble(t) }
             }.frame(maxWidth: .infinity, alignment: .trailing)
         } else {

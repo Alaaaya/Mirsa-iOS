@@ -7,7 +7,7 @@ on:
         required: false
         default: ""
   push:
-    branches: [kat/composer20, kat/zip-import20, kat/openin-attach20, kat/injection-method20, kat/injection-method20-validation, mirsa/all-four20]
+    branches: [kat/composer20, kat/zip-import20, kat/openin-attach20, kat/injection-method20, kat/injection-method20-validation, mirsa/all-four20, mirsa/2.1]
 permissions:
   contents: read
 jobs:
@@ -163,7 +163,7 @@ jobs:
         run: |
           python3 - <<'PYTHON'
           import pathlib,re
-          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.0"', p.read_text());assert n==1;p.write_text(text)
+          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.1"', p.read_text());assert n==1;p.write_text(text)
           PYTHON
           /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 261" ios-app/Info.plist
           brew install xcodegen && xcodegen generate
