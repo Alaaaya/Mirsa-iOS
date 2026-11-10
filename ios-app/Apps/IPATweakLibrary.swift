@@ -81,7 +81,8 @@ final class IPATweakLibrary: ObservableObject {
     }
 
     /// A single result is automatic; archives with several roots require explicit selection.
-    func addFile(_ url: URL, allowSelection: Bool = false) async throws {
+    @discardableResult
+    func addFile(_ url: URL, allowSelection: Bool = false) async throws -> IPATweak {
         guard !importing else { throw SideloadError.message(IPATweakImportText.error("busy")) }
         importing = true
         defer { importing = false }
@@ -130,6 +131,7 @@ final class IPATweakLibrary: ObservableObject {
             try? FileManager.default.removeItem(at: Self.root.appendingPathComponent(item.id.uuidString))
             throw error
         }
+        return item
     }
 
     nonisolated private static func prepare(_ source: URL, session: URL, cancellation: URL) throws -> [IPATweakImportCandidate] {
@@ -189,7 +191,7 @@ final class IPATweakLibrary: ObservableObject {
 
     /// Validate before copying, then stream with a second actual-byte quota and cancellation.
     /// Framework symlinks are deliberately unsupported, never recreated or followed.
-    nonisolated private static func copyValidated(_ source: URL, to dest: URL, cancellation: URL? = nil) throws {
+    nonisolated static func copyValidated(_ source: URL, to dest: URL, cancellation: URL? = nil) throws {
         let fm = FileManager.default
         var entries = [source], count = 0
         var declared: Int64 = 0, actual: Int64 = 0

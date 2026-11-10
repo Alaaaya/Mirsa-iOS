@@ -562,6 +562,7 @@ struct PersonalAppsHub: View {
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
         .task { reloadDrafts() }
+        .onReceive(NotificationCenter.default.publisher(for: .mirsaProjectAttached)) { _ in reloadDrafts() }
         .onChange(of: library.apps) { _ in
             reloadDrafts()
             if library.loadError == nil { hiddenStore.prune(.personal, existing: Set(library.apps.map { $0.id.uuidString })) }

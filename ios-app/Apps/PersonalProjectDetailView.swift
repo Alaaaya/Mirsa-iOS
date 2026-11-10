@@ -107,8 +107,8 @@ struct PersonalProjectDetailView: View {
             DocumentPickerView(allowedContentTypes: ["zip", "dylib", "deb", "framework"].compactMap { UTType(filenameExtension: $0) } + [.data]) { url in
                 Task {
                     do {
-                        try await tweaks.addFile(url, allowSelection: true)
-                        if let first = tweaks.items.first, !draft.tweakIDs.contains(first.id) { draft.tweakIDs.append(first.id) }
+                        let imported = try await tweaks.addFile(url, allowSelection: true)
+                        if !draft.tweakIDs.contains(imported.id) { draft.tweakIDs.append(imported.id) }
                     } catch { message = error.localizedDescription }
                 }
             }
@@ -152,6 +152,11 @@ struct PersonalProjectDetailView: View {
             Button(personalText("OK", "تمام")) { resultAlert = nil }
         } message: { Text(resultAlert ?? "") }
         .task { await load(); await inspect(); consumeSigningResult() }
+        .onReceive(NotificationCenter.default.publisher(for: .mirsaProjectAttached)) { note in
+            guard note.object as? UUID == app.id else { return }
+            do { draft = try ProjectAttachmentStore.draft(app) }
+            catch { message = OpenInAttachmentText.failed }
+        }
         .onChange(of: signing.state?.running) { _ in consumeSigningResult() }
         .onChange(of: draft) { _ in if loaded, let destination = draftDestination { draftWriter.schedule(draft, to: destination) } }
         .onChange(of: scenePhase) { phase in if phase != .active { draftWriter.flush() } }
@@ -234,13 +239,7 @@ struct PersonalProjectDetailView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(comp.title).font(.subheadline).lineLimit(1)
                         if comp.subtitle != comp.title { Text(comp.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
-                        Menu {
-                            Button { draft.directInjection = true } label: { Label(personalText("Via main executable", "عبر الملف التنفيذي الرئيسي"), systemImage: loaderOn ? "circle" : "checkmark") }
-                            Button { draft.directInjection = false } label: { Label(personalText("Via LoadControl", "عبر LoadControl"), systemImage: loaderOn ? "checkmark" : "circle") }
-                        } label: {
-                            Text((loaderOn ? personalText("Via LoadControl", "عبر LoadControl") : personalText("Via main executable", "عبر الملف التنفيذي الرئيسي")) + " ▾").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        targetMenu(comp)
+                        methodControls(comp)
                     }
                     Spacer()
                     ShareLink(item: comp.url) { Image(systemName: "square.and.arrow.up") }
@@ -318,22 +317,98 @@ struct PersonalProjectDetailView: View {
             if let result { bundleManager = result } else { message = personalText("Could not read the app files.", "ما قدرت أقرأ ملفات التطبيق.") }
         }
     }
-    @State private var targetList: [(id: String, kind: String, label: String)] = []
-    @State private var targetsLoading = false
-    private func mainTarget() -> String? { targetList.first { $0.kind == "main" }?.id }
-    @ViewBuilder private func targetMenu(_ comp: TweakComponent) -> some View {
-        let current = draft.tweakTargets?[comp.id]
-        let shown = targetList.first { $0.id == current }?.label ?? personalText("Main app", "التطبيق الرئيسي")
+    private func reloadButton() -> some View {
+        Button { loadTargets() } label: {
+            Label(targetsLoading ? tr("Reading app…", "عم أقرأ التطبيق…", ckb: "ئەپەکە دەخوێنرێتەوە…", kmr: "Sepan tê xwendin…") : tr("Reload targets", "إعادة تحميل الأهداف", ckb: "دووبارە بارکردنی ئامانجەکان", kmr: "Armancan ji nû ve bar bike"), systemImage: "arrow.clockwise")
+        }.disabled(targetsLoading)
+    }
+    @ViewBuilder private func methodControls(_ comp: TweakComponent) -> some View {
+        let current = InjectionMethodStore.method(for: comp.id, methods: draft.injectionMethods, legacyDirect: draft.directInjection)
+        let configured = InjectionMethodStore.isConfigured(comp.id, methods: draft.injectionMethods)
+        let cc = injectionCaps.component(comp.id)
         Menu {
-            if targetList.isEmpty {
-                Button { loadTargets() } label: { Label(targetsLoading ? personalText("Reading app…", "عم أقرأ التطبيق…") : personalText("Load targets", "تحميل الأهداف"), systemImage: "arrow.down.circle") }
+            // Reload is always available: it is the only way to clear stale capabilities.
+            reloadButton()
+            ForEach(InjectionMethod.allCases, id: \.self) { m in
+                Button {
+                    var d = draft.injectionMethods ?? [:]; d[comp.id] = m.rawValue; draft.injectionMethods = d
+                } label: { Label(m.title, systemImage: m == current ? "checkmark" : "circle") }
+                .disabled(!injectionCaps.isEnabled(m, component: comp.id))
             }
-            ForEach(targetList, id: \.id) { t in
+        } label: {
+            Text((current?.title ?? tr("Invalid saved method. Pick again.", "طريقة محفوظة غير صالحة. اختار من جديد.", ckb: "ڕێگای پاشەکەوتکراو نادروستە. دووبارە هەڵبژێرە.", kmr: "Rêbaza tomarkirî nederbasdar e. Dîsa hilbijêre.")) + " ▾").font(.caption2).foregroundStyle(.secondary)
+        }
+        if let current {
+            Text(configured ? current.explanation : tr("Default. Pick a method to configure this tweak.", "الافتراضي. اختار طريقة لتضبط هالإضافة.", ckb: "بنەڕەت. ڕێگایەک هەڵبژێرە بۆ ڕێکخستن.", kmr: "Bingeh. Rêbazekê hilbijêre da ku mîheng bike."))
+                .font(.caption2).foregroundStyle(.secondary)
+            // Show why a method is unavailable whether or not it was configured, once this component was inspected.
+            if cc != nil || configured, let reason = injectionCaps.disabledReason(current, component: comp.id), configured || cc != nil {
+                Text(reason).font(.caption2).foregroundStyle(.orange)
+            }
+            switch current {
+            case .direct: targetMenu(comp)
+            case .load_control: targetMenu(comp, method: .load_control)
+            case .separate_extension: extensionPicker(comp)
+            case .shared_library: sharedPicker(comp)
+            }
+        } else if let raw = draft.injectionMethods?[comp.id] {
+            Text(tr("Unknown saved method \"", "طريقة محفوظة غير معروفة \"", ckb: "ڕێگای پاشەکەوتکراوی نەناسراو \"", kmr: "Rêbaza tomarkirî ya nenas \"") + raw + "\"")
+                .font(.caption2).foregroundStyle(.orange)
+        }
+    }
+    @ViewBuilder private func extensionPicker(_ comp: TweakComponent) -> some View {
+        let picked = Set(draft.injectionProcessTargets?[comp.id] ?? [])
+        let cc = injectionCaps.component(comp.id)
+        let extensionIDs = cc?.eligible(.separate_extension) ?? []
+        let optionalMain = injectionCaps.mainTarget.map { main in (cc?.eligible(.direct).contains(main.id) == true) ? [main.id] : [] } ?? []
+        let eligible = optionalMain + extensionIDs
+        Menu {
+            ForEach(eligible, id: \.self) { id in
+                Button {
+                    var all = draft.injectionProcessTargets ?? [:]
+                    var cur = all[comp.id] ?? []
+                    if let i = cur.firstIndex(of: id) { cur.remove(at: i) } else { cur.append(id) }
+                    all[comp.id] = cur.isEmpty ? nil : cur
+                    draft.injectionProcessTargets = all.isEmpty ? nil : all
+                } label: { Label(injectionCaps.label(id), systemImage: picked.contains(id) ? "checkmark.square" : "square") }
+            }
+        } label: {
+            Text(tr("Extensions: ", "الامتدادات: ", ckb: "پێوەکراوەکان: ", kmr: "Pêvek: ") + (picked.isEmpty ? tr("none selected", "ما اخترت", ckb: "هیچ نەهەڵبژێردراوە", kmr: "tu nehatine hilbijartin") : "\(picked.count)") + " ▾").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private func sharedPicker(_ comp: TweakComponent) -> some View {
+        let current = draft.injectionSharedTargets?[comp.id]
+        let list = injectionCaps.component(comp.id)?.sharedCandidates ?? []
+        let matches = list.filter { $0.selectionID == current || $0.id == current }
+        let candidate = matches.count == 1 ? matches.first : nil
+        Menu {
+            ForEach(list, id: \.selectionID) { c in
+                Button {
+                    var all = draft.injectionSharedTargets ?? [:]; all[comp.id] = c.selectionID; draft.injectionSharedTargets = all
+                } label: { Label(c.label + " (" + c.processes.map { injectionCaps.label($0) }.joined(separator: ", ") + ")", systemImage: c.selectionID == candidate?.selectionID ? "checkmark" : "circle") }
+            }
+        } label: {
+            Text(tr("Shared library: ", "المكتبة المشتركة: ", ckb: "کتێبخانەی هاوبەش: ", kmr: "Pirtûkxaneya parvekirî: ") + (candidate?.label ?? tr("none selected", "ما اخترت", ckb: "هیچ نەهەڵبژێردراوە", kmr: "tu nehatine hilbijartin")) + " ▾").font(.caption2).foregroundStyle(.secondary)
+        }
+        if let candidate {
+            Text(tr("Processes: ", "العمليات: ", ckb: "پرۆسەکان: ", kmr: "Pêvajo: ") + candidate.processes.map { injectionCaps.label($0) }.joined(separator: ", "))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+    private func mainTarget() -> String? { targetList.first { $0.kind == "main" }?.id ?? injectionCaps.mainTarget?.id }
+    @ViewBuilder private func targetMenu(_ comp: TweakComponent, method: InjectionMethod = .direct) -> some View {
+        let current = draft.tweakTargets?[comp.id]
+        let valid = Set(injectionCaps.component(comp.id)?.eligible(method) ?? [])
+        let shown = targetList.first { $0.id == current }?.label ?? tr("Main app", "التطبيق الرئيسي", ckb: "ئەپی سەرەکی", kmr: "Sepana sereke")
+        Menu {
+            reloadButton()
+            // Only targets the backend probed as valid for THIS component; stale or unknown ids never appear.
+            ForEach(targetList.filter { valid.contains($0.id) }, id: \.id) { t in
                 Button { setTarget(comp.id, t) } label: {
                     Label(t.label + " (" + t.kind + ")", systemImage: (current == t.id || (current == nil && t.kind == "main")) ? "checkmark" : "circle")
-                }.disabled(loaderOn && t.kind != "main")
+                }
             }
-        } label: { Text(personalText("Target: ", "الهدف: ") + shown + " ▾").font(.caption2).foregroundStyle(.secondary) }
+        } label: { Text(tr("Target: ", "الهدف: ", ckb: "ئامانج: ", kmr: "Armanc: ") + shown + " ▾").font(.caption2).foregroundStyle(.secondary) }
     }
     private func setTarget(_ cid: String, _ t: (id: String, kind: String, label: String)) {
         var m = draft.tweakTargets ?? [:]
@@ -343,21 +418,35 @@ struct PersonalProjectDetailView: View {
     private func loadTargets() {
         guard !targetsLoading else { return }
         targetsLoading = true
+        // Drop old capabilities first so stale ones can never be used while re-inspecting.
+        injectionCaps = InjectionCapabilities()
         let input = library.url(app)
+        let comps = components()
         Task {
-            let result: [(id: String, kind: String, label: String)]? = await Task.detached(priority: .userInitiated) {
+            let loaded: ([(id: String, kind: String, label: String)], InjectionCapabilities)? = await Task.detached(priority: .userInitiated) {
                 let stage = FileManager.default.temporaryDirectory.appendingPathComponent("targets-\(UUID().uuidString)", isDirectory: true)
                 defer { try? FileManager.default.removeItem(at: stage) }
                 do {
                     try IPAEditorService.run("extract", input: input, output: stage)
-                    return try IPAEditorService.targets(app: IPAEditorService.app(in: stage), scratch: stage)
+                    let app = try IPAEditorService.app(in: stage)
+                    let list = try IPAEditorService.targets(app: app, scratch: stage)
+                    guard let main = list.first(where: { $0.kind == "main" })?.id else { return nil }
+                    // Backend probes each component with its own library; method here is only a placeholder it overrides.
+                    let entries = comps.map { InjectionPlanEntry(id: $0.id, library: $0.url.path, target: main, method: .direct) }
+                    let caps = try IPAEditorService.injectionCapabilities(app: app, scratch: stage, entries: entries)
+                    return (list, caps)
                 } catch { return nil }
             }.value
             targetsLoading = false
-            if let result { targetList = result } else { message = personalText("Could not read the app targets.", "ما قدرت أقرأ أهداف التطبيق.") }
+            if let loaded { targetList = loaded.0; injectionCaps = loaded.1 }
+            else { message = tr("Could not read the app targets.", "ما قدرت أقرأ أهداف التطبيق.", ckb: "نەتوانرا ئامانجەکانی ئەپ بخوێندرێتەوە.", kmr: "Armancên sepanê nehatin xwendin.") }
         }
     }
     private var loaderOn: Bool { draft.directInjection == false }
+    /// Backend-reported capabilities per component, from a clean extraction. Empty until loaded (fail closed).
+    @State private var injectionCaps = InjectionCapabilities()
+    @State private var targetList: [(id: String, kind: String, label: String)] = []
+    @State private var targetsLoading = false
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(personalText("Project settings", "إعدادات المشروع"), systemImage: "gearshape.fill").font(.subheadline.weight(.semibold))
@@ -549,7 +638,7 @@ struct PersonalProjectDetailView: View {
         options.gameMode = draft.gameMode ?? .keep
         options.fixWhiteIcon = draft.fixWhiteIcon ?? false
         options.newTweaksFirst = draft.newTweaksFirst ?? false
-        options.useLoader = draft.directInjection == false
+        options.useLoader = (draft.injectionMethods ?? [:]).isEmpty && draft.directInjection == false
         options.existingLibraryEdits = draft.existingLibraryEdits ?? []
         options.customEntitlements = draft.customEntitlements
         options.exportExtension = draft.exportExtension ?? "ipa"
@@ -563,9 +652,18 @@ struct PersonalProjectDetailView: View {
             let comps = components()
             options.libraries = comps.map(\.url)
             let targets = draft.tweakTargets ?? [:]
-            if comps.contains(where: { targets[$0.id] != nil }) {
-                guard let main = mainTarget() else { message = personalText("Load targets first.", "حمّل الأهداف أولاً."); return }
-                options.injections = comps.map { ["id": $0.id, "library": $0.url.path, "target": targets[$0.id] ?? main] }
+            let methods = draft.injectionMethods ?? [:]
+            if comps.contains(where: { targets[$0.id] != nil || methods[$0.id] != nil }) {
+                guard injectionCaps.mainTarget != nil else { message = personalText("Load targets first.", "حمّل الأهداف أولاً."); return }
+                do {
+                    options.injections = try comps.map { c in
+                        try InjectionMethodStore.entry(id: c.id, library: c.url.path, tweakTarget: targets[c.id], methods: draft.injectionMethods, legacyDirect: draft.directInjection,
+                                                       processTargets: draft.injectionProcessTargets, sharedTargets: draft.injectionSharedTargets, caps: injectionCaps)
+                    }
+                } catch {
+                    message = tr("An injection choice is missing, unsupported or outdated. Reload targets and pick the method again.", "في اختيار حقن ناقص أو مو مدعوم أو قديم. أعد تحميل الأهداف واختار الطريقة مرة تانية.", ckb: "هەڵبژاردنێکی تێخستن کەمە، پشتگیری ناکرێت یان کۆنە. ئامانجەکان دووبارە بار بکە و ڕێگا هەڵبژێرە.", kmr: "Hilbijartineke derzîkirinê kêm e, nayê piştgirîkirin an kevn e. Armancan ji nû ve bar bike û rêbazê dîsa hilbijêre.")
+                    return
+                }
                 options.injectionOrder = comps.map(\.id)
             }
         } catch { message = error.localizedDescription; return }

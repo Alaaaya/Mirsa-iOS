@@ -7,7 +7,7 @@ on:
         required: false
         default: ""
   push:
-    branches: [kat/composer20, kat/zip-import20]
+    branches: [kat/composer20, kat/zip-import20, kat/openin-attach20, kat/injection-method20, kat/injection-method20-validation, mirsa/all-four20]
 permissions:
   contents: read
 jobs:
@@ -47,6 +47,7 @@ jobs:
           brew install xcodegen
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; size="${{ matrix.size }}"; names=["iPhone SE (3rd generation)","iPhone 16e","iPhone 16"] if size=="small" else ["iPhone 17 Pro Max","iPhone 16 Pro Max"]; pick=next(d for name in names for d in ds if d["name"]==name); print(pick["udid"])')
+          echo "MIRSA_TEST_DEVICE=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl list devices available
           xcrun simctl ui "$DEVICE" appearance dark || true
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
@@ -55,6 +56,23 @@ jobs:
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+      - name: Test integrated Open In project attachments on the same build
+        run: |
+          set -o pipefail
+          DEVICE="$MIRSA_TEST_DEVICE"
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/OpenIn.xcresult -only-testing:MirsaTests/OpenInProjectAttachmentTests -only-testing:MirsaTests/PersonalProjectPerformanceTests -only-testing:MirsaTests/OpenInIPATests -only-testing:MirsaTests/IncomingIPAConfirmationTests -only-testing:MirsaTests/IncomingIPAExplicitTests -only-testing:MirsaTests/IncomingIPAChoiceTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/openin.log
+      - name: Export Open In sheet attachments
+        if: always()
+        run: |
+          if [ -d build/OpenIn.xcresult ]; then
+            mkdir -p build/openin-shots
+            xcrun xcresulttool export attachments --path build/OpenIn.xcresult --output-path build/openin-shots
+          fi
+      - name: Run compiled project injection and attachment regression tests
+        if: matrix.size == 'small'
+        run: |
+          set -o pipefail
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$MIRSA_TEST_DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ProjectFeatures.xcresult -only-testing:MirsaTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/project-features.log
       - name: Export named screenshots
         if: always()
         run: |
@@ -88,7 +106,12 @@ jobs:
             build/shots
             build/crashes
             build/ai-ui.log
+            build/project-features.log
+            build/ProjectFeatures.xcresult
             build/AIUI.xcresult
+            build/OpenIn.xcresult
+            build/openin.log
+            build/openin-shots
           if-no-files-found: warn
 
   unsigned-ipa:
@@ -111,6 +134,11 @@ jobs:
           workspaces: rust-core
       - name: Run exact ZIP and DEB parser security regressions
         run: python3 scripts/appstore/zip-import-tests.py
+      - name: Run exact production injection-method behavior and security tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          python3 scripts/appstore/injection-method-tests.py 2>&1 | tee build/injection-method-native.log
       - name: Build AirliftFFI for iOS (device)
         env:
           IPHONEOS_DEPLOYMENT_TARGET: "18.0"
@@ -119,7 +147,10 @@ jobs:
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
       - name: Run compiled feature and backend regression tests
-        run: bash scripts/appstore/package-tests.sh
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
       - name: Build unsigned IPA (isolated fixture 261, never published)
         run: |
           python3 - <<'PYTHON'
@@ -142,3 +173,13 @@ jobs:
         with:
           name: Mirsa-composer20-unsigned
           path: build/Mirsa.ipa
+
+      - name: Upload native and Swift test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirsa-injection-method-tests
+          path: |
+            build/injection-method-native.log
+            build/package-tests.log
+          if-no-files-found: warn

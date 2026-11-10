@@ -9,6 +9,8 @@ mod fat_macho;
 mod existing_libraries;
 #[path = "load_control.rs"]
 mod load_control;
+#[path = "injection_methods.rs"]
+mod injection_methods;
 #[path = "tweak_targets.rs"]
 mod tweak_targets;
 use serde::Deserialize;
@@ -1088,6 +1090,7 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
             if out.parent().is_none() { return Err("Invalid output".into()); }
             fs::write(out, json).map_err(err)
         }
+        "injection_capabilities" => injection_methods::capabilities_for(Path::new(&r.input),&r.injections,Path::new(&r.output)),
         "targets" => tweak_targets::list_targets(Path::new(&r.input),Path::new(&r.output)),
         "package_roots" => tweak_targets::package_roots(Path::new(&r.input),Path::new(&r.output)),
         "inject_plan" => tweak_targets::inject_plan(Path::new(&r.input),&r.injections,&r.order,r.use_loader,r.new_first),
