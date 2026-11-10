@@ -46,6 +46,7 @@ jobs:
           python3 ios-app/localization-coverage-test.py
           python3 ios-app/localization-plural-test.py
           python3 scripts/appstore/server-ui-contract-test.py
+          python3 scripts/appstore/chat-ui-contract-test.py
       - uses: actions/upload-artifact@v4
         with:
           name: Mirsa-store20-transport-device
@@ -57,4 +58,5 @@ jobs:
           path: |
             build/store-server-tests.log
             build/store-server-ui-text-proof.json
+            build/chat-ui-contract-proof.json
           if-no-files-found: error
