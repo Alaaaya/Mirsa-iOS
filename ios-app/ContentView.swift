@@ -634,7 +634,7 @@ struct ContentView: View {
                 .tag(AppTab.sources)
 
             ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused))
+                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
                 .tag(AppTab.pairing)
 
@@ -1188,12 +1188,21 @@ struct VPNStatusRow: View {
 struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
     var chatEditing: Bool = false
+    var nestedNavigation: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
         if liquid {
-            content
-                .toolbar(.hidden, for: .tabBar)
-                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: chatEditing ? 0 : MirsaTabBarMetrics.clearance) }
+            if nestedNavigation {
+                // A pushed chat destination can lose an ancestor safe-area inset.
+                // Bound the tools NavigationStack itself above the floating dock.
+                content
+                    .toolbar(.hidden, for: .tabBar)
+                    .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+            } else {
+                content
+                    .toolbar(.hidden, for: .tabBar)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: chatEditing ? 0 : MirsaTabBarMetrics.clearance) }
+            }
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }

@@ -23,7 +23,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: app)], timeout: 10) == .completed
     }
 
-    private func assertComposer(_ app: XCUIApplication, keyboard: Bool = false, name: String) {
+    private func assertComposer(_ app: XCUIApplication, keyboard: Bool = false, liquid: Bool = true, name: String) {
         // SwiftUI.VerticalTextView reports conflicting legacy/modern element types
         // on iOS 26. Query its stable identifier without a TextField/TextView filter.
         let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
@@ -46,9 +46,19 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             let keys = app.keyboards.firstMatch
             XCTAssertTrue(keys.waitForExistence(timeout: 5))
             XCTAssertLessThanOrEqual(input.frame.maxY, keys.frame.minY + 1, "composer obscured by keyboard")
-        } else {
-            let dock = app.otherElements["mirsa-tab-dock"]
-            if dock.exists { XCTAssertLessThanOrEqual(input.frame.maxY, dock.frame.minY + 1, "composer obscured by dock") }
+        } else if liquid {
+            // SwiftUI exposes this HStack's identifier on its tab buttons.
+            // Require the real dock, rather than silently skipping its geometry.
+            let dock = app.buttons.matching(identifier: "mirsa-tab-dock").firstMatch
+            XCTAssertTrue(dock.exists, "floating dock missing in liquid theme")
+            if dock.exists {
+                XCTAssertLessThanOrEqual(input.frame.maxY, dock.frame.minY + 1, "composer obscured by dock")
+                XCTAssertLessThanOrEqual(send.frame.maxY, dock.frame.minY + 1, "send button obscured by dock")
+                let status = app.staticTexts["chat-composer-status"]
+                if status.exists {
+                    XCTAssertLessThanOrEqual(status.frame.maxY, dock.frame.minY + 1, "inline status obscured by dock")
+                }
+            }
         }
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         a.name = name; a.lifetime = .keepAlways; add(a)
@@ -93,7 +103,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
 
     func testRegistrationPendingClassicLargeTextKeepsComposer() {
         let app = openEmptyChat("-MirsaChatRegistrationPendingFixture", theme: "classic", largeText: true)
-        assertComposer(app, name: "registration_pending_classic_large_text")
+        assertComposer(app, liquid: false, name: "registration_pending_classic_large_text")
         app.terminate()
     }
 
