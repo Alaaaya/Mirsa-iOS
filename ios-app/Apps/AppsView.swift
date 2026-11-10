@@ -93,6 +93,7 @@ struct AppsTab: View {
     @ObservedObject private var hiddenStore = HiddenAppsStore.shared
     @ObservedObject private var downloads = DownloadsLibrary.shared
     @AppStorage("mirsa.apps.homeLayout") private var homeLayout = false
+    @AppStorage("mirsa.home.style") private var homeStyle = "pages"
     @Namespace private var segNS
 
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
@@ -103,14 +104,25 @@ struct AppsTab: View {
             AuroraBackground()
 
             if homeLayout {
-                MirsaHomeScreen(apps: hiddenStore.visible(store.containerApps + store.realApps, ns: .main, id: { $0.id }),
-                                allAppIDs: (store.containerApps + store.realApps).map(\.id),
-                                onLaunch: { launchIfIdle($0) },
-                                onSettings: { showSettings = true },
-                                onImport: { showPicker = true },
-                                onImportLink: { showURLImport = true },
-                                onDownloads: { segment = .downloads },
-                                menu: { app in menu(for: app) })
+                if homeStyle == "iphone" {
+                    MirsaIPhoneHome(apps: hiddenStore.visible(store.containerApps + store.realApps, ns: .main, id: { $0.id }),
+                                    allAppIDs: (store.containerApps + store.realApps).map(\.id),
+                                    onLaunch: { launchIfIdle($0) },
+                                    onSettings: { showSettings = true },
+                                    onImport: { showPicker = true },
+                                    onImportLink: { showURLImport = true },
+                                    onDownloads: { segment = .downloads },
+                                    menu: { app in menu(for: app) })
+                } else {
+                    MirsaHomeScreen(apps: hiddenStore.visible(store.containerApps + store.realApps, ns: .main, id: { $0.id }),
+                                    allAppIDs: (store.containerApps + store.realApps).map(\.id),
+                                    onLaunch: { launchIfIdle($0) },
+                                    onSettings: { showSettings = true },
+                                    onImport: { showPicker = true },
+                                    onImportLink: { showURLImport = true },
+                                    onDownloads: { segment = .downloads },
+                                    menu: { app in menu(for: app) })
+                }
                 if segment == .downloads {
                     VStack {
                         HStack {
@@ -1064,6 +1076,7 @@ struct PromptSheet: View {
 struct AppsSettingsSheet: View {
     @AppStorage(MirsaInstallMode.key) private var installMode = "appleID"
     @AppStorage("mirsa.apps.homeLayout") private var homeLayout = false
+    @AppStorage("mirsa.home.style") private var homeStyle = "pages"
     @AppStorage(MirsaCompletionFeedback.enabledKey) private var completionFeedback = true
     @AppStorage("mirsa.home.wallpaper") private var wallpaper = "ocean"
     @EnvironmentObject var vm: AppViewModel
@@ -1117,6 +1130,12 @@ struct AppsSettingsSheet: View {
                     Text(tr("Off keeps your current apps view unchanged. Home Screen uses pages and a glass dock.", "لما تطفّي الخيار بتضل الواجهة الحالية نفسها. الشاشة الرئيسية فيها صفحات ودوك زجاجي."))
                         .font(.caption).foregroundStyle(.secondary)
                     if homeLayout {
+                        Picker(tr("Style", "الشكل", ckb: "شێواز", kmr: "Şêwaz"), selection: $homeStyle) {
+                            Text(tr("Pages", "صفحات", ckb: "پەڕەکان", kmr: "Rûpel")).tag("pages")
+                            Text(tr("iPhone", "متل الآيفون", ckb: "وەک ئایفۆن", kmr: "Wek iPhone")).tag("iphone")
+                        }
+                    }
+                    if homeLayout && homeStyle != "iphone" {
                         Picker(tr("Wallpaper", "الخلفية"), selection: $wallpaper) {
                             Text(tr("Ocean", "بحر")).tag("ocean")
                             Text(tr("Sunset", "غروب")).tag("sunset")
