@@ -406,7 +406,6 @@ struct ForgeChatThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
@@ -426,6 +425,8 @@ struct ForgeChatThreadView: View {
                     .animation(.easeOut(duration: 0.2), value: store.outgoing.count)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
+                .safeAreaInset(edge: .top, spacing: 0) { header }
                 .onChange(of: msgs.count + queued.count) { _, _ in withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -450,15 +451,14 @@ struct ForgeChatThreadView: View {
 
     private var header: some View {
         ZStack {
-            Text(ForgeChatText.title).font(.system(size: 21, weight: .bold)).foregroundStyle(.white)
+            Text(ForgeChatText.title).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 8).background(.ultraThinMaterial, in: Capsule())
             HStack {
-                Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(Color(red: 0.118, green: 0.169, blue: 0.251)).clipShape(Circle()) }
+                Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
                     .accessibilityLabel(ForgeChatText.close)
                 Spacer()
             }
-        }.padding(.horizontal, 18).padding(.vertical, 10)
-        .background(.ultraThinMaterial.opacity(0.6))
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 0.5) }
+        }.padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
     }
 
