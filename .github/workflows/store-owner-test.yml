@@ -1,0 +1,77 @@
+name: Mirsa owner Store test IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unsigned-ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Validate owner-only Store access
+        run: python3 scripts/appstore/owner-store-gate-tests.py
+      - name: Run exact ZIP and DEB parser security regressions
+        run: python3 scripts/appstore/zip-import-tests.py
+      - name: Run exact production injection-method behavior and security tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          python3 scripts/appstore/injection-method-tests.py 2>&1 | tee build/injection-method-native.log
+      - name: Build AirliftFFI for iOS (device)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run compiled feature and backend regression tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
+      - name: Build unsigned IPA (isolated fixture 261, never published)
+        run: |
+          python3 - <<'PYTHON'
+          import pathlib,re
+          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.0"', p.read_text());assert n==1;p.write_text(text)
+          PYTHON
+          /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 261" ios-app/Info.plist
+          brew install xcodegen && xcodegen generate
+          export GITHUB_RUN_NUMBER=261
+          bash build-ipa.sh
+      - name: Localization coverage
+        run: |
+          python3 ios-app/localization-coverage-test.py
+          python3 ios-app/localization-plural-test.py
+          python3 scripts/appstore/chat-ui-contract-test.py
+          python3 scripts/appstore/source-ui-contract-test.py
+          python3 scripts/appstore/delete-contract-test.py
+          python3 scripts/appstore/public-gate-contract-test.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-composer20-unsigned
+          path: build/Mirsa.ipa
+
+      - name: Upload native and Swift test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirsa-injection-method-tests
+          path: |
+            build/injection-method-native.log
+            build/package-tests.log
+          if-no-files-found: warn
