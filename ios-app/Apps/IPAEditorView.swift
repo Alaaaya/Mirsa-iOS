@@ -266,7 +266,7 @@ struct IPATweakLibraryView: View {
                         }
                         .padding(16).appsGlass(cornerRadius: 18)
                         if library.importing {
-                            HStack { ProgressView().tint(.white); Text(editorText("Importing…", "عم نضيف الملف…")) }
+                            HStack { ProgressView().tint(.white); Text(editorText("Importing…", "عم نضيف الملف…")); Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal")) { library.cancelImport() } }
                                 .font(.subheadline)
                         }
                         if let failure {
@@ -304,14 +304,17 @@ struct IPATweakLibraryView: View {
                     Button(editorText("Done", "خلص")) { dismiss() }.disabled(library.importing)
                 }
             }
-            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.data, .folder, .package], allowsMultipleSelection: false) { result in
+            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.zip, .data, .folder, .package], allowsMultipleSelection: false) { result in
                 do {
                     guard let url = try result.get().first else { return }
                     Task {
                         failure = nil
-                        do { try await library.addFile(url) } catch { failure = error.localizedDescription }
+                        do { try await library.addFile(url, allowSelection: true) } catch { failure = error.localizedDescription }
                     }
                 } catch { failure = error.localizedDescription }
+            }
+            .sheet(item: $library.pendingImport, onDismiss: { library.finishImportSelection(nil) }) { choice in
+                IPATweakImportSelectionView(choice: choice) { library.finishImportSelection($0) }
             }
             .confirmationDialog(editorText("Remove from library?", "احذف الملف من المكتبة؟"),
                                 isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),

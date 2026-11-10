@@ -7,7 +7,7 @@ on:
         required: false
         default: ""
   push:
-    branches: [kat/composer20]
+    branches: [kat/composer20, kat/zip-import20]
 permissions:
   contents: read
 jobs:
@@ -105,6 +105,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust-core
+      - name: Run exact ZIP and DEB parser security regressions
+        run: python3 scripts/appstore/zip-import-tests.py
       - name: Build AirliftFFI for iOS (device)
         env:
           IPHONEOS_DEPLOYMENT_TARGET: "18.0"

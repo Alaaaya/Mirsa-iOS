@@ -104,14 +104,17 @@ struct PersonalProjectDetailView: View {
         .environment(\.layoutDirection, .leftToRight)
         .sheet(isPresented: $showCertificates, onDismiss: reloadIdentities) { PersonalCertificateManagerView() }
         .sheet(isPresented: $pickingTweak) {
-            DocumentPickerView(allowedContentTypes: ["dylib", "deb", "framework"].compactMap { UTType(filenameExtension: $0) } + [.data]) { url in
+            DocumentPickerView(allowedContentTypes: ["zip", "dylib", "deb", "framework"].compactMap { UTType(filenameExtension: $0) } + [.data]) { url in
                 Task {
                     do {
-                        try await tweaks.addFile(url)
+                        try await tweaks.addFile(url, allowSelection: true)
                         if let first = tweaks.items.first, !draft.tweakIDs.contains(first.id) { draft.tweakIDs.append(first.id) }
                     } catch { message = error.localizedDescription }
                 }
             }
+        }
+        .sheet(item: $tweaks.pendingImport, onDismiss: { tweaks.finishImportSelection(nil) }) { choice in
+            IPATweakImportSelectionView(choice: choice) { tweaks.finishImportSelection($0) }
         }
         .sheet(isPresented: $pickingEntitlements) {
             DocumentPickerView(allowedContentTypes: [.propertyList, .xml, .data]) { url in
@@ -219,7 +222,7 @@ struct PersonalProjectDetailView: View {
                     .font(.caption).foregroundStyle(.yellow)
             }
             if ids.isEmpty {
-                Text(personalText("No tweaks. Add .dylib, .deb or .framework files.", "ما في إضافات. ضيف ملفات .dylib أو .deb أو .framework."))
+                Text(tr("No additions. Import ZIP, .dylib, .deb or a .framework folder.", "ما في إضافات. ضيف ZIP أو dylib أو deb أو مجلد framework.", ckb: "زیادکراو نییە. ZIP، dylib، deb یان بوخچەی framework هاوردە بکە.", kmr: "Pêvek tune ne. ZIP, dylib, deb an peldanka framework bîne."))
                     .font(.footnote).foregroundStyle(.secondary)
             }
             let comps = components()
