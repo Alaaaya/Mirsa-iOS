@@ -310,14 +310,15 @@ struct ForgeChatRoot: View {
                 }
                 ForEach(store.threads) { t in
                     NavigationLink(value: t.id) {
-                        VStack(alignment: .leading) { Text(ForgeChatText.cleanTitle(t.title)).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { Text(ForgeChatText.status(s)).font(.caption2).foregroundStyle(.secondary) } }
+                        HStack(spacing: 12) { MirsaSailMark().frame(width: 34, height: 34); VStack(alignment: .leading, spacing: 6) { Text(ForgeChatText.cleanTitle(t.title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { MirsaChatStatusPill(raw: s) } } }.padding(.vertical, 6)
                     }
+                    .listRowBackground(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.07)).overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5)))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { toDelete = t.id } label: { Label(ForgeChatText.deleteAction, systemImage: "trash") }.tint(.red)
                     }
                 }
             }
-            .scrollContentBackground(.hidden).background(MirsaChatTheme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
+            .scrollContentBackground(.hidden).listRowSpacing(10).background(AuroraBackground().ignoresSafeArea()).preferredColorScheme(.dark)
             .confirmationDialog(ForgeChatText.deleteTitle, isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
                 Button(ForgeChatText.deleteAction, role: .destructive) { if let id = toDelete { Task { await store.deleteThread(id) } }; toDelete = nil }
                 Button(ForgeChatText.cancel, role: .cancel) { toDelete = nil }
@@ -420,7 +421,7 @@ struct ForgeChatThreadView: View {
             }
             inputBar
         }
-        .background(MirsaChatTheme.bg.ignoresSafeArea())
+        .background(AuroraBackground().ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: photo) { _, item in
             guard let item else { return }
@@ -442,7 +443,7 @@ struct ForgeChatThreadView: View {
                 Spacer()
             }
         }.padding(.horizontal, 18).padding(.vertical, 10)
-        .background(MirsaChatTheme.bg)
+        .background(.ultraThinMaterial.opacity(0.6))
         .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 0.5) }
         .zIndex(1)
     }
@@ -452,12 +453,12 @@ struct ForgeChatThreadView: View {
             HStack(spacing: 8) {
                 PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
                 TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).foregroundStyle(.white).tint(MirsaChatTheme.blue)
-            }.padding(.horizontal, 14).padding(.vertical, 10).background(MirsaChatTheme.bubble).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             Button {
                 started = true
                 store.send(threadID: threadID, text: text, jpeg: jpeg)
                 text = ""; jpeg = nil; photo = nil
-            } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaChatTheme.blue.opacity(canSend ? 1 : 0.45)).clipShape(Circle()) }
+            } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
                 .disabled(!canSend).accessibilityLabel(ForgeChatText.send)
                 .scaleEffect(canSend ? 1 : 0.94).animation(.spring(response: 0.25, dampingFraction: 0.8), value: canSend)
                 .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
@@ -465,13 +466,16 @@ struct ForgeChatThreadView: View {
     }
 
     private func userBubble(_ t: String) -> some View {
-        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 18).padding(.vertical, 12).background(MirsaChatTheme.bubble).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 11).background(MirsaPalette.accentGradient).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)).shadow(color: MirsaPalette.accent.opacity(0.25), radius: 8, y: 3).frame(maxWidth: 300, alignment: .trailing)
     }
 
     @ViewBuilder private func assistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) { MirsaSailMark().frame(width: 38, height: 38); Text(ForgeChatText.title).font(.system(size: 16, weight: .bold)).foregroundStyle(.white) }
+            HStack(spacing: 8) { MirsaSailMark().frame(width: 28, height: 28); Text(ForgeChatText.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(MirsaChatTheme.muted) }
             content().foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white.opacity(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5))
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -503,5 +507,23 @@ struct ForgeChatImageView: View {
     var body: some View {
         Group { if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 200).cornerRadius(8) } else { ProgressView().frame(height: 60) } }
             .task { image = await ForgeChatStore.shared.image(messageID) }
+    }
+}
+
+
+/// Small coloured pill for a request's status in the Mirsa AI list.
+struct MirsaChatStatusPill: View {
+    let raw: String
+    private var color: Color {
+        switch raw.lowercased() {
+        case "working", "building", "in_progress", "running": return MirsaPalette.accent
+        case "done", "completed", "closed", "resolved": return .green
+        default: return MirsaChatTheme.muted
+        }
+    }
+    var body: some View {
+        HStack(spacing: 5) { Circle().fill(color).frame(width: 6, height: 6); Text(ForgeChatText.status(raw)).font(.system(size: 12, weight: .medium)) }
+            .foregroundStyle(color).padding(.horizontal, 9).padding(.vertical, 4)
+            .background(Capsule().fill(color.opacity(0.15)))
     }
 }
