@@ -5,6 +5,13 @@ enum MirsaStoreAvailability {
     static let publicLoginEnabled = false
 }
 
+/// Local visibility only; the server independently verifies owner credentials.
+enum MirsaStoreOwnerAccess {
+    static func allows(deviceID: String) -> Bool {
+        deviceID.lowercased() == "91f71c66-b727-450e-8de2-244a1cf85915"
+    }
+}
+
 extension MirsaStoreServerClient {
     static let shared: MirsaStoreServerClient = {
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,

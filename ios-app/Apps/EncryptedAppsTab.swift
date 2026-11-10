@@ -6,6 +6,10 @@ struct EncryptedAppsTab: View {
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
     @State private var picking = false
+    @State private var showingAppStore = false
+    private var ownerStoreEnabled: Bool {
+        MirsaStoreOwnerAccess.allows(deviceID: ForgeClient.deviceID())
+    }
     @State private var pendingDelete: EncryptedIPAEntry?
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
@@ -20,7 +24,16 @@ struct EncryptedAppsTab: View {
                 introCard
                 benefitsCard
                 importButton
-                appStoreButton
+                if ownerStoreEnabled {
+                    Button { showingAppStore = true } label: {
+                        Label(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"), systemImage: "person.crop.circle")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.mirsaPrimary)
+                    .accessibilityIdentifier("encrypted-appstore-account")
+                } else {
+                    appStoreButton
+                }
                 if store.entries.isEmpty {
                     emptyCard
                 } else {
@@ -39,6 +52,17 @@ struct EncryptedAppsTab: View {
         .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
+        .sheet(isPresented: $showingAppStore) {
+            if ownerStoreEnabled {
+                AppStoreAccountView(onDownloaded: { url in
+                    await store.importIPA(from: url)
+                    if let error = store.error {
+                        throw NSError(domain: "MirsaStoreImport", code: 1,
+                                      userInfo: [NSLocalizedDescriptionKey: error])
+                    }
+                })
+            }
+        }
         .sheet(isPresented: $picking) {
             DocumentPickerView(allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { url in
                 Task { await store.importIPA(from: url) }
