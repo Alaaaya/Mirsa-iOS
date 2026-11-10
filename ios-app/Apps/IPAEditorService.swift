@@ -11,14 +11,14 @@ enum IPAEditorService {
 
     static func run(_ operation: String, input: URL, output: URL? = nil,
                     executable: String? = nil, libraries: [URL] = [], newFirst: Bool = false,
-                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil, cancellation: URL? = nil) throws {
+                    injections: [InjectionPlanEntry]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil, cancellation: URL? = nil) throws {
         var request: [String: Any] = ["operation": operation, "input": input.path]
         if let output { request["output"] = output.path }
         if let cancellation { request["cancellation_path"] = cancellation.path }
         if let executable { request["executable"] = executable }
         request["libraries"] = libraries.map(\.path)
         if newFirst { request["new_first"] = true }
-        if let injections { request["injections"] = injections }
+        if let injections { request["injections"] = injections.map(\.json) }
         if let order { request["order"] = order }
         if useLoader { request["use_loader"] = true }
         if let options = signingOptions {
@@ -89,6 +89,18 @@ enum IPAEditorService {
             guard let id = d["id"] as? String, let kind = d["kind"] as? String else { return nil }
             return (id, kind, d["label"] as? String ?? id)
         }
+    }
+
+    /// Read-only backend capability inspection of an extracted .app. `entries` (id + library + main target) make the backend probe each component separately.
+    static func injectionCapabilities(app: URL, scratch: URL, entries: [InjectionPlanEntry]) throws -> InjectionCapabilities {
+        let out = scratch.appendingPathComponent("injcaps-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: out) }
+        try run("injection_capabilities", input: app, output: out, injections: entries)
+        guard let size = try? out.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 4 * 1024 * 1024,
+              let caps = InjectionCapabilities.parse(try Data(contentsOf: out)) else {
+            throw SideloadError.message(archiveError("IPA editor failed."))
+        }
+        return caps
     }
 
     /// Dylib load-command names of the main executable (read-only).
