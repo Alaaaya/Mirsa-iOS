@@ -10,10 +10,19 @@
 use std::ffi::{c_char, c_void};
 
 pub mod exploit;
+mod connection_failure;
+mod connection_route;
 pub mod ffi_util;
 pub mod grappa;
 pub mod logging;
 pub mod pairing;
+pub mod container;
+mod ipa_editor;
+mod personal_sign;
+mod signing_progress;
+mod discovery_transport;
+mod install_workspace;
+pub mod sideload;
 
 // Re-export idevice-ffi's symbols into our staticlib (tunnel_create_rppairing,
 // afc_*, rsd_*, adapter_*, etc.) so Swift can call them directly.
@@ -440,3 +449,5 @@ pub extern "C" fn al_clear_target_hosts() {
     }));
 }
 
+
+mod personal_p12;

@@ -27,6 +27,14 @@ int32_t al_log_init(ALLogCallback cb, void *ctx);
 // Free any char* returned by this library.
 void al_string_free(char *p);
 
+// Opaque cancellation token, owned by the Swift download operation. Never free
+// until its blocking worker returns. No URL/headers/secrets in returned errors.
+void *al_discovery_cancel_new(void);
+void al_discovery_cancel(void *token);
+void al_discovery_cancel_free(void *token);
+char *al_discovery_download(const char *url, const char *dest, uint64_t max_bytes,
+                            uint64_t total_seconds, const void *token);
+
 // ---------------------------------------------------------------------------
 // Pairing — RPPairing host
 // ---------------------------------------------------------------------------
@@ -164,6 +172,68 @@ int32_t al_set_target_hosts(const char *const *hosts, size_t count);
 // Clear custom target host settings, reverting to default tunnel IP fallbacks.
 void al_clear_target_hosts(void);
 
+
+
+// ---------------------------------------------------------------------------
+// Sideloader (Apps tab) — isideload + idevice, see rust-core/src/sideload.rs
+// ---------------------------------------------------------------------------
+
+// Keychain-backed key/value store supplied by Swift. `get` returns a malloc'd
+// string (freed by Rust with free()) or NULL. `set` with "" deletes the key.
+typedef struct {
+    void *ctx;
+    char *(*get)(void *ctx, const char *key);
+    void (*set)(void *ctx, const char *key, const char *value);
+} ALKeyValueStore;
+
+// Blocking prompt into Swift. `json` has "kind": "two_factor" | "max_certs".
+// Return a malloc'd answer ("code:123456", "sms:<id>", "devices", "resend",
+// "abort"; or comma separated cert serials to revoke) or NULL to abort.
+typedef char *(*ALPromptCb)(void *ctx, const char *json);
+typedef void (*ALProgressCb)(void *ctx, double fraction, const char *stage);
+
+int32_t al_sl_set_storage(ALKeyValueStore store);
+
+// Sign in with an Apple ID. BLOCKS (network + 2FA prompt). `anisette_url` may be NULL/"".
+int32_t al_sl_login(const char *email, const char *password, const char *anisette_url,
+                    ALPromptCb prompt_cb, void *ctx, char **out_json, char **out_error);
+int32_t al_sl_is_logged_in(void);
+void al_sl_logout(void);
+
+// JSON: email, team_id, team_name, cert_serial, cert_expires, app_ids_available, app_ids_max, app_ids[]
+int32_t al_sl_account_info(char **out_json, char **out_error);
+
+// Sign (.ipa or .app) with the free development certificate and install as a
+// real app over the loopback tunnel. JSON: bundle_id, name, version, expires, team_id
+int32_t al_sl_install(const char *pairing_path, const char *app_path, const char *device_name,
+                      ALProgressCb progress_cb, ALLogCallback log_cb, void *ctx,
+                      char **out_json, char **out_error);
+// Install an ALREADY SIGNED .app folder (absolute path) with no Apple ID.
+// The embedded profile still limits devices/expiry. JSON: bundle_id, name, version, expires
+int32_t al_sl_install_signed(const char *pairing_path, const char *app_path,
+                             ALProgressCb progress_cb, ALLogCallback log_cb, void *ctx,
+                             char **out_json, char **out_error);
+// Install an App Store (FairPlay-encrypted) .ipa unmodified: streamed to
+// PublicStaging and installed with its own iTunesMetadata/sinf. No signing,
+// no extraction, no decryption. JSON: bundle_id, name, version, has_sinf, has_itunes_metadata
+int32_t al_sl_install_store_ipa(const char *pairing_path, const char *ipa_path,
+                                ALProgressCb progress_cb, ALLogCallback log_cb, void *ctx,
+                                char **out_json, char **out_error);
+int32_t al_sl_uninstall(const char *pairing_path, const char *bundle_id,
+                        ALLogCallback log_cb, void *ctx, char **out_error);
+
+// Container: patch the guest main executable into a dylib and sign every
+// Mach-O in the extracted .app with the session's development certificate.
+// JSON: executable, signed_files, cert_serial, team_id
+int32_t al_container_sign(const char *app_dir, char **out_json, char **out_error);
+int32_t al_container_sign_as(const char *app_dir, const char *ident, char **out_json, char **out_error);
+int32_t al_container_sign_file(const char *path, const char *ident, char **out_json, char **out_error);
+
+// Device tools over the pairing tunnel. kind: battery, storage, profiles,
+// profile_remove (arg uuid), crashes (arg dir), crash_pull (arg name, out_path),
+// afc_ls (arg path), afc_pull (arg path, out_path), afc_remove (arg path).
+int32_t al_dev_tool(const char *pairing_path, const char *kind, const char *arg,
+                    const char *out_path, char **out_json, char **out_error);
 
 #ifdef __cplusplus
 }

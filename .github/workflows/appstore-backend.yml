@@ -1,0 +1,17 @@
+name: App Store backend validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Swift 6.2 Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          swift --version
+      - name: Backend unit tests on macOS, no simulator or Apple credentials
+        run: bash scripts/appstore/package-tests.sh

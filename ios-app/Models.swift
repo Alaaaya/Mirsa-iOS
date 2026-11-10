@@ -87,6 +87,10 @@ enum AppTab: String, CaseIterable, Identifiable {
     case walletCards = "Wallet Cards"
     case passcodeThemes = "Passcode"
     case wallpapers = "Wallpapers"
+    case apps = "Apps"
+    case sources = "Sources"
+    case personalHub = "Personal Apps Hub"
+    case encrypted = "Encrypted"
     var id: String { rawValue }
 }
 
@@ -616,6 +620,38 @@ enum PasscodeThemePackager {
 
     static func buildPassthm(keys: [String: UIImage]) throws -> Data {
         try buildPassthm(keys: keys, telephonyVersion: "all", language: .all, bold: .both)
+    }
+
+    /// Stream a directory to a stored ZIP using the existing ZIP primitives.
+    /// Keeps at most one JPEG plus the small central directory in memory.
+    static func archiveDirectory(_ directory: URL, to output: URL) throws {
+        let fm = FileManager.default
+        guard fm.createFile(atPath: output.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+        let handle = try FileHandle(forWritingTo: output)
+        defer { try? handle.close() }
+        var central = Data()
+        var offset: UInt32 = 0
+        var count: UInt16 = 0
+        let files = fm.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey])
+        while let url = files?.nextObject() as? URL {
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            try autoreleasepool {
+                let content = try Data(contentsOf: url)
+                let name = Data(url.path.dropFirst(directory.path.count + 1).utf8)
+                let crc = crc32(content)
+                let header = makeLocalFileHeader(name: name, content: content, crc: crc)
+                guard count < UInt16.max,
+                      UInt64(offset) + UInt64(header.count) + UInt64(content.count) < UInt64(UInt32.max)
+                else { throw CocoaError(.fileWriteOutOfSpace) }
+                try handle.write(contentsOf: header)
+                try handle.write(contentsOf: content)
+                central.append(makeCentralDirEntry(name: name, content: content, crc: crc, offset: offset))
+                offset += UInt32(header.count + content.count)
+                count += 1
+            }
+        }
+        try handle.write(contentsOf: central)
+        try handle.write(contentsOf: makeEndRecord(count: count, size: UInt32(central.count), offset: offset))
     }
 
     // MARK: - Zip primitives
