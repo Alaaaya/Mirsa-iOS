@@ -1,6 +1,8 @@
 //! Bounded pre-install archive tooling and conservative Mach-O injection.
 //! Never executes package scripts or loads user code into Mirsa.
 //! Mach-O rewriting only consumes verified zero header padding; no relocation.
+#[path="tweak_import.rs"]
+mod tweak_import;
 #[path = "fat_macho.rs"]
 mod fat_macho;
 #[path = "existing_libraries.rs"]
@@ -1029,6 +1031,8 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
 #[derive(Deserialize)]
 struct Request {
     #[serde(default)]
+    cancellation_path: String,
+    #[serde(default)]
     existing_library_edits: Vec<existing_libraries::Edit>,
     operation: String,
     #[serde(default)]
@@ -1071,6 +1075,7 @@ fn run(r: Request) -> Result<crate::personal_sign::Verification> {
         "extract_inspection" => extract_inspection(Path::new(&r.input), Path::new(&r.output)),
         "pack" => pack(Path::new(&r.input), Path::new(&r.output)),
         "deb" => extract_deb(Path::new(&r.input), Path::new(&r.output)),
+        "tweak_import" => tweak_import::prepare(Path::new(&r.input), Path::new(&r.output), Path::new(&r.cancellation_path)),
         "deb_tweak" => extract_deb_bounded(Path::new(&r.input), Path::new(&r.output), 128 * 1024 * 1024, 128 * 1024 * 1024, 20_000),
         "incoming_profile" => crate::personal_sign::incoming_ipa::inspect_profile(Path::new(&r.input),Path::new(&r.output)),
         "incoming_preview" => crate::personal_sign::incoming_ipa::inspect(Path::new(&r.input),Path::new(&r.output)),
