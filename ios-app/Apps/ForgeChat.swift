@@ -155,11 +155,9 @@ enum ForgeChatImage {
         let r: ForgePreciseClient.Response
         do {
             let c = try await ForgeClient.fixToken()
-            if let stage = ChatAttachmentConfig.endpoint, let ids = body["attachmentIDs"] as? [String], !ids.isEmpty {
-                // Attachments ON (Kat, 2026-11-10): only chat-send carrying attachmentIDs goes to stage here
-                // (put/read/delete go through AttachmentUploader). Every other chat call stays on the current
-                // server. Stage accepts the same production identity (JWT, apikey, device headers).
-                r = try await ForgePreciseClient.request(body, credentials: c, endpoint: stage, apikey: WebBackendConfig.defaultPublishableKey)
+            if let attachmentEndpoint = ChatAttachmentConfig.endpoint, let ids = body["attachmentIDs"] as? [String], !ids.isEmpty {
+                // Attachment-bearing messages use the verified production contract with the same identity.
+                r = try await ForgePreciseClient.request(body, credentials: c, endpoint: attachmentEndpoint, apikey: WebBackendConfig.defaultPublishableKey)
             } else {
                 r = try await ForgePreciseClient.request(body, credentials: c)
             }
