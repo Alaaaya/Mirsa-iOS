@@ -13,6 +13,9 @@ enum ForgeChatText {
         for p in ["؟", "?", "!", "،", ".", ","] { s = s.replacingOccurrences(of: " " + p, with: p) }
         return s
     }
+    static var shortIDLabel: String { tr("ID", "المعرّف", ckb: "ناسنامە", kmr: "Nasname") }
+    static var copied: String { tr("Copied", "انتسخ", ckb: "کۆپی کرا", kmr: "Hat kopîkirin") }
+    static var shortIDHelp: String { tr("Your short chat ID is at the top of each conversation. Tap it to copy, then send it to Mirsa support so they can find your requests.", "معرّفك المختصر موجود فوق بكل محادثة. دوس عليه لتنسخه، وابعته لدعم مرسى ليلاقوا طلباتك.", ckb: "ناسنامە کورتەکەت لە سەرەوەی هەر گفتوگۆیەکە. دەستی لێ بدە بۆ کۆپیکردن، پاشان بینێرە بۆ پشتگیری میرسا تا داواکارییەکانت بدۆزنەوە.", kmr: "Nasnameya te ya kurt li jorê her sohbetê ye. Bitikîne da ku kopî bikî, paşê ji piştgiriya Mirsa re bişîne da ku daxwazên te bibînin.") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
     static var deleteTitle: String { tr("Delete this request?", "حذف هالطلب؟", ckb: "ئەم داواکارییە بسڕیتەوە؟", kmr: "Ev daxwaz were jêbirin?") }
@@ -305,6 +308,7 @@ struct ForgeChatRoot: View {
                 if !guideSeen {
                     HStack(alignment: .top) { Text(ForgeChatText.guide).font(.footnote); Button { guideSeen = true } label: { Image(systemName: "xmark") } }
                 }
+                Label(ForgeChatText.shortIDHelp, systemImage: "number").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let e = store.error { Text(e).font(.footnote).foregroundStyle(.red) }
                 if store.threads.isEmpty && store.pendingThreadIDs.isEmpty { Text(ForgeChatText.empty).foregroundStyle(.secondary) }
                 ForEach(store.pendingThreadIDs, id: \.self) { id in
@@ -418,6 +422,10 @@ struct ForgeChatThreadView: View {
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
     @State private var started = false
+    /// First 8 characters of the device ID the chat already sends as x-mirsa-device.
+    @State private var shortID = ""
+    @State private var copiedTick = 0
+    @State private var showCopied = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var msgs: [ForgeChatMessage] { store.messages[threadID] ?? [] }
     private var queued: [ForgeChatOutgoing] {
@@ -506,6 +514,7 @@ struct ForgeChatThreadView: View {
         .toolbar(.hidden, for: .navigationBar)
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onAppear {
+            if shortID.isEmpty { shortID = String(ForgeClient.deviceID().prefix(8)) }
             #if DEBUG
             // Seed only the explicit no-network UI harness, never real drafts.
             if ForgeChatStore.fixture {
@@ -526,6 +535,32 @@ struct ForgeChatThreadView: View {
         }
     }
 
+    private var shortIDCapsule: some View {
+        Button {
+            UIPasteboard.general.string = shortID
+            copiedTick += 1
+            withAnimation(.easeOut(duration: 0.2)) { showCopied = true }
+            let tick = copiedTick
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { if copiedTick == tick { withAnimation(.easeIn(duration: 0.2)) { showCopied = false } } }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: showCopied ? "checkmark" : "doc.on.doc").font(.system(size: 11, weight: .semibold))
+                Text(showCopied ? ForgeChatText.copied : ForgeChatText.shortIDLabel + " " + shortID)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced)).lineLimit(1)
+            }
+            .foregroundStyle(showCopied ? Color.green : .white.opacity(0.9))
+            .padding(.horizontal, 12).frame(height: 32)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .environment(\.layoutDirection, .leftToRight)
+        .sensoryFeedback(.success, trigger: copiedTick)
+        .accessibilityIdentifier("chat-short-id")
+        .accessibilityLabel(ForgeChatText.shortIDLabel + " " + shortID)
+        .accessibilityHint(ForgeChatText.shortIDHelp)
+    }
+
     private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = true, after delay: Double = 0) {
         let go = {
             if animated && !reduceMotion { withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
@@ -539,6 +574,7 @@ struct ForgeChatThreadView: View {
         HStack(spacing: 10) {
             Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
                 .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
+            if !shortID.isEmpty { shortIDCapsule }
             Spacer()
         }
         .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
