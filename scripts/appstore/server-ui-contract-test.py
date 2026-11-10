@@ -29,6 +29,22 @@ assert "Country code (us, de, tr)" not in source
 assert "الرمز يلي وصل عآيفونك" in source
 assert "Sent only to Apple." not in source
 assert "Saved only in this device" not in source
+identity = (root / "ios-app/Apps/StoreServerIdentity.swift").read_text()
+forge = (root / "ios-app/Apps/ForgeFixTransport.swift").read_text()
+readonly = forge.split("static func existingFixCredentials", 1)[1].split("static func fixToken", 1)[0]
+assert "existingFixCredentials(bearer: bearer, user: user)" in identity
+assert "ForgeFixSystemKeychain().read" in readonly
+assert "SecItemCopyMatching" in readonly
+for mutation in ["SecItemAdd", "SecItemUpdate", "SecItemDelete", "fixRequest(", "deviceID()", "ForgeFixKeychain.token("]:
+    assert mutation not in readonly, mutation
+assert "fixToken()" not in identity
+assert ".reversed()" not in source
+client = (root / "ios-app/AppStore/StoreServerClient.swift").read_text()
+assert 'forHTTPHeaderField: "x-mirsa-device"' in client
+assert 'forHTTPHeaderField: "x-mirsa-device-token"' in client
+assert 'owner: refreshed, device: token)' in client
+for code in ["staging_denied", "device_limit", "invalid_version"]:
+    assert 'case "' + code + '"' in source
 output = root / "build/store-server-ui-text-proof.json"
 output.parent.mkdir(exist_ok=True)
 output.write_text(json.dumps({"kind": "source guards only, not device UI execution", "strings": rows}, ensure_ascii=False, indent=2))

@@ -22,6 +22,26 @@ extension ForgeClient {
         return id
     }
 
+    /// Read-only staging access. Never enrolls, creates, replaces or resets a Forge identity.
+    static func existingFixCredentials(bearer: String, user: UUID) throws -> ForgeFixCredentials {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.alaa.mirsa.forge.device",
+            kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
+              let bytes = out as? Data, let device = String(data: bytes, encoding: .utf8),
+              UUID(uuidString: device) != nil else {
+            throw MirsaStoreServerError(code: "staging_denied")
+        }
+        let account = user.uuidString.lowercased() + "." + device.lowercased()
+        guard let saved = try ForgeFixSystemKeychain().read(service: ForgeFixKeychain.service, account: account),
+              let token = String(data: saved, encoding: .utf8),
+              token.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw MirsaStoreServerError(code: "staging_denied")
+        }
+        return ForgeFixCredentials(accessToken: bearer, deviceID: device, deviceToken: token)
+    }
+
     static func fixToken() async throws -> ForgeFixCredentials {
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())

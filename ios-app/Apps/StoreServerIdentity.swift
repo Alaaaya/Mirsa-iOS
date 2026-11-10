@@ -18,7 +18,11 @@ extension MirsaStoreServerClient {
                   let subject = object["sub"] as? String, let user = UUID(uuidString: subject) else {
                 throw MirsaStoreServerError(code: "unauthorized")
             }
-            return MirsaStoreServerIdentity(bearer: bearer, userID: user)
+            let saved: ForgeFixCredentials
+            do { saved = try ForgeClient.existingFixCredentials(bearer: bearer, user: user) }
+            catch { throw MirsaStoreServerError(code: "staging_denied") }
+            return MirsaStoreServerIdentity(bearer: saved.accessToken, userID: user,
+                forgeDeviceID: saved.deviceID, forgeDeviceToken: saved.deviceToken)
         })
     }()
 }
