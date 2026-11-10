@@ -163,7 +163,11 @@ enum ForgeChatImage {
         if let tid = threadID, deleting.contains(tid) { return }
         if let tid = threadID, hasInFlight(tid) { return } // no double send while a message is still unsent
         let img = jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString()
-        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: threadID ?? UUID(), newThread: !serverKnows(threadID ?? UUID()), text: String(t.prefix(4000)), imageBase64: img))
+        let tid = threadID ?? UUID()
+        let confirmed = messages[tid] ?? []
+        let pending = ForgeChatTimeline.pending(outgoing: outgoing, echoes: sentEcho, confirmed: confirmed, threadID: tid)
+        let anchor = ForgeChatTimeline.orderedIDs(confirmed: confirmed, pending: pending).last
+        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: !serverKnows(tid), text: String(t.prefix(4000)), imageBase64: img, afterMessageID: anchor))
         saveOutgoing()
         Task { await flush() }
         startRetrying()
@@ -385,7 +389,8 @@ struct ForgeChatThreadView: View {
     private var rows: [ForgeChatDisplayRow] {
         let confirmed = msgs.map { ForgeChatDisplayRow.message($0) }
         let pending = queued.map { o in ForgeChatDisplayRow.pending(o, sending: store.outgoing.contains { $0.id == o.id }) }
-        return ForgeChatTimeline.mergeConfirmed(previous: confirmed, incoming: pending)
+        let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
+        return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
     private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
