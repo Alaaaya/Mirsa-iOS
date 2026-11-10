@@ -26,6 +26,10 @@ assert "afterMessageID: anchor" in source
 assert "if sorted != threads { threads = sorted }" in source
 assert "accessibilityReduceMotion" in source and "reduceMotion ? nil : .spring" in source
 assert ".scrollDismissesKeyboard(.interactively)" in source
+# The layout container must not replace identifiers on its interactive children.
+assert '.accessibilityIdentifier("chat-composer")' not in source
+assert '.accessibilityIdentifier("chat-input")' in source
+assert '.accessibilityIdentifier("chat-send")' in source
 assert 'sentEcho.removeAll { $0.threadID == id }; saveEcho()' in source
 assert "deleteEpoch[id, default: 0] += 1" in source
 assert "if deleting.contains(id) || deleteEpoch[id] != epoch { return }" in source
