@@ -7,6 +7,12 @@ enum ForgeChatText {
     static var subtitle: String { tr("Write what you want, Mirsa takes your request and works on it. It takes time.", "اكتب شو بدك، مرسى بياخد طلبك وبيشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، میرسا داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات، کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Mirsa daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
     static var guide: String { tr("Mirsa AI is not an instant chat. Your message goes into a queue and Mirsa answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "مرسى AI مو شات فوري. رسالتك بتدخل بالدور ومرسى بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويكات الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "میرسا AI گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و میرسا بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Mirsa AI ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Mirsa bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
     static var placeholder: String { tr("Write your request…", "اكتب طلبك…", ckb: "داواکارییەکەت بنووسە…", kmr: "Daxwaza xwe binivîse…") }
+    /// Server titles come from the first message; tidy stray spaces before punctuation ("تعمل ؟").
+    static func cleanTitle(_ t: String?) -> String {
+        guard var s = t?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return newRequest }
+        for p in ["؟", "?", "!", "،", ".", ","] { s = s.replacingOccurrences(of: " " + p, with: p) }
+        return s
+    }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
     static var send: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
     static var deleteTitle: String { tr("Delete this request?", "حذف هالطلب؟", ckb: "ئەم داواکارییە بسڕیتەوە؟", kmr: "Ev daxwaz were jêbirin?") }
@@ -105,6 +111,8 @@ enum ForgeChatImage {
     @Published var threads: [ForgeChatThread] = []
     @Published var messages: [UUID: [ForgeChatMessage]] = [:]
     @Published var outgoing: [ForgeChatOutgoing] = []
+    /// Accepted by the server but not yet returned by chat-read. Shown so a sent message never vanishes and reappears.
+    @Published var sentEcho: [ForgeChatOutgoing] = []
     @Published var error: String?
     private let key = "mirsa.chat.outgoing.v1"
     private var flushing = false
@@ -168,7 +176,7 @@ enum ForgeChatImage {
         if let s = UserDefaults.standard.string(forKey: draftKey), let u = UUID(uuidString: s), !serverKnows(u) { return u }
         let u = UUID(); UserDefaults.standard.set(u.uuidString, forKey: draftKey); return u
     }
-    var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return outgoing.map(\.threadID).filter { id in !threads.contains { t in t.id == id } && seen.insert(id).inserted } }
+    var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return (outgoing + sentEcho).map(\.threadID).filter { id in !threads.contains { t in t.id == id } && seen.insert(id).inserted } }
     func hasInFlight(_ id: UUID) -> Bool { outgoing.contains { $0.threadID == id } }
 
     func send(threadID: UUID?, text: String, jpeg: Data?) {
@@ -208,7 +216,8 @@ enum ForgeChatImage {
             do {
                 _ = try await call(body)
                 if deleting.contains(o.threadID) { continue } // delete started mid-send; delete waits for flush and wipes it
-                ackedThreads.insert(o.threadID); outgoing.removeAll { $0.id == o.id }; saveOutgoing(); error = nil
+                ackedThreads.insert(o.threadID); var echo = o; echo.imageBase64 = nil; sentEcho.append(echo)
+                outgoing.removeAll { $0.id == o.id }; saveOutgoing(); error = nil
             } catch let f as ForgeClient.Failure {
                 // Daily limit: the server refuses this message for good, so it cannot be replayed today.
                 error = f.errorDescription; outgoing.removeAll { $0.id == o.id }; saveOutgoing()
@@ -233,7 +242,7 @@ enum ForgeChatImage {
         for m in messages[id] ?? [] { Self.imageCache.removeObject(forKey: m.id as NSUUID) }
         threads.removeAll { $0.id == id }
         var all = messages; all[id] = nil; messages = all
-        outgoing.removeAll { $0.threadID == id }; saveOutgoing()
+        outgoing.removeAll { $0.threadID == id }; saveOutgoing(); sentEcho.removeAll { $0.threadID == id }
         ackedThreads.remove(id)
         if UserDefaults.standard.string(forKey: draftKey).flatMap(UUID.init(uuidString:)) == id { UserDefaults.standard.removeObject(forKey: draftKey) }
         error = nil
@@ -245,7 +254,8 @@ enum ForgeChatImage {
         let epochs = deleteEpoch
         guard let d = try? await call(["action": "chat-list"]), let w0 = try? JSONDecoder().decode(W.self, from: d) else { return }
         let w = (threads: w0.threads.compactMap(\.value).filter { !deleting.contains($0.id) && deleteEpoch[$0.id] == epochs[$0.id] }, ())
-        threads = w.threads.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+        let sorted = w.threads.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+        if sorted != threads { threads = sorted }
     }
 
     func read(_ id: UUID) async {
@@ -259,6 +269,11 @@ enum ForgeChatImage {
         // One undecodable message must never hide the others (operator replies were not showing).
         let w = (messages: raw.messages.compactMap(\.value), 0)
         if w.messages.count < raw.messages.count { lastDiagnostic = "decode: skipped \(raw.messages.count - w.messages.count) of \(raw.messages.count) messages" }
+        let ids = Set(w.messages.map(\.id))
+        if sentEcho.contains(where: { ids.contains($0.id) }) { sentEcho.removeAll { ids.contains($0.id) } }
+        // Never replace a non-empty list with an empty one from a lagging read: that made the chat blink empty.
+        if w.messages.isEmpty, !(messages[id] ?? []).isEmpty { return }
+        if messages[id] == w.messages { return } // nothing changed: no re-render, no jump
         var all = messages; all[id] = w.messages; messages = all // reassign whole dictionary so SwiftUI always sees the change
         if w.messages.contains(where: { $0.role == "result" && !handledResults.contains($0.id) }) {
             for m in w.messages where m.role == "result" { handledResults.insert(m.id) }
@@ -284,18 +299,18 @@ struct ForgeChatRoot: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Text(ForgeChatText.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                Text(ForgeChatText.subtitle).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !guideSeen {
                     HStack(alignment: .top) { Text(ForgeChatText.guide).font(.footnote); Button { guideSeen = true } label: { Image(systemName: "xmark") } }
                 }
                 if let e = store.error { Text(e).font(.footnote).foregroundStyle(.red) }
                 if store.threads.isEmpty && store.outgoing.isEmpty { Text(ForgeChatText.empty).foregroundStyle(.secondary) }
                 ForEach(store.pendingThreadIDs, id: \.self) { id in
-                    NavigationLink(value: id) { VStack(alignment: .leading) { Text(store.outgoing.first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(ForgeChatText.sending).font(.caption2).foregroundStyle(.secondary) } }
+                    NavigationLink(value: id) { VStack(alignment: .leading) { Text((store.outgoing + store.sentEcho).first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(store.hasInFlight(id) ? ForgeChatText.sending : ForgeChatText.status("queued")).font(.caption2).foregroundStyle(.secondary) } }
                 }
                 ForEach(store.threads) { t in
                     NavigationLink(value: t.id) {
-                        VStack(alignment: .leading) { Text(t.title ?? ForgeChatText.newRequest).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { Text(ForgeChatText.status(s)).font(.caption2).foregroundStyle(.secondary) } }
+                        VStack(alignment: .leading) { Text(ForgeChatText.cleanTitle(t.title)).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { Text(ForgeChatText.status(s)).font(.caption2).foregroundStyle(.secondary) } }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { toDelete = t.id } label: { Label(ForgeChatText.deleteAction, systemImage: "trash") }.tint(.red)
@@ -369,9 +384,10 @@ struct ForgeChatThreadView: View {
     @State private var jpeg: Data?
     @State private var started = false
     private var msgs: [ForgeChatMessage] { store.messages[threadID] ?? [] }
-    private var queued: [ForgeChatOutgoing] { store.outgoing.filter { o in o.threadID == threadID && !msgs.contains { $0.id == o.id } } }
+    private var queued: [ForgeChatOutgoing] { (store.outgoing + store.sentEcho).filter { o in o.threadID == threadID && !msgs.contains { $0.id == o.id } } }
+    private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
-    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && queued.isEmpty }
+    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !unsent }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -382,9 +398,9 @@ struct ForgeChatThreadView: View {
                         assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
                         ForEach(msgs) { m in bubble(m).id(m.id) }
                         ForEach(queued) { o in
-                            VStack(alignment: .trailing, spacing: 4) { userBubble(o.text); Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) }.frame(maxWidth: .infinity, alignment: .trailing)
+                            VStack(alignment: .trailing, spacing: 4) { userBubble(o.text); if store.outgoing.contains(where: { $0.id == o.id }) { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) } }.frame(maxWidth: .infinity, alignment: .trailing).id(o.id)
                         }
-                        if let last = msgs.last, last.role == "user", queued.isEmpty {
+                        if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
                             HStack(spacing: 10) { MirsaTypingDots(); Text(ForgeChatText.waiting).font(.system(size: 15)).foregroundStyle(MirsaChatTheme.muted) }
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting")
                         }
@@ -392,7 +408,8 @@ struct ForgeChatThreadView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding(.horizontal, 18).padding(.top, 8)
                 }
-                .onChange(of: msgs.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: msgs.count + queued.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             if let jpeg, let img = UIImage(data: jpeg) {
@@ -423,6 +440,9 @@ struct ForgeChatThreadView: View {
                 Spacer()
             }
         }.padding(.horizontal, 18).padding(.vertical, 10)
+        .background(MirsaChatTheme.bg)
+        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 0.5) }
+        .zIndex(1)
     }
 
     private var inputBar: some View {

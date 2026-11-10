@@ -7,7 +7,7 @@ on:
         required: false
         default: ""
   push:
-    branches: [kat/mirsa-ai-design, kat/mirsa-ai-sole15]
+    branches: [kat/mirsa-ai-design, kat/mirsa-ai-sole15, hark/ai-chat-fixes]
 permissions:
   contents: read
 jobs:
