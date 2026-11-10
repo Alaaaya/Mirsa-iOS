@@ -3,6 +3,8 @@ import Foundation
 /// Only allowlisted response fields, never a request, headers, URL, or raw body.
 public struct AuthenticationServiceError: Error, Sendable {
     public enum Stage: String, Sendable { case bag, sapCertificate, sapSetup, sapValidation, signing, authentication }
+    public enum Reason: String, Sendable { case nativeDeviceProofUnavailable }
+    public let reason: Reason?
     public let stage: Stage
     public let transport: Bool
     public let httpStatus: Int?
@@ -11,7 +13,8 @@ public struct AuthenticationServiceError: Error, Sendable {
     public let networkCode: Int?
 
     public init(stage: Stage, httpStatus: Int? = nil, appleCode: Any? = nil, message: String? = nil,
-                networkCode: Int? = nil, transport: Bool = false, secrets: [String] = []) {
+                networkCode: Int? = nil, transport: Bool = false, secrets: [String] = [], reason: Reason? = nil) {
+        self.reason = reason
         self.stage = stage
         self.transport = transport
         self.httpStatus = httpStatus

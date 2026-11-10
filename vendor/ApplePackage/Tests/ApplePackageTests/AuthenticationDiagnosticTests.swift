@@ -68,6 +68,38 @@ final class AuthenticationDiagnosticTests: XCTestCase {
         XCTAssertThrowsError(try Bag.parse(Data("not a plist".utf8)).requireSupportedAuthentication())
     }
 
+    func testChallengeMustBeExplicitAndNeverInferredFromEmpty204() {
+        let explicit: [String: Any] = [
+            "failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"
+        ]
+        XCTAssertTrue(Authenticator.requiresVerificationCode(fields: explicit, status: 200, submittedCode: ""))
+        XCTAssertFalse(Authenticator.requiresVerificationCode(fields: [:], status: 204, submittedCode: ""))
+        XCTAssertFalse(Authenticator.requiresVerificationCode(fields: explicit, status: 204, submittedCode: ""))
+        XCTAssertFalse(Authenticator.requiresVerificationCode(fields: explicit, status: 200, submittedCode: "123456"))
+        XCTAssertFalse(Authenticator.requiresVerificationCode(fields: [:], status: 200, submittedCode: ""))
+        for failure in ["-5000", "5005"] {
+            var wrongPassword = explicit; wrongPassword["failureType"] = failure
+            XCTAssertFalse(Authenticator.requiresVerificationCode(fields: wrongPassword, status: 200, submittedCode: ""))
+        }
+    }
+
+    func testNativeEndpointRequiresUnavailableProofBeforeCredentials() throws {
+        let endpoint = "https://auth.itunes.apple.com/auth/v1/native"
+        let fields: [String: Any] = [
+            "authenticateAccount": endpoint, "sign-sap-version": "200",
+            "sign-sap-setup": "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy",
+            "sign-sap-setup-cert": "https://s.mzstatic.com/sap/setupCert.plist"
+        ]
+        let bag = Bag.parse(try PropertyListSerialization.data(fromPropertyList: fields, format: .xml, options: 0))
+        XCTAssertEqual(bag.authEndpoint.absoluteString, endpoint)
+        XCTAssertThrowsError(try bag.requireSupportedAuthentication()) { error in
+            let safe = error as? AuthenticationServiceError
+            XCTAssertEqual(safe?.reason, .nativeDeviceProofUnavailable)
+            XCTAssertEqual(safe?.stage, .bag)
+            XCTAssertNil(safe?.message)
+        }
+    }
+
     func testCredentialFreeLiveSAPPreflight() async throws {
         guard ProcessInfo.processInfo.environment["MIRSA_AUTH_PREFLIGHT"] == "1" else {
             throw XCTSkip("Explicit opt-in credential-free Apple SAP transport probe")

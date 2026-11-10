@@ -105,6 +105,7 @@ enum MirsaStorePolicy {
 
 /// Safe structured diagnostics from the authentication boundary only.
 struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
+    let reason: AuthenticationServiceError.Reason?
     let stage: AuthenticationServiceError.Stage
     let transport: Bool
     let httpStatus: Int?
@@ -113,6 +114,7 @@ struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
     let networkCode: Int?
 
     init(_ error: AuthenticationServiceError) {
+        reason = error.reason
         stage = error.stage; transport = error.transport; httpStatus = error.httpStatus; appleCode = error.appleCode
         appleMessage = error.message; networkCode = error.networkCode
     }
@@ -134,6 +136,19 @@ struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
         if let appleCode { fields.append("Apple " + appleCode) }
         if let networkCode { fields.append("Network " + String(networkCode)) }
         if let appleMessage { fields.append(appleMessage) }
+        if reason == .nativeDeviceProofUnavailable {
+            fields.append(tr(
+                "Apple requested a newer device-security sign-in method that this Mirsa login backend does not support yet. Mirsa stopped before sending your password to this unsupported method. A verification code cannot fix this. Use the official App Store for now; do not keep retrying your password.",
+                "Apple طلبت طريقة أمان أحدث للدخول، ولسا دخول المتجر بمرسى ما بيدعمها. مرسى وقف قبل ما يبعت كلمة سرك لهالطريقة غير المدعومة. رمز التحقق ما بيحل هالمشكلة. استخدم App Store الرسمي حالياً، ولا تكرر كلمة سرك.",
+                ckb: "Apple شێوازێکی نوێتری پاراستنی چوونەژوورەوەی داوا کرد کە ئەم بەشەی Mirsa هێشتا پشتگیری ناکات. Mirsa پێش ناردنی وشەی نهێنی بۆ ئەم شێوازە پشتگیری نەکراوە وەستا. کۆدی پشتڕاستکردنەوە ئەمە چارەسەر ناکات. ئێستا App Storeی فەرمی بەکاربهێنە و وشەی نهێنی دووبارە مەکەرەوە.",
+                kmr: "Apple rêbazeke nûtir a ewlehiya têketinê dixwaze ku ev beşa Mirsa hê piştgirî nake. Mirsa berî şandina şîfreya te ji bo vê rêbaza bê piştgirî sekinî. Koda piştrastkirinê vê çareser nake. Niha App Store ya fermî bi kar bîne û şîfreya xwe dubare neke."))
+        } else if stage == .authentication && httpStatus == 204 {
+            fields.append(tr(
+                "Apple returned no sign-in result. This does not confirm your password and is not a request for a verification code. Do not keep retrying your password. Use the official App Store while Mirsa's sign-in compatibility is being updated.",
+                "Apple رجّعت رد فاضي بلا نتيجة دخول. هاد مو تأكيد لكلمة السر ولا طلب رمز تحقق. لا تكرر كلمة سرك. استخدم App Store الرسمي لحد ما يتحدث دعم الدخول بمرسى.",
+                ckb: "Apple وەڵامێکی بەتاڵی گەڕاندەوە بێ ئەنجامی چوونەژوورەوە. ئەمە پشتڕاستکردنەوەی وشەی نهێنی نییە و داوای کۆدیش ناکات. وشەی نهێنی دووبارە مەکەرەوە. تا نوێکردنەوەی پشتگیریی چوونەژوورەوەی Mirsa، App Storeی فەرمی بەکاربهێنە.",
+                kmr: "Apple bersiveke vala da, bê encama têketinê. Ev ne pejirandina şîfreyê ye û ne daxwaza kodê ye. Şîfreya xwe dubare neke. Heta piştgiriya têketina Mirsa nû bibe App Store ya fermî bi kar bîne."))
+        }
         return fields.joined(separator: " · ")
     }
 }

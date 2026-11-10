@@ -20,6 +20,13 @@ public enum Bag {
         var advertisedAuthEndpoint: Bool = false
 
         func requireSupportedAuthentication() throws {
+            // Native Store auth requires device-bound AMD provisioning, not only a SAP signature.
+            // This backend has no supported implementation for a normal sideloaded iOS app.
+            // Reject before SAP setup, credential persistence, or any password POST.
+            if advertisedAuthEndpoint, authEndpoint.host?.lowercased() == "auth.itunes.apple.com",
+               authEndpoint.path.hasPrefix("/auth/v1/native") {
+                throw AuthenticationServiceError(stage: .bag, reason: .nativeDeviceProofUnavailable)
+            }
             guard advertisedAuthEndpoint, sapVersion == "200",
                   sapSetupEndpoint == "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy",
                   sapCertificateEndpoint == "https://s.mzstatic.com/sap/setupCert.plist" else {
@@ -132,22 +139,11 @@ public enum Bag {
         return url
     }
 
-    /// The bag advertises the native auth endpoint without the `/fast/` sub-path
-    /// that the login flow requires; the no-trailing-slash variant 301s to an
-    /// HTML page. The legacy authenticate route also requires its trailing
-    /// slash; the bare route can return a bodyless 301 without Location.
+    /// Preserve the advertised native route exactly. Rewriting it to /fast/ is not
+    /// a substitute for native device proof. Only the known legacy route is normalized.
     static func normalizedAuthEndpoint(from urlString: String) -> URL? {
         guard var comps = URLComponents(string: urlString) else { return nil }
-        if comps.host == "auth.itunes.apple.com" {
-            var path = comps.path
-            while path.hasSuffix("/") {
-                path.removeLast()
-            }
-            if !path.hasSuffix("/fast") {
-                path += "/fast"
-            }
-            comps.path = path + "/"
-        } else if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
+        if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
             let legacyHost =
                 host == "buy.itunes.apple.com" || host.range(of: "^p[0-9]+-buy[.]itunes[.]apple[.]com$", options: .regularExpression) != nil
             if legacyHost, comps.path == "/WebObjects/MZFinance.woa/wa/authenticate" {
