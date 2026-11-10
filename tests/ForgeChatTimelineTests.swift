@@ -73,4 +73,58 @@ final class ForgeChatTimelineTests: XCTestCase {
         let other = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true, text: "Other", imageBase64: nil)
         XCTAssertEqual(ForgeChatTimeline.pending(outgoing: [second, other], echoes: [first], confirmed: [], threadID: thread).map(\.id), [first.id, second.id])
     }
+    func testReplyBeforeUserReadIsReconciledToServerCausalOrderWithoutDuplicates() {
+        let sent = outgoing()
+        let user = message(sent.id)
+        let reply = ForgeChatMessage(id: UUID(), threadID: thread, role: "assistant", text: "Answer")
+        let merged = ForgeChatTimeline.mergeConfirmed(previous: [reply], incoming: [user, reply, reply])
+        XCTAssertEqual(merged.map(\.id), [user.id, reply.id])
+        XCTAssertEqual(ForgeChatTimeline.mergeConfirmed(previous: merged, incoming: [user, reply]), merged)
+    }
+
+    func testFirstOptimisticSendStaysBeforeReplyUntilServerUserArrives() {
+        let sent = outgoing()
+        let echo = ForgeChatTimeline.acceptedEcho(sent)
+        let reply = ForgeChatMessage(id: UUID(), threadID: thread, role: "assistant", text: "Answer")
+        let pending = ForgeChatTimeline.pending(outgoing: [], echoes: [echo], confirmed: [reply], threadID: thread)
+        XCTAssertEqual(ForgeChatTimeline.orderedIDs(confirmed: [reply], pending: pending), [sent.id, reply.id])
+        let confirmed = ForgeChatTimeline.mergeConfirmed(previous: [reply], incoming: [message(sent.id), reply])
+        XCTAssertEqual(ForgeChatTimeline.orderedIDs(confirmed: confirmed, pending: [echo]), [sent.id, reply.id])
+    }
+
+    func testFollowupEchoStaysAfterPriorReplyButBeforeItsOwnReply() throws {
+        let priorUser = message()
+        let priorReply = ForgeChatMessage(id: UUID(), threadID: thread, role: "kat", text: "Earlier")
+        let sent = ForgeChatOutgoing(id: UUID(), threadID: thread, newThread: false, text: "Followup", imageBase64: nil, afterMessageID: priorReply.id)
+        let echo = try JSONDecoder().decode(ForgeChatOutgoing.self, from: JSONEncoder().encode(ForgeChatTimeline.acceptedEcho(sent)))
+        let reply = ForgeChatMessage(id: UUID(), threadID: thread, role: "assistant", text: "Later")
+        XCTAssertEqual(ForgeChatTimeline.orderedIDs(confirmed: [priorUser, priorReply, reply], pending: [echo]), [priorUser.id, priorReply.id, sent.id, reply.id])
+        XCTAssertEqual(echo.afterMessageID, priorReply.id)
+    }
+
+    func testMultiplePendingRowsKeepSendOrderAndStableIDs() {
+        let prior = message()
+        let first = ForgeChatOutgoing(id: UUID(), threadID: thread, newThread: false, text: "One", imageBase64: nil, afterMessageID: prior.id)
+        let second = ForgeChatOutgoing(id: UUID(), threadID: thread, newThread: false, text: "Two", imageBase64: nil, afterMessageID: first.id)
+        let reply = message()
+        XCTAssertEqual(ForgeChatTimeline.orderedIDs(confirmed: [prior, reply], pending: [first, second, first]), [prior.id, first.id, second.id, reply.id])
+    }
+
+    func testCanonicalReorderRetainsRowsMissingFromPartialPoll() {
+        let first = message(), missing = message(), late = message()
+        let merged = ForgeChatTimeline.mergeConfirmed(previous: [late, missing, first], incoming: [first, late])
+        XCTAssertEqual(merged.map(\.id), [first.id, missing.id, late.id])
+        XCTAssertEqual(ForgeChatTimeline.mergeConfirmed(previous: merged, incoming: []), merged)
+    }
+
+    func testLegacySavedDraftWithoutAnchorStillDecodesAndRendersOnce() throws {
+        let sent = outgoing()
+        let data = try JSONEncoder().encode(sent)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "afterMessageID")
+        let restored = try JSONDecoder().decode(ForgeChatOutgoing.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(restored.afterMessageID)
+        XCTAssertEqual(ForgeChatTimeline.orderedIDs(confirmed: [], pending: [restored, restored]), [sent.id])
+    }
+
 }
