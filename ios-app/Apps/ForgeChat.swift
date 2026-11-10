@@ -610,7 +610,7 @@ struct ForgeChatThreadView: View {
             .fixedSize(horizontal: false, vertical: true)
             .background(MirsaChatTheme.bg)
         }
-        .background(AuroraBackground().ignoresSafeArea())
+        .background(MirsaChatTheme.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onAppear {
