@@ -24,10 +24,16 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
     }
 
     private func assertComposer(_ app: XCUIApplication, keyboard: Bool = false, name: String) {
-        let field = app.textFields["chat-input"]
-        let multiline = app.textViews["chat-input"]
-        let input = field.exists ? field : multiline
-        XCTAssertTrue(input.waitForExistence(timeout: 5), "composer missing")
+        // SwiftUI.VerticalTextView reports conflicting legacy/modern element types
+        // on iOS 26. Query its stable identifier without a TextField/TextView filter.
+        let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+        guard input.waitForExistence(timeout: 10) else {
+            print("COMPOSER_ACCESSIBILITY_TREE \(app.debugDescription)")
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "missing_" + name; failure.lifetime = .keepAlways; add(failure)
+            XCTFail("composer missing")
+            return
+        }
         XCTAssertTrue(input.isHittable, "composer not reachable")
         let bounds = app.windows.firstMatch.frame
         XCTAssertGreaterThan(input.frame.width, 30)
