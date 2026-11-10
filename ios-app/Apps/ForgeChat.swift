@@ -295,6 +295,7 @@ struct ForgeChatRoot: View {
     @ObservedObject private var store = ForgeChatStore.shared
     @AppStorage("mirsa.chat.guideSeen") private var guideSeen = false
     @State private var path: [UUID] = []
+    @State private var open: ForgeOpenThread?
     @State private var toDelete: UUID?
     var body: some View {
         NavigationStack(path: $path) {
@@ -306,12 +307,12 @@ struct ForgeChatRoot: View {
                 if let e = store.error { Text(e).font(.footnote).foregroundStyle(.red) }
                 if store.threads.isEmpty && store.outgoing.isEmpty { Text(ForgeChatText.empty).foregroundStyle(.secondary) }
                 ForEach(store.pendingThreadIDs, id: \.self) { id in
-                    NavigationLink(value: id) { VStack(alignment: .leading) { Text((store.outgoing + store.sentEcho).first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(store.hasInFlight(id) ? ForgeChatText.sending : ForgeChatText.status("queued")).font(.caption2).foregroundStyle(.secondary) } }
+                    Button { open = ForgeOpenThread(id: id) } label: { ForgeChatRowChevron { VStack(alignment: .leading) { Text((store.outgoing + store.sentEcho).first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(store.hasInFlight(id) ? ForgeChatText.sending : ForgeChatText.status("queued")).font(.caption2).foregroundStyle(.secondary) } } }.buttonStyle(.plain)
                 }
                 ForEach(store.threads) { t in
-                    NavigationLink(value: t.id) {
+                    Button { open = ForgeOpenThread(id: t.id) } label: { ForgeChatRowChevron {
                         HStack(spacing: 12) { MirsaSailMark().frame(width: 34, height: 34); VStack(alignment: .leading, spacing: 6) { Text(ForgeChatText.cleanTitle(t.title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { MirsaChatStatusPill(raw: s) } } }.padding(.vertical, 6)
-                    }
+                    } }.buttonStyle(.plain)
                     .listRowBackground(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.07)).overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5)))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { toDelete = t.id } label: { Label(ForgeChatText.deleteAction, systemImage: "trash") }.tint(.red)
@@ -325,15 +326,28 @@ struct ForgeChatRoot: View {
             }
             .navigationTitle(ForgeChatText.title).navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
+            // A conversation opens full screen, over the Tools segments and the tab bar.
+            .fullScreenCover(item: $open) { o in ForgeChatThreadView(threadID: o.id) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { if !embedded { Button(ForgeChatText.close) { dismiss() } } }
-                ToolbarItem(placement: .primaryAction) { Button { path.append(store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest) }
+                ToolbarItem(placement: .primaryAction) { Button { open = ForgeOpenThread(id: store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest) }
             }
             .task { // poll only while this screen is visible
                 await store.flush()
                 while !Task.isCancelled { await store.refreshThreads(); try? await Task.sleep(nanoseconds: 15_000_000_000) }
             }
         }
+    }
+}
+
+struct ForgeOpenThread: Identifiable, Hashable { let id: UUID }
+
+/// List row label with the trailing chevron a NavigationLink used to draw.
+struct ForgeChatRowChevron<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        HStack { content; Spacer(minLength: 8); Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+            .contentShape(Rectangle())
     }
 }
 
