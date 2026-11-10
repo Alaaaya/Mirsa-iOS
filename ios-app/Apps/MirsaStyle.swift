@@ -46,8 +46,7 @@ enum MirsaTheme: String, CaseIterable, Identifiable {
 }
 
 extension View {
-    /// Every card in Mirsa goes through here. Since the style unification it is
-    /// always a solid card (no blur / material), whatever theme is selected.
+    /// Every card in Mirsa goes through here: real glass with the Liquid Glass theme, solid with Classic.
     func appsGlass(cornerRadius: CGFloat = 24, tint: Color? = nil, interactive: Bool = false) -> some View {
         modifier(MirsaSolidCard(shape: RoundedRectangle(cornerRadius: MirsaRadius.snap(cornerRadius), style: .continuous),
                                 tint: tint, elevation: cornerRadius >= 20 ? 1 : 0.6))
