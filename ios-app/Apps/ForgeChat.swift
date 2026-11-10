@@ -4,6 +4,11 @@ import PhotosUI
 /// "Mirsa AI": a request thread with Mirsa. This is a manual queue, not an instant AI chat; replies take time.
 enum ForgeChatText {
     static var title: String { tr("Mirsa AI", "مرسى AI", ckb: "میرسا AI", kmr: "Mirsa AI") }
+    static var supportID: String { tr("Support ID", "رقم الدعم", ckb: "ناسنامەی پشتگیری", kmr: "Nasnameya piştgiriyê") }
+    static var copySupportID: String { tr("Copy support ID", "انسخ رقم الدعم", ckb: "ناسنامەی پشتگیری کۆپی بکە", kmr: "Nasnameya piştgiriyê kopî bike") }
+    static var supportIDCopied: String { tr("Copied", "اننسخ", ckb: "کۆپی کرا", kmr: "Hat kopîkirin") }
+    static var supportIDHint: String { tr("Send this short ID when reporting a problem. It is not a sign-in code.", "ابعث هالرقم لما تبلّغ عن مشكلة. مو رمز تسجيل دخول.", ckb: "کاتی ڕاپۆرتکردنی کێشە ئەم ناسنامە کورتە بنێرە. کۆدی چوونەژوورەوە نییە.", kmr: "Dema tu pirsgirêkekê ragihînî vê nasnameya kurt bişîne. Ev ne koda têketinê ye.") }
+
     static var subtitle: String { tr("Write what you want, Mirsa takes your request and works on it. It takes time.", "اكتب شو بدك، مرسى بياخد طلبك وبيشتغل عليه، بياخد وقت", ckb: "بنووسە چیت دەوێت، میرسا داواکارییەکەت وەردەگرێت و کاری لەسەر دەکات، کاتی دەوێت.", kmr: "Binivîse tu çi dixwazî, Mirsa daxwaza te distîne û li ser dixebite. Dem dixwaze.") }
     static var guide: String { tr("Mirsa AI is not an instant chat. Your message goes into a queue and Mirsa answers by hand, so replies can take minutes or longer. Finished tweaks appear here and in Versions for your review. Nothing turns on by itself.", "مرسى AI مو شات فوري. رسالتك بتدخل بالدور ومرسى بتردّ بإيدها، فالرد ممكن ياخد دقايق أو أكتر. التويكات الجاهزة بتظهر هون وبالنسخ لتراجعها. ما بيتفعّل شي لحاله.", ckb: "میرسا AI گفتوگۆی خێرا نییە. نامەکەت دەچێتە ڕیز و میرسا بە دەست وەڵام دەداتەوە، بۆیە ڕەنگە چەند خولەکێک یان زیاتر بخایەنێت. تویکە تەواوەکان لێرە و لە وەشانەکان دەردەکەون بۆ پێداچوونەوە. هیچ شتێک خۆی چالاک نابێت.", kmr: "Mirsa AI ne sohbeteke tavilê ye. Peyama te dikeve rêzê û Mirsa bi destan bersiv dide, ji ber vê yekê dibe ku çend deqe an zêdetir bikşîne. Tweakên amade li vir û di Guhertoyan de ji bo kontrolê xuya dibin. Tiştek bi serê xwe naçalake.") }
     static var placeholder: String { tr("Write your request…", "اكتب طلبك…", ckb: "داواکارییەکەت بنووسە…", kmr: "Daxwaza xwe binivîse…") }
@@ -290,6 +295,43 @@ enum ForgeChatImage {
     }
 }
 
+/// Support only, never an authentication token or a unique/account identity.
+/// Read the same persistent UUID used by Forge requests, with no registration or ID reset.
+private struct ForgeSupportIDBadge: View {
+    @State private var supportID = String(ForgeClient.deviceID().prefix(8)).lowercased()
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = supportID
+            copied = true
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(copied ? ForgeChatText.supportIDCopied : ForgeChatText.supportID)
+                    .font(.system(size: 9, weight: .medium))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                HStack(spacing: 3) {
+                    Text(supportID).font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 9))
+                }
+            }.foregroundStyle(.white.opacity(0.85))
+        }
+        .buttonStyle(.plain)
+        .frame(minWidth: 72, minHeight: 44)
+        .environment(\.layoutDirection, .leftToRight)
+        .accessibilityLabel(ForgeChatText.copySupportID)
+        .accessibilityValue(copied ? ForgeChatText.supportIDCopied + " " + supportID : supportID)
+        .accessibilityHint(ForgeChatText.supportIDHint)
+        .accessibilityIdentifier("chat-support-id")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            copied = false
+        }
+    }
+}
+
 struct ForgeChatRoot: View {
     var embedded: Bool = false
     @Environment(\.dismiss) private var dismiss
@@ -327,6 +369,12 @@ struct ForgeChatRoot: View {
             .navigationTitle(ForgeChatText.title).navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 10) {
+                        Text(ForgeChatText.title).font(.headline).lineLimit(1).minimumScaleFactor(0.85)
+                        ForgeSupportIDBadge()
+                    }.environment(\.layoutDirection, .leftToRight)
+                }
                 ToolbarItem(placement: .cancellationAction) { if !embedded { Button(ForgeChatText.close) { dismiss() } } }
                 ToolbarItem(placement: .primaryAction) { Button { path.append(store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest).accessibilityIdentifier("chat-new") }
             }
@@ -420,6 +468,12 @@ struct ForgeChatThreadView: View {
     private var draftCount: Int { ForgeChatText.messageCount(text) }
     private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && !unsent }
 
+    private func scrollToLast(_ proxy: ScrollViewProxy, animated: Bool, delay: Double = 0) {
+        let go = { withAnimation(animated && !reduceMotion ? .easeOut(duration: 0.3) : nil) { proxy.scrollTo("bottom", anchor: .bottom) } }
+        if delay <= 0 { DispatchQueue.main.async(execute: go) }
+        else { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: go) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -451,8 +505,11 @@ struct ForgeChatThreadView: View {
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: msgs.count + queued.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+                .onChange(of: rows.map(\.id)) { _, _ in scrollToLast(proxy, animated: true) }
+                .onChange(of: msgs.last?.id) { _, _ in scrollToLast(proxy, animated: true) }
+                .onChange(of: composerFocused) { _, _ in scrollToLast(proxy, animated: true, delay: 0.3) }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in scrollToLast(proxy, animated: false) }
+                .onAppear { scrollToLast(proxy, animated: false); scrollToLast(proxy, animated: false, delay: 0.15); scrollToLast(proxy, animated: false, delay: 0.5) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -502,13 +559,20 @@ struct ForgeChatThreadView: View {
 
     private var header: some View {
         ZStack {
-            Text(ForgeChatText.title).font(.system(size: 21, weight: .bold)).foregroundStyle(.white)
+            HStack(spacing: 10) {
+                Text(ForgeChatText.title).font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.8)
+                ForgeSupportIDBadge()
+            }
+            .padding(.horizontal, 44)
             HStack {
                 Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(Color(red: 0.118, green: 0.169, blue: 0.251)).clipShape(Circle()) }
                     .accessibilityLabel(ForgeChatText.close)
                 Spacer()
             }
-        }.padding(.horizontal, 18).padding(.vertical, 10)
+        }
+        .environment(\.layoutDirection, .leftToRight)
+        .padding(.horizontal, 18).padding(.vertical, 10)
         .background(.ultraThinMaterial.opacity(0.6))
         .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 0.5) }
         .zIndex(1)
