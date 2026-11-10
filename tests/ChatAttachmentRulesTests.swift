@@ -80,9 +80,15 @@ final class ChatAttachmentRulesTests: XCTestCase {
         XCTAssertEqual(ChatAttachmentRules.sendIDs(ids + ids), Array(ids.prefix(3)))
     }
 
-    @MainActor func testFeatureIsOffAndNeverProduction() {
-        XCTAssertFalse(MirsaFeatures.chatAttachments21)
-        XCTAssertNil(ChatAttachmentConfig.stageBaseURL)
-        XCTAssertNil(ChatAttachmentConfig.endpoint)
+    @MainActor func testFeatureUsesVerifiedProductionAndFixturesStayOffline() {
+        XCTAssertTrue(MirsaFeatures.chatAttachments21)
+        XCTAssertEqual(ChatAttachmentConfig.productionBaseURL, ForgeClient.endpoint)
+        XCTAssertEqual(ChatAttachmentConfig.productionBaseURL.absoluteString,
+                       "https://hirebeofomiyumwysppj.supabase.co/functions/v1/mirsa-forge")
+        if ForgeChatStore.fixture {
+            XCTAssertNil(ChatAttachmentConfig.endpoint)
+        } else {
+            XCTAssertEqual(ChatAttachmentConfig.endpoint, ChatAttachmentConfig.productionBaseURL)
+        }
     }
 }

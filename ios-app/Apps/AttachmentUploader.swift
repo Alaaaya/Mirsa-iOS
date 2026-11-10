@@ -4,22 +4,19 @@ import UIKit
 // MARK: - Feature switch and config (Mirsa 2.1 chat attachments)
 
 enum MirsaFeatures {
-    /// Mirsa 2.1 chat attachments (Photos / Files / From link).
-    /// OFF until Kat confirms the stage server works and the owner approves. With it OFF the chat
-    /// behaves exactly as 2.0: the old photo button and legacy image flow, no new button, no network calls.
-    static let chatAttachments21 = false
+    /// Owner-approved production attachments, verified against the live contract.
+    static let chatAttachments21 = true
 }
 
 @MainActor enum ChatAttachmentConfig {
-    /// Stage function from Kat (2026-11-10). Only used while MirsaFeatures.chatAttachments21 is ON,
-    /// which stays OFF in the official build. NEVER point this at the production mirsa-forge function.
-    static let stageBaseURL: URL? = URL(string: "https://mirsa-app.mooo.com/attachments21-stage")
+    /// Same production endpoint and identity as the existing chat.
+    static let productionBaseURL = URL(string: "https://hirebeofomiyumwysppj.supabase.co/functions/v1/mirsa-forge")!
 
-    /// The attachments endpoint, or nil when the feature is off / unconfigured / unsafe.
+    /// Fixtures never access production, even when the release feature is enabled.
     static var endpoint: URL? {
-        guard MirsaFeatures.chatAttachments21, let url = stageBaseURL, url.scheme == "https",
-              url != ForgeClient.endpoint, !url.path.contains("mirsa-forge") else { return nil }
-        return url
+        guard MirsaFeatures.chatAttachments21, !ForgeChatStore.fixture,
+              productionBaseURL == ForgeClient.endpoint else { return nil }
+        return productionBaseURL
     }
 
     /// Show the attachments menu instead of the legacy photo button.
