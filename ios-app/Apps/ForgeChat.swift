@@ -60,6 +60,10 @@ Bi hûrgilî binivîse tu çi dixwazî, û heke wêneyekî tiştê di hişê te 
     static var empty: String { tr("No requests yet.", "ما في طلبات لسا.", ckb: "هێشتا داواکاری نییە.", kmr: "Hê daxwaz tune.") }
     static var limit: String { tr("Daily request limit reached. Try again tomorrow.", "وصلت للحد اليومي للطلبات. جرّب بكرا.", ckb: "گەیشتیتە سنووری ڕۆژانە. سبەی هەوڵ بدەرەوە.", kmr: "Sînorê rojane gihîşt. Sibê dîsa biceribîne.") }
     static var failed: String { tr("Could not send. Your message is saved and will retry.", "ما انبعتت. رسالتك محفوظة وبنعيد المحاولة.", ckb: "نەنێردرا. نامەکەت پاشەکەوتکراوە و دووبارە هەوڵ دەدرێت.", kmr: "Neşandî. Peyam hatiye tomarkirin û dê dîsa biceribe.") }
+    static let messageMax = 4000
+    static func messageCount(_ text: String) -> Int { text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count }
+    static var tooLong: String { tr("Maximum 4,000 characters. Shorten your message or split it into two.", "الحد ٤٠٠٠ حرف. اختصر رسالتك أو قسّمها لرسالتين.", ckb: "زۆرترین ٤٠٠٠ پیت. نامەکەت کورت بکەوە یان بیکە بە دوو نامە.", kmr: "Herî zêde 4.000 tîp. Peyamê kurt bike an bike du peyam.") }
+    static func counter(_ count: Int) -> String { "\(count) / \(messageMax) " + tr("characters", "حرف", ckb: "پیت", kmr: "tîp") }
     static var resultSaved: String { tr("Finished. Saved in Versions for your review. Nothing was enabled.", "خلص. انحفظ بالنسخ لتراجعه. ما تفعّل شي.", ckb: "تەواو بوو. لە وەشانەکان پاشەکەوت کرا بۆ پێداچوونەوە. هیچ شتێک چالاک نەکرا.", kmr: "Qediya. Di Guhertoyan de ji bo kontrolê hat tomarkirin. Tiştek nehat çalakkirin.") }
 }
 
@@ -142,6 +146,7 @@ enum ForgeChatImage {
         }
         if r.status == 200 { lastDiagnostic = nil; return r.data }
         let code = (try? JSONSerialization.jsonObject(with: r.data) as? [String: Any])?["error"] as? String ?? ""
+        if code == "message_too_long" { lastDiagnostic = code; throw ForgeChatTransient.failed(code) }
         if r.status == 429 { throw ForgeClient.Failure.message(ForgeChatText.limit) }
         if r.status == 403, retryBind, code == "device_not_bound" || code == "device_auth_required" {
             // A fresh install is bound to the account by one ordinary Forge call, then registration is repeated.
@@ -169,6 +174,7 @@ enum ForgeChatImage {
     func send(threadID: UUID?, text: String, jpeg: Data?) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return }
         if let tid = threadID, deleting.contains(tid) { return }
         if let tid = threadID, hasInFlight(tid) { return } // no double send while a message is still unsent
         let img = jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString()
@@ -176,7 +182,7 @@ enum ForgeChatImage {
         let confirmed = messages[tid] ?? []
         let pending = ForgeChatTimeline.pending(outgoing: outgoing, echoes: sentEcho, confirmed: confirmed, threadID: tid)
         let anchor = ForgeChatTimeline.orderedIDs(confirmed: confirmed, pending: pending).last
-        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: !serverKnows(tid), text: String(t.prefix(4000)), imageBase64: img, afterMessageID: anchor))
+        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: !serverKnows(tid), text: t, imageBase64: img, afterMessageID: anchor))
         saveOutgoing()
         Task { await flush() }
         startRetrying()
@@ -202,7 +208,7 @@ enum ForgeChatImage {
         guard !Self.fixture, !flushing else { return }
         flushing = true; defer { flushing = false }
         for o in outgoing where !deleting.contains(o.threadID) {
-            var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text]
+            var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text, "language": AppLanguageStore.snapshot.rawValue]
             if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
             do {
                 _ = try await call(body)
@@ -213,7 +219,7 @@ enum ForgeChatImage {
                 // Daily limit: the server refuses this message for good, so it cannot be replayed today.
                 error = f.errorDescription; outgoing.removeAll { $0.id == o.id }; saveOutgoing()
             } catch {
-                self.error = ForgeChatText.failed + (lastDiagnostic.map { " (" + $0 + ")" } ?? "")
+                self.error = lastDiagnostic == "message_too_long" ? ForgeChatText.tooLong : ForgeChatText.failed
                 break // keep the message, the retry loop replays it with the same id
             }
         }
@@ -411,7 +417,8 @@ struct ForgeChatThreadView: View {
     }
     private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
-    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !unsent }
+    private var draftCount: Int { ForgeChatText.messageCount(text) }
+    private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && !unsent }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -472,6 +479,16 @@ struct ForgeChatThreadView: View {
         .background(MirsaChatTheme.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
+        .onAppear {
+            #if DEBUG
+            // Seed only the explicit no-network UI harness, never real drafts.
+            if ForgeChatStore.fixture {
+                let args = ProcessInfo.processInfo.arguments
+                if args.contains("-MirsaChatDraft4000Fixture") { text = String(repeating: "ع", count: 4000) }
+                if args.contains("-MirsaChatDraft4001Fixture") { text = String(repeating: "ع", count: 4001) }
+            }
+            #endif
+        }
         .onChange(of: photo) { _, item in
             guard let item else { return }
             Task { jpeg = (try? await item.loadTransferable(type: Data.self)).flatMap { ForgeChatImage.prepare($0) } }
@@ -498,21 +515,32 @@ struct ForgeChatThreadView: View {
     }
 
     private var inputBar: some View {
-        HStack(alignment: .center, spacing: 10) {
-            HStack(spacing: 8) {
-                PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
-                TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(.white).tint(MirsaChatTheme.blue)
-            }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            Button {
-                started = true
-                store.send(threadID: threadID, text: text, jpeg: jpeg)
-                text = ""; jpeg = nil; photo = nil
-            } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
-                .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
-                .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
-                .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
+        VStack(alignment: .leading, spacing: 4) {
+            if draftCount >= 3600 {
+                Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
+                    .font(.caption).foregroundStyle(draftCount > ForgeChatText.messageMax ? Color.red : MirsaChatTheme.muted)
+                    .accessibilityIdentifier("chat-character-limit")
+                    .accessibilityLabel(ForgeChatText.counter(draftCount))
+                    .accessibilityValue(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : "")
+            }
+            HStack(alignment: .center, spacing: 10) {
+                HStack(spacing: 8) {
+                    PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
+                    TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(.white).tint(MirsaChatTheme.blue)
+                }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                Button {
+                    started = true
+                    store.send(threadID: threadID, text: text, jpeg: jpeg)
+                    text = ""; jpeg = nil; photo = nil
+                } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
+                    .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
+                    .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
+                    .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
+            }
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
-            .accessibilityIdentifier("chat-composer")
+        // Do not assign an identifier to this transparent layout container.
+        // SwiftUI propagates it to the text editor and buttons, replacing their
+        // distinct identifiers and hiding those controls from accessibility queries.
     }
 
     private func userBubble(_ t: String) -> some View {

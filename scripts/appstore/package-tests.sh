@@ -20,6 +20,7 @@ sed 's/@testable import Mirsa/@testable import MirsaStoreKit/' "$ROOT/tests/Mirs
 python3 "$ROOT/scripts/appstore/source-test-harness.py" "$WORK"
 python3 "$ROOT/scripts/appstore/public-gate-harness-tests.py"
 python3 "$ROOT/scripts/appstore/public-gate-test-harness.py" "$WORK"
+python3 "$ROOT/scripts/appstore/chat-length-test-harness.py" "$WORK"
 export MIRSA_SOURCE_FIXTURES="$WORK/source-fixtures"
 # UI localization is outside this standalone backend package.
 cat > "$WORK/Sources/MirsaStoreKit/TestLocalization.swift" <<'SWIFT'
