@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.7"
+    MARKETING_VERSION: "1.8"
     CURRENT_PROJECT_VERSION: "1.3.2"
     TARGETED_DEVICE_FAMILY: "1"
     # AirliftFFI is arm64-only (aws-lc-rs / idevice); drop x86_64 simulator slice.
