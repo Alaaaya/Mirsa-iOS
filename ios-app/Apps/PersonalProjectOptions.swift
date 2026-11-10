@@ -13,7 +13,7 @@ struct PersonalProjectOptions: Sendable {
     var minimumOS: String? = nil
     var libraries: [URL] = []
     /// When non-empty, per-component target plan (inject_plan) replaces plain library injection.
-    var injections: [[String: String]] = []
+    var injections: [InjectionPlanEntry] = []
     /// Staged file-manager edits applied to the workspace copy right after extraction (before every other edit).
     var bundleOverlay: BundleOverlay? = nil
     var bundleBlobs: URL? = nil
@@ -64,6 +64,12 @@ struct PersonalProjectDraft: Codable, Equatable {
     var customEntitlements: Data? = nil
     var customEntitlementsName: String? = nil
     var directInjection: Bool? = nil
+    /// component id (uuid:path) -> InjectionMethod raw value. Absent = migrate from legacy directInjection.
+    var injectionMethods: [String: String]? = nil
+    /// component id -> selected process target ids for separate_extension (decoded optional, backward compatible).
+    var injectionProcessTargets: [String: [String]]? = nil
+    /// component id -> backend shared candidate id for shared_library.
+    var injectionSharedTargets: [String: String]? = nil
     /// tweak id -> target id. nil/absent = main executable. Specific framework/extension targets stay disabled until the backend enumerates real Mach-O targets.
     var tweakTargets: [String: String]? = nil
     /// Excluded package components, keyed "<tweakUUID>:<rootRelativePath>". A .deb exposes each dylib/framework root as its own component.

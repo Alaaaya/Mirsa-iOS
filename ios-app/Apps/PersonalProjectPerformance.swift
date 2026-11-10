@@ -12,13 +12,14 @@ struct PersonalProjectBackdrop: View, Equatable {
 /// Flush synchronously at navigation/sign boundaries so the latest edit survives.
 @MainActor
 final class PersonalProjectDraftWriter: ObservableObject {
+    private static let writers = NSHashTable<PersonalProjectDraftWriter>.weakObjects()
     private var pending: (PersonalProjectDraft, URL)?
     private var task: Task<Void, Never>?
     private let delay: UInt64
     private let write: (Data, URL) throws -> Void
     init(delay: UInt64 = 350_000_000, write: @escaping (Data, URL) throws -> Void = {
         try $0.write(to: $1, options: [.atomic, .completeFileProtection])
-    }) { self.delay = delay; self.write = write }
+    }) { self.delay = delay; self.write = write; Self.writers.add(self) }
     func schedule(_ draft: PersonalProjectDraft, to url: URL) {
         pending = (draft, url)
         task?.cancel()
@@ -27,11 +28,15 @@ final class PersonalProjectDraftWriter: ObservableObject {
             self?.flush()
         }
     }
-    func flush() {
+    func flush() { try? flushStrict() }
+    func flushStrict() throws {
         task?.cancel(); task = nil
         guard let (draft, url) = pending else { return }
+        try write(JSONEncoder().encode(draft), url)
         pending = nil
-        if let data = try? JSONEncoder().encode(draft) { try? write(data, url) }
+    }
+    static func flushAll() throws {
+        for writer in writers.allObjects { try writer.flushStrict() }
     }
 }
 

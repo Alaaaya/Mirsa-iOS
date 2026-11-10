@@ -5,8 +5,8 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Clone)]
 #[serde(rename_all="camelCase")]
 pub(super) struct Library {
-    id: String, owner: String, load_path: String, kind: String,
-    bundled_path: Option<String>, provenance: String, slices: Vec<String>,
+    id: String, pub(super) owner: String, pub(super) load_path: String, pub(super) kind: String,
+    pub(super) bundled_path: Option<String>, provenance: String, slices: Vec<String>,
 }
 #[derive(Deserialize, Clone, Default)]
 pub(super) struct Edit { pub owner: String, #[serde(default)] pub removed: Vec<String>, #[serde(default)] pub order: Vec<String> }
@@ -83,7 +83,7 @@ fn binaries(app:&Path)->Result<Vec<PathBuf>> {
  if matches!(magic,[0xcf,0xfa,0xed,0xfe]|[0xca,0xfe,0xba,0xbe]|[0xbe,0xba,0xfe,0xca]|[0xca,0xfe,0xba,0xbf]|[0xbf,0xba,0xfe,0xca]){out.push(p)}
  }out.sort();Ok(out)
 }
-fn graph(app:&Path)->Result<Vec<Library>> {
+pub(super) fn graph(app:&Path)->Result<Vec<Library>> {
  tweak_targets::checked_tree(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut out:Vec<Library>=Vec::new();
  for p in binaries(&app)? {
   let d=read_macho(&p)?;let owner=p.strip_prefix(&app).map_err(err)?.to_str().ok_or("Non UTF8 owner")?.to_owned();

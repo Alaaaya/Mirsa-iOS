@@ -634,7 +634,7 @@ struct ContentView: View {
                 .tag(AppTab.sources)
 
             ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused))
+                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
                 .tag(AppTab.pairing)
 
@@ -663,13 +663,16 @@ struct ContentView: View {
         }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
         .onOpenURL { url in
+            if OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]); return }
             // mirsa://launch?bundle=… from a Home Screen shortcut.
             if HomeShortcut.handle(url) { vm.selectedTab = .apps; return }
             // Document handoff uses a private snapshot before the provider relinquishes access.
             guard url.isFileURL, url.pathExtension.lowercased() == "ipa" else { return }
             vm.selectedTab = .apps
             guard incomingSources.insert(url.standardizedFileURL).inserted else { return }
+            let scope = url.startAccessingSecurityScopedResource()
             Task {
+                defer { if scope { url.stopAccessingSecurityScopedResource() } }
                 do {
                     let snapshot = try await Task.detached(priority: .userInitiated) {
                         try OpenInIPA.snapshot(url)
@@ -1188,12 +1191,21 @@ struct VPNStatusRow: View {
 struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
     var chatEditing: Bool = false
+    var nestedNavigation: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
         if liquid {
-            content
-                .toolbar(.hidden, for: .tabBar)
-                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: chatEditing ? 0 : MirsaTabBarMetrics.clearance) }
+            if nestedNavigation {
+                // A pushed chat destination can lose an ancestor safe-area inset.
+                // Bound the tools NavigationStack itself above the floating dock.
+                content
+                    .toolbar(.hidden, for: .tabBar)
+                    .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+            } else {
+                content
+                    .toolbar(.hidden, for: .tabBar)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: chatEditing ? 0 : MirsaTabBarMetrics.clearance) }
+            }
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }

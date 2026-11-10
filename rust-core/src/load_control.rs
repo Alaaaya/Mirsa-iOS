@@ -122,6 +122,26 @@ fn reject_eager_roots(
     Ok(())
 }
 
+// The loader may live in an appex whose legitimate eager dependencies live
+// in the enclosing app. Resolve exact commands using the conservative graph,
+// never the older Frameworks/basename fallback. All code remains contained.
+fn reject_eager_graph(container:&Path, main:&Path, roots:&[PathBuf])->Result<()> {
+    let root=fs::canonicalize(container).map_err(err)?;
+    let mut graph:BTreeMap<String,Vec<Option<String>>>=BTreeMap::new();
+    for edge in existing_libraries::graph(&root)? {
+        graph.entry(edge.owner).or_default().push(edge.bundled_path);
+    }
+    let id=main.strip_prefix(&root).map_err(err)?.to_str().ok_or("Invalid eager target")?.to_owned();
+    let mut queue=vec![id];let mut seen=HashSet::new();
+    while let Some(id)=queue.pop() {
+        if !seen.insert(id.clone()){continue}
+        if seen.len()>4096{return Err("Eager graph exceeds limit".into())}
+        let path=root.join(relative(&id)?);macho(read_macho(&path)?,false)?;
+        if roots.contains(&fs::canonicalize(&path).map_err(err)?){return Err("A managed tweak is already eagerly loaded by the app".into())}
+        if let Some(edges)=graph.get(&id){for edge in edges{queue.push(edge.clone().ok_or("Unresolved or ambiguous eager dependency")?);}}
+    }
+    Ok(())
+}
 /// JSON operation inject_loader uses the ordinary `input`, `executable`,
 /// `libraries` (ordered roots) and `new_first` fields. Loader bytes are embedded,
 /// never supplied by user paths. Call on a throwaway copy then sign entire app.
@@ -130,6 +150,12 @@ pub(super) fn inject_loader(
     executable: &str,
     libraries: &[String],
     first: bool,
+) -> Result<()> {
+    inject_loader_scoped(app,app,executable,libraries,first)
+}
+/// Scope owns loader/resources; container bounds existing dependency traversal.
+pub(super) fn inject_loader_scoped(
+    container: &Path, app: &Path, executable: &str, libraries: &[String], first: bool,
 ) -> Result<()> {
     if libraries.is_empty() || libraries.len() > 64 {
         return Err("Loader requires 1–64 ordered tweaks".into());
@@ -166,7 +192,7 @@ pub(super) fn inject_loader(
     // Temporarily inspect original main commands, not direct refs just added by inject.
     let patched_main = fs::read(&main).map_err(err)?;
     fs::write(&main, &original_main).map_err(err)?;
-    let eager_check = reject_eager_roots(&app, &main, &roots, &mut HashSet::new());
+    let eager_check = reject_eager_graph(container, &main, &roots);
     fs::write(&main, &patched_main).map_err(err)?;
     eager_check?;
     for (i, r) in roots.iter().enumerate() {
