@@ -36,7 +36,7 @@ private struct SourceURLButtons: View {
     }
 }
 
-struct RepoApp: Identifiable, Hashable {
+struct RepoApp: Identifiable, Hashable, Sendable {
     var id: String { bundleID + "|" + version }
     let name: String
     let bundleID: String
@@ -88,6 +88,10 @@ final class SourcesStore: ObservableObject {
     @Published var sources: [RepoSource] = [] { didSet { save() } }
     @Published var apps: [String: [RepoApp]] = [:]   // by source url
     @Published var loading: Set<String> = []
+    @Published private(set) var loadErrors: [String: String] = [:]
+    private var requests: [String: Task<Bool, Never>] = [:]
+    typealias Loader = (URLRequest) async throws -> (Data, URLResponse)
+    private let load: Loader
     @Published var error: String?
     @Published var updatingAll = false
     @Published var hiddenIDs: Set<String> = [] {
@@ -157,8 +161,9 @@ final class SourcesStore: ObservableObject {
     ]
     private let seededKey = "mirsa.sources.builtin.v2"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, load: @escaping Loader = { try await URLSession.shared.data(for: $0) }) {
         self.defaults = defaults
+        self.load = load
         hiddenIDs = Set(defaults.stringArray(forKey: "mirsa.sources.hiddenIDs") ?? [])
         var list: [RepoSource] = []
         if let d = defaults.data(forKey: key),
@@ -192,6 +197,8 @@ final class SourcesStore: ObservableObject {
         hiddenIDs.remove(id)
         if !sources.contains(where: { MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(src.url) }) {
             apps[src.url] = nil
+            requests[src.url]?.cancel()
+            loadErrors[src.url] = nil
             loading.remove(src.url)
         }
         return true
@@ -221,64 +228,124 @@ final class SourcesStore: ObservableObject {
         return ok
     }
 
-    func refreshAll() async {
-        await withTaskGroup(of: Void.self) { g in
-            for s in visibleSources { g.addTask { _ = await self.refresh(s.url) } }
+    /// A persisted badge is metadata, not a loaded catalogue. Load each missing URL independently.
+    func ensureLoaded(_ url: String) async {
+        guard apps[url] == nil else { return }
+        _ = await refresh(url)
+    }
+
+    func loadMissing() async {
+        await withTaskGroup(of: Void.self) { group in
+            for url in Set(visibleSources.map(\.url)) where apps[url] == nil {
+                group.addTask { await self.ensureLoaded(url) }
+            }
         }
     }
 
+    func refreshAll() async {
+        await withTaskGroup(of: Void.self) { group in
+            for url in Set(visibleSources.map(\.url)) {
+                group.addTask { _ = await self.refresh(url) }
+            }
+        }
+    }
+
+    func listing(for url: String, query: String = "") -> [RepoApp] {
+        let all = apps[url] ?? []
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return term.isEmpty ? all : all.filter {
+            $0.name.localizedCaseInsensitiveContains(term) || $0.developer.localizedCaseInsensitiveContains(term)
+        }
+    }
+
+    /// One source-owned request, not a child of the list screen's cancellable navigation task.
+    /// Entering a detail page must not cancel the catalogue it is about to display.
     @discardableResult
     func refresh(_ url: String) async -> Bool {
-        guard let u = URL(string: url) else { return false }
-        // A copied GitHub download link is a signed URL that expires within an hour.
-        if u.host?.contains("release-assets.githubusercontent.com") == true || u.host?.contains("objects.githubusercontent.com") == true {
-            error = tr("That's a temporary GitHub download link and it expires. Use the release link (github.com/…/releases/download/…) instead.",
-                       "هاد رابط تحميل مؤقت من GitHub وبينتهي. استعمل رابط الإصدار github.com/…/releases/download/… بداله.")
-            return false
-        }
+        if let running = requests[url] { return await running.value }
         loading.insert(url)
-        defer { loading.remove(url) }
+        loadErrors[url] = nil
+        let request = Task { @MainActor in
+            defer { self.requests[url] = nil; self.loading.remove(url) }
+            return await self.fetchSource(url)
+        }
+        requests[url] = request
+        return await request.value
+    }
+
+    private func fetchSource(_ url: String) async -> Bool {
         do {
+            guard let u = URL(string: url) else { throw URLError(.badURL) }
+            if u.host?.contains("release-assets.githubusercontent.com") == true || u.host?.contains("objects.githubusercontent.com") == true {
+                throw NSError(domain: "Mirsa", code: 0, userInfo: [NSLocalizedDescriptionKey:
+                    tr("That's a temporary GitHub download link and it expires. Use the release link (github.com/…/releases/download/…) instead.",
+                       "هاد رابط تحميل مؤقت من GitHub وبينتهي. استعمل رابط الإصدار github.com/…/releases/download/… بداله.")])
+            }
             let data: Data, base: URL
             if MirsaSourceFeed.isOwned(url) {
-                let f = try await MirsaSourceFeed.fetch()
-                data = f.data; base = f.url
+                let feed = try await MirsaSourceFeed.fetch(load: load)
+                data = feed.data; base = feed.url
             } else {
-                var req = URLRequest(url: u)
-                req.cachePolicy = .reloadIgnoringLocalCacheData
-                req.timeoutInterval = 20
-                let (d, resp) = try await URLSession.shared.data(for: req)
-                if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) {
-                    throw NSError(domain: "Mirsa", code: h.statusCode,
-                                  userInfo: [NSLocalizedDescriptionKey: MirsaTr.f("sourceAnswered", h.statusCode)])
+                var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+                req.setValue("Mirsa", forHTTPHeaderField: "User-Agent")
+                let (bytes, response) = try await load(req)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw NSError(domain: "Mirsa", code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: MirsaTr.f("sourceAnswered", http.statusCode)])
                 }
-                data = d; base = u
+                data = bytes; base = response.url ?? u
             }
-            let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-            let root: [String: Any]? = (json as? [String: Any]) ?? ((json as? [[String: Any]]).map { ["apps": $0] })
-            guard let root else {
-                throw NSError(domain: "Mirsa", code: 0, userInfo: [NSLocalizedDescriptionKey: tr("Not a source file.", "هذا مو ملف سورس.")])
-            }
-            let parsed = Self.parseApps(root, base: base)
-            apps[url] = parsed
+            try Task.checkCancellation()
+            // Full catalogues (including 10,098 AppTesters entries) are decoded off the UI actor.
+            let parsed = try await Task.detached(priority: .userInitiated) {
+                try Self.decodeSource(data, base: base)
+            }.value
+            try Task.checkCancellation()
+            // Deleting a source while it loads must not resurrect its cache or row.
+            guard sources.contains(where: { $0.url == url }) else { return false }
+            apps[url] = parsed.apps
+            loadErrors[url] = nil
             for i in sources.indices where sources[i].url == url {
-                var s = sources[i]
-                let meta = (root["META"] as? [String: Any]) ?? (root["meta"] as? [String: Any]) ?? [:]
-                s.name = (root["name"] as? String) ?? (meta["repoName"] as? String) ?? (meta["name"] as? String) ?? s.name
-                s.iconURL = (root["iconURL"] as? String) ?? (root["icon"] as? String) ?? (meta["repoIcon"] as? String) ?? s.iconURL
-                s.tint = (root["tintColor"] as? String) ?? (root["tint"] as? String) ?? s.tint
-                s.updated = parsed.compactMap { $0.date }.compactMap(Self.date).max() ?? s.updated
-                s.appCount = parsed.count
-                sources[i] = s
+                var source = sources[i]
+                source.name = parsed.name ?? source.name
+                source.iconURL = parsed.iconURL ?? source.iconURL
+                source.tint = parsed.tint ?? source.tint
+                source.updated = parsed.updated ?? source.updated
+                source.appCount = parsed.apps.count
+                sources[i] = source
             }
             return true
         } catch {
-            self.error = error.localizedDescription
+            guard sources.contains(where: { $0.url == url }) else { return false }
+            let message = error.localizedDescription
+            loadErrors[url] = message
+            self.error = message
             return false
         }
     }
 
-    static func date(_ s: String) -> Date? {
+    struct DecodedSource: Sendable {
+        let apps: [RepoApp]
+        let name: String?
+        let iconURL: String?
+        let tint: String?
+        let updated: Date?
+    }
+
+    nonisolated static func decodeSource(_ data: Data, base: URL) throws -> DecodedSource {
+        let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        let root = (json as? [String: Any]) ?? ((json as? [Any]).map { ["apps": $0] })
+        guard let root else { throw URLError(.cannotParseResponse) }
+        let parsed = parseApps(root, base: base)
+        let meta = (root["META"] as? [String: Any]) ?? (root["meta"] as? [String: Any]) ?? [:]
+        return DecodedSource(apps: parsed,
+            name: (root["name"] as? String) ?? (meta["repoName"] as? String) ?? (meta["name"] as? String),
+            iconURL: (root["iconURL"] as? String) ?? (root["icon"] as? String) ?? (meta["repoIcon"] as? String),
+            tint: (root["tintColor"] as? String) ?? (root["tint"] as? String),
+            updated: parsed.compactMap(\.date).compactMap(Self.date).max())
+    }
+
+    nonisolated static func date(_ s: String) -> Date? {
         let iso = ISO8601DateFormatter()
         if let d = iso.date(from: s) { return d }
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
@@ -289,21 +356,25 @@ final class SourcesStore: ObservableObject {
         return nil
     }
 
-    static func parseApps(_ root: [String: Any], base: URL) -> [RepoApp] {
+    nonisolated static func parseApps(_ root: [String: Any], base: URL) -> [RepoApp] {
         // AltStore / SideStore / Feather / ESign: "apps". Scarlet and others:
         // apps grouped in arrays under any key. A bare array also works.
         var list: [[String: Any]] = []
         let appKeys = ["apps", "Apps", "applications", "items", "data"]
-        for k in appKeys { if let a = root[k] as? [[String: Any]] { list = a; break } }
+        for k in appKeys { if let a = root[k] as? [Any] { list = a.compactMap { $0 as? [String: Any] }; break } }
         if list.isEmpty {
             for (k, v) in root where k != "news" && k != "featuredApps" {
-                if let a = v as? [[String: Any]] { list += a }
-                if let d = v as? [String: Any], let a = d["apps"] as? [[String: Any]] { list += a }
+                if let a = v as? [Any] { list += a.compactMap { $0 as? [String: Any] } }
+                if let d = v as? [String: Any], let a = d["apps"] as? [Any] { list += a.compactMap { $0 as? [String: Any] } }
             }
         }
         func url(_ v: Any?) -> URL? {
-            guard let s = v as? String, !s.isEmpty else { return nil }
-            return URL(string: s, relativeTo: base)?.absoluteURL
+            guard let raw = v as? String else { return nil }
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, let url = URL(string: text, relativeTo: base)?.absoluteURL,
+                  let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme),
+                  url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
+            return url
         }
         func str(_ d: [String: Any], _ keys: String...) -> String? {
             for k in keys { if let s = d[k] as? String, !s.isEmpty { return s } }
@@ -388,7 +459,7 @@ struct SourcesTab: View {
                     // The row is the card; the link stays invisible so the system chevron
                     // no longer floats outside the card.
                     ZStack {
-                        NavigationLink { SourceDetailView(source: s, onSelectIPA: onSelectIPA) } label: { EmptyView() }.opacity(0)
+                        NavigationLink { SourceDetailView(source: s, store: store, onSelectIPA: onSelectIPA) } label: { EmptyView() }.opacity(0)
                         SourceRow(source: s, loading: store.loading.contains(s.url))
                     }
                         .deleteDisabled(store.isProtected(s))
@@ -469,7 +540,7 @@ struct SourcesTab: View {
             .alert(tr("Source", "السورس"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
                 Button(MirsaTr.lit("OK")) { store.error = nil }
             } message: { Text(store.error ?? "") }
-            .task { if store.apps.isEmpty { await store.refreshAll() } }
+            .task { await store.loadMissing() }
             .mirsaScreen()
         }
     }
@@ -510,27 +581,45 @@ private struct SourceRow: View {
 struct SourceDetailView: View {
     let source: RepoSource
     var onSelectIPA: ((URL) async throws -> Void)? = nil
-    @ObservedObject private var store = SourcesStore.shared
+    @ObservedObject private var store: SourcesStore
     @ObservedObject private var apps = AppsStore.shared
     @State private var query = ""
 
+    init(source: RepoSource, store: SourcesStore = .shared, onSelectIPA: ((URL) async throws -> Void)? = nil) {
+        self.source = source
+        self.store = store
+        self.onSelectIPA = onSelectIPA
+    }
+
     var body: some View {
-        let all = store.apps[source.url] ?? []
-        let shown = query.isEmpty ? all : all.filter {
-            $0.name.localizedCaseInsensitiveContains(query) || $0.developer.localizedCaseInsensitiveContains(query)
-        }
+        let all = store.listing(for: source.url)
+        let shown = store.listing(for: source.url, query: query)
         List {
-            ForEach(shown) { a in
-                RepoAppRow(app: a, installed: apps.apps.first { $0.id == a.bundleID }, onSelectIPA: onSelectIPA)
+            ForEach(shown) { app in
+                RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA)
                     .listRowBackground(Color.clear)
             }
-            if all.isEmpty && !store.loading.contains(source.url) {
-                Text(tr("No apps in this source.", "ما في تطبيقات بهالسورس.")).foregroundStyle(.secondary)
+            if store.loading.contains(source.url) || (store.apps[source.url] == nil && store.loadErrors[source.url] == nil) {
+                ProgressView(tr("Loading source…", "عم تتحمّل تطبيقات السورس…", ckb: "ئەپەکانی سەرچاوە بار دەکرێن…", kmr: "Sepanên çavkaniyê tên barkirin…"))
                     .listRowBackground(Color.clear)
+            } else if let message = store.loadErrors[source.url] {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(tr("Couldn't load this source.", "ما قدرت حمّل تطبيقات هالسورس.", ckb: "نەتوانرا ئەپەکانی سەرچاوە بار بکرێن.", kmr: "Sepanên vê çavkaniyê nehatin barkirin."))
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                    Button(tr("Try again", "جرّب كمان مرة", ckb: "دووبارە هەوڵ بدە", kmr: "Dîsa biceribîne")) { Task { await store.refresh(source.url) } }
+                }
+                .listRowBackground(Color.clear)
+            } else if all.isEmpty {
+                Text(tr("No apps in this source.", "ما في تطبيقات بهالسورس.", ckb: "هیچ ئەپێک لەم سەرچاوەیە نییە.", kmr: "Di vê çavkaniyê de sepan tune ne."))
+                    .foregroundStyle(.secondary).listRowBackground(Color.clear)
+            } else if shown.isEmpty {
+                Text(tr("No matching apps.", "ما لقيت تطبيقات بهالاسم.", ckb: "هیچ ئەپێکی گونجاو نەدۆزرایەوە.", kmr: "Sepanên lihevhatî nehatin dîtin."))
+                    .foregroundStyle(.secondary).listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)
         .searchable(text: $query)
+        .task(id: source.url) { await store.ensureLoaded(source.url) }
         .refreshable { await store.refresh(source.url) }
         .navigationTitle(source.name)
         .mirsaScreen()
