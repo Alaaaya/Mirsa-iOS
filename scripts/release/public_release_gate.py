@@ -49,7 +49,9 @@ def remote_gate(feed, normal_ipa=None):
  assert len(apps)==1
  version=apps[0]['version']
  # Existing 1.9 remains serviceable until the reviewed 2.0 cutover.
- if version=='1.9': return
+ if version=='1.9':
+  validate_feed(feed, {'tag_name':'1.9'})
+  return
  assert version=='2.0', 'New versions require a reviewed KB gate update'
  origin='https://github.com/Alaaaya/Mirsa-iOS/releases/download/'+version+'/'
  def load(name):
@@ -71,6 +73,7 @@ if __name__=='__main__':
   data=pathlib.Path(a.ipa).read_bytes()
   with zipfile.ZipFile(io.BytesIO(data)) as z:
    assert z.testzip() is None
+   assert z.namelist().count('Payload/Mirsa.app/Info.plist') == 1, 'Missing or duplicate main app metadata'
    for n in z.namelist():
     if n=='Payload/Mirsa.app/Info.plist' or n.endswith('.appex/Info.plist'):
      assert plistlib.loads(z.read(n))['CFBundleShortVersionString']=='2.0'
