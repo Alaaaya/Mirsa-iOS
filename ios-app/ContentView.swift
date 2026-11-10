@@ -663,13 +663,16 @@ struct ContentView: View {
         }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
         .onOpenURL { url in
+            if OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]); return }
             // mirsa://launch?bundle=… from a Home Screen shortcut.
             if HomeShortcut.handle(url) { vm.selectedTab = .apps; return }
             // Document handoff uses a private snapshot before the provider relinquishes access.
             guard url.isFileURL, url.pathExtension.lowercased() == "ipa" else { return }
             vm.selectedTab = .apps
             guard incomingSources.insert(url.standardizedFileURL).inserted else { return }
+            let scope = url.startAccessingSecurityScopedResource()
             Task {
+                defer { if scope { url.stopAccessingSecurityScopedResource() } }
                 do {
                     let snapshot = try await Task.detached(priority: .userInitiated) {
                         try OpenInIPA.snapshot(url)

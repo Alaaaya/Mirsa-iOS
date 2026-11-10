@@ -107,8 +107,8 @@ struct PersonalProjectDetailView: View {
             DocumentPickerView(allowedContentTypes: ["zip", "dylib", "deb", "framework"].compactMap { UTType(filenameExtension: $0) } + [.data]) { url in
                 Task {
                     do {
-                        try await tweaks.addFile(url, allowSelection: true)
-                        if let first = tweaks.items.first, !draft.tweakIDs.contains(first.id) { draft.tweakIDs.append(first.id) }
+                        let imported = try await tweaks.addFile(url, allowSelection: true)
+                        if !draft.tweakIDs.contains(imported.id) { draft.tweakIDs.append(imported.id) }
                     } catch { message = error.localizedDescription }
                 }
             }
@@ -152,6 +152,11 @@ struct PersonalProjectDetailView: View {
             Button(personalText("OK", "تمام")) { resultAlert = nil }
         } message: { Text(resultAlert ?? "") }
         .task { await load(); await inspect(); consumeSigningResult() }
+        .onReceive(NotificationCenter.default.publisher(for: .mirsaProjectAttached)) { note in
+            guard note.object as? UUID == app.id else { return }
+            do { draft = try ProjectAttachmentStore.draft(app) }
+            catch { message = OpenInAttachmentText.failed }
+        }
         .onChange(of: signing.state?.running) { _ in consumeSigningResult() }
         .onChange(of: draft) { _ in if loaded, let destination = draftDestination { draftWriter.schedule(draft, to: destination) } }
         .onChange(of: scenePhase) { phase in if phase != .active { draftWriter.flush() } }
