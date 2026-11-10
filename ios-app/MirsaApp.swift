@@ -42,6 +42,10 @@ struct MirsaApp: App {
             Group {
                 if let page = MirsaStyleShots.page { MirsaStyleShotHost(page: page) } else if MirsaUITestHarness.active { MirsaUITestHarnessView() } else if AppsStore.isSetupMode { SetupView() } else { ContentView() }
             }
+            .background { OpenInProjectPresenter().frame(width: 0, height: 0) }
+            .onOpenURL { url in
+                if AppsStore.isSetupMode, OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]) }
+            }
             .environmentObject(vm)
             .environment(\.layoutDirection, .leftToRight)
             .environment(\.locale, language.current.locale)
@@ -50,6 +54,7 @@ struct MirsaApp: App {
             .mirsaLeftToRightChrome()
             .task { if !MirsaUITestHarness.active { await ForgeStore.shared.syncFixInbox() } }
             .onChange(of: scenePhase) { _, phase in
+                if phase == .active { OpenInProjectCoordinator.shared.presentNext() }
                 if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
                 if phase == .active, !MirsaUITestHarness.active { Task { await ForgeStore.shared.syncFixInbox() } }
             }
