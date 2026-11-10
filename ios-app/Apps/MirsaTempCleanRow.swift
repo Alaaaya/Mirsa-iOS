@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Small Settings item: shows the size of Mirsa's own managed temporary files and clears the ones not in use.
+/// Measures disposable tmp/cache leftovers off the main thread; live files are preserved.
 struct MirsaTempCleanRow: View {
-    @State private var size = MirsaManagedTmp.sizeText
+    @State private var size = "…"
     @State private var busy = false
     var body: some View {
         Section {
@@ -24,6 +24,11 @@ struct MirsaTempCleanRow: View {
         } footer: {
             Text(tr("Only Mirsa's own working files that are not in use. Your apps, library and projects are never touched.", "بس ملفات الشغل المؤقتة تبع مرسى اللي مو مستخدمة. تطبيقاتك ومكتبتك ومشاريعك ما بتنلمس.", ckb: "تەنها فایلە کاتییەکانی خودی میرسا کە بەکارنایەن. ئەپ و کتێبخانە و پڕۆژەکانت دەست لێ نادرێت.", kmr: "Tenê pelên xebatê yên Mirsayê yên ku nayên bikaranîn. Sepan, pirtûkxane û projeyên te nayên destlêdan."))
         }
-        .onAppear { size = MirsaManagedTmp.sizeText }
+        .onAppear {
+            DispatchQueue.global(qos: .utility).async {
+                let text = MirsaManagedTmp.sizeText
+                DispatchQueue.main.async { size = text }
+            }
+        }
     }
 }

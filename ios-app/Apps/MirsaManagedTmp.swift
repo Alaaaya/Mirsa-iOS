@@ -1,7 +1,7 @@
 import Foundation
 
-/// Only newly-created, explicitly owned operation directories are eligible for cleanup.
-/// User sources, persistent exports, archives and the old unclassified tmp contents are never swept.
+/// Managed workspaces have explicit live leases. Container-wide legacy cleanup additionally
+/// handles stale tmp/cache leftovers without touching current-process or persistent files.
 enum MirsaManagedTmp {
     static let rootName = "mirsa-managed"
     static var root: URL { FileManager.default.temporaryDirectory.appendingPathComponent(rootName, isDirectory: true) }
@@ -76,7 +76,9 @@ enum MirsaManagedTmp {
     static func sweep(maxAge: TimeInterval = 3600, now: Date = Date(), root r: URL? = nil) -> Int {
         lock.lock(); defer { lock.unlock() }
         guard let base = safeRoot(r ?? root),
-              let items = try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey]) else { return 0 }
+              let items = try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            return r == nil ? containerScan(delete: true, maxAge: maxAge, now: now).removed : 0
+        }
         var removed = 0
         for item in items {
             guard owned(item, base: base), !active.contains(item.path) else { continue }
@@ -86,11 +88,32 @@ enum MirsaManagedTmp {
             guard now.timeIntervalSince(modified) > maxAge else { continue }
             do { try FileManager.default.removeItem(at: item); removed += 1 } catch {}
         }
+        if r == nil {
+            removed += containerScan(delete: true, maxAge: maxAge, now: now).removed
+        }
         return removed
+    }
+
+    // Runs under the registry lock shared with begin/end/markServed. A lease protects
+    // its ancestors and descendants; unknown new legacy files fail closed by ctime.
+    private static func containerScan(delete: Bool, maxAge: TimeInterval, now: Date) -> MirsaContainerCleanup.Result {
+        let fm = FileManager.default
+        let blocked = active.union(served.filter { $0.value > now }.map { $0.key })
+        let cutoff = min(MirsaContainerCleanup.processStart.addingTimeInterval(-2),
+                         now.addingTimeInterval(-max(0, maxAge)))
+        var total = MirsaContainerCleanup.scan(root: fm.temporaryDirectory, scope: .temporary,
+            delete: delete, cutoff: cutoff, protectedPaths: blocked, now: now)
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let cache = MirsaContainerCleanup.scan(root: caches, scope: .caches,
+                delete: delete, cutoff: cutoff, protectedPaths: blocked, now: now)
+            total.bytes += cache.bytes; total.removed += cache.removed
+        }
+        return total
     }
 
     static func size(root r: URL? = nil) -> Int64 {
         lock.lock(); defer { lock.unlock() }
+        if r == nil { return containerScan(delete: false, maxAge: 0, now: Date()).bytes }
         guard let base = safeRoot(r ?? root) else { return 0 }
         // Walk each directory explicitly so skipping a link never prunes siblings.
         // Only real directories are enqueued; user-linked targets are never visited.
