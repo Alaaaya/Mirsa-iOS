@@ -498,6 +498,8 @@ struct ForgeChatThreadView: View {
     }
 
     private var inputBar: some View {
+        // Keep identifiers on controls; container identifiers replace their IDs
+        // in SwiftUI's accessibility representation.
         HStack(alignment: .center, spacing: 10) {
             HStack(spacing: 8) {
                 PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
@@ -512,7 +514,6 @@ struct ForgeChatThreadView: View {
                 .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
                 .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
-            .accessibilityIdentifier("chat-composer")
     }
 
     private func userBubble(_ t: String) -> some View {
