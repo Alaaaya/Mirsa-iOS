@@ -60,8 +60,17 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             // SwiftUI exposes this HStack's identifier on its tab buttons.
             // Require the real dock, rather than silently skipping its geometry.
             let dock = app.buttons.matching(identifier: "mirsa-tab-dock").firstMatch
+            // Since 2.1 a conversation opens full screen (fullScreenCover) over the
+            // tab bar. Then the dock is covered and cannot obscure the composer;
+            // the composer/send bounds checks above still apply.
+            let fullScreen = app.buttons["chat-back"].exists && !(dock.exists && dock.isHittable)
+            if fullScreen {
+                let status = app.staticTexts["chat-composer-status"]
+                if status.exists { XCTAssertLessThanOrEqual(status.frame.maxY, bounds.maxY, "inline status off screen") }
+            } else {
             XCTAssertTrue(dock.exists, "floating dock missing in liquid theme")
-            if dock.exists {
+            }
+            if dock.exists && !fullScreen {
                 XCTAssertLessThanOrEqual(input.frame.maxY, dock.frame.minY + 1, "composer obscured by dock")
                 XCTAssertLessThanOrEqual(send.frame.maxY, dock.frame.minY + 1, "send button obscured by dock")
                 let status = app.staticTexts["chat-composer-status"]

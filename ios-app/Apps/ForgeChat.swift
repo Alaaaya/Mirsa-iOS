@@ -296,6 +296,7 @@ struct ForgeChatRoot: View {
     @ObservedObject private var store = ForgeChatStore.shared
     @AppStorage("mirsa.chat.guideSeen") private var guideSeen = false
     @State private var path: [UUID] = []
+    @State private var open: ForgeOpenThread?
     @State private var toDelete: UUID?
     var body: some View {
         NavigationStack(path: $path) {
@@ -307,34 +308,47 @@ struct ForgeChatRoot: View {
                 if let e = store.error { Text(e).font(.footnote).foregroundStyle(.red) }
                 if store.threads.isEmpty && store.pendingThreadIDs.isEmpty { Text(ForgeChatText.empty).foregroundStyle(.secondary) }
                 ForEach(store.pendingThreadIDs, id: \.self) { id in
-                    NavigationLink(value: id) { VStack(alignment: .leading) { Text((store.outgoing + store.sentEcho).first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(store.hasInFlight(id) ? ForgeChatText.sending : ForgeChatText.status("queued")).font(.caption2).foregroundStyle(.secondary) } }
+                    Button { open = ForgeOpenThread(id: id) } label: { ForgeChatRowChevron { VStack(alignment: .leading) { Text((store.outgoing + store.sentEcho).first { $0.threadID == id }?.text ?? ForgeChatText.newRequest).lineLimit(2); Text(store.hasInFlight(id) ? ForgeChatText.sending : ForgeChatText.status("queued")).font(.caption2).foregroundStyle(.secondary) } } }.buttonStyle(.plain)
                 }
                 ForEach(store.threads) { t in
-                    NavigationLink(value: t.id) {
+                    Button { open = ForgeOpenThread(id: t.id) } label: { ForgeChatRowChevron {
                         HStack(spacing: 12) { MirsaSailMark().frame(width: 34, height: 34); VStack(alignment: .leading, spacing: 6) { Text(ForgeChatText.cleanTitle(t.title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { MirsaChatStatusPill(raw: s) } } }.padding(.vertical, 6)
-                    }
+                    } }.buttonStyle(.plain)
                     .listRowBackground(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.07)).overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5)))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { toDelete = t.id } label: { Label(ForgeChatText.deleteAction, systemImage: "trash") }.tint(.red)
                     }
                 }
             }
-            .scrollContentBackground(.hidden).listRowSpacing(10).background(MirsaChatTheme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
+            .scrollContentBackground(.hidden).listRowSpacing(10).background(AuroraBackground().ignoresSafeArea()).preferredColorScheme(.dark)
             .confirmationDialog(ForgeChatText.deleteTitle, isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
                 Button(ForgeChatText.deleteAction, role: .destructive) { if let id = toDelete { Task { await store.deleteThread(id) } }; toDelete = nil }
                 Button(ForgeChatText.cancel, role: .cancel) { toDelete = nil }
             }
             .navigationTitle(ForgeChatText.title).navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
+            // A conversation opens full screen, over the Tools segments and the tab bar.
+            .fullScreenCover(item: $open) { o in ForgeChatThreadView(threadID: o.id).environment(\.layoutDirection, .leftToRight) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { if !embedded { Button(ForgeChatText.close) { dismiss() } } }
-                ToolbarItem(placement: .primaryAction) { Button { path.append(store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest).accessibilityIdentifier("chat-new") }
+                ToolbarItem(placement: .primaryAction) { Button { open = ForgeOpenThread(id: store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest).accessibilityIdentifier("chat-new") }
             }
             .task { // poll only while this screen is visible
                 await store.flush()
                 while !Task.isCancelled { await store.refreshThreads(); try? await Task.sleep(nanoseconds: 15_000_000_000) }
             }
         }
+    }
+}
+
+struct ForgeOpenThread: Identifiable, Hashable { let id: UUID }
+
+/// List row label with the trailing chevron a NavigationLink used to draw.
+struct ForgeChatRowChevron<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        HStack { content; Spacer(minLength: 8); Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+            .contentShape(Rectangle())
     }
 }
 
@@ -422,7 +436,6 @@ struct ForgeChatThreadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
@@ -451,6 +464,8 @@ struct ForgeChatThreadView: View {
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
+                .safeAreaInset(edge: .top, spacing: 0) { header }
                 .onChange(of: msgs.count + queued.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -474,9 +489,9 @@ struct ForgeChatThreadView: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .background(MirsaChatTheme.bg)
+            .background(.ultraThinMaterial.opacity(0.85))
         }
-        .background(MirsaChatTheme.bg.ignoresSafeArea())
+        .background(AuroraBackground().ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onAppear {
@@ -500,17 +515,14 @@ struct ForgeChatThreadView: View {
         }
     }
 
+    /// No bar and no title: only a floating circular back button over the conversation.
     private var header: some View {
-        ZStack {
-            Text(ForgeChatText.title).font(.system(size: 21, weight: .bold)).foregroundStyle(.white)
-            HStack {
-                Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(Color(red: 0.118, green: 0.169, blue: 0.251)).clipShape(Circle()) }
-                    .accessibilityLabel(ForgeChatText.close)
-                Spacer()
-            }
-        }.padding(.horizontal, 18).padding(.vertical, 10)
-        .background(.ultraThinMaterial.opacity(0.6))
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 0.5) }
+        HStack(spacing: 10) {
+            Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
+                .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
+            Spacer()
+        }
+        .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
     }
 
