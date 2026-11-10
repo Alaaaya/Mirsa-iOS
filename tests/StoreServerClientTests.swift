@@ -21,6 +21,18 @@ private actor ServerFixture {
     var invalidCode = false
     var authenticated = false
     var errorCode: String?
+    var selection: String?
+    var mismatchSelection = false
+    func mismatch() { mismatchSelection = true }
+    var holdDownload = false
+    var held: CheckedContinuation<Void, Never>?
+    var started: CheckedContinuation<Void, Never>?
+    var didStart = false
+    func hold() { holdDownload = true }
+    func waitForDownload() async {
+        if didStart { return }; await withCheckedContinuation { started = $0 }
+    }
+    func releaseDownload() { held?.resume(); held = nil }
     func identity() -> MirsaStoreServerIdentity { .init(bearer: "fixture-bearer", userID: user) }
     func fail(_ value: String?) { errorCode = value }
     func rejectCodes() { invalidCode = true }
@@ -28,7 +40,7 @@ private actor ServerFixture {
     func verifyBody() -> [String: String]? {
         bodies.last { $0["code"] != nil } as? [String: String]
     }
-    func respond(_ request: URLRequest) throws -> (Data, Int) {
+    func respond(_ request: URLRequest) async throws -> (Data, Int) {
         XCTAssertEqual(request.url?.host, "mirsa-app.mooo.com")
         XCTAssertEqual(request.timeoutInterval, 180)
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-bearer")
@@ -42,6 +54,20 @@ private actor ServerFixture {
         }
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Mirsa-Store-Device"), device)
         if let errorCode { return try reply(["error": ["code": errorCode, "retryable": false]], 401) }
+        if path.hasSuffix("/versions") {
+            return try reply(["appID": 42, "latestExternalVersionID": "999", "versions": ["111", "222", "999"]])
+        }
+        if path.hasSuffix("/downloads") {
+            selection = body["externalVersionID"] as? String
+            if holdDownload {
+                didStart = true; started?.resume(); started = nil
+                await withCheckedContinuation { held = $0 }
+            }
+            return try reply(["jobID": "fixture-job", "status": "queued", "appID": 42, "externalVersionID": selection as Any? ?? NSNull()], 202)
+        }
+        if path.hasSuffix("/downloads/fixture-job") {
+            return try reply(["jobID": "fixture-job", "status": "running", "appID": mismatchSelection ? 999 : 42, "externalVersionID": selection as Any? ?? NSNull()])
+        }
         if path.hasSuffix("/login") {
             XCTAssertEqual(body["password"] as? String, "login-fixture-secret")
             return try reply(["status": "challenge", "challengeID": "fixture-challenge",
@@ -148,13 +174,76 @@ final class StoreServerClientTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    func testDownloadPollingIsBoundedAndCancellationStopsBeforeImport() async throws {
+        let fixture = ServerFixture()
+        let app = MirsaStoreApp(id: 42, bundleID: "invalid.fixture", name: "Fixture", version: "1", price: 0, artworkURL: "")
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+            http: { try await fixture.respond($0) }, pause: {})
+        do { _ = try await client.downloadOwnedApp(app); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreServerError, .code("busy")) }
+        let polls = await fixture.count("/downloads/fixture-job")
+        XCTAssertEqual(polls, MirsaStoreServerClient.maximumPolls)
+        let cancelled = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+            http: { try await fixture.respond($0) }, pause: { throw CancellationError() })
+        do { _ = try await cancelled.downloadOwnedApp(app); XCTFail() }
+        catch { XCTAssertTrue(error is CancellationError) }
+        let after = await fixture.count("/downloads/fixture-job")
+        XCTAssertEqual(after, polls)
+    }
+
+    func testLogoutInvalidatesInFlightDownloadBeforeLateJobCanImport() async throws {
+        let fixture = ServerFixture()
+        await fixture.hold()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+            http: { try await fixture.respond($0) }, pause: {})
+        let app = MirsaStoreApp(id: 42, bundleID: "invalid.fixture", name: "Fixture", version: "1", price: 0, artworkURL: "")
+        let download = Task { try await client.downloadOwnedApp(app) }
+        await fixture.waitForDownload()
+        try await client.signOut()
+        await fixture.releaseDownload()
+        do { _ = try await download.value; XCTFail("A late job must not reach the import callback") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .operationCancelled) }
+        let polls = await fixture.count("/downloads/fixture-job")
+        XCTAssertEqual(polls, 0)
+    }
+
+    func testOfficialVersionListAndSelectedExternalIDStayBoundToJob() async throws {
+        let fixture = ServerFixture()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+            http: { try await fixture.respond($0) }, pause: { throw CancellationError() })
+        let app = MirsaStoreApp(id: 42, bundleID: "invalid.fixture", name: "Fixture", version: "1", price: 0, artworkURL: "")
+        let versions = try await client.availableVersions(app)
+        XCTAssertEqual(versions, ["111", "222", "999"])
+        do { _ = try await client.downloadOwnedApp(app, externalVersionID: "222"); XCTFail() }
+        catch { XCTAssertTrue(error is CancellationError) }
+        try MirsaStoreServerClient.verifySelection(appID: 42, externalVersionID: "222", expectedAppID: 42, expectedVersionID: "222")
+        XCTAssertThrowsError(try MirsaStoreServerClient.verifySelection(appID: 42, externalVersionID: "111", expectedAppID: 42, expectedVersionID: "222"))
+        XCTAssertThrowsError(try MirsaStoreServerClient.verifySelection(appID: 43, externalVersionID: "222", expectedAppID: 42, expectedVersionID: "222"))
+        XCTAssertThrowsError(try MirsaStoreServerClient.verifySelection(appID: 42, externalVersionID: nil, expectedAppID: 42, expectedVersionID: "222"))
+        XCTAssertThrowsError(try MirsaStoreServerClient.verifySelection(appID: 42, externalVersionID: "222", expectedAppID: 42, expectedVersionID: nil))
+        XCTAssertFalse(MirsaStoreServerClient.numericVersion("22/2"))
+    }
+
+    func testChangedJobSelectionIsRejectedBeforeArtifactDownload() async throws {
+        let fixture = ServerFixture()
+        await fixture.mismatch()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+            http: { try await fixture.respond($0) }, pause: {})
+        let app = MirsaStoreApp(id: 42, bundleID: "invalid.fixture", name: "Fixture", version: "1", price: 0, artworkURL: "")
+        do { _ = try await client.downloadOwnedApp(app, externalVersionID: "222"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidPackage) }
+        let polls = await fixture.count("/downloads/fixture-job")
+        XCTAssertEqual(polls, 1)
+    }
+
     func testArtifactMetadataRejectsExfiltrationExpiryHashAndOversize() throws {
         let transport = try MirsaStoreServerTransport(origin: URL(string: "https://mirsa-app.mooo.com")!)
         func item(_ url: String = "https://mirsa-app.mooo.com/store/v1/artifacts/randomID",
                   size: Int64 = 10, hash: String = String(repeating: "a", count: 64),
                   offset: TimeInterval = 600) -> MirsaStoreServerClient.Artifact {
             .init(url: url, size: size, sha256: hash,
-                  expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset)))
+                  expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset)),
+                  appID: 42, externalVersionID: nil)
         }
         XCTAssertNoThrow(try MirsaStoreServerClient.artifactURL(item(), transport: transport))
         for value in [item("https://evil.invalid/store/v1/artifacts/randomID"),

@@ -9,7 +9,7 @@ enum MirsaStoreServerError: Error, Equatable {
     case code(String)
     static let allowed = Set(["unauthorized", "device_required", "rate_limited", "challenge_expired",
         "invalid_code", "credentials_rejected", "session_expired", "not_authenticated",
-        "paid_app_forbidden", "not_found", "artifact_expired", "too_large", "busy", "upstream_unavailable"])
+        "paid_app_forbidden", "license_required", "not_found", "artifact_expired", "too_large", "busy", "upstream_unavailable"])
     init(code: String) { self = .code(Self.allowed.contains(code) ? code : "upstream_unavailable") }
 }
 
@@ -22,7 +22,10 @@ actor MirsaStoreServerClient {
     private let vault: any MirsaStoreVault
     private let transport: MirsaStoreServerTransport
     private let http: HTTP
+    private let pause: () async throws -> Void
+    static let maximumPolls = 300
     private var busy = false
+    private var removedLegacySecrets = false
     private var generation: UInt64 = 0
     private var pending: (id: String, expires: Date, attempts: Int)?
     private var artifact: MirsaStoreServerArtifact?
@@ -31,8 +34,9 @@ actor MirsaStoreServerClient {
     init(identity: @escaping Identity, vault: any MirsaStoreVault = MirsaStoreKeychain(),
          transport: MirsaStoreServerTransport = try! MirsaStoreServerTransport(
             origin: URL(string: "https://mirsa-app.mooo.com")!),
-         http: HTTP? = nil) {
-        self.identity = identity; self.vault = vault; self.transport = transport
+         http: HTTP? = nil,
+         pause: @escaping () async throws -> Void = { try await Task.sleep(nanoseconds: 2_000_000_000) }) {
+        self.identity = identity; self.vault = vault; self.transport = transport; self.pause = pause
         self.http = http ?? { try await transport.json($0) }
     }
 
@@ -58,10 +62,15 @@ actor MirsaStoreServerClient {
                                                   version: version, price: price, artworkURL: "") }
     }
     private struct Job: Decodable {
-        let jobID: String; let status: String; let artifact: Artifact?
+        let jobID: String; let status: String; let appID: Int64
+        let externalVersionID: String?; let artifact: Artifact?
+    }
+    private struct Versions: Decodable {
+        let appID: Int64; let latestExternalVersionID: String; let versions: [String]
     }
     struct Artifact: Decodable {
         let url: String; let size: Int64; let sha256: String; let expiresAt: String
+        let appID: Int64; let externalVersionID: String?
     }
 
     static func date(_ value: String) -> Date? {
@@ -103,6 +112,11 @@ actor MirsaStoreServerClient {
         catch { throw MirsaStoreServerError(code: "upstream_unavailable") }
     }
     private func credentials(_ run: UInt64) async throws -> (MirsaStoreServerIdentity, String) {
+        if !removedLegacySecrets {
+            try vault.remove("account")
+            try vault.remove("challenge")
+            removedLegacySecrets = true
+        }
         let owner = try await identity()
         try check(run)
         if let previous = lastIdentity, previous.userID != owner.userID { pending = nil }
@@ -210,17 +224,50 @@ actor MirsaStoreServerClient {
         }
     }
 
-    func downloadOwnedApp(_ app: MirsaStoreApp) async throws -> URL {
+    func availableVersions(_ app: MirsaStoreApp) async throws -> [String] {
+        let run = try begin(); defer { busy = false }
+        let (owner, token) = try await credentials(run)
+        let result = try await perform(request("/versions", body: ["appID": app.id], owner: owner, device: token), as: Versions.self)
+        try check(run)
+        guard result.appID == app.id, Self.numericVersion(result.latestExternalVersionID),
+              result.versions.count <= 10_000 else { throw MirsaStoreError.invalidPackage }
+        let ids = result.versions
+        guard ids.allSatisfy(Self.numericVersion), Set(ids).count == ids.count,
+              ids.contains(result.latestExternalVersionID) else { throw MirsaStoreError.invalidPackage }
+        return ids
+    }
+
+    static func numericVersion(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 20 && value.utf8.allSatisfy { (48...57).contains($0) }
+    }
+
+    static func verifySelection(appID: Int64, externalVersionID: String?,
+                                expectedAppID: Int64, expectedVersionID: String?) throws {
+        guard appID == expectedAppID, externalVersionID == expectedVersionID else {
+            throw MirsaStoreError.invalidPackage
+        }
+    }
+
+    func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
         let run = try begin(); defer { busy = false; artifact = nil }
         let (owner, token) = try await credentials(run)
-        var job = try await perform(request("/downloads", body: ["appID": app.id], owner: owner, device: token), as: Job.self)
+        var body: [String: Any] = ["appID": app.id]
+        if let externalVersionID {
+            guard Self.numericVersion(externalVersionID) else { throw MirsaStoreError.invalidInput }
+            body["externalVersionID"] = externalVersionID
+        }
+        var job = try await perform(request("/downloads", body: body, owner: owner, device: token), as: Job.self)
         try check(run)
+        try Self.verifySelection(appID: job.appID, externalVersionID: job.externalVersionID,
+                                 expectedAppID: app.id, expectedVersionID: externalVersionID)
         let jobID = job.jobID
         guard Self.identifier(jobID) else { throw MirsaStoreError.invalidPackage }
         // Poll only during this explicit foreground operation, bounded to ten minutes.
-        for _ in 0..<300 {
+        for _ in 0..<Self.maximumPolls {
             try check(run)
             if job.status == "ready", let item = job.artifact {
+                try Self.verifySelection(appID: item.appID, externalVersionID: item.externalVersionID,
+                                         expectedAppID: app.id, expectedVersionID: externalVersionID)
                 let url = try Self.artifactURL(item, transport: transport)
                 let fetch = MirsaStoreServerArtifact()
                 artifact = fetch
@@ -238,13 +285,15 @@ actor MirsaStoreServerClient {
             guard job.status == "queued" || job.status == "running" else {
                 throw MirsaStoreServerError(code: "upstream_unavailable")
             }
-            try await Task.sleep(nanoseconds: 2_000_000_000)
+            try await pause()
             let refreshed = try await identity()
             try check(run)
             guard refreshed.userID == owner.userID else { throw MirsaStoreError.operationCancelled }
             job = try await perform(request("/downloads/" + jobID, method: "GET", body: nil,
                                             owner: refreshed, device: token), as: Job.self)
             guard job.jobID == jobID else { throw MirsaStoreError.invalidPackage }
+            try Self.verifySelection(appID: job.appID, externalVersionID: job.externalVersionID,
+                                     expectedAppID: app.id, expectedVersionID: externalVersionID)
         }
         throw MirsaStoreServerError(code: "busy")
     }
