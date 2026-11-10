@@ -266,7 +266,7 @@ struct AppStoreAccountView: View {
                         Text(t("Apple returned no versions.", "Apple ما رجّعت نسخ.", "Apple هیچ وەشانێکی نەگەڕاندەوە.", "Apple guhertoyek neda."))
                             .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
                     } else {
-                        let visible = Array(list.reversed().prefix(metadataLimit[key] ?? 20))
+                        let visible = Array(list.prefix(metadataLimit[key] ?? 20))
                         Picker("", selection: Binding(get: { chosen[key] ?? "" }, set: { chosen[key] = $0.isEmpty ? nil : $0; manualID[key] = "" })) {
                             Text(t("Latest", "الأحدث", "نوێترین", "Ya herî nû")).tag("")
                             ForEach(visible, id: \.self) { id in Text(versionLabel(app, id)).tag(id) }
@@ -275,7 +275,7 @@ struct AppStoreAccountView: View {
                             Button(t("Show 20 more versions", "عرض 20 نسخة كمان", "٢٠ وەشانی تریش نیشان بدە", "20 guhertoyên din nîşan bide")) {
                                 let next = min(list.count, visible.count + 20)
                                 metadataLimit[key] = next
-                                requestMetadata(app, ids: Array(list.reversed().prefix(next).suffix(20)))
+                                requestMetadata(app, ids: Array(list.prefix(next).suffix(20)))
                             }.buttonStyle(.mirsaSecondary)
                         }
                         Text(t("Version names come from Apple's official metadata. While loading or unavailable, External ID is shown. Downloads do not wait for names.",
@@ -385,7 +385,7 @@ struct AppStoreAccountView: View {
             let ids = try await client.availableVersions(app)
             versions[app.bundleID] = ids
             metadataLimit[app.bundleID] = 20
-            requestMetadata(app, ids: Array(ids.reversed().prefix(20)))
+            requestMetadata(app, ids: Array(ids.prefix(20)))
         }
     }
 
@@ -467,6 +467,9 @@ struct AppStoreAccountView: View {
                 case "unauthorized", "device_required", "session_expired", "not_authenticated":
                     account = nil; needsCode = false; results = []
                     return t("Your session is no longer available. Sign in again explicitly.", "جلستك ما عادت متاحة. سجّل دخول من جديد.", "دانیشتنەکەت بەردەست نییە. دووبارە بچۆ ژوورەوە.", "Danişîna te êdî ne berdest e. Dîsa têkeve.")
+                case "staging_denied": return t("App Store testing is restricted to the owner's existing verified device. This installation has no approved device credential. Nothing was reset.", "تجربة متجر أبل حالياً بس لجهاز صاحب التطبيق المسجّل. هالتثبيت ما عنده هوية جهاز معتمدة، وما غيّرنا شي.", "تاقیکردنەوەی ستۆر تەنها بۆ ئامێری پشتڕاستکراوەی خاوەنەکەیە. ئەم دامەزراندنە ناسنامەی ڕێپێدراوی نییە. هیچ شتێک نەگۆڕدرا.", "Ceribandina Store tenê ji bo amûra pejirandî ya xwedî ye. Ev sazkirin nasnameya pejirandî tune ye. Tiştek nehat guherandin.")
+                case "device_limit": return t("This account reached its device limit. Use an already registered device.", "هالحساب وصل لحد الأجهزة. استخدم جهاز مسجّل من قبل.", "ئەم ئەکاونتە گەیشتووەتە سنووری ئامێرەکان. ئامێرێکی پێشتر تۆمارکراو بەکاربهێنە.", "Ev hesab gihîştiye sînorê amûran. Amûreke berê tomarkirî bi kar bîne.")
+                case "invalid_version": return t("This version is not available for this app. Reload its official version list and choose again.", "هالنسخة مو متاحة لهالتطبيق. حدّث قائمة النسخ الرسمية واختار من جديد.", "ئەم وەشانە بۆ ئەم ئەپە بەردەست نییە. لیستی فەرمی نوێ بکەرەوە و دووبارە هەڵبژێرە.", "Ev guherto ji bo vê sepanê ne berdest e. Lîsteya fermî nû bike û dîsa hilbijêre.")
                 case "license_required": return t("Your account must own this app before listing versions or downloading. For a free app, tap Get free license first. Paid apps cannot be purchased here.", "لازم حسابك يملك التطبيق لتشوف النسخ أو تنزّل. إذا مجاني دوس احصل على ترخيص مجاني أول. المدفوع ما بينشترى هون.", "بۆ وەشانەکان و داگرتن دەبێت خاوەنی ئەپەکە بیت. بۆ ئەپی بێبەرامبەر سەرەتا مۆڵەت وەربگرە. پارەدار لێرە ناکڕدرێت.", "Ji bo guhertoyan û daxistinê divê hesab xwedî be. Ji bo belaş pêşî lîsansê bigire. Bi pere li vir nayê kirîn.")
                 case "paid_app_forbidden": return t("Paid apps cannot be purchased here.", "التطبيقات المدفوعة ما بتنشترى هون.", "ئەپە پارەدارەکان لێرە ناکڕدرێن.", "Sepanên bi pere li vir nayên kirîn.")
                 case "artifact_expired", "not_found": return t("This session or download expired. Start the action again.", "انتهت هالجلسة أو هالتنزيل. ابدأ الطلب من جديد.", "دانیشتن یان داگرتن بەسەرچوو. دووبارە دەست پێبکە.", "Danişîn an daxistin qediya. Dîsa dest pê bike.")
