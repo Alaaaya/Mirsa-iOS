@@ -8,6 +8,9 @@ enum MirsaFeatures {
     /// OFF until Kat confirms the stage server works and the owner approves. With it OFF the chat
     /// behaves exactly as 2.0: the old photo button and legacy image flow, no new button, no network calls.
     static let chatAttachments21 = false
+    /// PREVIEW BUILD ONLY (hark/2.1-attach-preview): shows the attachments menu so the UI can be seen.
+    /// The endpoint stays nil, so nothing is uploaded and every pick shows "coming soon". Never merge this.
+    static let chatAttachmentsUIPreview = true
 }
 
 @MainActor enum ChatAttachmentConfig {
@@ -24,7 +27,7 @@ enum MirsaFeatures {
     }
 
     /// Show the attachments menu instead of the legacy photo button.
-    static var uiEnabled: Bool { endpoint != nil || fixtureUI }
+    static var uiEnabled: Bool { endpoint != nil || fixtureUI || MirsaFeatures.chatAttachmentsUIPreview }
 
     /// DEBUG UI-test harness only: shows the menu with local, network-free uploads.
     static var fixtureUI: Bool {
