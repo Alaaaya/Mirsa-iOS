@@ -8,6 +8,7 @@ cp "$ROOT"/ios-app/AppStore/*.swift "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/StoreClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/ios-app/Apps/UpdateNetworkPath.swift" "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/UpdateNetworkPathTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+cp "$ROOT/ios-app/Apps/MirsaManagedTmp.swift" "$WORK/Sources/MirsaStoreKit/"
 # UI localization is outside this standalone backend package.
 cat > "$WORK/Sources/MirsaStoreKit/TestLocalization.swift" <<'SWIFT'
 func tr(_ en: String, _ ar: String, ckb: String, kmr: String) -> String { en }
