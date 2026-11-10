@@ -619,6 +619,7 @@ struct ContentView: View {
     }
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     private var liquidTheme: Bool { theme == MirsaTheme.liquid.rawValue }
+    @State private var chatComposerFocused = false
 
     var body: some View {
         TabView(selection: $vm.selectedTab) {
@@ -633,7 +634,7 @@ struct ContentView: View {
                 .tag(AppTab.sources)
 
             ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
+                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused))
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
                 .tag(AppTab.pairing)
 
@@ -649,7 +650,7 @@ struct ContentView: View {
         }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
-            if liquidTheme {
+            if liquidTheme && !chatComposerFocused {
                 LiquidTabBar(selection: $vm.selectedTab, items: [
                     LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
                     LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
@@ -660,6 +661,7 @@ struct ContentView: View {
                 .ignoresSafeArea(.keyboard)
             }
         }
+        .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
         .onOpenURL { url in
             // mirsa://launch?bundle=… from a Home Screen shortcut.
             if HomeShortcut.handle(url) { vm.selectedTab = .apps; return }
@@ -1185,14 +1187,15 @@ struct VPNStatusRow: View {
 /// and keep content clear of it.
 struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
+    var chatEditing: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
         if liquid {
             content
                 .toolbar(.hidden, for: .tabBar)
-                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: MirsaTabBarMetrics.clearance) }
+                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: chatEditing ? 0 : MirsaTabBarMetrics.clearance) }
         } else {
-            content
+            content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }
     }
 }

@@ -15,15 +15,23 @@ struct ToolsTab: View {
             }
         }
     }
-    @State private var section: Section = .pairing
+    @State private var section: Section = {
+        #if DEBUG
+        if MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaChatEmbeddedFixture") { return .create }
+        #endif
+        return .pairing
+    }()
     @Namespace private var ns
+    @State private var chatComposerFocused = false
 
     var body: some View {
         VStack(spacing: 0) {
-            picker
-                .padding(.horizontal, MirsaSpacing.page)
-                .padding(.vertical, MirsaSpacing.xs)
-                .background(AuroraBackground().ignoresSafeArea(edges: .top))
+            if !chatComposerFocused {
+                picker
+                    .padding(.horizontal, MirsaSpacing.page)
+                    .padding(.vertical, MirsaSpacing.xs)
+                    .background(AuroraBackground().ignoresSafeArea(edges: .top))
+            }
             Group {
                 switch section {
                 case .pairing: SetupPairingSheet(showsClose: false)
@@ -37,6 +45,7 @@ struct ToolsTab: View {
         // One continuous page background behind the picker and every section.
         .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
     }
 
     private var picker: some View {

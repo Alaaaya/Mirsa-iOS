@@ -102,6 +102,15 @@ enum ForgeChatImage {
     init() {
         if Self.fixture {
             let t = Self.fixtureThreadID
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaChatEmptyFixture") {
+                let args = ProcessInfo.processInfo.arguments
+                if args.contains("-MirsaChatQuotaFixture") { error = ForgeChatText.limit }
+                if args.contains("-MirsaChatRegistrationFailureFixture") { error = ForgeChatText.failed }
+                // Empty, pending registration and exhausted quota must all render the same composer.
+                return
+            }
+            #endif
             threads = [ForgeChatThread(id: t, title: "Fixture", status: "open", createdAt: nil, updatedAt: nil)]
             messages = [t: [
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Make me a tweak that hides the dock labels."),
@@ -190,7 +199,7 @@ enum ForgeChatImage {
     }
 
     func flush() async {
-        guard !flushing else { return }
+        guard !Self.fixture, !flushing else { return }
         flushing = true; defer { flushing = false }
         for o in outgoing where !deleting.contains(o.threadID) {
             var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text]
@@ -231,6 +240,7 @@ enum ForgeChatImage {
     }
 
     func refreshThreads() async {
+        guard !Self.fixture else { return }
         struct Lossy: Decodable { let value: ForgeChatThread?; init(from d: Decoder) throws { value = try? ForgeChatThread(from: d) } }
         struct W: Decodable { let threads: [Lossy] }
         let epochs = deleteEpoch
@@ -312,7 +322,7 @@ struct ForgeChatRoot: View {
             .navigationDestination(for: UUID.self) { ForgeChatThreadView(threadID: $0) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { if !embedded { Button(ForgeChatText.close) { dismiss() } } }
-                ToolbarItem(placement: .primaryAction) { Button { path.append(store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest) }
+                ToolbarItem(placement: .primaryAction) { Button { path.append(store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest).accessibilityIdentifier("chat-new") }
             }
             .task { // poll only while this screen is visible
                 await store.flush()
@@ -372,12 +382,19 @@ private enum ForgeChatDisplayRow: Identifiable, Equatable {
     }
 }
 
+/// Scoped to the active chat so only its typing mode collapses competing chrome.
+struct ForgeChatComposerFocusKey: PreferenceKey {
+    static var defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
 struct ForgeChatThreadView: View {
     let threadID: UUID
     @ObservedObject private var store = ForgeChatStore.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
+    @FocusState private var composerFocused: Bool
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
     @State private var started = false
@@ -421,7 +438,6 @@ struct ForgeChatThreadView: View {
                             HStack(spacing: 10) { MirsaTypingDots(); Text(ForgeChatText.waiting).font(.system(size: 15)).foregroundStyle(MirsaChatTheme.muted) }
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
                         }
-                        if let e = store.error { Text(e).font(.caption).foregroundStyle(.red) }
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding(.horizontal, 18).padding(.top, 8)
                     .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
@@ -431,14 +447,31 @@ struct ForgeChatThreadView: View {
                 .onChange(of: msgs.count + queued.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            if let jpeg, let img = UIImage(data: jpeg) {
-                HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
-                    Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(MirsaChatTheme.muted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Reserve the composer before the scroll view is laid out. A flexible sibling
+        // can be placed below the visible nested NavigationStack/tab safe area.
+        // This also tracks the keyboard's safe area without fixed device heights.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                if let jpeg, let img = UIImage(data: jpeg) {
+                    HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
+                        Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(MirsaChatTheme.muted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
+                }
+                inputBar
+                if let e = store.error {
+                    Text(e).font(.caption).foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18).padding(.bottom, 6)
+                        .accessibilityIdentifier("chat-composer-status")
+                }
             }
-            inputBar
+            .fixedSize(horizontal: false, vertical: true)
+            .background(MirsaChatTheme.bg)
         }
         .background(MirsaChatTheme.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onChange(of: photo) { _, item in
             guard let item else { return }
             Task { jpeg = (try? await item.loadTransferable(type: Data.self)).flatMap { ForgeChatImage.prepare($0) } }
@@ -468,17 +501,18 @@ struct ForgeChatThreadView: View {
         HStack(alignment: .center, spacing: 10) {
             HStack(spacing: 8) {
                 PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
-                TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).foregroundStyle(.white).tint(MirsaChatTheme.blue)
+                TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(.white).tint(MirsaChatTheme.blue)
             }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             Button {
                 started = true
                 store.send(threadID: threadID, text: text, jpeg: jpeg)
                 text = ""; jpeg = nil; photo = nil
             } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
-                .disabled(!canSend).accessibilityLabel(ForgeChatText.send)
+                .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
                 .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
                 .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
         }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
+            .accessibilityIdentifier("chat-composer")
     }
 
     private func userBubble(_ t: String) -> some View {
