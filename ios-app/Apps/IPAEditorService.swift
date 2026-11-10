@@ -21,6 +21,7 @@ enum IPAEditorService {
         if let order { request["order"] = order }
         if useLoader { request["use_loader"] = true }
         if let options = signingOptions {
+            request["existing_library_edits"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(options.existingLibraryEdits))
             request["remove_extensions"] = options.removeExtensions
             request["remove_watch"] = options.removeWatchApp
             request["remove_app_clips"] = options.removeAppClips
@@ -96,6 +97,16 @@ enum IPAEditorService {
         guard let size = try? out.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 1_000_000,
               let list = try JSONSerialization.jsonObject(with: Data(contentsOf: out)) as? [String] else { return [] }
         return list
+    }
+
+    static func existingLibraries(in app: URL) throws -> [ExistingProjectLibrary] {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("libraries-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: out) }
+        try run("existing_libraries", input: app, output: out)
+        guard let size = try out.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 16 * 1024 * 1024 else {
+            throw SideloadError.message("Library inspection exceeds safe limits.")
+        }
+        return try JSONDecoder().decode([ExistingProjectLibrary].self, from: Data(contentsOf: out))
     }
 
     static func validBundleID(_ value: String) -> Bool {
