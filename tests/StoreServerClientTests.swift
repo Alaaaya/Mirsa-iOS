@@ -35,7 +35,7 @@ private actor ServerFixture {
         if didStart { return }; await withCheckedContinuation { started = $0 }
     }
     func releaseDownload() { held?.resume(); held = nil }
-    func identity() -> MirsaStoreServerIdentity { .init(bearer: "fixture-bearer", userID: user) }
+    func identity() -> MirsaStoreServerIdentity { .init(bearer: "fixture-bearer", userID: user, forgeDeviceID: "91f71c66-b727-450e-8de2-244a1cf85915", forgeDeviceToken: String(repeating: "a", count: 64)) }
     func fail(_ value: String?) { errorCode = value }
     func rejectCodes() { invalidCode = true }
     func count(_ suffix: String) -> Int { paths.filter { $0.hasSuffix(suffix) }.count }
@@ -46,6 +46,8 @@ private actor ServerFixture {
         XCTAssertEqual(request.url?.host, "mirsa-app.mooo.com")
         XCTAssertEqual(request.timeoutInterval, 180)
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-bearer")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-mirsa-device"), "91f71c66-b727-450e-8de2-244a1cf85915")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-mirsa-device-token"), String(repeating: "a", count: 64))
         let path = request.url!.path
         paths.append(path)
         let body = try request.httpBody.map { try JSONSerialization.jsonObject(with: $0) as! [String: Any] } ?? [:]
@@ -104,6 +106,40 @@ private actor ServerFixture {
 }
 
 final class StoreServerClientTests: XCTestCase {
+    func testAllRoutesIncludingEnrollmentAndArtifactCarryExistingForgeBinding() async throws {
+        let fixture = ServerFixture()
+        let owner = await fixture.identity()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+                                           http: { try await fixture.respond($0) })
+        for path in ["/devices", "/login", "/verify", "/account", "/search", "/purchase", "/versions",
+                     "/version-metadata", "/downloads", "/downloads/fixture-job", "/artifacts/fixture-artifact", "/logout"] {
+            let enrollment = path == "/devices"
+            let request = try await client.request(path, owner: owner,
+                device: enrollment ? nil : String(repeating: "D", count: 43))
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-bearer", path)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-mirsa-device"), owner.forgeDeviceID, path)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-mirsa-device-token"), owner.forgeDeviceToken, path)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Mirsa-Store-Device"),
+                           enrollment ? nil : String(repeating: "D", count: 43), path)
+        }
+    }
+
+    func testMissingExistingForgeCredentialDeniesBeforeEnrollmentOrAppleBody() async throws {
+        let fixture = ServerFixture()
+        let user = UUID()
+        let vault = ServerFixtureVault()
+        let client = MirsaStoreServerClient(identity: {
+            .init(bearer: "fixture-bearer", userID: user,
+                  forgeDeviceID: "91f71c66-b727-450e-8de2-244a1cf85915", forgeDeviceToken: "")
+        }, vault: vault, http: { try await fixture.respond($0) })
+        do { _ = try await client.signIn(email: "fixture@example.invalid", password: "login-fixture-secret"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreServerError, .code("staging_denied")) }
+        let enrollment = await fixture.count("/devices")
+        let login = await fixture.count("/login")
+        XCTAssertEqual(enrollment, 0); XCTAssertEqual(login, 0)
+        XCTAssertTrue(vault.items.isEmpty)
+    }
+
     func testChallengeRequiresFreshPasswordAndPersistsOnlyOpaqueDeviceToken() async throws {
         let fixture = ServerFixture()
         let vault = ServerFixtureVault()
@@ -168,7 +204,9 @@ final class StoreServerClientTests: XCTestCase {
         catch { XCTAssertEqual(error as? MirsaStoreServerError, .code("upstream_unavailable")) }
         let accounts = await fixture.count("/account")
         XCTAssertEqual(accounts, 2)
-        XCTAssertEqual(MirsaStoreServerError(code: "invalid_code"), .code("invalid_code"))
+        for code in ["invalid_code", "device_limit", "invalid_version", "staging_denied"] {
+            XCTAssertEqual(MirsaStoreServerError(code: code), .code(code))
+        }
     }
 
     func testLogoutDeletesChallengeAndCallsServerOnce() async throws {

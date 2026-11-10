@@ -3,11 +3,13 @@ import Foundation
 struct MirsaStoreServerIdentity {
     let bearer: String
     let userID: UUID
+    let forgeDeviceID: String
+    let forgeDeviceToken: String
 }
 
 enum MirsaStoreServerError: Error, Equatable {
     case code(String)
-    static let allowed = Set(["unauthorized", "device_required", "rate_limited", "challenge_expired",
+    static let allowed = Set(["unauthorized", "device_required", "device_limit", "invalid_version", "staging_denied", "rate_limited", "challenge_expired",
         "invalid_code", "credentials_rejected", "session_expired", "not_authenticated",
         "paid_app_forbidden", "license_required", "not_found", "artifact_expired", "too_large", "busy", "upstream_unavailable"])
     init(code: String) { self = .code(Self.allowed.contains(code) ? code : "upstream_unavailable") }
@@ -91,11 +93,17 @@ actor MirsaStoreServerClient {
     private func key(_ identity: MirsaStoreServerIdentity) -> String {
         "server-device." + identity.userID.uuidString.lowercased()
     }
-    private func request(_ path: String, method: String = "POST", body: [String: Any]? = [:],
+    func request(_ path: String, method: String = "POST", body: [String: Any]? = [:],
                          owner: MirsaStoreServerIdentity, device: String? = nil) throws -> URLRequest {
+        guard UUID(uuidString: owner.forgeDeviceID) != nil,
+              owner.forgeDeviceToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw MirsaStoreServerError(code: "staging_denied")
+        }
         var request = URLRequest(url: try transport.url("/store/v1" + path), timeoutInterval: 180)
         request.httpMethod = method
         request.setValue("Bearer " + owner.bearer, forHTTPHeaderField: "Authorization")
+        request.setValue(owner.forgeDeviceID, forHTTPHeaderField: "x-mirsa-device")
+        request.setValue(owner.forgeDeviceToken, forHTTPHeaderField: "x-mirsa-device-token")
         if let device { request.setValue(device, forHTTPHeaderField: "X-Mirsa-Store-Device") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if method != "GET", let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
@@ -304,12 +312,12 @@ actor MirsaStoreServerClient {
                 let url = try Self.artifactURL(item, transport: transport)
                 let fetch = MirsaStoreServerArtifact()
                 artifact = fetch
-                var req = try request("/artifacts/" + url.lastPathComponent, method: "GET", body: nil, owner: owner, device: token)
                 // Refresh the Supabase JWT, never replay the Apple password.
                 let refreshed = try await identity()
                 try check(run)
-                guard refreshed.userID == owner.userID else { throw MirsaStoreError.operationCancelled }
-                req.setValue("Bearer " + refreshed.bearer, forHTTPHeaderField: "Authorization")
+                guard refreshed.userID == owner.userID, refreshed.forgeDeviceID == owner.forgeDeviceID,
+                      refreshed.forgeDeviceToken == owner.forgeDeviceToken else { throw MirsaStoreError.operationCancelled }
+                let req = try request("/artifacts/" + url.lastPathComponent, method: "GET", body: nil, owner: refreshed, device: token)
                 let file = try await fetch.fetch(transport: transport, request: req, expectedBytes: item.size,
                                                  sha256: item.sha256, expires: Self.date(item.expiresAt)!)
                 do { try check(run); return file }
@@ -321,7 +329,8 @@ actor MirsaStoreServerClient {
             try await pause()
             let refreshed = try await identity()
             try check(run)
-            guard refreshed.userID == owner.userID else { throw MirsaStoreError.operationCancelled }
+            guard refreshed.userID == owner.userID, refreshed.forgeDeviceID == owner.forgeDeviceID,
+                      refreshed.forgeDeviceToken == owner.forgeDeviceToken else { throw MirsaStoreError.operationCancelled }
             job = try await perform(request("/downloads/" + jobID, method: "GET", body: nil,
                                             owner: refreshed, device: token), as: Job.self)
             guard job.jobID == jobID else { throw MirsaStoreError.invalidPackage }
