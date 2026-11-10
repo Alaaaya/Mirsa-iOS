@@ -68,7 +68,11 @@ jobs:
               for a in t.get("attachments", []):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
-                  if not name.lower().endswith(".png"): name += ".png"
+                  name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+                  # Failure attachments include text and JSON, not only screenshots.
+                  # Preserve their extensions and keep names upload-artifact-safe.
+                  if not os.path.splitext(name)[1]:
+                      name += os.path.splitext(a["exportedFileName"])[1]
                   shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY
