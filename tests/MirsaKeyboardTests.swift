@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Vision
 @testable import Mirsa
 
 @MainActor
@@ -59,12 +60,20 @@ final class MirsaKeyboardTests: XCTestCase {
             .mirsaKeyboardDismissal().environment(\.locale, Locale(identifier: "ar")))
         window.rootViewController = host
         window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        window.layoutIfNeeded()
         defer { window.endEditing(true); window.isHidden = true; original?.makeKey() }
         try await Task.sleep(nanoseconds: 1_000_000_000)
         func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
         let fields = descendants(host.view).compactMap { $0 as? UITextField }
         let field = try XCTUnwrap(fields.first)
-        XCTAssertTrue(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
+        let mountDeadline = Date().addingTimeInterval(5)
+        while !projectCTAVisible(host.view, window: window), Date() < mountDeadline {
+            window.layoutIfNeeded()
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        attach(window, name: "project-app-window-before-editing-CTA")
+        XCTAssertTrue(projectCTAVisible(host.view, window: window),
                       "CTA must exist before editing begins")
         var keyboardFrame: CGRect?
         let token = NotificationCenter.default.addObserver(forName: UIResponder.keyboardDidShowNotification,
@@ -85,7 +94,7 @@ final class MirsaKeyboardTests: XCTestCase {
         // follow the finger and allow cancellation; none/onDrag are still bugs.
         XCTAssertTrue([UIScrollView.KeyboardDismissMode.interactive, .interactiveWithAccessory]
             .contains(scroll.keyboardDismissMode), "Expected interactive dismissal, got \(scroll.keyboardDismissMode)")
-        XCTAssertFalse(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
+        XCTAssertFalse(projectCTAVisible(host.view, window: window),
                        "CTA must not be exposed or cover the page while software keyboard is visible")
         attach(window, name: "project-app-window-keyboard-visible-focused-field")
         // Resigning first responder is not the end of the software keyboard's
@@ -101,15 +110,38 @@ final class MirsaKeyboardTests: XCTestCase {
         await fulfillment(of: [didHide], timeout: 5)
         XCTAssertFalse(field.isFirstResponder)
         let deadline = Date().addingTimeInterval(5)
-        while !accessibilityContains(host.view, identifier: "mirsa.project.sign"),
+        while !projectCTAVisible(host.view, window: window),
               Date() < deadline {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        XCTAssertTrue(accessibilityContains(host.view, identifier: "mirsa.project.sign"),
+        XCTAssertTrue(projectCTAVisible(host.view, window: window),
                       "CTA must return after keyboard fully dismisses")
         attach(window, name: "project-app-window-keyboard-hidden-CTA-restored")
+    }
+
+    /// SwiftUI safe-area inset buttons can be absent from the in-process AX
+    /// containers even when drawn. Require the exact CTA in the actual pixels
+    /// as a fallback, not a synthetic view, state flag or relaxed assertion.
+    private func projectCTAVisible(_ root: UIView, window: UIWindow) -> Bool {
+        if accessibilityContains(root, identifier: "mirsa.project.sign") { return true }
+        let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+            _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        guard let cg = image.cgImage else { return false }
+        let expected = personalText("Export configuration only", "تصدير الإعدادات فقط")
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["ar", "en-US"]
+        request.usesLanguageCorrection = false
+        request.customWords = [expected]
+        do { try VNImageRequestHandler(cgImage: cg).perform([request]) }
+        catch { return false }
+        let compact: (String) -> String = { $0.filter { !$0.isWhitespace } }
+        return (request.results ?? []).contains { observation in
+            observation.topCandidates(10).contains { compact($0.string) == compact(expected) }
+        }
     }
 
     private func accessibilityContains(_ root: NSObject, identifier: String) -> Bool {

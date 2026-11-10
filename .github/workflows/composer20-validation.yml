@@ -55,12 +55,12 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" 2>&1 | tee build/ai-ui.log
       - name: Test integrated Open In project attachments on the same build
         run: |
           set -o pipefail
           DEVICE="$MIRSA_TEST_DEVICE"
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/OpenIn.xcresult -only-testing:MirsaTests/OpenInProjectAttachmentTests -only-testing:MirsaTests/PersonalProjectPerformanceTests -only-testing:MirsaTests/OpenInIPATests -only-testing:MirsaTests/IncomingIPAConfirmationTests -only-testing:MirsaTests/IncomingIPAExplicitTests -only-testing:MirsaTests/IncomingIPAChoiceTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/openin.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/OpenIn.xcresult -only-testing:MirsaTests/OpenInProjectAttachmentTests -only-testing:MirsaTests/PersonalProjectPerformanceTests -only-testing:MirsaTests/OpenInIPATests -only-testing:MirsaTests/IncomingIPAConfirmationTests -only-testing:MirsaTests/IncomingIPAExplicitTests -only-testing:MirsaTests/IncomingIPAChoiceTests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" 2>&1 | tee build/openin.log
       - name: Export Open In sheet attachments
         if: always()
         run: |
@@ -72,7 +72,14 @@ jobs:
         if: matrix.size == 'small'
         run: |
           set -o pipefail
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$MIRSA_TEST_DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ProjectFeatures.xcresult -only-testing:MirsaTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/project-features.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$MIRSA_TEST_DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ProjectFeatures.xcresult -only-testing:MirsaTests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" 2>&1 | tee build/project-features.log
+      - name: Export compiled project test screenshots
+        if: always() && matrix.size == 'small'
+        run: |
+          if [ -d build/ProjectFeatures.xcresult ]; then
+            mkdir -p build/project-shots
+            xcrun xcresulttool export attachments --path build/ProjectFeatures.xcresult --output-path build/project-shots
+          fi
       - name: Export named screenshots
         if: always()
         run: |
@@ -107,6 +114,7 @@ jobs:
             build/crashes
             build/ai-ui.log
             build/project-features.log
+            build/project-shots
             build/ProjectFeatures.xcresult
             build/AIUI.xcresult
             build/OpenIn.xcresult
