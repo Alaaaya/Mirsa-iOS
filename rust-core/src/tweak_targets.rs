@@ -7,8 +7,8 @@ pub(super) struct Target { pub id: String, pub kind: String, pub label: String }
 pub(super) struct Injection {
  pub(super) id: String, pub(super) library: String, pub(super) target: String,
  #[serde(default)] pub(super) method: Option<String>,
- #[serde(default)] targets: Vec<String>,
- #[serde(default, alias="sharedTarget")] shared_target: Option<String>,
+ #[serde(default)] pub(super) targets: Vec<String>,
+ #[serde(default, alias="sharedTarget")] pub(super) shared_target: Option<String>,
 }
 fn json(out: &Path, value: &impl Serialize)->Result<()> { fs::write(out,serde_json::to_vec(value).map_err(err)?).map_err(err) }
 fn executable(bundle:&Path)->Result<String>{
@@ -296,7 +296,7 @@ B.dylib
  }
  #[test] fn capabilities_without_extensions_disable_methods_with_reason_and_no_writes() {
   let(p,a)=setup("capabilities");let original=fs::read(a.join("Main")).unwrap();let out=p.join("cap.json");super::super::injection_methods::capabilities(&a,&out).unwrap();
-  let v:serde_json::Value=serde_json::from_slice(&fs::read(out).unwrap()).unwrap();
+  let v:serde_json::Value=serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
   assert_eq!(v["sharedCandidates"],serde_json::json!([]));assert!(v["sharedDisabledReason"].as_str().unwrap().contains("requires"));
   assert_eq!(v["methods"][3]["enabled"],false);assert_eq!(v["methods"][3]["reason"],"no_extensions");
   assert_eq!(fs::read(a.join("Main")).unwrap(),original);fs::remove_dir_all(p).unwrap();
@@ -341,9 +341,11 @@ B.dylib
   assert!(super::super::injection_methods::shared_candidates(&a,&["Main".into(),"PlugIns/X.appex/X".into(),"PlugIns/Y.appex/Y".into()]).is_err());
   let original=fs::read(a.join("Main")).unwrap();let out=p.join("caps.json");
   super::super::injection_methods::capabilities_for(&a,&[selected],&out).unwrap();
-  let v:serde_json::Value=serde_json::from_slice(&fs::read(out).unwrap()).unwrap();
+  let v:serde_json::Value=serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
   assert_eq!(v["methods"][2]["enabled"],false);assert_eq!(v["components"][0]["methods"][2]["enabled"],true);
-  assert_eq!(v["components"][0]["methods"][0]["enabled"],false);
+  assert_eq!(v["components"][0]["methods"][0]["enabled"],true);
+  assert_eq!(v["components"][0]["sharedCandidates"][0]["processes"],serde_json::json!(["Main","PlugIns/X.appex/X"]));
+  assert!(v["components"][0]["eligibleTargets"]["load_control"].as_array().unwrap().contains(&serde_json::json!("Main")));
   assert_eq!(fs::read(a.join("Main")).unwrap(),original);assert!(!a.join("Frameworks/Frameworks").exists());
   fs::remove_dir_all(p).unwrap();
  }
@@ -355,6 +357,23 @@ B.dylib
   let original=fs::read(a.join("Main")).unwrap();
   assert!(inject_plan(&a,&items,&[],false,false).unwrap_err().contains("interleaved"));
   assert_eq!(fs::read(a.join("Main")).unwrap(),original);assert!(!a.join("Frameworks").exists());fs::remove_dir_all(p).unwrap();
+ }
+
+ #[test] fn component_discovery_main_only_input_verifies_candidates_before_any_user_selection() {
+  let(p,a,l)=shared_setup("discover-before-choice");
+  let out=p.join("caps.json");
+  super::super::injection_methods::capabilities_for(&a,&[item("discover",&l,"Main")],&out).unwrap();
+  let v:serde_json::Value=serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
+  let c=&v["components"][0];
+  for index in 0..4 {assert_eq!(c["methods"][index]["enabled"],true);}
+  assert_eq!(c["eligibleTargets"]["separate_extension"],serde_json::json!(["PlugIns/X.appex/X"]));
+  assert_eq!(c["sharedCandidates"][0]["id"],"Frameworks/Shared.dylib");
+  assert!(!a.join("Frameworks/Frameworks").exists());
+  let mut unsupported=fixture(6);put32(&mut unsupported,8,2);fs::write(&l,unsupported).unwrap();
+  super::super::injection_methods::capabilities_for(&a,&[item("bad",&l,"Main")],&out).unwrap();
+  let bad:serde_json::Value=serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
+  for method in bad["components"][0]["methods"].as_array().unwrap(){assert_eq!(method["enabled"],false);}
+  fs::remove_dir_all(p).unwrap();
  }
 
 }
