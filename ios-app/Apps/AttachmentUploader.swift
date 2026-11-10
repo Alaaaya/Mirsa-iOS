@@ -11,10 +11,9 @@ enum MirsaFeatures {
 }
 
 @MainActor enum ChatAttachmentConfig {
-    /// TODO(Kat): base URL of the ISOLATED stage function once it is deployed, e.g.
-    ///   https://<ISOLATED-STAGE-PROJECT>.supabase.co/functions/v1/mirsa-attachments21-stage
-    /// It is NOT deployed yet, so this stays nil. NEVER point it at the production mirsa-forge function.
-    static let stageBaseURL: URL? = nil
+    /// Stage function from Kat (2026-11-10). Only used while MirsaFeatures.chatAttachments21 is ON,
+    /// which stays OFF in the official build. NEVER point this at the production mirsa-forge function.
+    static let stageBaseURL: URL? = URL(string: "https://mirsa-app.mooo.com/attachments21-stage")
 
     /// The attachments endpoint, or nil when the feature is off / unconfigured / unsafe.
     static var endpoint: URL? {

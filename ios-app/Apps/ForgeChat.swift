@@ -145,9 +145,10 @@ enum ForgeChatImage {
         let r: ForgePreciseClient.Response
         do {
             let c = try await ForgeClient.fixToken()
-            if let stage = ChatAttachmentConfig.endpoint {
-                // Attachments ON (stage only): the whole chat talks to the stage function so threads,
-                // uploads and sends share one server. Same credentials plus the existing apikey.
+            if let stage = ChatAttachmentConfig.endpoint, let ids = body["attachmentIDs"] as? [String], !ids.isEmpty {
+                // Attachments ON (Kat, 2026-11-10): only chat-send carrying attachmentIDs goes to stage here
+                // (put/read/delete go through AttachmentUploader). Every other chat call stays on the current
+                // server. Stage accepts the same production identity (JWT, apikey, device headers).
                 r = try await ForgePreciseClient.request(body, credentials: c, endpoint: stage, apikey: WebBackendConfig.defaultPublishableKey)
             } else {
                 r = try await ForgePreciseClient.request(body, credentials: c)
@@ -232,10 +233,11 @@ enum ForgeChatImage {
                 body["attachmentIDs"] = ChatAttachmentRules.sendIDs(ids).map { $0.uuidString.lowercased() } // same IDs on every retry
             } else if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
             do {
-                _ = try await call(body)
+                let sent = try await call(body)
                 if deleting.contains(o.threadID) { continue } // delete started mid-send; delete waits for flush and wipes it
                 ackedThreads.insert(o.threadID); let echo = ForgeChatTimeline.acceptedEcho(o); sentEcho.removeAll { $0.id == o.id }; sentEcho.append(echo); saveEcho()
                 outgoing.removeAll { $0.id == o.id }; saveOutgoing(); error = nil
+                if let ids = o.attachmentIDs, !ids.isEmpty { applySentAttachments(sent, threadID: o.threadID) }
             } catch let a as ChatAttachmentError {
                 if a.isTransient || a.status == 401 || a.status == 403 {
                     self.error = a.message
@@ -256,6 +258,16 @@ enum ForgeChatImage {
             }
         }
         await refreshThreads()
+    }
+
+    /// Kat, 2026-11-10: chat-send answers {message:{...}} with message.attachments, same shape as chat-read
+    /// (expired ones come back available:false with no bytes). Publish it right away; the next read confirms it.
+    private func applySentAttachments(_ data: Data, threadID: UUID) {
+        struct W: Decodable { let message: ForgeChatMessage }
+        guard let m = (try? JSONDecoder().decode(W.self, from: data))?.message, m.threadID == threadID,
+              m.attachments?.isEmpty == false else { return }
+        let merged = ForgeChatTimeline.mergeConfirmed(previous: messages[threadID] ?? [], incoming: [m])
+        if messages[threadID] != merged { var all = messages; all[threadID] = merged; messages = all }
     }
 
     /// Server delete first (device-owned thread). Local state is wiped only after the server confirms.
