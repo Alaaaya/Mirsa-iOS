@@ -22,6 +22,8 @@ private actor ServerFixture {
     var authenticated = false
     var errorCode: String?
     var selection: String?
+    var wrongMetadataApp = false
+    func wrongMetadata() { wrongMetadataApp = true }
     var mismatchSelection = false
     func mismatch() { mismatchSelection = true }
     var holdDownload = false
@@ -54,6 +56,13 @@ private actor ServerFixture {
         }
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Mirsa-Store-Device"), device)
         if let errorCode { return try reply(["error": ["code": errorCode, "retryable": false]], 401) }
+        if path.hasSuffix("/version-metadata") {
+            XCTAssertEqual(body["externalVersionIDs"] as? [String], ["111", "222"])
+            return try reply(["appID": wrongMetadataApp ? 999 : 42, "entries": [
+                ["externalVersionID": "111", "status": "ready", "version": "1.2.3"],
+                ["externalVersionID": "222", "status": "queued"],
+                ["externalVersionID": "999", "status": "ready", "version": "unrequested"]]])
+        }
         if path.hasSuffix("/versions") {
             return try reply(["appID": 42, "latestExternalVersionID": "999", "versions": ["111", "222", "999"]])
         }
@@ -63,10 +72,10 @@ private actor ServerFixture {
                 didStart = true; started?.resume(); started = nil
                 await withCheckedContinuation { held = $0 }
             }
-            return try reply(["jobID": "fixture-job", "status": "queued", "appID": 42, "externalVersionID": selection as Any? ?? NSNull()], 202)
+            return try reply(["jobID": "fixture-job", "status": "queued", "appID": 42, "externalVersionID": selection.map { $0 as Any } ?? NSNull()], 202)
         }
         if path.hasSuffix("/downloads/fixture-job") {
-            return try reply(["jobID": "fixture-job", "status": "running", "appID": mismatchSelection ? 999 : 42, "externalVersionID": selection as Any? ?? NSNull()])
+            return try reply(["jobID": "fixture-job", "status": "running", "appID": mismatchSelection ? 999 : 42, "externalVersionID": selection.map { $0 as Any } ?? NSNull()])
         }
         if path.hasSuffix("/login") {
             XCTAssertEqual(body["password"] as? String, "login-fixture-secret")
@@ -234,6 +243,24 @@ final class StoreServerClientTests: XCTestCase {
         catch { XCTAssertEqual(error as? MirsaStoreError, .invalidPackage) }
         let polls = await fixture.count("/downloads/fixture-job")
         XCTAssertEqual(polls, 1)
+    }
+
+    func testOfficialMetadataBindingAndTwentyIDLimit() async throws {
+        let fixture = ServerFixture()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: ServerFixtureVault(),
+            http: { try await fixture.respond($0) })
+        let app = MirsaStoreApp(id: 42, bundleID: "invalid.fixture", name: "Fixture", version: "1", price: 0, artworkURL: "")
+        let entries = try await client.versionMetadata(app, externalVersionIDs: ["111", "222"])
+        XCTAssertEqual(entries.map(\.externalVersionID), ["111", "222"])
+        XCTAssertEqual(entries.first?.version, "1.2.3")
+        XCTAssertNil(entries.last?.version)
+        for ids in [["111", "111"], ["bad"], (1...21).map(String.init)] {
+            do { _ = try await client.versionMetadata(app, externalVersionIDs: ids); XCTFail() }
+            catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        }
+        await fixture.wrongMetadata()
+        do { _ = try await client.versionMetadata(app, externalVersionIDs: ["111", "222"]); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidPackage) }
     }
 
     func testArtifactMetadataRejectsExfiltrationExpiryHashAndOversize() throws {

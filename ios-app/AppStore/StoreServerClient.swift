@@ -237,6 +237,39 @@ actor MirsaStoreServerClient {
         return ids
     }
 
+    struct VersionMetadata: Decodable, Equatable {
+        let externalVersionID: String
+        let status: String
+        let version: String?
+    }
+    private struct MetadataResponse: Decodable {
+        let appID: Int64
+        let entries: [VersionMetadata]
+    }
+
+    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String]) async throws -> [VersionMetadata] {
+        guard !ids.isEmpty, ids.count <= 20, Set(ids).count == ids.count,
+              ids.allSatisfy(Self.numericVersion) else { throw MirsaStoreError.invalidInput }
+        // Metadata is independent of the foreground operation's busy flag; it cannot delay a download.
+        let run = generation
+        let (owner, token) = try await credentials(run)
+        let result = try await perform(request("/version-metadata", body: ["appID": app.id, "externalVersionIDs": ids],
+                                               owner: owner, device: token), as: MetadataResponse.self)
+        try check(run)
+        guard result.appID == app.id, result.entries.count <= 20 else { throw MirsaStoreError.invalidPackage }
+        let requested = Set(ids)
+        var seen = Set<String>()
+        return result.entries.filter { item in
+            guard requested.contains(item.externalVersionID), seen.insert(item.externalVersionID).inserted,
+                  ["queued", "ready", "unavailable"].contains(item.status) else { return false }
+            if item.status == "ready" {
+                guard let version = item.version, !version.isEmpty, version.utf8.count <= 128,
+                      !version.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return false }
+            } else if item.version != nil { return false }
+            return true
+        }
+    }
+
     static func numericVersion(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 20 && value.utf8.allSatisfy { (48...57).contains($0) }
     }
