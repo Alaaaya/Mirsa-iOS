@@ -16,14 +16,16 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     names = [n for n in archive.namelist() if n.startswith("Payload/") and n.count("/") == 2 and n.endswith(".app/Info.plist")]
     assert len(names) == 1
     current = plistlib.loads(archive.read(names[0]))
-    assert current["CFBundleShortVersionString"] == "1.7"
+    assert current["CFBundleShortVersionString"] == "1.8"
     for name in archive.namelist():
         if name.endswith(".appex/Info.plist"):
             ext = plistlib.loads(archive.read(name))
             assert ext["CFBundleShortVersionString"] == current["CFBundleShortVersionString"]
             assert ext["CFBundleVersion"] == current["CFBundleVersion"]
 old = baseline["ipa"]["info"]["CFBundleVersion"]
+previous = "4.56.1"  # Actual verified production 1.7 IPA, run 256
 new = current["CFBundleVersion"]
+assert int(current["MirsaBuild"]) > 256, "actual MirsaBuild must advance past production 1.7"
 # JSON-encoded numeric versions are also valid Swift string literals.
 with tempfile.TemporaryDirectory() as tmp:
     script = pathlib.Path(tmp) / "Upgrade243.swift"
@@ -32,12 +34,14 @@ with tempfile.TemporaryDirectory() as tmp:
         ", installed: " + json.dumps(old) + "))\n" +
         "precondition(!UpdaterMetadata.isNewer(remote: " + json.dumps(old) +
         ", installed: " + json.dumps(new) + "))\n" +
-        'precondition(UpdaterMetadata.isNewer(remote: "1.7", installed: "1.3.243"))\n' +
-        'precondition(UpdaterMetadata.isNewer(remote: "1.7", installed: "1.4"))\n' +
-        'precondition(!UpdaterMetadata.isNewer(remote: "1.4", installed: "1.7"))\n' +
+        "precondition(UpdaterMetadata.isNewer(remote: " + json.dumps(new) +
+        ", installed: " + json.dumps(previous) + "))\n" +
+        'precondition(UpdaterMetadata.isNewer(remote: "1.8", installed: "1.3.243"))\n' +
+        'precondition(UpdaterMetadata.isNewer(remote: "1.8", installed: "1.4"))\n' +
+        'precondition(!UpdaterMetadata.isNewer(remote: "1.4", installed: "1.8"))\n' +
         'print("Actual 243 updater migration PASS")\n'
     ).encode())
     subprocess.run(["swift", str(script)], check=True)
 print(json.dumps({"baselineIPA": baseline["ipa"]["sha256"], "oldBuild": old,
-                  "newBuild": new, "shortVersion": current["CFBundleShortVersionString"],
+                  "previousBuild": previous, "newBuild": new, "shortVersion": current["CFBundleShortVersionString"],
                   "actual243Comparator": "PASS"}))
