@@ -248,3 +248,71 @@ final class IPATweakLibrary: ObservableObject {
         }
     }
 }
+
+
+/// Download tasks stream to disk. The delegate cancels oversized responses
+/// during transfer instead of discovering a full-disk download afterwards.
+private final class IPATweakDownload: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private var continuation: CheckedContinuation<URL, Error>?
+    private var received: URL?
+    private var downloadFailure: Error?
+    private var session: URLSession?
+
+    static func fetch(_ url: URL) async throws -> URL {
+        let delegate = IPATweakDownload()
+        return try await withCheckedThrowingContinuation { continuation in
+            delegate.continuation = continuation
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 60
+            config.timeoutIntervalForResource = 180
+            let queue = OperationQueue()
+            queue.maxConcurrentOperationCount = 1
+            let session = URLSession(configuration: config, delegate: delegate, delegateQueue: queue)
+            delegate.session = session
+            session.downloadTask(with: url).resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard request.url?.scheme?.lowercased() == "https", request.url?.user == nil, request.url?.password == nil else {
+            downloadFailure = SideloadError.message("Only HTTPS tweak redirects are allowed.")
+            completionHandler(nil); task.cancel(); return
+        }
+        completionHandler(request)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        if totalBytesWritten > IPAEditorService.maximumFileSize || totalBytesExpectedToWrite > IPAEditorService.maximumFileSize {
+            downloadFailure = SideloadError.message("Tweak exceeds 512 MiB.")
+            downloadTask.cancel()
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        do {
+            guard let http = downloadTask.response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  http.url?.scheme?.lowercased() == "https" else {
+                throw SideloadError.message("The tweak URL did not return a successful HTTPS download.")
+            }
+            let size = (try location.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0
+            guard size <= IPAEditorService.maximumFileSize else { throw SideloadError.message("Tweak exceeds 512 MiB.") }
+            let retained = FileManager.default.temporaryDirectory.appendingPathComponent("tweak-download-\(UUID().uuidString)")
+            try FileManager.default.moveItem(at: location, to: retained)
+            received = retained
+        } catch { downloadFailure = error }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let callback = continuation
+        continuation = nil
+        if let failure = downloadFailure ?? error {
+            if let received { try? FileManager.default.removeItem(at: received) }
+            callback?.resume(throwing: failure)
+        } else if let received { callback?.resume(returning: received) }
+        else { callback?.resume(throwing: SideloadError.message("Tweak download returned no file.")) }
+        session.finishTasksAndInvalidate()
+        self.session = nil
+    }
+}
