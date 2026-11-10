@@ -7,7 +7,7 @@ enum MirsaFeatures {
     /// Mirsa 2.1 chat attachments (Photos / Files / From link).
     /// OFF until Kat confirms the stage server works and the owner approves. With it OFF the chat
     /// behaves exactly as 2.0: the old photo button and legacy image flow, no new button, no network calls.
-    static let chatAttachments21 = false
+    static let chatAttachments21 = true // STAGE TEST BUILD ONLY (hark/2.1-attach-stage-test). Never merge.
 }
 
 @MainActor enum ChatAttachmentConfig {
