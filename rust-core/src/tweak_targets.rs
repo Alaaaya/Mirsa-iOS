@@ -2,16 +2,21 @@
 use super::*;
 use serde::Serialize;
 #[derive(Serialize)]
-struct Target { id: String, kind: String, label: String }
+pub(super) struct Target { pub id: String, pub kind: String, pub label: String }
 #[derive(Deserialize,Clone)]
-pub(super) struct Injection { id: String, library: String, target: String }
+pub(super) struct Injection {
+ id: String, library: String, target: String,
+ #[serde(default)] method: Option<String>,
+ #[serde(default)] targets: Vec<String>,
+ #[serde(default, alias="sharedTarget")] shared_target: Option<String>,
+}
 fn json(out: &Path, value: &impl Serialize)->Result<()> { fs::write(out,serde_json::to_vec(value).map_err(err)?).map_err(err) }
 fn executable(bundle:&Path)->Result<String>{
  let value=plist::Value::from_file(bundle.join("Info.plist")).map_err(err)?;
  let s=value.as_dictionary().and_then(|d|d.get("CFBundleExecutable")).and_then(|v|v.as_string()).ok_or("Bundle missing executable")?;
  if relative(s)?.components().count()!=1 {return Err("Invalid bundle executable".into())} Ok(s.into())
 }
-fn targets(app:&Path)->Result<Vec<Target>>{
+pub(super) fn targets(app:&Path)->Result<Vec<Target>>{
  checked_tree(app)?;let app=fs::canonicalize(app).map_err(err)?;
  let mut files=Vec::new();walk(&app,&mut files)?;
  let main=executable(&app)?;
@@ -46,33 +51,50 @@ pub(super) fn package_roots(root:&Path,out:&Path)->Result<()> {
 }
 fn inject_plan_inner(app:&Path,items:&[Injection],order:&[String],loader:bool,first:bool)->Result<()> {
  if items.is_empty() || items.len()>64 || order.len()>4096{return Err("Injection plan exceeds limits or is empty".into())}
- let available=targets(app)?;let mut ids=HashSet::new();let mut groups:BTreeMap<String,Vec<String>>=BTreeMap::new();let mut destinations=HashSet::new();
+ let available=targets(app)?;let mut ids=HashSet::new();let mut groups:BTreeMap<(String,bool),Vec<String>>=BTreeMap::new();let mut destinations=HashSet::new();
  let mut sorted=items.to_vec();
  sorted.sort_by(|a,b|order.iter().position(|x|x==&a.id).unwrap_or(usize::MAX).cmp(&order.iter().position(|x|x==&b.id).unwrap_or(usize::MAX)).then(a.id.cmp(&b.id)));
  for item in sorted {
   if item.id.is_empty() || item.id.len()>4096 || !ids.insert(item.id){return Err("Duplicate or invalid stable tweak id".into())}
-  let target=available.iter().find(|t|t.id==item.target).ok_or("Unknown injection target")?;
-  if loader && target.kind!="main" {return Err("LoadControl supports the main executable only".into())}
+  let method=item.method.as_deref().unwrap_or(if loader{"load_control"}else{"direct"});
+  if !matches!(method,"direct"|"load_control"|"shared_library"|"separate_extension"){return Err("unknown_injection_method".into())}
+  let selected=if item.targets.is_empty(){vec![item.target.clone()]}else{item.targets.clone()};
+  if selected.is_empty()||selected.len()>65{return Err("invalid_process_selection".into())}
+  let mut unique=HashSet::new();
+  for id in &selected {if !unique.insert(id){return Err("duplicate_process_target".into())} if !available.iter().any(|t|t.id==*id){return Err("unknown_process_target".into())}}
+  if method=="direct" && selected.len()!=1{return Err("direct_requires_single_target".into())}
+  if matches!(method,"load_control"|"separate_extension") && selected.iter().any(|id|available.iter().any(|t|t.id==*id&&t.kind=="framework")){return Err("method_requires_process_targets".into())}
+  if method=="separate_extension" && !selected.iter().any(|id|available.iter().any(|t|t.id==*id&&t.kind=="extension")){return Err("separate_extension_requires_extension".into())}
+  let resolved=if method=="shared_library" {
+   let candidates=super::injection_methods::shared_candidates(app,&selected)?;
+   let id=if let Some(requested)=&item.shared_target{if !candidates.contains(requested){return Err("shared_target_not_common_dependency".into())}requested.clone()}else{if candidates.len()!=1{return Err("shared_target_ambiguous_or_unavailable".into())}candidates[0].clone()};
+   vec![id]
+  }else{selected};
   let source=Path::new(&item.library);let code=if source.extension().and_then(|s|s.to_str())==Some("framework"){source.join(framework_executable(source)?)}else{source.to_path_buf()};
   macho(read_macho(&code)?,true)?;
   let name=source.file_name().and_then(|s|s.to_str()).ok_or("Invalid tweak name")?;
-  let parent=Path::new(&item.target).parent().ok_or("Invalid target")?;
-  let destination=parent.join("Frameworks").join(name);
-  let key=destination.to_string_lossy().to_lowercase();
-  if !destinations.insert(key){return Err("Tweak destination filename collision for selected target; rename library first".into())}
-  let dir=app.join(parent).join("Frameworks");
-  if dir.exists(){for e in fs::read_dir(&dir).map_err(err)?{if e.map_err(err)?.file_name().to_string_lossy().eq_ignore_ascii_case(name){return Err("Existing target Frameworks filename collision".into())}}}
-  groups.entry(item.target).or_default().push(item.library);
+  for target_id in resolved {
+   let target=available.iter().find(|t|t.id==target_id);
+   if method=="load_control" && target.is_none_or(|t|t.kind=="framework"){return Err("loader_requires_process_target".into())}
+   let parent=Path::new(&target_id).parent().ok_or("Invalid target")?;
+   let destination=parent.join("Frameworks").join(name);
+   let key=destination.to_string_lossy().to_lowercase();
+   if !destinations.insert(key){return Err("Tweak destination filename collision for selected target; rename library first".into())}
+   let dir=app.join(parent).join("Frameworks");
+   if dir.exists(){for e in fs::read_dir(&dir).map_err(err)?{if e.map_err(err)?.file_name().to_string_lossy().eq_ignore_ascii_case(name){return Err("Existing target Frameworks filename collision".into())}}}
+   groups.entry((target_id,method=="load_control")).or_default().push(item.library.clone());
+  }
  }
+
  // Work on caller-owned disposable app copy. Existing signer signs nested libraries
  // before hashing resources and enclosing frameworks/extensions before outer app.
- for (id,libraries) in groups {
-  let t=available.iter().find(|t|t.id==id).unwrap();
+ for ((id,use_loader),libraries) in groups {
+  let is_library=available.iter().find(|t|t.id==id).is_none_or(|t|t.kind=="framework");
   let target=app.join(&id);let scope=target.parent().ok_or("Missing target parent")?;
-  if loader {load_control::inject_loader(app,&id,&libraries,first)?}else{
+  if use_loader {load_control::inject_loader(scope,target.file_name().and_then(|s|s.to_str()).ok_or("Invalid target")?,&libraries,first)?}else{
    // Scope is the selected bundle, not the outer app. Cross-bundle dependencies
    // therefore fail closed instead of silently using another extension's code.
-   if t.kind=="framework" {
+   if is_library {
     for lib in &libraries {let src=Path::new(lib);let code=if src.extension().and_then(|s|s.to_str())==Some("framework"){src.join(framework_executable(src)?)}else{src.to_owned()};for dep in dependencies(&code)?{if dep.starts_with("@executable_path/"){return Err("Framework target cannot resolve executable-relative tweak dependencies".into())}}}
    }
    inject_scoped(scope,target.file_name().and_then(|s|s.to_str()).ok_or("Invalid target")?,&libraries,first,true)?;
@@ -114,11 +136,11 @@ pub(super) fn checked_tree(root:&Path)->Result<()> {
  fn fixture(kind:u32)->Vec<u8>{let mut d=vec![0;4096];for(o,v)in[(0,0xfeedfacf),(4,0x100000c),(12,kind),(16,1),(20,152),(32,0x19),(36,152),(96,1),(152,1024)]{put32(&mut d,o,v)}d[80..88].copy_from_slice(&4096u64.to_le_bytes());d[144..152].copy_from_slice(&16u64.to_le_bytes());d}
  fn bundle(p:&Path,exe:&str,kind:u32){fs::create_dir_all(p).unwrap();fs::write(p.join(exe),fixture(kind)).unwrap();let mut d=plist::Dictionary::new();d.insert("CFBundleExecutable".into(),plist::Value::String(exe.into()));plist::Value::Dictionary(d).to_file_xml(p.join("Info.plist")).unwrap()}
  fn setup(tag:&str)->(PathBuf,PathBuf){let p=std::env::temp_dir().join(format!("mirsa-targets-{}-{tag}",std::process::id()));let _=fs::remove_dir_all(&p);let app=p.join("A.app");bundle(&app,"Main",2);(p,app)}
- fn item(id:&str,lib:&Path,target:&str)->Injection{Injection{id:id.into(),library:lib.to_string_lossy().into(),target:target.into()}}
+ fn item(id:&str,lib:&Path,target:&str)->Injection{Injection{id:id.into(),library:lib.to_string_lossy().into(),target:target.into(),method:None,targets:Vec::new(),shared_target:None}}
  #[test]fn mixed_targets_and_stable_order(){let(p,a)=setup("mixed");bundle(&a.join("PlugIns/X.appex"),"X",2);bundle(&a.join("Frameworks/F.framework"),"F",6);for n in["A","B","C","D"]{fs::write(p.join(format!("{n}.dylib")),fixture(6)).unwrap()}
  let items=vec![item("a",&p.join("A.dylib"),"Main"),item("b",&p.join("B.dylib"),"Main"),item("c",&p.join("C.dylib"),"PlugIns/X.appex/X"),item("d",&p.join("D.dylib"),"Frameworks/F.framework/F")];
  inject_plan(&a,&items,&["missing".into(),"b".into()],false,false).unwrap();let deps=dependencies(&a.join("Main")).unwrap();assert!(deps[0].ends_with("B.dylib"));assert!(deps[1].ends_with("A.dylib"));assert!(dependencies(&a.join("PlugIns/X.appex/X")).unwrap()[0].ends_with("C.dylib"));assert!(dependencies(&a.join("Frameworks/F.framework/F")).unwrap()[0].ends_with("D.dylib"));fs::remove_dir_all(p).unwrap();}
- #[test]fn unsupported_and_duplicate_fail(){let(p,a)=setup("reject");bundle(&a.join("PlugIns/X.appex"),"X",2);let lib=p.join("T.dylib");fs::write(&lib,fixture(6)).unwrap();assert!(inject_plan(&a,&[item("a",&lib,"PlugIns/X.appex/X")],&[],true,false).is_err());assert!(inject_plan(&a,&[item("a",&lib,"Main"),item("a",&lib,"Main")],&[],false,false).is_err());assert!(inject_plan(&a,&[item("a",&lib,"../outside")],&[],false,false).is_err());let mut d=fixture(6);put32(&mut d,8,2);fs::write(&lib,d).unwrap();assert!(inject_plan(&a,&[item("a",&lib,"Main")],&[],false,false).is_err());fs::remove_dir_all(p).unwrap();}
+ #[test]fn unsupported_and_duplicate_fail(){let(p,a)=setup("reject");bundle(&a.join("PlugIns/X.appex"),"X",2);let lib=p.join("T.dylib");fs::write(&lib,fixture(6)).unwrap();let mut bad=item("a",&lib,"PlugIns/X.appex/X");bad.method=Some("nonsense".into());assert!(inject_plan(&a,&[bad],&[],true,false).is_err());assert!(inject_plan(&a,&[item("a",&lib,"Main"),item("a",&lib,"Main")],&[],false,false).is_err());assert!(inject_plan(&a,&[item("a",&lib,"../outside")],&[],false,false).is_err());let mut d=fixture(6);put32(&mut d,8,2);fs::write(&lib,d).unwrap();assert!(inject_plan(&a,&[item("a",&lib,"Main")],&[],false,false).is_err());fs::remove_dir_all(p).unwrap();}
  #[test]fn roots_separate_same_basename_and_symlink_reject(){let(p,_)=setup("roots");let r=p.join("pkg");fs::create_dir_all(r.join("a")).unwrap();fs::create_dir_all(r.join("b")).unwrap();for n in["a/T.dylib","b/T.dylib"]{fs::write(r.join(n),fixture(6)).unwrap()}let out=p.join("roots.json");package_roots(&r,&out).unwrap();let v:serde_json::Value=serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();assert_eq!(v[0]["id"],"a/T.dylib");assert_eq!(v[1]["id"],"b/T.dylib");#[cfg(unix)]{std::os::unix::fs::symlink("/tmp",r.join("escape")).unwrap();assert!(package_roots(&r,&out).is_err());}fs::remove_dir_all(p).unwrap();}
  #[test]fn missing_dependency_and_colliding_roots_fail(){let(p,a)=setup("deps");let l=p.join("A.dylib");let m=macho(fixture(6),true).unwrap();let mut cs:Vec<_>=m.commands.iter().map(|c|c.data.clone()).collect();cs.push(dylib_command(0xc,"@rpath/Missing.dylib",None).unwrap());fs::write(&l,write_commands(m,cs).unwrap()).unwrap();assert!(inject_plan(&a,&[item("a",&l,"Main")],&[],false,false).is_err());fs::remove_dir_all(p).unwrap();}
  #[test]fn transaction_rolls_back_after_late_failure(){let(p,a)=setup("transaction");bundle(&a.join("PlugIns/Z.appex"),"Z",2);let good=p.join("Good.dylib");let bad=p.join("Bad.dylib");fs::write(&good,fixture(6)).unwrap();let m=macho(fixture(6),true).unwrap();let mut cs:Vec<_>=m.commands.iter().map(|c|c.data.clone()).collect();cs.push(dylib_command(0xc,"@rpath/DoesNotExist.dylib",None).unwrap());fs::write(&bad,write_commands(m,cs).unwrap()).unwrap();let before=fs::read(a.join("Main")).unwrap();assert!(inject_plan(&a,&[item("good",&good,"Main"),item("bad",&bad,"PlugIns/Z.appex/Z")],&[],false,false).is_err());assert_eq!(fs::read(a.join("Main")).unwrap(),before);assert!(!a.join("Frameworks").exists());assert!(!a.join("PlugIns/Z.appex/Frameworks").exists());assert!(!fs::read_dir(&p).unwrap().any(|e|e.unwrap().file_name().to_string_lossy().starts_with(".mirsa-")));fs::remove_dir_all(p).unwrap();}
