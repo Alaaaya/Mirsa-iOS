@@ -6,8 +6,8 @@ final class NoTranslatorFeatureTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         return try String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)
     }
-    func testToolsHasOnlyPairingDeviceTweaks() {
-        XCTAssertEqual(ToolsTab.Section.allCases.map(\.rawValue), ["pairing", "device", "tweaks"])
+    func testToolsHasApprovedSectionsAndNoTranslator() {
+        XCTAssertEqual(ToolsTab.Section.allCases.map(\.rawValue), ["tweaks", "create", "device", "pairing"])
     }
     func testNoTranslatorEntrypointsOrCalls() throws {
         let fm = FileManager.default

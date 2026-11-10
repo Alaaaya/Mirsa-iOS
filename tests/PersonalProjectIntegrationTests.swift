@@ -117,9 +117,12 @@ final class PersonalProjectIntegrationTests: XCTestCase {
         let gridKey = "mirsa.personal.projects.grid"
         let restoreDefaults = preserveDefaults(Self.layoutKeys + [gridKey])
         let beforeApps = Set(library.apps.map(\.id)), beforeTweaks = Set(tweaks.items.map(\.id))
-        // Harmless synthetic bytes named like a dylib; imported as data, never loaded or executed.
+        // Real bounded Mach-O fixture, parsed as data only, never loaded or executed.
         let dylib = FileManager.default.temporaryDirectory.appendingPathComponent("testdylib-\(UUID().uuidString).dylib")
-        try Data("not executable fixture".utf8).write(to: dylib)
+        let ownerZIP = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "OwnerTikTokV4", withExtension: "zip"))
+        let zip = try ZipReader(data: Data(contentsOf: ownerZIP))
+        let entry = try XCTUnwrap(zip.entries.first { $0.name.hasSuffix(".dylib") })
+        try zip.read(entry, length: entry.uncompressedSize).write(to: dylib)
         defer {
             try? FileManager.default.removeItem(at: dylib)
             for t in tweaks.items where !beforeTweaks.contains(t.id) { try? tweaks.delete(t) }
@@ -130,7 +133,7 @@ final class PersonalProjectIntegrationTests: XCTestCase {
         let app = try XCTUnwrap(library.apps.first { !beforeApps.contains($0.id) })
         try await tweaks.addFile(dylib)
         let tweak = try XCTUnwrap(tweaks.items.first { !beforeTweaks.contains($0.id) }, "Tweak import must create a real library item; no chip proof without it")
-        XCTAssertEqual(tweak.roots, [dylib.lastPathComponent])
+        XCTAssertEqual(tweak.roots, ["0/" + dylib.lastPathComponent])
         let store = isolatedStore()
         XCTAssertFalse(store.visible(library.apps, ns: .personal, id: { $0.id.uuidString }).isEmpty)
         var draft = PersonalProjectDraft(name: "Fixture", bundleID: app.bundleID, version: "1.0")
