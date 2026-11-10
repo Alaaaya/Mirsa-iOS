@@ -15,6 +15,13 @@ enum ForgeChatText {
         return s
     }
     static var shortIDLabel: String { tr("ID", "المعرّف", ckb: "ناسنامە", kmr: "Nasname") }
+    // Mirsa 2.1: report a problem with a Mirsa AI reply (server action "chat-report").
+    static var reportButton: String { tr("Report a problem", "بلّغ عن مشكلة", ckb: "ڕاپۆرتی کێشەیەک بکە", kmr: "Pirsgirêkekê ragihîne") }
+    static var reportQuestion: String { tr("What's the problem?", "شو المشكلة؟", ckb: "کێشەکە چییە؟", kmr: "Pirsgirêk çi ye?") }
+    static var reportOptional: String { tr("Optional", "اختياري", ckb: "ئارەزوومەندانە", kmr: "Ne mecbûrî") }
+    static var reportSend: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
+    static var reportThanks: String { tr("We got your report. We'll look into it and reply to you in this conversation.", "وصلنا بلاغك، رح نشوفو ونرد عليك بنفس المحادثة", ckb: "ڕاپۆرتەکەت گەیشت. سەیری دەکەین و لە هەمان گفتوگۆدا وەڵامت دەدەینەوە.", kmr: "Ragihandina te gihîşt me. Em ê lê binêrin û di heman sohbetê de bersiva te bidin.") }
+    static var reportFailed: String { tr("Couldn't send the report. Try again.", "ما قدرنا نبعت البلاغ. جرّب كمان مرة.", ckb: "ڕاپۆرتەکە نەنێردرا. دووبارە هەوڵ بدەرەوە.", kmr: "Ragihandin nehat şandin. Dîsa biceribîne.") }
     static var copied: String { tr("Copied", "انتسخ", ckb: "کۆپی کرا", kmr: "Hat kopîkirin") }
     static var shortIDHelp: String { tr("Your short chat ID is at the top of each conversation. Tap it to copy, then send it to Mirsa support so they can find your requests.", "معرّفك المختصر موجود فوق بكل محادثة. دوس عليه لتنسخه، وابعته لدعم مرسى ليلاقوا طلباتك.", ckb: "ناسنامە کورتەکەت لە سەرەوەی هەر گفتوگۆیەکە. دەستی لێ بدە بۆ کۆپیکردن، پاشان بینێرە بۆ پشتگیری میرسا تا داواکارییەکانت بدۆزنەوە.", kmr: "Nasnameya te ya kurt li jorê her sohbetê ye. Bitikîne da ku kopî bikî, paşê ji piştgiriya Mirsa re bişîne da ku daxwazên te bibînin.") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
@@ -289,6 +296,14 @@ enum ForgeChatImage {
         error = nil
     }
 
+    /// Mirsa 2.1: report a problem with one Mirsa AI reply. Same identity as chat-send, current server.
+    /// Body {threadID, messageID, note}; note is optional and capped at 500 characters.
+    func report(threadID: UUID, messageID: UUID, note: String) async -> Bool {
+        if Self.fixture { return true }
+        let n = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+        return (try? await call(["action": "chat-report", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "note": n])) != nil
+    }
+
     func refreshThreads() async {
         guard !Self.fixture else { return }
         struct Lossy: Decodable { let value: ForgeChatThread?; init(from d: Decoder) throws { value = try? ForgeChatThread(from: d) } }
@@ -475,6 +490,8 @@ struct ForgeChatThreadView: View {
     @State private var started = false
     /// First 8 characters of the device ID the chat already sends as x-mirsa-device.
     @State private var shortID = ""
+    @State private var reportTarget: ForgeChatMessage?
+    @State private var reportDone = false
     // Mirsa 2.1 attachments (only used when ChatAttachmentConfig.uiEnabled).
     @ObservedObject private var drafts = ChatAttachmentDrafts.shared
     @State private var showPhotos = false
@@ -576,6 +593,11 @@ struct ForgeChatThreadView: View {
         }
         .background(AuroraBackground().ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $reportTarget) { m in
+            ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { reportDone = true }
+                .environment(\.layoutDirection, .leftToRight)
+        }
+        .alert(ForgeChatText.reportThanks, isPresented: $reportDone) {}
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onAppear {
             if shortID.isEmpty { shortID = String(ForgeClient.deviceID().prefix(8)) }
@@ -772,6 +794,11 @@ struct ForgeChatThreadView: View {
                     }
                 }
             }
+            Button { reportTarget = m } label: {
+                Label(ForgeChatText.reportButton, systemImage: "exclamationmark.bubble").font(.caption).foregroundStyle(MirsaChatTheme.muted)
+                    .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(.ultraThinMaterial.opacity(0.6)))
+            }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.top, -2)
+            .accessibilityIdentifier("chat-report")
         }
     }
 }
@@ -801,5 +828,51 @@ struct MirsaChatStatusPill: View {
         HStack(spacing: 5) { Circle().fill(color).frame(width: 6, height: 6); Text(ForgeChatText.status(raw)).font(.system(size: 12, weight: .medium)) }
             .foregroundStyle(color).padding(.horizontal, 9).padding(.vertical, 4)
             .background(Capsule().fill(color.opacity(0.15)))
+    }
+}
+
+
+/// Mirsa 2.1 «بلّغ عن مشكلة»: optional note (max 500), Send. Aurora style, left-to-right.
+struct ForgeChatReportSheet: View {
+    let send: (String) async -> Bool
+    let onSent: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var note = ""
+    @State private var sending = false
+    @State private var failed = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(ForgeChatText.reportButton).font(.headline).foregroundStyle(.white)
+                Spacer()
+                Button { dismiss() } label: { Image(systemName: "xmark").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.8)) }.accessibilityLabel(ForgeChatText.cancel)
+            }
+            TextField(ForgeChatText.reportQuestion + " (" + ForgeChatText.reportOptional + ")", text: $note, axis: .vertical)
+                .lineLimit(3...6).padding(12).foregroundStyle(.white)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5))
+                .onChange(of: note) { _, v in if v.count > 500 { note = String(v.prefix(500)) } }
+                .accessibilityIdentifier("chat-report-note")
+            HStack {
+                Text("\(note.count)/500").font(.caption2).foregroundStyle(.white.opacity(0.5))
+                Spacer()
+                if failed { Text(ForgeChatText.reportFailed).font(.caption).foregroundStyle(.red) }
+            }
+            Button {
+                Task {
+                    sending = true; failed = false
+                    let ok = await send(note)
+                    sending = false
+                    if ok { dismiss(); onSent() } else { failed = true }
+                }
+            } label: {
+                HStack { Spacer(); if sending { ProgressView().tint(.white) } else { Text(ForgeChatText.reportSend).font(.body.weight(.semibold)) }; Spacer() }
+                    .padding(.vertical, 12).foregroundStyle(.white).background(MirsaPalette.accentGradient).clipShape(Capsule())
+            }.buttonStyle(.plain).disabled(sending).accessibilityIdentifier("chat-report-send")
+        }
+        .padding(20)
+        .presentationDetents([.height(330)])
+        .presentationBackground { AuroraBackground() }
+        .preferredColorScheme(.dark)
     }
 }
