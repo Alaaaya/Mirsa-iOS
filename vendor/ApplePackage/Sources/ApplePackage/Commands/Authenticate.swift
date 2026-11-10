@@ -84,6 +84,11 @@ public actor Authenticator {
         guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), host == "apple.com" || host.hasSuffix(".apple.com"),
               url.user == nil, url.password == nil, url.port == nil || url.port == 443
         else { try ensureFailed("Authentication requires an Apple HTTPS endpoint.") }
+        // Also reject a legacy response redirect to native auth. Never submit another
+        // password POST there with a SAP-only signer.
+        if host == "auth.itunes.apple.com", url.path.hasPrefix("/auth/v1/native") {
+            throw AuthenticationServiceError(stage: .authentication, reason: .nativeDeviceProofUnavailable)
+        }
         return url
     }
 
@@ -127,6 +132,15 @@ public actor Authenticator {
                 ?? fields["customerMessage"] as? String, secrets: secrets + knownSecrets)
     }
 
+    /// Only Apple's explicit challenge can open the code form. No empty HTTP response,
+    /// failed password, or generic missing field is evidence that a code was sent.
+    static func requiresVerificationCode(fields: [String: Any], status: Int, submittedCode: String) -> Bool {
+        guard status == 200, submittedCode.isEmpty,
+              let failureType = fields["failureType"] as? String, failureType.isEmpty,
+              fields["customerMessage"] as? String == "MZFinance.BadLogin.Configurator_message" else { return false }
+        return true
+    }
+
     private func parseResponse(_ response: HTTPClient.Response, email: String, password: String, code: String) throws -> LoginResponse {
         APLogger.logResponse(
             status: response.status.code, headers: response.headers.map { ($0.name, $0.value) }, bodySize: response.body?.readableBytes,
@@ -168,9 +182,7 @@ public actor Authenticator {
             return .failure(diagnostic)
         }
 
-        if let failureType = dic["failureType"] as? String, failureType.isEmpty, code.isEmpty,
-           let customerMessage = dic["customerMessage"] as? String, customerMessage == "MZFinance.BadLogin.Configurator_message"
-        {
+        if Self.requiresVerificationCode(fields: dic, status: Int(response.status.code), submittedCode: code) {
             return .codeRequired
         }
 

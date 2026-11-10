@@ -107,6 +107,18 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         }
     }
 
+    func testNativeRedirectCannotSubmitPasswordWithLegacySigner() async throws {
+        let signer = RecordingSigner()
+        do {
+            _ = try await makeRequest(endpoint: "https://auth.itunes.apple.com/auth/v1/native", signer: signer)
+            XCTFail("Native proof is unavailable; no request may be constructed")
+        } catch let safe as AuthenticationServiceError {
+            XCTAssertEqual(safe.reason, .nativeDeviceProofUnavailable)
+            let signed = await signer.recordedBodies()
+            XCTAssertTrue(signed.isEmpty)
+        }
+    }
+
     func testSigningFailurePreventsRequestConstruction() async throws {
         do {
             _ = try await makeRequest(signer: FailingSigner())
@@ -152,7 +164,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             let original = "https://auth.itunes.apple.com\(path)?guid=example"
             XCTAssertEqual(
                 Bag.normalizedAuthEndpoint(from: original)?.absoluteString,
-                "https://auth.itunes.apple.com/auth/v1/native/fast/?guid=example",
+                original,
             )
         }
     }

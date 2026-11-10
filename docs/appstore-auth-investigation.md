@@ -70,3 +70,45 @@ Offline diagnostics tests, a successful public SAP exchange, and a compiled IPA 
 prove account login, delivered 2FA, or LTE behavior. The release may improve safe reporting
 and correct the request contract; it must not be described as proven LTE-login repair.
 Only a real-device sign-in result with the new safe stage/status/code can close that gap.
+
+
+## 2026-11-10 device HTTP 204 follow-up
+
+Owner tested 1.6 and received HTTP 204 at authentication, with no 2FA notification.
+This is not evidence of an accepted password or a verification-code request.
+
+Fresh upstream ipatool checkout e0e2908dc866651cbd6ad86edd954119c003c46b
+includes the native Store AMD implementation from merged PR 643.
+See https://github.com/majd/ipatool/issues/642 and
+https://github.com/majd/ipatool/pull/643 .
+The newer Apple bag advertises https://auth.itunes.apple.com/auth/v1/native .
+The existing native-to-fast rewrite is incorrect and has been removed in this branch.
+This does NOT establish that Mirsa's reported 204 used that endpoint; no owner
+credentials or private device HTTP capture were collected.
+
+Native sign-in needs actual X-Apple-AMD and X-Apple-AMD-M proof and RP/SP machine
+provisioning. AuthKit X-Apple-I-MD data is not a substitute. Upstream obtains these
+locally through emulated AppleMediaServices/ADI/FairPlay with persistent machine state.
+Its tools/build-ios.sh explicitly builds a standalone executable for JAILBROKEN iOS.
+The Unicorn iOS patch changes memory from writable to executable with mprotect, and
+the executable uses a private no-container entitlement. This is not a supported
+drop-in backend for an ordinary signed, sandboxed Mirsa install. We did not copy
+binary blobs, invent AMD fields, invoke private AMS APIs, or proxy login credentials.
+
+Apple AuthenticationServices documents signing into one's own service, AutoFill,
+and web authentication. It does not document obtaining the App Store passwordToken
+and Store AMD proof needed by this downloader.
+https://developer.apple.com/documentation/authenticationservices
+
+Safety-only branch kat/auth20-safe is based on exact 1.9 production 674042d.
+It preserves native URLs and fails closed for an advertised native flow BEFORE
+password storage or submission. Legacy 204 keeps the real HTTP status and gives
+localized guidance, not a fake verification form or fake resend-code button.
+Existing explicit Apple challenge continuation remains unchanged and bounded.
+The official App Store is a temporary option for normal app installs, not a claim
+that it exports an IPA into Mirsa. Existing owned IPA imports still work unchanged.
+
+No real-device sign-in repair is claimed. A supported local native-proof provider
+remains the blocker. This branch must not be promoted as a working auth hotfix.
+Feature CI is deliberately separate from all production publishers. Version 2.0
+is used only for its isolated test artifact; 1.8/1.9 are not overwritten.
