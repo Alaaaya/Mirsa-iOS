@@ -273,7 +273,7 @@ final class EncryptedAppsStore: ObservableObject {
         }
         let apps = AppsStore.shared
         apps.error = nil
-        guard apps.realAppNetworkReady(vm) else {
+        guard await apps.realAppNetworkReady(vm) else {
             error = apps.error ?? EncryptedText.t("Installing needs Wi-Fi + LocalDevVPN", "التثبيت بدو واي فاي + LocalDevVPN",
                                                   "دامەزراندن پێویستی بە Wi-Fi + LocalDevVPN هەیە", "Sazkirin Wi-Fi + LocalDevVPN dixwaze")
             apps.error = nil

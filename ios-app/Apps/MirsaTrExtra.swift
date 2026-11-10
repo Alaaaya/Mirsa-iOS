@@ -2,6 +2,14 @@ import Foundation
 
 extension MirsaTr {
     static let extraCkb: [String: String] = [
+        "Real app installation needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.": "دامەزراندنی ئەپی ڕاستەقینە پێویستی بە Wi-Fi هەیە، نەک داتای مۆبایل. بە Wi-Fi ببەسترێوە، LocalDevVPN داگیرسێنراو بهێڵەرەوە و دووبارە هەوڵبدەرەوە.",
+        "Updating needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.": "نوێکردنەوە پێویستی بە Wi-Fi هەیە، نەک داتای مۆبایل. بە Wi-Fi ببەسترێوە، LocalDevVPN داگیرسێنراو بهێڵەرەوە و دووبارە هەوڵبدەرەوە.",
+        "Could not confirm your connection yet. Wait a moment and try again.": "هێشتا نەتوانرا پەیوەندییەکەت دڵنیا بکرێتەوە. کەمێک چاوەڕێ بکە و دووبارە هەوڵبدەرەوە.",
+        "Real app installation needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.": "دامەزراندنی ئەپی ڕاستەقینە پێویستی بە LocalDevVPNی کارا و فایلی جووتکردن هەیە. LocalDevVPN دابگیرسێنە و دووبارە هەوڵبدەرەوە.",
+        "Updating needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.": "نوێکردنەوە پێویستی بە LocalDevVPNی کارا و فایلی جووتکردن هەیە. LocalDevVPN دابگیرسێنە و دووبارە هەوڵبدەرەوە.",
+        "Open Settings": "کردنەوەی ڕێکخستنەکان",
+        "Another install is still running. Wait for it to finish, then try again.": "دامەزراندنێکی تر هێشتا کار دەکات. چاوەڕێ بکە تا تەواو دەبێت و دووبارە هەوڵبدەرەوە.",
+        "Next step: check Wi-Fi and LocalDevVPN, then try again. If it repeats, send the report from Settings.": "هەنگاوی دواتر: Wi-Fi و LocalDevVPN بپشکنە و دووبارە هەوڵبدەرەوە. ئەگەر دووبارە بووەوە، ڕاپۆرتەکە لە ڕێکخستنەکانەوە بنێرە.",
         "Updating needs Wi-Fi + LocalDevVPN": "نوێکردنەوە پێویستی بە Wi-Fi + LocalDevVPN هەیە",
         "Real app installation needs Wi-Fi + LocalDevVPN": "دامەزراندنی ئەپی ڕاستەقینە پێویستی بە Wi-Fi + LocalDevVPN هەیە",
         "Install with Apple ID": "دامەزراندن بە Apple ID",
@@ -49,6 +57,14 @@ extension MirsaTr {
         "{} code file(s)": "{} فایلی کۆد",
     ]
     static let extraKmr: [String: String] = [
+        "Real app installation needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.": "Sazkirina sepana rastîn Wi-Fi dixwaze, ne daneya mobîl. Bi Wi-Fi ve girêbide, LocalDevVPN vekirî bihêle û dîsa biceribîne.",
+        "Updating needs Wi-Fi, not mobile data. Connect to Wi-Fi, keep LocalDevVPN on, then try again.": "Nûkirin Wi-Fi dixwaze, ne daneya mobîl. Bi Wi-Fi ve girêbide, LocalDevVPN vekirî bihêle û dîsa biceribîne.",
+        "Could not confirm your connection yet. Wait a moment and try again.": "Hê girêdana te nehat piştrastkirin. Hinekî bisekine û dîsa biceribîne.",
+        "Real app installation needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.": "Sazkirina sepana rastîn LocalDevVPN-a çalak û pelê hevjêrkirinê dixwaze. LocalDevVPN veke û dîsa biceribîne.",
+        "Updating needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.": "Nûkirin LocalDevVPN-a çalak û pelê hevjêrkirinê dixwaze. LocalDevVPN veke û dîsa biceribîne.",
+        "Open Settings": "Mîhengan veke",
+        "Another install is still running. Wait for it to finish, then try again.": "Sazkirineke din hê dixebite. Bisekine heta biqede û dîsa biceribîne.",
+        "Next step: check Wi-Fi and LocalDevVPN, then try again. If it repeats, send the report from Settings.": "Gava din: Wi-Fi û LocalDevVPN kontrol bike û dîsa biceribîne. Heke dubare bibe, raporê ji Mîhengan bişîne.",
         "Updating needs Wi-Fi + LocalDevVPN": "Nûkirin Wi-Fi + LocalDevVPN dixwaze",
         "Real app installation needs Wi-Fi + LocalDevVPN": "Sazkirina sepana rastîn Wi-Fi + LocalDevVPN dixwaze",
         "Install with Apple ID": "Bi Apple ID saz bike",
