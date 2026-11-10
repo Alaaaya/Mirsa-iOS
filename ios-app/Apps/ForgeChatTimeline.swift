@@ -5,12 +5,23 @@ struct ForgeChatThread: Codable, Identifiable, Equatable {
 }
 struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let size: Int64?; let sha256: String?; let expiresAt: String? }
 struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UUID?; let bundleID: String?; let name: String?; let version: Int?; let artifact: ForgeChatArtifact? }
+struct ForgeChatAttachmentMeta: Codable, Equatable, Identifiable { let id: String; let kind: String; let name: String?; let available: Bool? }
+/// Local draft of one attachment. Link drafts hold only the URL, which the server never fetches.
+struct ForgeChatAttachmentDraft: Codable, Equatable, Identifiable {
+    var id = UUID()
+    let kind: String // image | file | link
+    let name: String
+    var mime: String? = nil
+    var base64: String? = nil
+    var url: String? = nil
+}
 struct ForgeChatMessage: Codable, Identifiable, Equatable {
     let id: UUID; let threadID: UUID; let role: String; let text: String?; let createdAt: String?; let hasImage: Bool?; let result: ForgeChatResult?
+    var attachments: [ForgeChatAttachmentMeta]? = nil
     init(id: UUID, threadID: UUID, role: String, text: String?, createdAt: String? = nil, hasImage: Bool? = nil, result: ForgeChatResult? = nil) {
         self.id = id; self.threadID = threadID; self.role = role; self.text = text; self.createdAt = createdAt; self.hasImage = hasImage; self.result = result
     }
-    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result }
+    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments }
     /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -21,12 +32,15 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
         createdAt = try? c.decode(String.self, forKey: .createdAt)
         hasImage = try? c.decode(Bool.self, forKey: .hasImage)
         result = try? c.decode(ForgeChatResult.self, forKey: .result)
+        attachments = try? c.decode([ForgeChatAttachmentMeta].self, forKey: .attachments)
     }
 }
 
 /// A message keeps its UUID until the server accepted it, so retries replay instead of duplicating.
 struct ForgeChatOutgoing: Codable, Identifiable, Equatable {
     let id: UUID; let threadID: UUID; let newThread: Bool; let text: String; var imageBase64: String?
+    var attachments: [ForgeChatAttachmentDraft]? = nil
+    var uploadedIDs: [String]? = nil
     /// Last visible row when sending, not a device-clock guess. Optional for saved v1 drafts.
     let afterMessageID: UUID?
     init(id: UUID, threadID: UUID, newThread: Bool, text: String, imageBase64: String?, afterMessageID: UUID? = nil) {
@@ -42,6 +56,7 @@ enum ForgeChatTimeline {
     static func acceptedEcho(_ outgoing: ForgeChatOutgoing) -> ForgeChatOutgoing {
         var echo = outgoing
         echo.imageBase64 = nil // never persist the uploaded image twice
+        echo.attachments = echo.attachments?.map { ForgeChatAttachmentDraft(id: $0.id, kind: $0.kind, name: $0.name, mime: $0.mime, base64: nil, url: $0.url) }
         return echo
     }
 

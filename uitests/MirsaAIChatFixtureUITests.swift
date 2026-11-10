@@ -172,4 +172,31 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
         app.terminate()
     }
+
+    func testChatOpensAtLastMessageAndStaysAfterKeyboard() {
+        for large in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture", "-MirsaChatLongFixture",
+                                   "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+            app.launch()
+            let last = app.staticTexts["LAST-MESSAGE-MARK"]
+            XCTAssertTrue(last.waitForExistence(timeout: 15), "last message missing")
+            let bounds = app.windows.firstMatch.frame
+            let visible = NSPredicate { _, _ in last.exists && last.frame.maxY <= bounds.maxY && last.frame.minY >= bounds.minY }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: visible, object: app)], timeout: 10), .completed, "chat did not open at last message")
+            XCTAssertFalse(app.staticTexts["FIRST-MESSAGE-MARK"].isHittable, "chat opened at top")
+            let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+            if input.waitForExistence(timeout: 5) {
+                input.tap()
+                XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+                let keys = app.keyboards.firstMatch
+                let above = NSPredicate { _, _ in last.exists && last.frame.maxY <= keys.frame.minY + 1 }
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: above, object: app)], timeout: 10), .completed, "last message hidden by keyboard")
+            }
+            let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            a.name = large ? "scroll_last_large" : "scroll_last_small"; a.lifetime = .keepAlways; add(a)
+            app.terminate()
+        }
+    }
 }
