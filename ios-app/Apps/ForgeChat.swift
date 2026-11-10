@@ -21,7 +21,10 @@ enum ForgeChatText {
     static var reportOptional: String { tr("Optional", "اختياري", ckb: "ئارەزوومەندانە", kmr: "Ne mecbûrî") }
     static var reportSend: String { tr("Send", "إرسال", ckb: "ناردن", kmr: "Bişîne") }
     static var reportThanks: String { tr("We got your report. We'll look into it and reply to you in this conversation.", "وصلنا بلاغك، رح نشوفو ونرد عليك بنفس المحادثة", ckb: "ڕاپۆرتەکەت گەیشت. سەیری دەکەین و لە هەمان گفتوگۆدا وەڵامت دەدەینەوە.", kmr: "Ragihandina te gihîşt me. Em ê lê binêrin û di heman sohbetê de bersiva te bidin.") }
-    static var reportFailed: String { tr("Couldn't send the report. Try again.", "ما قدرنا نبعت البلاغ. جرّب كمان مرة.", ckb: "ڕاپۆرتەکە نەنێردرا. دووبارە هەوڵ بدەرەوە.", kmr: "Ragihandin nehat şandin. Dîsa biceribîne.") }
+    static var reportFailed: String { tr("Something went wrong, try again in a bit.", "صار خطأ، جرّب كمان شوي", ckb: "هەڵەیەک ڕوویدا، کەمێکی تر هەوڵ بدەرەوە.", kmr: "Çewtiyek çêbû, piştî demekê dîsa biceribîne.") }
+    static var reportGone: String { tr("This reply no longer exists.", "هالرد مو موجود أو انحذف", ckb: "ئەم وەڵامە بوونی نییە یان سڕاوەتەوە.", kmr: "Ev bersiv tune ye an hatiye jêbirin.") }
+    static var reportInvalid: String { tr("The note must be 500 characters or fewer.", "الملاحظة لازم تكون 500 حرف أو أقل", ckb: "تێبینییەکە دەبێت ٥٠٠ پیت یان کەمتر بێت.", kmr: "Nîşe divê 500 tîp an kêmtir be.") }
+    static var reportHint: String { tr("Your note goes to support.", "ملاحظتك بتوصل للدعم", ckb: "تێبینییەکەت دەگاتە پشتگیری.", kmr: "Nîşeya te digihîje piştgiriyê.") }
     static var copied: String { tr("Copied", "انتسخ", ckb: "کۆپی کرا", kmr: "Hat kopîkirin") }
     static var shortIDHelp: String { tr("Your short chat ID is at the top of each conversation. Tap it to copy, then send it to Mirsa support so they can find your requests.", "معرّفك المختصر موجود فوق بكل محادثة. دوس عليه لتنسخه، وابعته لدعم مرسى ليلاقوا طلباتك.", ckb: "ناسنامە کورتەکەت لە سەرەوەی هەر گفتوگۆیەکە. دەستی لێ بدە بۆ کۆپیکردن، پاشان بینێرە بۆ پشتگیری میرسا تا داواکارییەکانت بدۆزنەوە.", kmr: "Nasnameya te ya kurt li jorê her sohbetê ye. Bitikîne da ku kopî bikî, paşê ji piştgiriya Mirsa re bişîne da ku daxwazên te bibînin.") }
     static var newRequest: String { tr("New request", "طلب جديد", ckb: "داواکاری نوێ", kmr: "Daxwaza nû") }
@@ -296,12 +299,29 @@ enum ForgeChatImage {
         error = nil
     }
 
-    /// Mirsa 2.1: report a problem with one Mirsa AI reply. Same identity as chat-send, current server.
-    /// Body {threadID, messageID, note}; note is optional and capped at 500 characters.
-    func report(threadID: UUID, messageID: UUID, note: String) async -> Bool {
-        if Self.fixture { return true }
+    /// Mirsa 2.1 «بلّغ عن مشكلة» (Kat's contract, 2026-11-10): POST {action:"chat-report", threadID, messageID, note}
+    /// to the chat-send endpoint with the same headers. messageID is the Mirsa AI reply under which the button was tapped.
+    /// 200 ok (a repeat report also answers 200) · 401 refresh session, retry once · 403 rebind device, retry once
+    /// · 404 thread/message gone · 422 bad UUID or note > 500 · 503 unavailable.
+    enum ReportResult: Equatable { case ok, gone, invalid, unavailable }
+    func report(threadID: UUID, messageID: UUID, note: String) async -> ReportResult {
+        if Self.fixture { return .ok }
         let n = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
-        return (try? await call(["action": "chat-report", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "note": n])) != nil
+        let body: [String: Any] = ["action": "chat-report", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "note": n]
+        var refreshed = false, rebound = false
+        while true {
+            let r: ForgePreciseClient.Response
+            do { r = try await ForgePreciseClient.request(body, credentials: try await ForgeClient.fixToken(forceRefresh: refreshed)) }
+            catch { lastDiagnostic = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription; return .unavailable }
+            switch r.status {
+            case 200: return .ok
+            case 401 where !refreshed: refreshed = true; continue
+            case 403 where !rebound: rebound = true; _ = try? await ForgeClient.get(["action": "gallery"]); continue
+            case 404: return .gone
+            case 422: return .invalid
+            default: lastDiagnostic = "chat-report HTTP \(r.status)"; return .unavailable
+            }
+        }
     }
 
     func refreshThreads() async {
@@ -594,7 +614,7 @@ struct ForgeChatThreadView: View {
         .background(AuroraBackground().ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $reportTarget) { m in
-            ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { reportDone = true }
+            ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
                 .environment(\.layoutDirection, .leftToRight)
         }
         .alert(ForgeChatText.reportThanks, isPresented: $reportDone) {}
@@ -834,12 +854,12 @@ struct MirsaChatStatusPill: View {
 
 /// Mirsa 2.1 «بلّغ عن مشكلة»: optional note (max 500), Send. Aurora style, left-to-right.
 struct ForgeChatReportSheet: View {
-    let send: (String) async -> Bool
+    let send: (String) async -> ForgeChatStore.ReportResult
     let onSent: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var note = ""
     @State private var sending = false
-    @State private var failed = false
+    @State private var error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -853,17 +873,23 @@ struct ForgeChatReportSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5))
                 .onChange(of: note) { _, v in if v.count > 500 { note = String(v.prefix(500)) } }
                 .accessibilityIdentifier("chat-report-note")
+            Text(ForgeChatText.reportHint).font(.caption).foregroundStyle(.white.opacity(0.6))
             HStack {
                 Text("\(note.count)/500").font(.caption2).foregroundStyle(.white.opacity(0.5))
                 Spacer()
-                if failed { Text(ForgeChatText.reportFailed).font(.caption).foregroundStyle(.red) }
+                if let error { Text(error).font(.caption).foregroundStyle(.red).multilineTextAlignment(.trailing) }
             }
             Button {
                 Task {
-                    sending = true; failed = false
-                    let ok = await send(note)
+                    sending = true; error = nil
+                    let r = await send(note)
                     sending = false
-                    if ok { dismiss(); onSent() } else { failed = true }
+                    switch r {
+                    case .ok: dismiss(); onSent()
+                    case .gone: error = ForgeChatText.reportGone
+                    case .invalid: error = ForgeChatText.reportInvalid
+                    case .unavailable: error = ForgeChatText.reportFailed
+                    }
                 }
             } label: {
                 HStack { Spacer(); if sending { ProgressView().tint(.white) } else { Text(ForgeChatText.reportSend).font(.body.weight(.semibold)) }; Spacer() }
@@ -871,7 +897,7 @@ struct ForgeChatReportSheet: View {
             }.buttonStyle(.plain).disabled(sending).accessibilityIdentifier("chat-report-send")
         }
         .padding(20)
-        .presentationDetents([.height(330)])
+        .presentationDetents([.height(350)])
         .presentationBackground { AuroraBackground() }
         .preferredColorScheme(.dark)
     }

@@ -42,10 +42,10 @@ extension ForgeClient {
         return ForgeFixCredentials(accessToken: bearer, deviceID: device, deviceToken: token)
     }
 
-    static func fixToken() async throws -> ForgeFixCredentials {
+    static func fixToken(forceRefresh: Bool = false) async throws -> ForgeFixCredentials {
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
-        let jwt = try await auth.token(forceRefresh: false)
+        let jwt = try await auth.token(forceRefresh: forceRefresh)
         let user = try fixUserID(jwt)
         let device = deviceID()
         let token = try ForgeFixKeychain.token(user: user, device: device)
