@@ -362,15 +362,8 @@ struct AppStoreAccountView: View {
         let version = chosen[app.bundleID]
         run(t("Downloading from Apple…", "عم نزّل من Apple…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
             let url = try await client.downloadOwnedApp(app, externalVersionID: version)
-            let dir = url.deletingLastPathComponent()
+            defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try await onDownloaded(url)
-            // Only after the host copied it successfully: remove the private temp directory.
-            // Parent is deleted only if it is a UUID-named direct child of the temp directory.
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("MirsaStore", isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
-            let parent = dir.standardizedFileURL.resolvingSymlinksInPath()
-            if parent.deletingLastPathComponent() == tmp, UUID(uuidString: parent.lastPathComponent) != nil {
-                try? FileManager.default.removeItem(at: dir)
-            } else { try? FileManager.default.removeItem(at: url) }
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
                        "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
         }

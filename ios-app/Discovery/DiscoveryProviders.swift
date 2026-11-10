@@ -295,7 +295,7 @@ struct DiscoveryIPAVerifier: DiscoveryIPAVerifying {
         let downloader = DiscoveryDownloader(limits: limits)
         do {
             let file = try await downloader.download(url) { _ in }
-            defer { try? FileManager.default.removeItem(at: file) }
+            defer { MirsaManagedTmp.end(file.deletingLastPathComponent()) }
             return try Self.validated(candidate, file: file, expectedBundleID: expectedBundleID, queryName: queryName)
         } catch { return nil }
     }
