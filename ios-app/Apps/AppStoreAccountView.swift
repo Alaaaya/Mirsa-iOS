@@ -7,22 +7,18 @@ import SwiftUI
 struct AppStoreAccountView: View {
     var onDownloaded: (URL) async throws -> Void
 
-    private let client = MirsaStoreClient.shared
+    private let client = MirsaStoreServerClient.shared
     @State private var account: MirsaStoreAccount?
     @State private var email = ""
     @State private var password = ""
     @State private var code = ""
     @State private var needsCode = false
-    @State private var country = "us"
     @State private var term = ""
     @State private var results: [MirsaStoreApp] = []
     @State private var searched = false
     @State private var busy: String?
     @State private var work: Task<Void, Never>?
     @State private var notice: String?
-    @State private var versions: [String: [String]] = [:]
-    @State private var chosen: [String: String] = [:]
-    @State private var manualID: [String: String] = [:]
     @State private var showSteps = false
     @State private var confirmSignOut = false
     @FocusState private var focus: Bool
@@ -55,7 +51,7 @@ struct AppStoreAccountView: View {
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
         .task { account = try? await client.currentAccount() }
-        .onDisappear { password = ""; code = "" }
+        .onDisappear { password = ""; code = ""; work?.cancel() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
         } message: { Text(notice ?? "") }
@@ -64,10 +60,10 @@ struct AppStoreAccountView: View {
             Button(t("Sign out", "تسجيل الخروج", "چوونە دەرەوە", "Derkeve"), role: .destructive) { signOut() }
             Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal"), role: .cancel) {}
         } message: {
-            Text(t("Your saved login is deleted from this iPhone. Downloaded IPAs stay.",
-                   "بينمسح دخولك المحفوظ من هالآيفون. ملفات IPA يلي نزلتها بتضل.",
-                   "چوونەژوورەوە پاشەکەوتکراوەکەت لەم ئایفۆنە دەسڕدرێتەوە. IPAە داگیراوەکان دەمێنن.",
-                   "Têketina te ya tomarkirî ji vê iPhone tê jêbirin. IPAyên daketî dimînin."))
+            Text(t("Your server session, challenges and server downloads are deleted. Imported IPAs stay.",
+                   "بتنمسح جلسة دخولك ورموز التحقق والتنزيلات عن سيرفر مرسى. ملفات IPA المستوردة بتضل.",
+                   "دانیشتن و کۆدەکان و داگرتنەکانی سێرڤەر دەسڕدرێنەوە. IPA هاوردەکراوەکان دەمێنن.",
+                   "Danişîn, kod û daxistinên serverê tên jêbirin. IPAyên hatine anîn dimînin."))
         }
     }
 
@@ -81,6 +77,11 @@ struct AppStoreAccountView: View {
                     "Sepanên ku hesabê te yê Apple xwedî ye dakêşe. Mirsa şîfreya wan venake, îmze nake û parve nake."),
                   systemImage: "lock.shield.fill")
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+            Text(t("Your email and password go over HTTPS to the Mirsa server for Apple sign-in. The password is not saved. Apple may require a verification code.",
+                   "إيميلك وكلمة السر بينبعتوا لسيرفر مرسى عبر HTTPS للدخول عند Apple. كلمة السر ما بتنحفظ وممكن Apple تطلب رمز تحقق.",
+                   "ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ سێرڤەری Mirsa دەنێردرێن بۆ Apple. وشەی نهێنی هەڵناگیرێت و Apple ڕەنگە کۆد بخوازێت.",
+                   "E-name û şîfreya te bi HTTPS ji servera Mirsa re ji bo Apple tên şandin. Şîfre nayê tomarkirin û dibe ku Apple kodê bixwaze."))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             Button { withAnimation(.easeOut(duration: 0.2)) { showSteps.toggle() } } label: {
                 HStack {
                     Text(t("How it works and limits", "كيف بيشتغل والحدود", "چۆن کار دەکات و سنوورەکان", "Çawa dixebite û sînor"))
@@ -93,18 +94,18 @@ struct AppStoreAccountView: View {
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             if showSteps {
                 VStack(alignment: .leading, spacing: 8) {
-                    step("1", t("Sign in with your Apple Account. Login secrets stay in this device’s protected Keychain and are sent only to Apple.",
-                                "سجّل دخول بحساب Apple. بيانات الدخول بتضل بس بسلسلة المفاتيح المحمية عهالجهاز وبتنبعت لـApple بس.",
-                                "بە ئەکاونتی Apple بچۆ ژوورەوە. زانیارییە نهێنییەکان تەنها لە Keychainی پارێزراوی ئەم ئامێرە هەڵدەگیرێن و بۆ Apple دەنێردرێن.",
-                                "Bi hesabê Apple têkeve. Agahiyên têketinê tenê di Keychaina parastî ya vî amûrî de dimînin û tenê ji Apple re tên şandin."))
+                    step("1", t("Mirsa sends your email and password over HTTPS to its server to sign in to Apple. Your password is not saved. Only the session is kept.",
+                                "مرسى بيبعت إيميلك وكلمة السر لسيرفرو عبر HTTPS ليسجّل دخول عند Apple. كلمة السر ما بتنحفظ، بس جلسة الدخول.",
+                                "Mirsa ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ سێرڤەری خۆی دەنێرێت بۆ چوونەژوورەوەی Apple. وشەی نهێنی هەڵناگیرێت، تەنها دانیشتن.",
+                                "Mirsa e-name û şîfreya te bi HTTPS ji servera xwe re dişîne ji bo têketina Apple. Şîfre nayê tomarkirin, tenê danişîn dimîne."))
                     step("2", t("If Apple asks, type the 6-digit code it sends to your devices.",
                                 "إذا طلبت Apple، اكتب الرمز من 6 أرقام يلي بيوصلك.",
                                 "ئەگەر Apple داوای کرد، کۆدی ٦ ژمارەیی بنووسە کە بۆت دێت.",
                                 "Heke Apple bixwaze, koda 6 hejmarî ya ku jî re tê binivîse."))
-                    step("3", t("Search an app. Pick the store country if it is not found.",
-                                "دوّر على تطبيق. غيّر دولة المتجر إذا ما انلقى.",
-                                "ئەپێک بگەڕێ. ئەگەر نەدۆزرایەوە وڵاتی ستۆر بگۆڕە.",
-                                "Sepanekê bigere. Heke nehat dîtin welatê stoyê biguherîne."))
+                    step("3", t("Search the store linked to your Apple Account.",
+                                "دوّر على تطبيق بمتجر حساب Apple تبعك.",
+                                "لە ستۆری بەستراو بە ئەکاونتی Apple بگەڕێ.",
+                                "Li stoya girêdayî hesabê Apple bigere."))
                     step("4", t("Free apps you never got: tap Get free license once. Paid apps are never bought here.",
                                 "تطبيقات مجانية ما حصلت عليها: دوس احصل على ترخيص مجاني مرة وحدة. التطبيقات المدفوعة ما بتنشترى هون.",
                                 "ئەپە بێبەرامبەرەکان کە نەتهێناون: جارێک مۆڵەتی بێبەرامبەر بهێنە. ئەپی پارەدار لێرە ناکڕدرێت.",
@@ -113,10 +114,10 @@ struct AppStoreAccountView: View {
                                 "نزّل. مرسى بيحتفظ بالملف الأصلي وبيضيفو لتبويب متجر أبل.",
                                 "دایبگرە. Mirsa فایلە ڕەسەنەکە دەپارێزێت و دەیخاتە بەشی فرۆشگای ئەپڵ.",
                                 "Daxe. Mirsa pelê resen diparêze û li Firoşgeha Apple zêde dike."))
-                    Text(t("Limits: a downloaded file does not mean it will install or open. Older versions depend on Apple, and the app must belong to this Apple Account. Do not share these files; they are tied to your account.",
-                           "حدود: نزول الملف ما يعني إنه رح يتثبت أو يفتح. النسخ القديمة بتتوقف على Apple، والتطبيق لازم يكون على حسابك. لا تشارك هالملفات لأنها مربوطة بحسابك.",
-                           "سنوور: داگرتنی فایل مانای ئەوە نییە دامەزرێت یان بکرێتەوە. وەشانە کۆنەکان بە Apple ەوە بەستراون و ئەپەکە دەبێت هی ئەم ئەکاونتە بێت. ئەم فایلانە بڵاو مەکەرەوە، بە ئەکاونتەکەتەوە بەستراون.",
-                           "Sînor: daketina pelê nayê wê wateyê ku dê saz bibe an vebe. Guhertoyên kevn bi Apple ve girêdayî ne û sepan divê yê vî hesabî be. Van pelan parve neke, bi hesabê te ve girêdayî ne."))
+                    Text(t("Limits: a downloaded file does not mean it will install or open. The app must belong to this Apple Account. Do not share these files; they are tied to your account.",
+                           "حدود: نزول الملف ما يعني إنه رح يتثبت أو يفتح. التطبيق لازم يكون على حسابك. لا تشارك هالملفات لأنها مربوطة بحسابك.",
+                           "سنوور: داگرتنی فایل مانای ئەوە نییە دامەزرێت یان بکرێتەوە. ئەپەکە دەبێت هی ئەم ئەکاونتە بێت. ئەم فایلانە بڵاو مەکەرەوە، بە ئەکاونتەکەتەوە بەستراون.",
+                           "Sînor: daketina pelê nayê wê wateyê ku dê saz bibe an vebe. Sepan divê yê vî hesabî be. Van pelan parve neke, bi hesabê te ve girêdayî ne."))
                         .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -145,13 +146,15 @@ struct AppStoreAccountView: View {
                    "Apple berî ku têketinê biqedîne koda 6 hejmarî dixwaze. Koda li cihazeke din a bi vî hesabê Apple ve têketî veke û li jêr binivîse."))
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("000000", text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode)
+            TextField(t("Code shown on your iPhone", "الرمز يلي وصل عآيفونك", "کۆدی سەر ئایفۆنەکەت", "Koda li iPhone ya te"), text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode)
                 .focused($focus).fieldStyle()
-                .onChange(of: code) { _, v in code = String(v.filter(\.isNumber).prefix(6)) }
+                .onChange(of: code) { _, v in code = String(v.filter { $0.isASCII && $0.isNumber }.prefix(6)) }
+            SecureField(t("Re-enter password for this verification", "اكتب كلمة السر من جديد للتحقق", "وشەی نهێنی بۆ پشتڕاستکردنەوە دووبارە بنووسە", "Ji bo piştrastkirinê şîfreyê dîsa binivîse"), text: $password)
+                .textContentType(.password).focused($focus).fieldStyle()
             Button { submitCode() } label: { Text(t("Verify code", "تحقق من الرمز", "کۆدەکە پشتڕاست بکەرەوە", "Kodê piştrast bike")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaPrimary).disabled(code.count != 6 || busy != nil)
-            Text(t("Same sign-in session. Three tries, then start again.", "نفس جلسة الدخول. 3 محاولات ثم ابدأ من جديد.",
-                   "هەمان دانیشتن. سێ هەوڵ، دواتر دووبارە دەست پێبکە.", "Heman danişîn. Sê hewil, paşê ji nû ve dest pê bike."))
+                .buttonStyle(.mirsaPrimary).disabled(code.count != 6 || password.isEmpty || busy != nil)
+            Text(t("Re-enter your password for this request. Two verification tries within five minutes, then start again. A challenge does not confirm that a code was delivered.", "اكتب كلمة السر من جديد لهالطلب. محاولتين خلال 5 دقايق وبعدين ابدأ من جديد. طلب الرمز مو تأكيد إنو وصلك.",
+                   "وشەی نهێنی بۆ ئەم داواکارییە دووبارە بنووسە. دوو هەوڵ لە پێنج خولەکدا، پاشان دووبارە دەست پێبکە. داوای کۆد گەیشتنی کۆد پشتڕاست ناکاتەوە.", "Ji bo vê daxwazê şîfreyê dîsa binivîse. Di pênc deqeyan de du hewil, paşê ji nû ve dest pê bike. Daxwaza kodê ne piştrastkirina gihîştina kodê ye."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button(t("Cancel and start over", "إلغاء والبدء من جديد", "هەڵوەشاندنەوە و دەستپێکردنەوە", "Betal bike û ji nû ve dest pê bike")) { cancelVerification() }
                 .buttonStyle(.mirsaSecondary).disabled(busy != nil)
@@ -168,8 +171,8 @@ struct AppStoreAccountView: View {
                 .autocorrectionDisabled().focused($focus).fieldStyle()
             SecureField(t("Password", "كلمة السر", "وشەی نهێنی", "Şîfre"), text: $password)
                 .textContentType(.password).focused($focus).fieldStyle()
-            Text(t("Sent only to Apple. Saved only in this device’s protected Keychain.", "بتنبعت لـApple بس. بتنحفظ بس بسلسلة المفاتيح المحمية عهالجهاز.",
-                   "تەنها بۆ Apple دەنێردرێت. تەنها لە Keychainی پارێزراوی ئەم ئامێرە هەڵدەگیرێت.", "Tenê ji Apple re tê şandin. Tenê di Keychaina parastî ya vî amûrî de tê tomarkirin."))
+            Text(t("Sent over HTTPS to the Mirsa server for Apple sign-in. Your password is not saved. Apple may ask for a code.", "بتنبعت لسيرفر مرسى عبر HTTPS للدخول عند Apple. كلمة السر ما بتنحفظ. ممكن Apple تطلب رمز تحقق.",
+                   "بە HTTPS بۆ سێرڤەری Mirsa دەنێردرێت بۆ چوونەژوورەوەی Apple. وشەی نهێنی هەڵناگیرێت. Apple ڕەنگە کۆد بخوازێت.", "Bi HTTPS ji servera Mirsa re ji bo têketina Apple tê şandin. Şîfre nayê tomarkirin. Dibe ku Apple kodê bixwaze."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button { signIn() } label: { Text(t("Sign in", "تسجيل الدخول", "چوونەژوورەوە", "Têkeve")).frame(maxWidth: .infinity) }
                 .buttonStyle(.mirsaPrimary)
@@ -196,19 +199,15 @@ struct AppStoreAccountView: View {
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
             Text(t("Search", "بحث", "گەڕان", "Lêgerîn")).font(MirsaFont.cardTitle).foregroundStyle(.white)
             HStack {
-                TextField(t("Country code (us, de, tr)", "رمز الدولة (us, de, tr)", "کۆدی وڵات (us, de, tr)", "Koda welat (us, de, tr)"), text: $country)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().focused($focus).fieldStyle()
-                    .frame(width: 130)
-                    .onChange(of: country) { _, v in country = String(v.lowercased().filter(\.isLetter).prefix(2)) }
                 TextField(t("App name", "اسم التطبيق", "ناوی ئەپ", "Navê sepanê"), text: $term)
                     .submitLabel(.search).onSubmit { search() }.focused($focus).fieldStyle()
             }
-            Text(t("The store country changes which apps and versions you can find.", "دولة المتجر بتغيّر التطبيقات والنسخ يلي بتلاقيها.",
-                   "وڵاتی ستۆر دیاری دەکات چ ئەپ و وەشانێک دەدۆزیتەوە.", "Welatê stoyê diyar dike tu kîjan sepan û guhertoyan dibînî."))
+            Text(t("Search uses your Apple Account storefront.", "البحث بمتجر حساب Apple تبعك.",
+                   "گەڕان لە ستۆری ئەکاونتی Apple ت دەکرێت.", "Lêgerîn li stoya hesabê Apple ye."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button { search() } label: { Text(t("Search", "بحث", "گەڕان", "Lêgerîn")).frame(maxWidth: .infinity) }
                 .buttonStyle(.mirsaPrimary)
-                .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty || country.count != 2 || busy != nil)
+                .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty || busy != nil)
         }
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
 
@@ -221,7 +220,6 @@ struct AppStoreAccountView: View {
 
     private func resultCard(_ app: MirsaStoreApp) -> some View {
         let free = app.price == 0
-        let key = app.bundleID
         return VStack(alignment: .leading, spacing: MirsaSpacing.s) {
             HStack(spacing: 12) {
                 AsyncImage(url: URL(string: app.artworkURL)) { $0.resizable().scaledToFill() } placeholder: { MirsaPalette.cardRaised }
@@ -242,30 +240,6 @@ struct AppStoreAccountView: View {
                        "تەنها ئەگەر ئەم ئەکاونتە پێشتر ئەپەکەی نەهێنابێت. دەیخاتە ئەکاونتی Apple ت بێ پارە.",
                        "Tenê heke ev hesab berê sepan negirtibe. Li hesabê Apple zêde dike, bêpere."))
                     .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Button { loadVersions(app) } label: { Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).frame(maxWidth: .infinity) }
-                    .buttonStyle(.mirsaSecondary).disabled(busy != nil)
-                Text(t("Optional. Apple gives version IDs, not names, and may not allow old ones. Leave empty for the latest.",
-                       "اختياري. Apple بتعطي أرقام نسخ مو أسماء، وممكن ما تسمح بالقديمة. اتركو فاضي للأحدث.",
-                       "ئارەزوومەندانە. Apple ناسنامەی وەشان دەدات نەک ناو، و ڕەنگە کۆنەکان ڕێگەپێنەدات. بەتاڵی بهێڵەرەوە بۆ نوێترین.",
-                       "Bijarte. Apple ID-yên guhertoyan dide, ne nav, û dibe ku yên kevn nede. Ji bo yê herî nû vala bihêle."))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-                if let list = versions[key] {
-                    if list.isEmpty {
-                        Text(t("Apple returned no versions.", "Apple ما رجّعت نسخ.", "Apple هیچ وەشانێکی نەگەڕاندەوە.", "Apple guhertoyek neda."))
-                            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
-                    } else {
-                        Picker("", selection: Binding(get: { chosen[key] ?? "" }, set: { chosen[key] = $0.isEmpty ? nil : $0; manualID[key] = "" })) {
-                            Text(t("Latest", "الأحدث", "نوێترین", "Ya herî nû")).tag("")
-                            ForEach(list.reversed(), id: \.self) { Text($0).tag($0) }
-                        }.pickerStyle(.menu).tint(MirsaPalette.accentSoft)
-                    }
-                }
-                TextField(t("Version ID (optional)", "رقم النسخة (اختياري)", "ناسنامەی وەشان (ئارەزوومەندانە)", "ID ya guhertoyê (bijarte)"),
-                          text: Binding(get: { manualID[key] ?? "" }, set: { v in
-                              let d = String(v.filter(\.isNumber).prefix(12)); manualID[key] = d; chosen[key] = d.isEmpty ? nil : d }))
-                    .keyboardType(.numberPad).focused($focus).fieldStyle()
             }
             VStack(alignment: .leading, spacing: 4) {
                 Button { download(app) } label: {
@@ -310,9 +284,10 @@ struct AppStoreAccountView: View {
 
     private func submitCode() {
         let c = code
-        code = ""
+        let secret = password
+        password = ""; code = ""
         run(t("Verifying…", "عم نتحقق…", "پشتڕاستکردنەوە…", "Piştrastkirin…")) {
-            switch try await client.verify(code: c) {
+            switch try await client.verify(code: c, password: secret) {
             case .signedIn(let a): account = a; needsCode = false; email = ""
             case .verificationRequired: notice = t("The code was not accepted. Try again.", "الرمز ما انقبل. جرّب مرة ثانية.", "کۆدەکە وەرنەگیرا. دووبارە هەوڵ بدەرەوە.", "Kod nehat pejirandin. Dîsa biceribîne.")
             }
@@ -320,7 +295,7 @@ struct AppStoreAccountView: View {
     }
 
     private func cancelVerification() {
-        code = ""; needsCode = false
+        password = ""; code = ""; needsCode = false
         Task { try? await client.signOut() }
     }
 
@@ -330,16 +305,15 @@ struct AppStoreAccountView: View {
         Task {
             do {
                 try await client.signOut()
-                account = nil; results = []; versions = [:]; chosen = [:]; manualID = [:]; searched = false
+                account = nil; results = []; searched = false
             } catch { notice = describe(error); account = try? await client.currentAccount() }
         }
     }
 
     private func search() {
         let q = term.trimmingCharacters(in: .whitespaces)
-        let c = country
         run(t("Searching…", "عم نبحث…", "گەڕان…", "Lêgerîn…")) {
-            let found = try await client.search(term: q, country: c, limit: 25)
+            let found = try await client.search(term: q, limit: 25)
             results = found; searched = true
         }
     }
@@ -352,16 +326,9 @@ struct AppStoreAccountView: View {
         }
     }
 
-    private func loadVersions(_ app: MirsaStoreApp) {
-        run(t("Asking Apple for versions…", "عم نسأل Apple عن النسخ…", "پرسیار لە Apple دەکرێت…", "Ji Apple guhertoyan dipirsin…")) {
-            versions[app.bundleID] = try await client.availableVersions(app)
-        }
-    }
-
     private func download(_ app: MirsaStoreApp) {
-        let version = chosen[app.bundleID]
-        run(t("Downloading from Apple…", "عم نزّل من Apple…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
-            let url = try await client.downloadOwnedApp(app, externalVersionID: version)
+        run(t("Preparing and downloading…", "عم جهّز ونزّل…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
+            let url = try await client.downloadOwnedApp(app)
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try await onDownloaded(url)
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
@@ -369,8 +336,28 @@ struct AppStoreAccountView: View {
         }
     }
 
+    private func codeReset() { code = "" }
+
     private func describe(_ error: Error) -> String {
-        if let d = error as? MirsaStoreAuthDiagnostic { return d.localizedDescription }
+        if let server = error as? MirsaStoreServerError {
+            switch server {
+            case .code(let code):
+                switch code {
+                case "invalid_code": return t("Code not accepted. Re-enter your password and try once more.", "الرمز ما انقبل. اكتب كلمة السر من جديد وجرّب مرة ثانية.", "کۆدەکە وەرنەگیرا. وشەی نهێنی دووبارە بنووسە و هەوڵ بدە.", "Kod nehat pejirandin. Şîfreyê dîsa binivîse û biceribîne.")
+                case "challenge_expired", "credentials_rejected":
+                    needsCode = false; password = ""; codeReset()
+                    return t("Sign-in expired or was rejected. Start again with your Apple Account.", "انتهت محاولة الدخول أو ما انقبلت. ابدأ من جديد بحساب Apple.", "چوونەژوورەوە بەسەرچوو یان ڕەتکرایەوە. دووبارە دەست پێبکە.", "Têketin qediya an hat redkirin. Ji nû ve dest pê bike.")
+                case "unauthorized", "device_required", "session_expired", "not_authenticated":
+                    account = nil; needsCode = false; results = []
+                    return t("Your session is no longer available. Sign in again explicitly.", "جلستك ما عادت متاحة. سجّل دخول من جديد.", "دانیشتنەکەت بەردەست نییە. دووبارە بچۆ ژوورەوە.", "Danişîna te êdî ne berdest e. Dîsa têkeve.")
+                case "paid_app_forbidden": return t("Paid apps cannot be purchased here.", "التطبيقات المدفوعة ما بتنشترى هون.", "ئەپە پارەدارەکان لێرە ناکڕدرێن.", "Sepanên bi pere li vir nayên kirîn.")
+                case "artifact_expired", "not_found": return t("This session or download expired. Start the action again.", "انتهت هالجلسة أو هالتنزيل. ابدأ الطلب من جديد.", "دانیشتن یان داگرتن بەسەرچوو. دووبارە دەست پێبکە.", "Danişîn an daxistin qediya. Dîsa dest pê bike.")
+                case "too_large": return t("This download exceeds the 2 GB limit.", "هالتنزيل أكبر من حد 2 غيغابايت.", "ئەم داگرتنە لە سنووری ٢ گیگابایت زیاترە.", "Ev daxistin ji sînorê 2 GB mezintir e.")
+                case "rate_limited", "busy": return t("The service is busy. Wait a little before trying again.", "الخدمة مشغولة. استنى شوي قبل ما تعيد.", "خزمەتگوزاری سەرقاڵە. کەمێک چاوەڕێ بکە.", "Xizmet mijûl e. Hinekî bisekine û dîsa biceribîne.")
+                default: return t("The App Store service could not finish this request. Try again later.", "خدمة متجر أبل ما قدرت تكمل الطلب. جرّب بعدين.", "خزمەتگوزاری App Store نەیتوانی داواکاری تەواو بکات. دواتر هەوڵ بدە.", "Xizmeta App Store nikarî daxwazê biqedîne. Paşê biceribîne.")
+                }
+            }
+        }
         guard let e = error as? MirsaStoreError else {
             return t("Something went wrong. Check your connection and try again.", "صار خطأ. تأكد من الإنترنت وجرّب.",
                      "هەڵەیەک ڕوویدا. ئینتەرنێتەکەت بپشکنە و دووبارە هەوڵ بدە.", "Çewtiyek çêbû. Girêdana înternetê kontrol bike û dîsa biceribîne.")

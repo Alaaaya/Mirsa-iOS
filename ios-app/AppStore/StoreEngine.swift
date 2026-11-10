@@ -9,6 +9,10 @@ struct MirsaStoreApp: Sendable, Equatable, Identifiable {
     let version: String
     let price: Double?
     let artworkURL: String
+    init(id: Int64, bundleID: String, name: String, version: String, price: Double?, artworkURL: String) {
+        self.id = id; self.bundleID = bundleID; self.name = name; self.version = version
+        self.price = price; self.artworkURL = artworkURL
+    }
     init(_ software: Software) {
         id = software.id; bundleID = software.bundleID; name = software.name
         version = software.version; price = software.price; artworkURL = software.artworkUrl
