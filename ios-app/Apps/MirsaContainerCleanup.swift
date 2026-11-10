@@ -77,13 +77,20 @@ enum MirsaContainerCleanup {
         }
     }
 
+    /// Use the same spelling for Darwin's known aliases in roots, leases and race fixtures.
+    /// Foundation may resolve /private/var back to /var, so resolvingSymlinks alone is not enough.
+    /// This is lexical normalization only; openRoot still validates every actual component.
+    static func canonicalDarwinPath(_ url: URL) -> String {
+        var parts = url.standardizedFileURL.pathComponents.dropFirst().map { $0 }
+        if parts.first == "var" || parts.first == "tmp" { parts.insert("private", at: 0) }
+        return "/" + parts.joined(separator: "/")
+    }
+
     /// Open EVERY path component without following links, not merely the last component.
     /// Resolve only Darwin's known /var and /tmp aliases. Arbitrary ancestor links fail closed.
     private static func openRoot(_ url: URL) -> (Int32, [Int32], [Link], String)? {
         guard url.isFileURL else { return nil }
-        var parts = url.standardizedFileURL.pathComponents.dropFirst().map { $0 }
-        if parts.first == "var" { parts.insert("private", at: 0) }
-        else if parts.first == "tmp" { parts.insert("private", at: 0) }
+        let parts = canonicalDarwinPath(url).split(separator: "/").map(String.init)
         guard !parts.isEmpty else { return nil }
         let first = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
         guard first >= 0 else { return nil }
@@ -114,7 +121,7 @@ enum MirsaContainerCleanup {
                      beforeDelete: ((URL) -> Void)? = nil) -> Result {
         guard let (fd, descriptors, initialChain, canonical) = openRoot(root) else { return Result() }
         defer { descriptors.forEach { close($0) } }
-        let blocked = protectedPaths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().standardizedFileURL.path }
+        let blocked = protectedPaths.map { canonicalDarwinPath(URL(fileURLWithPath: $0).resolvingSymlinksInPath()) }
         var result = Result()
         var rootStat = stat()
         guard fstat(fd, &rootStat) == 0 else { return result }
