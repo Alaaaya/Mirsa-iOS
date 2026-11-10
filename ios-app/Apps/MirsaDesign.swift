@@ -108,8 +108,51 @@ struct MirsaSolidCard<S: InsettableShape>: ViewModifier {
     let shape: S
     var tint: Color? = nil
     var elevation: Double = 1
+    /// Settings › Theme. Liquid Glass draws real glass; Classic keeps the solid card.
+    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
+        if theme == MirsaTheme.liquid.rawValue && !reduceTransparency {
+            glass(content)
+        } else {
+            solid(content)
+        }
+    }
+
+    @ViewBuilder private func glass(_ content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(tint.map { Glass.regular.tint($0.opacity(0.35)) } ?? .regular, in: shape)
+                .contentShape(shape)
+        } else {
+            material(content)
+        }
+        #else
+        material(content)
+        #endif
+    }
+
+    /// iOS 18 / older SDK: frosted material with a light rim, so the background still shows through.
+    private func material(_ content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    shape.fill(.ultraThinMaterial)
+                    shape.fill(Color.white.opacity(0.04))
+                    if let tint { shape.fill(tint.opacity(0.18)) }
+                }
+                .shadow(color: .black.opacity(0.18 * elevation), radius: 12 * elevation, y: 6 * elevation)
+            }
+            .overlay {
+                shape.strokeBorder(LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.06)],
+                                                  startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+            }
+            .contentShape(shape)
+    }
+
+    private func solid(_ content: Content) -> some View {
         content
             .background {
                 ZStack {
