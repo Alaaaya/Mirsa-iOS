@@ -1,5 +1,10 @@
 import Foundation
 
+/// Public builds never reach the App Store login. Backend stays owner-only.
+enum MirsaStoreAvailability {
+    static let publicLoginEnabled = false
+}
+
 extension MirsaStoreServerClient {
     static let shared: MirsaStoreServerClient = {
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
