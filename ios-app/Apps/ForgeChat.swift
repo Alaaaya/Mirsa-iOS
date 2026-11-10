@@ -451,8 +451,6 @@ struct ForgeChatThreadView: View {
 
     private var header: some View {
         ZStack {
-            Text(ForgeChatText.title).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
-                .padding(.horizontal, 14).padding(.vertical, 8).background(.ultraThinMaterial, in: Capsule())
             HStack {
                 Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
                     .accessibilityLabel(ForgeChatText.close)
