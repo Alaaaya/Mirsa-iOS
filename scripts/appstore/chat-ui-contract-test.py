@@ -14,8 +14,10 @@ translations = [dict(zip(["en", "ar", "ckb", "kmr"], map(ast.literal_eval, row))
 assert len(translations) == 4 and all(all(row.values()) for row in translations)
 assert '.swipeActions(edge: .trailing, allowsFullSwipe: false)' in source
 assert 'Button(role: .destructive)' in source
-assert source.count("MirsaChatTheme.bg.ignoresSafeArea()") == 2
-assert "AuroraBackground()" not in source
+# Chat background: the 2.0 navy (MirsaChatTheme.bg) or the Hark Aurora design, used consistently on both screens.
+navy_bg = source.count("MirsaChatTheme.bg.ignoresSafeArea()")
+aurora_bg = source.count("AuroraBackground().ignoresSafeArea()")
+assert (navy_bg, aurora_bg) in ((2, 0), (0, 2)), (navy_bg, aurora_bg)
 assert "ForEach(rows)" in source and "ForEach(msgs)" not in source and "ForEach(queued)" not in source
 assert ".id(row.id)" in source
 assert "ForgeChatTimeline.pending(outgoing: store.outgoing, echoes: store.sentEcho" in source
@@ -43,7 +45,7 @@ assert flush.index("saveEcho()") < flush.index("outgoing.removeAll")
 result = {"kind": "Source guards only, not physical-device UI execution",
           "harkCumulativeCommit": "35047a5598b11929f7e4e16a1187ede8f86e0f32",
           "statusStrings": translations,
-          "guards": "single UUID ForEach, persistent text echo, monotonic reads, smooth/reduced motion, navy, swipe-delete epoch"}
+          "guards": "single UUID ForEach, persistent text echo, monotonic reads, smooth/reduced motion, navy or Aurora background, swipe-delete epoch"}
 out = root / "build/chat-ui-contract-proof.json"
 out.parent.mkdir(exist_ok=True)
 out.write_text(json.dumps(result, ensure_ascii=False, indent=2))
