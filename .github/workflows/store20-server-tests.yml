@@ -63,6 +63,7 @@ jobs:
           python3 scripts/appstore/server-ui-contract-test.py
           python3 scripts/appstore/chat-ui-contract-test.py
           python3 scripts/appstore/delete-contract-test.py
+          python3 scripts/appstore/source-ui-contract-test.py
       - uses: actions/upload-artifact@v4
         with:
           name: Mirsa-store20-transport-device
@@ -76,4 +77,5 @@ jobs:
             build/store-server-ui-text-proof.json
             build/chat-ui-contract-proof.json
             build/delete-contract-proof.json
+            build/source-ui-contract-proof.json
           if-no-files-found: error
