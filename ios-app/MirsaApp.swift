@@ -4,6 +4,7 @@ import AirliftFFI
 /// Entry point called from main.m once the Container loader has had its turn.
 @_cdecl("mirsa_swift_main")
 public func mirsaSwiftMain() {
+    MirsaContainerCleanup.captureProcessStart()
     MirsaApp.main()
 }
 
@@ -32,7 +33,8 @@ struct MirsaApp: App {
         AppsStore.registerBackgroundTask()
         AppsStore.importHandoffIfNeeded()
         MirsaChrome.apply()
-        if !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
+        // Cold/background launch may still be handing a URLSession file to its delegate.
+        // Automatic sweeping starts only after the scene becomes active.
     }
 
     var body: some Scene {
