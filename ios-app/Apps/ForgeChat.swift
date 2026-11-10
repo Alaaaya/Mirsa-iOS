@@ -466,8 +466,19 @@ struct ForgeChatThreadView: View {
                 .scrollDismissesKeyboard(.interactively)
                 // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
                 .safeAreaInset(edge: .top, spacing: 0) { header }
-                .onChange(of: msgs.count + queued.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+                // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .onChange(of: rows.map(\.id)) { _, _ in pinToBottom(proxy) }
+                .onChange(of: msgs.last?.text) { _, _ in pinToBottom(proxy) }
+                .onChange(of: composerFocused) { _, focused in if focused { pinToBottom(proxy, after: 0.35) } }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in pinToBottom(proxy) }
+                .onAppear {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                    // Again once the lazy rows (and the full-screen cover) finished laying out.
+                    pinToBottom(proxy, animated: false, after: 0.05)
+                    pinToBottom(proxy, animated: false, after: 0.3)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -513,6 +524,14 @@ struct ForgeChatThreadView: View {
         .task {
             while !Task.isCancelled && !ForgeChatStore.fixture { await store.read(threadID); try? await Task.sleep(nanoseconds: 8_000_000_000) }
         }
+    }
+
+    private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = true, after delay: Double = 0) {
+        let go = {
+            if animated && !reduceMotion { withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+            else { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: go) } else { DispatchQueue.main.async(execute: go) }
     }
 
     /// No bar and no title: only a floating circular back button over the conversation.
