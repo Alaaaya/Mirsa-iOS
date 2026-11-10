@@ -1,152 +1,77 @@
-name: Unsigned Mirsa IPA
+name: Mirsa owner Store test IPA
 on:
   workflow_dispatch:
-  push:
-    branches: [apps-sideloader]
 permissions:
-  contents: write
-env:
-  MIRSA_VERSION: "1.9"
+  contents: read
 jobs:
-  build:
+  unsigned-ipa:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          ref: ${{ github.sha }}
       - name: Select newest Xcode
         run: |
-          ls -d /Applications/Xcode*.app
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
-          if [ -z "$XC" ]; then XC=$(xcode-select -p | sed 's#/Contents/Developer##'); fi
-          sudo xcode-select -s "$XC"
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
-
-      - name: Validate on-device App Store backend without simulator
-        run: bash scripts/appstore/package-tests.sh
-
-      - name: Authentication diagnostics, redaction and exact signed-body offline tests
-        run: swift test --package-path vendor/ApplePackage --filter 'AuthenticationDiagnosticTests|SAPAuthenticationRequestTests'
-
-      - name: Credential-free Apple SAP preflight
-        continue-on-error: true
-        env:
-          MIRSA_AUTH_PREFLIGHT: "1"
-        run: swift test --package-path vendor/ApplePackage --filter AuthenticationDiagnosticTests.testCredentialFreeLiveSAPPreflight
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust-core
-
-      # rust-core changed (sideloader + container signer), so rebuild the
-      # static library instead of using the prebuilt AirliftFFI.xcframework.
+      - name: Validate owner-only Store access
+        run: python3 scripts/appstore/owner-store-gate-tests.py
+      - name: Run exact ZIP and DEB parser security regressions
+        run: python3 scripts/appstore/zip-import-tests.py
+      - name: Run exact production injection-method behavior and security tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          python3 scripts/appstore/injection-method-tests.py 2>&1 | tee build/injection-method-native.log
       - name: Build AirliftFFI for iOS (device)
         env:
           IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         run: |
-          cd rust-core
-          cargo build --release --target aarch64-apple-ios
-          cd ..
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios
           rm -rf AirliftFFI.xcframework
-          xcodebuild -create-xcframework \
-            -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a \
-            -headers rust-core/include \
-            -output AirliftFFI.xcframework
-
-      - name: Generate Xcode project
-        run: brew install xcodegen && xcodegen generate
-
-      - name: Stamp build number
-        run: /usr/libexec/PlistBuddy -c "Add :MirsaBuild string ${{ github.run_number }}" ios-app/Info.plist
-
-      - name: Build unsigned IPA
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run compiled feature and backend regression tests
         run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
+      - name: Build unsigned IPA (isolated fixture 261, never published)
+        run: |
+          python3 - <<'PYTHON'
+          import pathlib,re
+          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.0"', p.read_text());assert n==1;p.write_text(text)
+          PYTHON
+          /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 261" ios-app/Info.plist
+          brew install xcodegen && xcodegen generate
+          export GITHUB_RUN_NUMBER=261
           bash build-ipa.sh
-
-      - name: Verify actual IPA upgrade from live 243
-        run: python3 scripts/verify_release_upgrade.py build/Mirsa.ipa
-
+      - name: Localization coverage
+        run: |
+          python3 ios-app/localization-coverage-test.py
+          python3 ios-app/localization-plural-test.py
+          python3 scripts/appstore/chat-ui-contract-test.py
+          python3 scripts/appstore/source-ui-contract-test.py
+          python3 scripts/appstore/delete-contract-test.py
+          python3 scripts/appstore/public-gate-contract-test.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Mirsa-unsigned
+          name: Mirsa-composer20-unsigned
           path: build/Mirsa.ipa
 
-      # Mirsa checks the latest release on launch and offers to update itself.
-      - name: Publish release for in-app updates
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 scripts/curated_release_notes.py docs/release-notes.json "${MIRSA_VERSION}" > notes.txt
-          gh release create "${MIRSA_VERSION}" build/Mirsa.ipa \
-            --title "Mirsa ${MIRSA_VERSION}" --notes-file notes.txt \
-            --target "${{ github.sha }}" --latest
-
-      # Mirsa Setup for ESign/Feather: a fixed "setup" release (never "latest",
-      # so Mirsa's own updater is not affected) holding Mirsa-Setup.ipa and an
-      # AltStore-format source.json that Feather/ESign read for updates.
-      - name: Publish Mirsa Setup + Feather source
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN: ${{ github.run_number }}
-        run: |
-          set -e
-          VER="${MIRSA_VERSION}"
-          rm -rf setup && mkdir setup && cd setup
-          unzip -q ../build/Mirsa.ipa
-          P=$(ls -d Payload/*.app)/Info.plist
-          PB=/usr/libexec/PlistBuddy
-          # Extension bundle IDs must remain prefixed by the containing app ID.
-          # Keep extension versions in sync with Setup as well.
-          python3 - "$P" "$VER" <<'PYSETUP'
-          import pathlib, plistlib, sys
-          parent = pathlib.Path(sys.argv[1])
-          old_id = plistlib.loads(parent.read_bytes())["CFBundleIdentifier"]
-          for info in parent.parent.glob("PlugIns/**/*.appex/Info.plist"):
-              data = plistlib.loads(info.read_bytes())
-              bundle_id = data["CFBundleIdentifier"]
-              if not bundle_id.startswith(old_id + "."):
-                  raise SystemExit("Extension identifier is not prefixed by its parent")
-              data["CFBundleIdentifier"] = "com.alaa.mirsa.setup" + bundle_id[len(old_id):]
-              data["CFBundleShortVersionString"] = sys.argv[2]
-              data["CFBundleVersion"] = plistlib.loads(parent.read_bytes())["CFBundleVersion"]
-              info.write_bytes(plistlib.dumps(data))
-          PYSETUP
-          $PB -c "Set :CFBundleIdentifier com.alaa.mirsa.setup" "$P"
-          $PB -c "Set :CFBundleDisplayName Mirsa Setup" "$P" || $PB -c "Add :CFBundleDisplayName string Mirsa Setup" "$P"
-          $PB -c "Set :CFBundleName Mirsa Setup" "$P"
-          $PB -c "Delete :MirsaSetupMode" "$P" 2>/dev/null || true
-          $PB -c "Add :MirsaSetupMode bool true" "$P"
-          $PB -c "Set :CFBundleShortVersionString $VER" "$P"
-          zip -qry ../build/Mirsa-Setup.ipa Payload
-          cd ..
-          SIZE=$(stat -f%z build/Mirsa-Setup.ipa)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/setup/Mirsa-Setup.ipa"
-          ICON="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/ios-app/Assets.xcassets/AppIcon.appiconset/AppIcon-60@3x.png"
-          NOTES=$(python3 scripts/curated_release_notes.py docs/release-notes.json "$VER")
-          python3 - "$VER" "$DATE" "$URL" "$SIZE" "$ICON" "$NOTES" <<'PY'
-          import json, sys, plistlib, pathlib, glob
-          ver, date, url, size, icon, notes = sys.argv[1:7]
-          src = {
-            "name": "Mirsa", "identifier": "com.alaa.mirsa.source",
-            "apps": [{
-              "name": "Mirsa Setup", "bundleIdentifier": "com.alaa.mirsa.setup",
-              "developerName": "Alaa", "iconURL": icon,
-              "localizedDescription": "Installs Mirsa with your Apple ID.",
-              "version": ver, "versionDate": date, "downloadURL": url, "size": int(size),
-              "versions": [{"version": ver, "buildVersion": plistlib.loads(pathlib.Path(glob.glob("setup/Payload/*.app/Info.plist")[0]).read_bytes())["CFBundleVersion"], "date": date,
-                            "downloadURL": url, "size": int(size),
-                            "releaseNotes": json.loads(notes)["releaseNotes"], "localizedDescription": json.loads(notes)["releaseNotes"].get("en", "Release notes are not available for this version."), "minOSVersion": "18.0"}]
-            }],
-            "news": []
-          }
-          json.dump(src, open("build/source.json", "w"), indent=2)
-          PY
-          gh release view setup >/dev/null 2>&1 || gh release create setup --title "Mirsa Setup (Feather source)" --notes "Add this source in Feather/ESign: https://github.com/${GITHUB_REPOSITORY}/releases/download/setup/source.json" --latest=false
-          gh release upload setup build/Mirsa-Setup.ipa build/source.json --clobber
+      - name: Upload native and Swift test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirsa-injection-method-tests
+          path: |
+            build/injection-method-native.log
+            build/package-tests.log
+          if-no-files-found: warn
