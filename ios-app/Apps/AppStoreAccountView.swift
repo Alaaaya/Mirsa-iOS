@@ -433,9 +433,22 @@ struct AppStoreAccountView: View {
                     let entries = try await client.versionMetadata(app, externalVersionIDs: remaining)
                     guard !Task.isCancelled, generation == operationGeneration else { return }
                     for item in entries { metadata[key, default: [:]][item.externalVersionID] = item }
+                    for id in remaining where !entries.contains(where: { $0.externalVersionID == id }) {
+                        metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
+                    }
                     remaining = remaining.filter { metadata[key]?[$0]?.status == "queued" }
                     if !remaining.isEmpty && attempt < 5 { try await Task.sleep(nanoseconds: 3_000_000_000) }
-                } catch { return }
+                } catch {
+                    guard !Task.isCancelled, generation == operationGeneration else { return }
+                    for id in remaining {
+                        metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
+                    }
+                    return
+                }
+            }
+            guard !Task.isCancelled, generation == operationGeneration else { return }
+            for id in remaining {
+                metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
             }
         }
     }
