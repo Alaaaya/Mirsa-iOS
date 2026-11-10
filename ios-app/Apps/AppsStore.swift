@@ -83,6 +83,7 @@ final class AppsStore: ObservableObject {
         }
     }
     private var renewals: [String: Task<Bool, Never>] = [:]
+    private var deletingApps: Set<String> = []
     @Published var toast: String? = nil
     /// Bundle id of the Mirsa that installSelf just installed (to open it).
     @Published var installedSelfBundleID: String? = nil
@@ -877,11 +878,31 @@ final class AppsStore: ObservableObject {
     }
 
     func delete(_ app: ManagedApp, vm: AppViewModel?) async {
-        let fm = FileManager.default
-        if app.location == .container { await backupData(app, quiet: true) }
-        if app.location == .real, let bid = app.installedBundleID, networkReady(vm) {
-            _ = try? await Task.detached { try SideloadService.uninstall(bundleID: bid) }.value
+        guard deletingApps.insert(app.id).inserted else { return }
+        defer { deletingApps.remove(app.id) }
+        guard let current = apps.first(where: { $0.id == app.id }) else { return }
+        if current.location == .real {
+            do {
+                try await RealAppDeletion.perform(
+                    networkReady: networkReady(vm), bundleID: current.installedBundleID,
+                    uninstall: { bid in
+                        // The existing bridge throws unless installation_proxy's
+                        // terminal completion response confirms the uninstall.
+                        try await Task.detached { try SideloadService.uninstall(bundleID: bid) }.value
+                        return true
+                    },
+                    commit: { self.removeLocalApp(current) })
+            } catch {
+                fail(RealAppDeletion.failureMessage, offersSettings: true)
+            }
+            return
         }
+        await backupData(current, quiet: true)
+        removeLocalApp(current)
+    }
+
+    private func removeLocalApp(_ app: ManagedApp) {
+        let fm = FileManager.default
         try? fm.removeItem(at: Self.appDir(app.id))
         try? fm.removeItem(at: Self.dataDir(app.id))
         try? fm.removeItem(at: Self.originalIPA(app.id))
