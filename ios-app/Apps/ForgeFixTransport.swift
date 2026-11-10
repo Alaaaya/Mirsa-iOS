@@ -74,7 +74,7 @@ extension ForgeClient {
         let (stream, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
               response.url == endpoint, response.expectedContentLength <= Int64(maxBytes) else {
-            throw Failure.message("Fix sync request failed. Reopen Mirsa to retry.")
+            throw Failure.message(tr("Could not sync. Your request is saved; check your connection and reopen Mirsa to retry.", "تعذّرت المزامنة. طلبك محفوظ؛ تأكد من الاتصال وافتح مرسى من جديد للمحاولة.", ckb: "هاوکاتکردن سەرنەکەوت. داواکارییەکەت پاشەکەوت کراوە؛ پەیوەندی بپشکنە و میرسا دووبارە بکەرەوە.", kmr: "Hevdemkirin serneket. Daxwaza te hatiye tomarkirin; girêdanê kontrol bike û Mirsa dîsa veke."))
         }
         var result = Data()
         for try await byte in stream {

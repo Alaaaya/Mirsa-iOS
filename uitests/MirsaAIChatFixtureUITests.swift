@@ -2,12 +2,12 @@ import XCTest
 
 /// Screenshot of the REAL ForgeChatThreadView with a seeded no-network store (DEBUG harness only).
 final class MirsaAIChatFixtureUITests: XCTestCase {
-    private func openEmptyChat(_ state: String = "", theme: String = "liquid", largeText: Bool = false) -> XCUIApplication {
+    private func openEmptyChat(_ state: String = "", theme: String = "liquid", largeText: Bool = false, language: String = "ar") -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-embedded", "-MirsaChatFixture",
                                "-MirsaChatEmbeddedFixture", "-MirsaChatEmptyFixture", "-mirsa.theme", theme,
-                               "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar_SA"]
+                               "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
         if !state.isEmpty { app.launchArguments.append(state) }
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch()
@@ -95,6 +95,32 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         let app = openEmptyChat("-MirsaChatRegistrationPendingFixture", theme: "classic", largeText: true)
         assertComposer(app, name: "registration_pending_classic_large_text")
         app.terminate()
+    }
+
+    func testDraft4000And4001ScalarLimitInAllLanguages() {
+        let errors = [
+            "en": "Maximum 4,000 characters. Shorten your message or split it into two.",
+            "ar": "الحد ٤٠٠٠ حرف. اختصر رسالتك أو قسّمها لرسالتين.",
+            "ckb": "زۆرترین ٤٠٠٠ پیت. نامەکەت کورت بکەوە یان بیکە بە دوو نامە.",
+            "kmr": "Herî zêde 4.000 tîp. Peyamê kurt bike an bike du peyam."
+        ]
+        for language in ["en", "ar", "ckb", "kmr"] {
+            for count in [4000, 4001] {
+                let app = openEmptyChat("-MirsaChatDraft\(count)Fixture", language: language)
+                assertComposer(app, name: "draft_\(count)_\(language)")
+                let counter = app.staticTexts["chat-character-limit"]
+                XCTAssertTrue(counter.waitForExistence(timeout: 5))
+                XCTAssertTrue(counter.label.hasPrefix("\(count) / 4000 "))
+                XCTAssertEqual(app.buttons["chat-send"].isEnabled, count == 4000)
+                let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+                XCTAssertEqual((input.value as? String)?.unicodeScalars.count, count, "Draft was truncated")
+                // Accessibility exposes the counter, while the full localized error remains visible.
+                if count == 4001 {
+                    XCTAssertEqual(counter.value as? String, errors[language])
+                }
+                app.terminate()
+            }
+        }
     }
 
     func testChatFixtureScreenshot() {
