@@ -1,0 +1,240 @@
+{
+  "version": "2.0",
+  "sourceCommit": "8870223a9c53c2429daafe0458ecc976fc0ea3c4",
+  "verifiedAt": "2026-11-10",
+  "facts": [
+    {
+      "id": "navigation",
+      "facts": [
+        "Main tabs are Apps, Sources, Tools, App Store, Certificate. Arabic Sources is السورسات and App Store is متجر أبل.",
+        "Apps segments are Container, Real Apps, Downloads. Tools segments are Tweaks, Mirsa AI, Device, Pairing.",
+        "Mirsa AI is a chat surface, separate from the Tweaks project list."
+      ]
+    },
+    {
+      "id": "install-import",
+      "facts": [
+        "Import .ipa from Files or a link. Select Container, Real App, or certificate installation.",
+        "Container runs inside Mirsa, uses no separate real-app slot or App ID, is beta and does not guarantee compatibility.",
+        "Container needs Mirsa and guest to have the same signing team. Use Apps settings > Install Mirsa with my Apple ID if the team does not match.",
+        "Container does not provide guest push notifications, widgets/extensions, registered guest URL schemes or independent keychain/preferences. Encrypted App Store IPAs cannot be used as normal container inputs.",
+        "Real Apps have their own Home Screen icon and count toward free-account limits."
+      ],
+      "steps": [
+        "Use localizedUI.labels for the reply language. Apps tab, plus button, then From Files or From link directly. Import IPA is the plus accessibility label, not an extra submenu.",
+        "Import is LOCAL to the device. It does not upload the IPA to AI chat or grant the bot access to the app."
+      ]
+    },
+    {
+      "id": "free-account",
+      "facts": [
+        "Free Apple ID supports 3 active real apps INCLUDING Mirsa, and 10 App IDs per 7 days. Typical signing expires after 7 days.",
+        "Changing the real-app limit in settings does not grant a free account paid privileges. It is intended for paid developer accounts.",
+        "Renew or Renew All with the Apple ID before expiration; background renewal is available but is not a guarantee.",
+        "Revoking a development certificate can stop other apps signed with that certificate until renewed. Free account certificate-choice UI warns about its two-development-certificate limit."
+      ]
+    },
+    {
+      "id": "connection",
+      "facts": [
+        "Apple ID real-app installation/update preflight requires Wi-Fi, active LocalDevVPN and pairing. Mobile data alone is not accepted for those operations.",
+        "Do not claim all tools require Wi-Fi. Device tools explicitly allow Wi-Fi or cellular with LocalDevVPN and pairing.",
+        "VPN interface presence is only a hint, not proof that device authentication works. A timeout is not proof of an invalid pairing file.",
+        "If permission denied, check Local Network permission. If pairing rejected, import a new record for this iPhone. If route unavailable, check LocalDevVPN."
+      ]
+    },
+    {
+      "id": "pairing",
+      "facts": [
+        "Import .mobiledevicepairing, .plist or .mobilepair from SideStore, LiveContainer, iLoader, AltStore, Jitterbug or a computer.",
+        "Pairing tab supports importing and removing the active pairing record. Removing it requires re-pairing/importing before device operations.",
+        "On-device pairing UI is offered for iOS 27+. Earlier versions use imported pairing. Compatibility text is source documentation, not a guarantee of every device."
+      ],
+      "steps": [
+        "Tools > Pairing > Import Pairing File.",
+        "SideStore file is normally Files > On My iPhone > SideStore > ALTPairingFile.mobiledevicepairing.",
+        "For on-device pairing, start Pair This iPhone and follow Settings > Privacy & Security > Developer Mode > Pair with Mirsa, using the displayed PIN."
+      ]
+    },
+    {
+      "id": "certificate",
+      "facts": [
+        "Certificate mode imports an owner-provided P12, its password and matching provisioning profile. Certificate/profile validity, device coverage and app identity still apply.",
+        "The infinity marker does not bypass certificate, profile or device limits.",
+        "Certificate self-install/update uses OTA without VPN after a one-time real device read; do not generalize this exemption to unrelated device operations.",
+        "Do not ask users to paste P12 passwords, Apple passwords, pairing records or private keys into the AI chat. Direct them to dedicated app forms."
+      ]
+    },
+    {
+      "id": "downloads-sources",
+      "facts": [
+        "Downloads is an Apps segment. Importing/downloading does not establish signing, installation or launch success.",
+        "Sources supports AltStore, SideStore or Feather-format source links. Add a link, browse source apps, and select Install.",
+        "Sources can be hidden/unhidden or deleted with confirmation. Deleting a source leaves already installed apps installed.",
+        "Source Update All is available. A source listing is not proof of app compatibility or safety.",
+        "Opening a source loads its own catalogue, with progress, retry on error, and distinct empty/no-search-results states. Previously recorded counts do not guarantee a current successful load."
+      ],
+      "steps": [
+        "Sources > plus > paste source link > Add.",
+        "Open the source, choose an app and tap Install.",
+        "Delete via source delete action and confirm; use Hide for reversible concealment."
+      ]
+    },
+    {
+      "id": "tweak-project",
+      "facts": [
+        "Standalone manual-chat tweak/dylib generation needs target app name, version and requested behavior, NOT a target IPA upload. The local project injection/repack workflow uses a user-owned IPA later; never confuse it with standalone compilation. Version does not guarantee runtime compatibility.",
+        "Tools > Tweaks opens project list. Add a target IPA from Files, My Library, Projects, a link or sources.",
+        "Open project, describe change, tap Create, review version and explanation, then Inject to create an IPA for normal import/sign/install.",
+        "Versions can be renamed, edited into a new version, deleted individually or reverted. Deleting one version leaves the app and other versions.",
+        "App updated lets the project use a new target app. Export dylib and Library actions are available.",
+        "Generated or community code runs inside the target app and can access its data. There is no universal tweak-compatibility guarantee.",
+        "Do not ask for IPA as a prerequisite for standalone tweak creation. Specific binary analysis may optionally need an authorized artifact, but is distinct from building a standalone dylib. The AI cannot fetch app IPAs from the internet, inspect local imports, or guarantee compatibility."
+      ]
+    },
+    {
+      "id": "precise",
+      "facts": [
+        "Create precisely is capability-gated, NOT available to every user/device. Do not instruct everyone to expect this button.",
+        "When available it queues work rather than providing an instant result. Refresh checks status; finished work appears as a reviewable version, not automatically enabled.",
+        "Do not promise a fixed completion time."
+      ]
+    },
+    {
+      "id": "image-inspector",
+      "facts": [
+        "Image to tweak: choose screenshot, mark an element by dragging a circle, describe request, tap Generate from this image. Only the cleaned image and request are sent after generating.",
+        "Inspector is injected into a personal app copy, installed, and invoked by long press. Preview and export its redacted foreground UIKit capture, save JSON in Files and import it into Mirsa.",
+        "SwiftUI/WebView internals may be unavailable. It does not access other apps containers, capture all private UI text, or stream live tweak logs.",
+        "Merge supports 2–5 saved built versions of the same target app; originals remain. Batch generation is restricted to font or text-color changes and uses a separate generation for each selected personal IPA."
+      ]
+    },
+    {
+      "id": "community",
+      "facts": [
+        "Community tweaks offers reviewable shared tweaks. Use a community tweak in a target project and build/inject through the normal path.",
+        "Publishing requires reviewing tweak name, target app and description. Files can be uploaded as dylib/deb or fetched from a direct HTTPS URL and are marked Uploaded, not server-built.",
+        "Publishing or importing does not mean code is safe, tested or automatically installed."
+      ]
+    },
+    {
+      "id": "libraries",
+      "facts": [
+        "IPA editor offers name, icon, version and tweak edits. Its Tweak library accepts personal dylib/deb/framework files or a direct download link.",
+        "Select library files to inject into an unencrypted compatible arm64 installation copy. Universal binaries use compatible arm64 slice. Originals stay unchanged.",
+        "Missing hook dependencies fail safely. CydiaSubstrate/ElleKit are not bundled, so jailbreak-only tweaks may not work.",
+        "Removing a saved library file requires confirmation. Do not claim it removes injected code from an already installed app."
+      ]
+    },
+    {
+      "id": "archive",
+      "facts": [
+        "Saved IPA versions retain added or signed copies for an app. Choose retention count per app. Tap installation icon beside an older copy, then finish normal import/sign/install requirements.",
+        "Saved copy remains in archive. Saved IPA versions are NOT the same as App Store external-version availability or tweak source-code versions."
+      ]
+    },
+    {
+      "id": "device",
+      "facts": [
+        "Tools > Device includes Battery health, Storage by app, Provisioning profiles, Crash logs and Media files. Requires pairing and LocalDevVPN.",
+        "Removing a provisioning profile stops apps using it until renewed. Do not suggest deleting arbitrary profiles as a harmless cleanup.",
+        "Device service crash-log browser and Forge automatic crash monitoring are different. Forge cannot silently retrieve system crash logs or identify every crash cause."
+      ]
+    },
+    {
+      "id": "fix-reports",
+      "facts": [
+        "Use Report fix on a project/version or failed build, describe problem, preview safe report, consent and send. Reopen later to check for returned fix; current tweak stays unchanged.",
+        "Assisted repair requires fresh inspector context for the exact tweak with known enabled guard, pasted diagnostic, redaction review and explicit request. Maximum 3 server attempts per stable chain. Returned version requires review; no automatic install.",
+        "An interrupted launch marker does not establish that the tweak caused a crash."
+      ]
+    },
+    {
+      "id": "app-store",
+      "facts": [
+        "Public Apple account login, search and account downloads are coming soon and unavailable in this release. Do not ask for passwords or codes in chat or suggest this login currently works.",
+        "Original encrypted IPA import and Install as-is remain available. They do not decrypt, modify, re-sign or bypass purchase rights. Eligibility remains tied to the purchasing Apple account.",
+        "An original encrypted app is not a normal certificate-signing or container input. Downloading or importing is not proof of successful installation or launch."
+      ]
+    },
+    {
+      "id": "temp-cleanup",
+      "facts": [
+        "Apps settings > Clean temporary files measures legacy temporary and disposable cache folders as well as managed working areas. It is not a system-wide cache cleaner.",
+        "Cleaning skips active jobs and preserves saved IPA libraries, projects and persistent app data. Files changing during cleanup are handled conservatively."
+      ]
+    },
+    {
+      "id": "public-delete-caveat",
+      "facts": [
+        "Real-app deletion keeps the Mirsa entry and its files until device uninstall confirms success. With LocalDevVPN off, failure, cancellation or unconfirmed response, the app stays in the Mirsa list.",
+        "Enable LocalDevVPN and check pairing for device uninstall, or remove the app from the iPhone Home Screen. Never claim a free slot or provisioning profile was removed without confirmation.",
+        "Deleting an imported App Store IPA removes the saved file, not the installed Home Screen app."
+      ]
+    },
+    {
+      "id": "standalone-vs-repack",
+      "facts": [
+        "Standalone tweak/dylib compilation does not require IPA; target/version/behavior are sufficient to scope the request. User injects locally into their own authorized compatible IPA later. Repacking/injecting or delivering a full modified IPA requires an authorized input IPA through an actual supported file workflow, not pretending this chat has a local file. Never fetch third-party app IPAs from the internet. Never claim version alone proves exact hooks/download features work."
+      ]
+    }
+  ],
+  "knownIssues": [
+    {
+      "id": "app-store-login",
+      "availability": "coming-soon",
+      "status": "Apple login remains unavailable after a delivered and entered 2FA code returned a generic unavailable error. The exact underlying cause is unproven; do not describe it as the old no-code HTTP204 report."
+    },
+    {
+      "id": "device-verification",
+      "status": "Source loading, cleanup, chat ordering and transactional deletion have automated regression coverage. Do not imply every device workflow was physically tested."
+    }
+  ],
+  "releaseBoundary": "Public release is 2.0. Apple account login is coming soon and disabled for public use. Source loading, broader temporary-file cleanup, persistent chat ordering and conservative real-app deletion are included. Future unread badges, reactions, reply/edit/delete, expanded attachments and Inspector save/paste are not included unless separately verified in the exact source. Never disclose private implementation or staging details.",
+  "localizedUI": {
+    "version": "2.0",
+    "sourceCommit": "8870223a9c53c2429daafe0458ecc976fc0ea3c4",
+    "labels": {
+      "en": {
+        "apps": "Apps",
+        "tools": "Tools",
+        "importIPA": "Import IPA",
+        "fromFiles": "From Files",
+        "fromLink": "From link",
+        "sources": "Sources"
+      },
+      "ar": {
+        "apps": "التطبيقات",
+        "tools": "الأدوات",
+        "importIPA": "استيراد IPA",
+        "fromFiles": "من الملفات",
+        "fromLink": "من رابط",
+        "sources": "السورسات"
+      },
+      "ckb": {
+        "apps": "ئەپەکان",
+        "tools": "ئامرازەکان",
+        "importIPA": "هاوردەکردنی IPA",
+        "fromFiles": "لە Filesەوە",
+        "fromLink": "لە لینکەوە",
+        "sources": "سەرچاوەکان"
+      },
+      "kmr": {
+        "apps": "Sepan",
+        "tools": "Amûr",
+        "importIPA": "IPA têxe",
+        "fromFiles": "Ji Files",
+        "fromLink": "Ji lînkê",
+        "sources": "Çavkanî"
+      }
+    },
+    "routeSource": "ios-app/Apps/AppsView.swift lines416-431: Apps tab plus menu directly From Files or From link; Import IPA is accessibilityLabel, not an intermediate submenu",
+    "translationSources": [
+      "AppsStrings.swift",
+      "MirsaTr.swift"
+    ],
+    "navigationSource": "ios-app/ContentView.swift"
+  },
+  "publicDeveloper": "Alaa (علاء), the Mirsa developer; no invented team/company or other personal details",
+  "knownIssuesReviewed": true
+}

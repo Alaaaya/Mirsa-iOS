@@ -1,0 +1,110 @@
+name: Mirsa guarded 2.0 integration proof
+permissions:
+  contents: read
+env:
+  MIRSA_VERSION: '2.0'
+  GITHUB_RUN_NUMBER: '260'
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+    - uses: actions/checkout@v4
+    - name: Validate reviewed public KB and exact source before build
+      run: python3 scripts/release/public_release_gate.py preflight
+    - name: Select newest Xcode
+      run: 'ls -d /Applications/Xcode*.app
+
+        XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+
+        if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null |
+        sort -V | tail -1); fi
+
+        if [ -z "$XC" ]; then XC=$(xcode-select -p | sed ''s#/Contents/Developer##'');
+        fi
+
+        sudo xcode-select -s "$XC"
+
+        xcodebuild -version
+
+        '
+    - name: Validate on-device App Store backend without simulator
+      run: bash scripts/appstore/package-tests.sh
+    - name: Authentication diagnostics, redaction and exact signed-body offline tests
+      run: swift test --package-path vendor/ApplePackage --filter 'AuthenticationDiagnosticTests|SAPAuthenticationRequestTests'
+    - name: Credential-free Apple SAP preflight
+      continue-on-error: true
+      env:
+        MIRSA_AUTH_PREFLIGHT: '1'
+      run: swift test --package-path vendor/ApplePackage --filter AuthenticationDiagnosticTests.testCredentialFreeLiveSAPPreflight
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-apple-ios
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: rust-core
+    - name: Build AirliftFFI for iOS (device)
+      env:
+        IPHONEOS_DEPLOYMENT_TARGET: '18.0'
+      run: "cd rust-core\ncargo build --release --target aarch64-apple-ios\ncd ..\n\
+        rm -rf AirliftFFI.xcframework\nxcodebuild -create-xcframework \\\n  -library\
+        \ rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a \\\n  -headers\
+        \ rust-core/include \\\n  -output AirliftFFI.xcframework\n"
+    - name: Generate Xcode project
+      run: 'python3 - <<''PYTHON''
+
+        import os, pathlib, re
+
+        path = pathlib.Path("project.yml")
+
+        text, count = re.subn(r''MARKETING_VERSION: "[^"]+"'', ''MARKETING_VERSION:
+        "'' + os.environ["MIRSA_VERSION"] + ''"'', path.read_text())
+
+        assert count == 1
+
+        path.write_text(text)
+
+        PYTHON
+
+        brew install xcodegen && xcodegen generate
+
+        '
+    - name: Stamp build number
+      run: /usr/libexec/PlistBuddy -c "Add :MirsaBuild string ${{ github.run_number
+        }}" ios-app/Info.plist
+    - name: Build unsigned IPA
+      run: 'bash build-ipa.sh
+
+        '
+    - name: Verify actual IPA upgrade from live 243
+      run: python3 scripts/release/verify_release_upgrade20.py build/Mirsa.ipa
+    - name: Validate actual IPA and bind public release attestation
+      run: python3 scripts/release/public_release_gate.py artifact --ipa build/Mirsa.ipa
+    - name: Localization and public UI contracts
+      run: 'python3 ios-app/localization-coverage-test.py
+
+        python3 ios-app/localization-plural-test.py
+
+        python3 scripts/appstore/server-ui-contract-test.py
+
+        python3 scripts/appstore/chat-ui-contract-test.py
+
+        python3 scripts/appstore/delete-contract-test.py
+
+        python3 scripts/appstore/source-ui-contract-test.py
+
+        python3 scripts/appstore/public-gate-contract-test.py'
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Mirsa-unsigned
+        path: build/Mirsa.ipa
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: Mirsa-public20-integration-proof
+        path: 'build/release-attestation/
+
+          build/*proof.json'
+'on':
+  push:
+    branches:
+    - kat/public20-integration
