@@ -16,6 +16,21 @@ final class IPATweakLibrary: ObservableObject {
     static let shared = IPATweakLibrary()
     @Published private(set) var items: [IPATweak] = []
     @Published var importing = false
+    @Published var pendingImport: IPATweakImportChoice?
+    private var selectionContinuation: CheckedContinuation<[String]?, Never>?
+    private var activeCancellation: URL?
+
+    func finishImportSelection(_ ids: [String]?) {
+        let continuation = selectionContinuation
+        selectionContinuation = nil
+        pendingImport = nil
+        continuation?.resume(returning: ids)
+    }
+    func cancelImport() {
+        if let url = activeCancellation { try? Data().write(to: url) }
+        finishImportSelection(nil)
+    }
+
 
     nonisolated static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -65,19 +80,95 @@ final class IPATweakLibrary: ObservableObject {
         }
     }
 
-    func addFile(_ url: URL) async throws {
-        guard !importing else { throw SideloadError.message("Wait for the current library import.") }
+    /// A single result is automatic; archives with several roots require explicit selection.
+    func addFile(_ url: URL, allowSelection: Bool = false) async throws {
+        guard !importing else { throw SideloadError.message(IPATweakImportText.error("busy")) }
         importing = true
         defer { importing = false }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let item = try await Task.detached { try Self.importFile(url) }.value
+        let session = try MirsaManagedTmp.begin("tweak-import")
+        defer { activeCancellation = nil; MirsaManagedTmp.end(session) }
+        let cancellation = session.appendingPathComponent("cancel")
+        activeCancellation = cancellation
+        let candidates = try await withTaskCancellationHandler(operation: {
+            try await Task.detached {
+                do { return try Self.prepare(url, session: session, cancellation: cancellation) }
+                catch is CancellationError { throw CancellationError() }
+                catch { throw SideloadError.message(IPATweakImportText.error("corrupt")) }
+            }.value
+        }, onCancel: { try? Data().write(to: cancellation) })
+        try Task.checkCancellation()
+        let chosen: [IPATweakImportCandidate]
+        if candidates.count == 1 { chosen = candidates }
+        else {
+            guard allowSelection else { throw SideloadError.message(IPATweakImportText.error("selection_required")) }
+            let ids: [String]? = await withTaskCancellationHandler(operation: {
+                await withCheckedContinuation { continuation in
+                    selectionContinuation = continuation
+                    pendingImport = IPATweakImportChoice(candidates: candidates)
+                }
+            }, onCancel: { Task { @MainActor in self.cancelImport() } })
+            guard let ids else { throw CancellationError() }
+            chosen = candidates.filter { ids.contains($0.id) }
+            guard !chosen.isEmpty, chosen.count == Set(ids).count,
+                  Set(chosen.map(\.identity)).count == chosen.count else {
+                throw SideloadError.message(IPATweakImportText.error("collision"))
+            }
+        }
+        try Task.checkCancellation()
+        let item = try await withTaskCancellationHandler(operation: {
+            try await Task.detached { try Self.commit(chosen, session: session, cancellation: cancellation, name: url.deletingPathExtension().lastPathComponent) }.value
+        }, onCancel: { try? Data().write(to: cancellation) })
+        if Task.isCancelled || FileManager.default.fileExists(atPath: cancellation.path) {
+            try? FileManager.default.removeItem(at: Self.root.appendingPathComponent(item.id.uuidString))
+            throw CancellationError()
+        }
         items.insert(item, at: 0)
         do { try save() } catch {
             items.removeAll { $0.id == item.id }
             try? FileManager.default.removeItem(at: Self.root.appendingPathComponent(item.id.uuidString))
             throw error
         }
+    }
+
+    nonisolated private static func prepare(_ source: URL, session: URL, cancellation: URL) throws -> [IPATweakImportCandidate] {
+        let fm = FileManager.default
+        guard ["zip", "deb", "dylib", "framework"].contains(source.pathExtension.lowercased()), safeRelative(source.lastPathComponent) else {
+            throw SideloadError.message(IPATweakImportText.error("unsupported"))
+        }
+        let input = session.appendingPathComponent("input", isDirectory: true)
+        try fm.createDirectory(at: input, withIntermediateDirectories: false)
+        let snapshot = input.appendingPathComponent(source.lastPathComponent)
+        try copyValidated(source, to: snapshot, cancellation: cancellation)
+        try IPAEditorService.run("tweak_import", input: snapshot, output: session, cancellation: cancellation)
+        let manifest = session.appendingPathComponent("candidates.json")
+        guard let size = try manifest.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 2_000_000 else {
+            throw SideloadError.message(IPATweakImportText.error("limits"))
+        }
+        let candidates = try JSONDecoder().decode([IPATweakImportCandidate].self, from: Data(contentsOf: manifest))
+        guard !candidates.isEmpty, candidates.count <= 256, candidates.allSatisfy({ safeRelative($0.path) && $0.id == $0.path }) else {
+            throw SideloadError.message(IPATweakImportText.error("corrupt"))
+        }
+        return candidates
+    }
+
+    nonisolated private static func commit(_ candidates: [IPATweakImportCandidate], session: URL, cancellation: URL, name: String) throws -> IPATweak {
+        let fm = FileManager.default, id = UUID()
+        let folder = root.appendingPathComponent(id.uuidString, isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        do {
+            var roots: [String] = []
+            for (index, candidate) in candidates.enumerated() {
+                guard safeRelative(candidate.path), safeRelative(candidate.name), !candidate.name.contains("/") else { throw CocoaError(.fileReadCorruptFile) }
+                let group = folder.appendingPathComponent(String(index), isDirectory: true)
+                try fm.createDirectory(at: group, withIntermediateDirectories: false)
+                let target = group.appendingPathComponent(candidate.name)
+                try copyValidated(session.appendingPathComponent(candidate.path), to: target, cancellation: cancellation)
+                roots.append(String(index) + "/" + candidate.name)
+            }
+            return IPATweak(id: id, name: name, roots: roots, addedAt: Date(), packageOnlyCode: candidates.contains { $0.origin.hasPrefix("deb") })
+        } catch { try? fm.removeItem(at: folder); throw error }
     }
 
     func addURL(_ string: String) async throws {
@@ -87,162 +178,73 @@ final class IPATweakLibrary: ObservableObject {
               ["dylib", "deb"].contains(url.pathExtension.lowercased()) else {
             throw SideloadError.message("Enter a direct HTTPS URL ending in .dylib or .deb. Import .framework folders from Files.")
         }
-        importing = true
-        defer { importing = false }
         let temporary = try await IPATweakDownload.fetch(url)
         defer { try? FileManager.default.removeItem(at: temporary) }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tweak-url-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let named = folder.appendingPathComponent("Imported." + url.pathExtension.lowercased())
+        let folder = try MirsaManagedTmp.begin("tweak-url")
+        defer { MirsaManagedTmp.end(folder) }
+        let named = folder.appendingPathComponent(url.lastPathComponent)
         try FileManager.default.moveItem(at: temporary, to: named)
-        let item = try await Task.detached { try Self.importFile(named) }.value
-        items.insert(item, at: 0)
-        do { try save() } catch {
-            items.removeAll { $0.id == item.id }
-            try? FileManager.default.removeItem(at: Self.root.appendingPathComponent(item.id.uuidString))
-            throw error
-        }
+        try await addFile(named, allowSelection: true)
     }
 
-    nonisolated private static func copyValidated(_ source: URL, to dest: URL) throws {
+    /// Validate before copying, then stream with a second actual-byte quota and cancellation.
+    /// Framework symlinks are deliberately unsupported, never recreated or followed.
+    nonisolated private static func copyValidated(_ source: URL, to dest: URL, cancellation: URL? = nil) throws {
         let fm = FileManager.default
-        var count = 0
-        var bytes: Int64 = 0
-        func check(_ url: URL) throws {
-            count += 1
-            guard url.pathComponents.count - source.pathComponents.count <= 64 else {
-                throw SideloadError.message("Framework folder tree is too deep.")
-            }
-            let v = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .fileSizeKey])
-            guard count <= 20_000, v.isSymbolicLink != true, v.isRegularFile == true || v.isDirectory == true else {
-                throw SideloadError.message("Framework links, special files or excessive file counts are unsupported.")
-            }
-            if v.isRegularFile == true {
-                bytes += Int64(v.fileSize ?? 0)
-                guard bytes <= IPAEditorService.maximumFileSize else { throw SideloadError.message("Tweak exceeds 512 MiB.") }
-            }
-        }
-        try check(source)
+        var entries = [source], count = 0
+        var declared: Int64 = 0, actual: Int64 = 0
         let sourceValues = try source.resourceValues(forKeys: [.isDirectoryKey])
-        if source.hasDirectoryPath || sourceValues.isDirectory == true {
-            guard let e = fm.enumerator(at: source, includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .fileSizeKey]) else {
-                throw SideloadError.message("Cannot inspect framework.")
+        if sourceValues.isDirectory == true {
+            guard let e = fm.enumerator(at: source, includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .fileSizeKey]) else { throw CocoaError(.fileReadCorruptFile) }
+            while let url = e.nextObject() as? URL {
+                entries.append(url)
+                if entries.count > 10_000 { throw SideloadError.message(IPATweakImportText.error("limits")) }
+                if (try url.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink == true { e.skipDescendants(); throw SideloadError.message(IPATweakImportText.error("links")) }
             }
-            while let url = e.nextObject() as? URL { try check(url) }
         }
-        try fm.copyItem(at: source, to: dest)
-    }
-
-    nonisolated private static func importFile(_ source: URL) throws -> IPATweak {
-        let fm = FileManager.default
-        let type = source.pathExtension.lowercased()
-        guard ["dylib", "deb", "framework"].contains(type) else {
-            throw SideloadError.message("Supported imports are .dylib, .deb and .framework folders.")
+        func checkCancellation() throws {
+            if let cancellation, fm.fileExists(atPath: cancellation.path) { throw CancellationError() }
         }
-        let id = UUID()
-        let folder = root.appendingPathComponent(id.uuidString, isDirectory: true)
-        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        do {
-            var roots: [String] = []
-            if type == "deb" {
-                let package = folder.appendingPathComponent("package.deb")
-                try copyValidated(source, to: package)
-                let extracted = folder.appendingPathComponent("data", isDirectory: true)
-                try IPAEditorService.run("deb", input: package, output: extracted)
-                try fm.removeItem(at: package)
-                guard let e = fm.enumerator(at: extracted, includingPropertiesForKeys: [.isDirectoryKey]) else {
-                    throw SideloadError.message("Could not inspect Debian archive.")
-                }
-                while let url = e.nextObject() as? URL {
-                    if url.pathExtension == "framework", (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true {
-                        roots.append("data/" + String(url.path.dropFirst(extracted.path.count + 1)))
-                        e.skipDescendants()
-                    } else if url.pathExtension == "dylib" {
-                        roots.append("data/" + String(url.path.dropFirst(extracted.path.count + 1)))
-                    }
-                }
-                guard !roots.isEmpty else { throw SideloadError.message("This package contains no dylib or framework. Scripts are never run.") }
-            } else {
-                let name = source.lastPathComponent
-                guard safeRelative(name), !name.contains("/") else { throw SideloadError.message("Invalid tweak filename.") }
-                let target = folder.appendingPathComponent(name, isDirectory: type == "framework")
-                try copyValidated(source, to: target)
-                roots = [name]
+        for url in entries {
+            try checkCancellation(); count += 1
+            let value = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .fileSizeKey])
+            guard count <= 10_000, url.pathComponents.count - source.pathComponents.count <= 64,
+                  value.isSymbolicLink != true, value.isRegularFile == true || value.isDirectory == true else {
+                throw SideloadError.message(IPATweakImportText.error("links"))
             }
-            return IPATweak(id: id, name: source.deletingPathExtension().lastPathComponent,
-                            roots: roots.sorted(), addedAt: Date(), packageOnlyCode: type == "deb")
-        } catch {
-            try? fm.removeItem(at: folder)
-            throw error
-        }
-    }
-}
-
-
-/// Download tasks stream to disk. The delegate cancels oversized responses
-/// during transfer instead of discovering a full-disk download afterwards.
-private final class IPATweakDownload: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
-    private var continuation: CheckedContinuation<URL, Error>?
-    private var received: URL?
-    private var downloadFailure: Error?
-    private var session: URLSession?
-
-    static func fetch(_ url: URL) async throws -> URL {
-        let delegate = IPATweakDownload()
-        return try await withCheckedThrowingContinuation { continuation in
-            delegate.continuation = continuation
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 60
-            config.timeoutIntervalForResource = 180
-            let queue = OperationQueue()
-            queue.maxConcurrentOperationCount = 1
-            let session = URLSession(configuration: config, delegate: delegate, delegateQueue: queue)
-            delegate.session = session
-            session.downloadTask(with: url).resume()
-        }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard request.url?.scheme?.lowercased() == "https", request.url?.user == nil, request.url?.password == nil else {
-            downloadFailure = SideloadError.message("Only HTTPS tweak redirects are allowed.")
-            completionHandler(nil); task.cancel(); return
-        }
-        completionHandler(request)
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        if totalBytesWritten > IPAEditorService.maximumFileSize || totalBytesExpectedToWrite > IPAEditorService.maximumFileSize {
-            downloadFailure = SideloadError.message("Tweak exceeds 512 MiB.")
-            downloadTask.cancel()
-        }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        do {
-            guard let http = downloadTask.response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-                  http.url?.scheme?.lowercased() == "https" else {
-                throw SideloadError.message("The tweak URL did not return a successful HTTPS download.")
+            let size = Int64(value.fileSize ?? 0)
+            if value.isRegularFile == true {
+                guard size <= 128 * 1024 * 1024 else { throw SideloadError.message(IPATweakImportText.error("limits")) }
+                declared += size
+                guard declared <= 256 * 1024 * 1024 else { throw SideloadError.message(IPATweakImportText.error("limits")) }
             }
-            let size = (try location.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0
-            guard size <= IPAEditorService.maximumFileSize else { throw SideloadError.message("Tweak exceeds 512 MiB.") }
-            let retained = FileManager.default.temporaryDirectory.appendingPathComponent("tweak-download-\(UUID().uuidString)")
-            try FileManager.default.moveItem(at: location, to: retained)
-            received = retained
-        } catch { downloadFailure = error }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let callback = continuation
-        continuation = nil
-        if let failure = downloadFailure ?? error {
-            if let received { try? FileManager.default.removeItem(at: received) }
-            callback?.resume(throwing: failure)
-        } else if let received { callback?.resume(returning: received) }
-        else { callback?.resume(throwing: SideloadError.message("Tweak download returned no file.")) }
-        session.finishTasksAndInvalidate()
-        self.session = nil
+        }
+        let available = try dest.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityKey]).volumeAvailableCapacity ?? 0
+        guard Int64(available) > declared + 16 * 1024 * 1024 else { throw SideloadError.message(IPATweakImportText.error("disk")) }
+        for url in entries {
+            try checkCancellation()
+            let suffix = url == source ? "" : String(url.path.dropFirst(source.path.count + 1))
+            guard suffix.isEmpty || safeRelative(suffix) else { throw CocoaError(.fileReadCorruptFile) }
+            let target = suffix.isEmpty ? dest : dest.appendingPathComponent(suffix)
+            let value = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey, .fileSizeKey])
+            guard value.isSymbolicLink != true else { throw CocoaError(.fileReadCorruptFile) }
+            if value.isDirectory == true { try fm.createDirectory(at: target, withIntermediateDirectories: true); continue }
+            guard value.isRegularFile == true, !fm.fileExists(atPath: target.path) else { throw CocoaError(.fileReadCorruptFile) }
+            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard fm.createFile(atPath: target.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+            let reader = try FileHandle(forReadingFrom: url), writer = try FileHandle(forWritingTo: target)
+            defer { try? reader.close(); try? writer.close() }
+            var fileBytes: Int64 = 0
+            while true {
+                try checkCancellation()
+                let chunk = try reader.read(upToCount: 65536) ?? Data()
+                if chunk.isEmpty { break }
+                fileBytes += Int64(chunk.count); actual += Int64(chunk.count)
+                guard fileBytes <= 128 * 1024 * 1024, actual <= 256 * 1024 * 1024,
+                      fileBytes <= Int64(value.fileSize ?? 0) else { throw SideloadError.message(IPATweakImportText.error("limits")) }
+                try writer.write(contentsOf: chunk)
+            }
+            guard fileBytes == Int64(value.fileSize ?? 0) else { throw CocoaError(.fileReadCorruptFile) }
+        }
     }
 }

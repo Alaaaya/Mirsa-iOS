@@ -45,7 +45,9 @@ plist = { version = "=1.10.1", features = ["enable_unstable_features_that_may_br
 # Socket-pinned transport retains original TLS hostname and disables proxies.
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
 
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
+caseless = "0.2"
+unicode-normalization = "0.1"
 tar = "0.4"
 flate2 = "1"
 lzma-rust2 = { version = "0.22", default-features = false, features = ["std", "xz"] }

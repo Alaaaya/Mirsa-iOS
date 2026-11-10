@@ -11,9 +11,10 @@ enum IPAEditorService {
 
     static func run(_ operation: String, input: URL, output: URL? = nil,
                     executable: String? = nil, libraries: [URL] = [], newFirst: Bool = false,
-                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil) throws {
+                    injections: [[String: String]]? = nil, order: [String]? = nil, useLoader: Bool = false, signingOptions: PersonalProjectOptions? = nil, cancellation: URL? = nil) throws {
         var request: [String: Any] = ["operation": operation, "input": input.path]
         if let output { request["output"] = output.path }
+        if let cancellation { request["cancellation_path"] = cancellation.path }
         if let executable { request["executable"] = executable }
         request["libraries"] = libraries.map(\.path)
         if newFirst { request["new_first"] = true }
@@ -37,6 +38,7 @@ enum IPAEditorService {
               result["ok"] as? Bool == true else {
             let result = try? JSONSerialization.jsonObject(with: resultData) as? [String: Any]
             let detail = result?["error"] as? String ?? "IPA editor failed."
+            if operation == "tweak_import" { throw SideloadError.message(IPATweakImportText.error(detail)) }
             let archiveOperation = ["extract", "extract_inspection", "deb", "package_roots"].contains(operation)
             throw SideloadError.message(archiveOperation ? archiveError(detail) : detail)
         }
