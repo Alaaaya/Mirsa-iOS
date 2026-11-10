@@ -14,6 +14,9 @@ struct AppStoreAccountView: View {
     @State private var code = ""
     @State private var needsCode = false
     @State private var versions: [String: [String]] = [:]
+    @State private var metadata: [String: [String: MirsaStoreServerClient.VersionMetadata]] = [:]
+    @State private var metadataTasks: [String: Task<Void, Never>] = [:]
+    @State private var metadataLimit: [String: Int] = [:]
     @State private var chosen: [String: String] = [:]
     @State private var manualID: [String: String] = [:]
     @State private var term = ""
@@ -55,7 +58,7 @@ struct AppStoreAccountView: View {
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
         .task { account = try? await client.currentAccount() }
-        .onDisappear { password = ""; code = ""; work?.cancel() }
+        .onDisappear { password = ""; code = ""; work?.cancel(); cancelMetadata() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
         } message: { Text(notice ?? "") }
@@ -263,10 +266,23 @@ struct AppStoreAccountView: View {
                         Text(t("Apple returned no versions.", "Apple ما رجّعت نسخ.", "Apple هیچ وەشانێکی نەگەڕاندەوە.", "Apple guhertoyek neda."))
                             .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
                     } else {
+                        let visible = Array(list.reversed().prefix(metadataLimit[key] ?? 20))
                         Picker("", selection: Binding(get: { chosen[key] ?? "" }, set: { chosen[key] = $0.isEmpty ? nil : $0; manualID[key] = "" })) {
                             Text(t("Latest", "الأحدث", "نوێترین", "Ya herî nû")).tag("")
-                            ForEach(list.reversed(), id: \.self) { Text($0).tag($0) }
+                            ForEach(visible, id: \.self) { id in Text(versionLabel(app, id)).tag(id) }
                         }.pickerStyle(.menu).tint(MirsaPalette.accentSoft)
+                        if visible.count < list.count {
+                            Button(t("Show 20 more versions", "عرض 20 نسخة كمان", "٢٠ وەشانی تریش نیشان بدە", "20 guhertoyên din nîşan bide")) {
+                                let next = min(list.count, visible.count + 20)
+                                metadataLimit[key] = next
+                                requestMetadata(app, ids: Array(list.reversed().prefix(next).suffix(20)))
+                            }.buttonStyle(.mirsaSecondary)
+                        }
+                        Text(t("Version names come from Apple's official metadata. While loading or unavailable, External ID is shown. Downloads do not wait for names.",
+                               "أسماء النسخ من بيانات Apple الرسمية. إذا الاسم عم يتحمّل أو مو متاح بيظهر رقم النسخة الخارجي. التنزيل ما بينتظر الاسم.",
+                               "ناوی وەشان لە زانیارییە فەرمییەکانی Apple دێت. لە بارکردن یان نەبووندا ناسنامەی دەرەکی نیشان دەدرێت. داگرتن چاوەڕێی ناو ناکات.",
+                               "Navên guhertoyan ji metadata fermî ya Apple ne. Dema barkirinê an ne berdest be ID ya derveyî tê nîşandan. Daxistin li navan nasekine."))
+                            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
                     }
                 }
                 TextField(t("Version ID (optional)", "رقم النسخة (اختياري)", "ناسنامەی وەشان (ئارەزوومەندانە)", "ID ya guhertoyê (bijarte)"),
@@ -336,6 +352,8 @@ struct AppStoreAccountView: View {
 
     private func signOut() {
         operationGeneration = UUID()
+        cancelMetadata()
+        metadata = [:]
         work?.cancel()
         password = ""; code = ""; email = ""; needsCode = false
         Task {
@@ -364,7 +382,10 @@ struct AppStoreAccountView: View {
 
     private func loadVersions(_ app: MirsaStoreApp) {
         run(t("Asking Apple for versions…", "عم نسأل Apple عن النسخ…", "پرسیار لە Apple دەکرێت…", "Ji Apple guhertoyan dipirsin…")) {
-            versions[app.bundleID] = try await client.availableVersions(app)
+            let ids = try await client.availableVersions(app)
+            versions[app.bundleID] = ids
+            metadataLimit[app.bundleID] = 20
+            requestMetadata(app, ids: Array(ids.reversed().prefix(20)))
         }
     }
 
@@ -379,6 +400,43 @@ struct AppStoreAccountView: View {
             try await onDownloaded(url)
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
                        "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
+        }
+    }
+
+    private func cancelMetadata() {
+        for task in metadataTasks.values { task.cancel() }
+        metadataTasks = [:]
+    }
+
+    private func versionLabel(_ app: MirsaStoreApp, _ id: String) -> String {
+        if let item = metadata[app.bundleID]?[id], item.status == "ready", let version = item.version {
+            return "\(version) · ID \(id)"
+        }
+        if metadata[app.bundleID]?[id]?.status == "unavailable" {
+            return t("External ID \(id) · name unavailable", "رقم خارجي \(id) · الاسم مو متاح", "ناسنامەی دەرەکی \(id) · ناو بەردەست نییە", "ID ya derveyî \(id) · nav ne berdest e")
+        }
+        return t("External ID \(id) · loading name", "رقم خارجي \(id) · عم يتحمّل الاسم", "ناسنامەی دەرەکی \(id) · ناو بار دەکرێت", "ID ya derveyî \(id) · nav tê barkirin")
+    }
+
+    private func requestMetadata(_ app: MirsaStoreApp, ids: [String]) {
+        let ids = Array(ids.filter { metadata[app.bundleID]?[$0]?.status != "ready" && metadata[app.bundleID]?[$0]?.status != "unavailable" }.prefix(20))
+        guard !ids.isEmpty else { return }
+        let key = app.bundleID
+        metadataTasks[key]?.cancel()
+        let generation = operationGeneration
+        metadataTasks[key] = Task {
+            var remaining = ids
+            // At most six metadata requests for the visible batch, never all catalog versions.
+            for attempt in 0..<6 {
+                guard !Task.isCancelled, generation == operationGeneration, !remaining.isEmpty else { return }
+                do {
+                    let entries = try await client.versionMetadata(app, externalVersionIDs: remaining)
+                    guard !Task.isCancelled, generation == operationGeneration else { return }
+                    for item in entries { metadata[key, default: [:]][item.externalVersionID] = item }
+                    remaining = remaining.filter { metadata[key]?[$0]?.status == "queued" }
+                    if !remaining.isEmpty && attempt < 5 { try await Task.sleep(nanoseconds: 3_000_000_000) }
+                } catch { return }
+            }
         }
     }
 
