@@ -330,6 +330,7 @@ struct ForgeChatRoot: View {
     @State private var path: [UUID] = []
     @State private var open: ForgeOpenThread?
     @State private var toDelete: UUID?
+    @State private var showIDHelp = false
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -337,7 +338,6 @@ struct ForgeChatRoot: View {
                 if !guideSeen {
                     HStack(alignment: .top) { Text(ForgeChatText.guide).font(.footnote); Button { guideSeen = true } label: { Image(systemName: "xmark") } }
                 }
-                Label(ForgeChatText.shortIDHelp, systemImage: "number").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let e = store.error { Text(e).font(.footnote).foregroundStyle(.red) }
                 if store.threads.isEmpty && store.pendingThreadIDs.isEmpty { Text(ForgeChatText.empty).foregroundStyle(.secondary) }
                 ForEach(store.pendingThreadIDs, id: \.self) { id in
@@ -364,6 +364,16 @@ struct ForgeChatRoot: View {
             .fullScreenCover(item: $open) { o in ForgeChatThreadView(threadID: o.id).environment(\.layoutDirection, .leftToRight) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { if !embedded { Button(ForgeChatText.close) { dismiss() } } }
+                // Short-ID hint: a small icon opposite the new-chat button; the text shows in a small popover.
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showIDHelp = true } label: { Image(systemName: "number.circle") }
+                        .accessibilityLabel(ForgeChatText.shortIDLabel).accessibilityIdentifier("chat-id-help")
+                        .popover(isPresented: $showIDHelp, arrowEdge: .top) {
+                            Text(ForgeChatText.shortIDHelp).font(.footnote).multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true).frame(width: 260).padding(14)
+                                .presentationCompactAdaptation(.popover)
+                        }
+                }
                 ToolbarItem(placement: .primaryAction) { Button { open = ForgeOpenThread(id: store.draftThreadID()) } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel(ForgeChatText.newRequest).accessibilityIdentifier("chat-new") }
             }
             .task { // poll only while this screen is visible
