@@ -353,7 +353,7 @@ struct ForgeChatRoot: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden).listRowSpacing(10).background(MirsaChatTheme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
+            .scrollContentBackground(.hidden).listRowSpacing(10).background(AuroraBackground().ignoresSafeArea()).preferredColorScheme(.dark)
             .confirmationDialog(ForgeChatText.deleteTitle, isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
                 Button(ForgeChatText.deleteAction, role: .destructive) { if let id = toDelete { Task { await store.deleteThread(id) } }; toDelete = nil }
                 Button(ForgeChatText.cancel, role: .cancel) { toDelete = nil }
@@ -550,9 +550,9 @@ struct ForgeChatThreadView: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .background(MirsaChatTheme.bg)
+            .background(.ultraThinMaterial.opacity(0.85))
         }
-        .background(MirsaChatTheme.bg.ignoresSafeArea())
+        .background(AuroraBackground().ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onAppear {
