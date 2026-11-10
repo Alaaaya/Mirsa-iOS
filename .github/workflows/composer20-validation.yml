@@ -1,0 +1,138 @@
+name: Mirsa 2.0 composer layout regression
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit or branch to capture (default: the triggering ref)"
+        required: false
+        default: ""
+  push:
+    branches: [kat/composer20]
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        size: [small, large]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run Mirsa AI fixture UITest
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; size="${{ matrix.size }}"; names=["iPhone SE (3rd generation)","iPhone 16e","iPhone 16"] if size=="small" else ["iPhone 17 Pro Max","iPhone 16 Pro Max"]; pick=next(d for name in names for d in ds if d["name"]==name); print(pick["udid"])')
+          xcrun simctl list devices available
+          xcrun simctl ui "$DEVICE" appearance dark || true
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+      - name: Export named screenshots
+        if: always()
+        run: |
+          if [ -d build/AIUI.xcresult ]; then
+            mkdir -p build/raw build/shots
+            xcrun xcresulttool export attachments --path build/AIUI.xcresult --output-path build/raw
+            python3 - <<'PY'
+          import json, os, re, shutil
+          m = json.load(open("build/raw/manifest.json"))
+          for t in m:
+              for a in t.get("attachments", []):
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
+                  if not name.lower().endswith(".png"): name += ".png"
+                  shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
+          print("\n".join(sorted(os.listdir("build/shots"))))
+          PY
+          fi
+          mkdir -p build/crashes
+          cp ~/Library/Logs/DiagnosticReports/*Mirsa* build/crashes/ 2>/dev/null || true
+          ls build/crashes
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mirsa-composer-${{ matrix.size }}
+          path: |
+            build/shots
+            build/crashes
+            build/ai-ui.log
+            build/AIUI.xcresult
+          if-no-files-found: warn
+
+  unsigned-ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Build AirliftFFI for iOS (device)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run compiled feature and backend regression tests
+        run: bash scripts/appstore/package-tests.sh
+      - name: Build unsigned IPA (isolated fixture 261, never published)
+        run: |
+          python3 - <<'PYTHON'
+          import pathlib,re
+          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.0"', p.read_text());assert n==1;p.write_text(text)
+          PYTHON
+          /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 261" ios-app/Info.plist
+          brew install xcodegen && xcodegen generate
+          export GITHUB_RUN_NUMBER=261
+          bash build-ipa.sh
+      - name: Localization coverage
+        run: |
+          python3 ios-app/localization-coverage-test.py
+          python3 ios-app/localization-plural-test.py
+          python3 scripts/appstore/chat-ui-contract-test.py
+          python3 scripts/appstore/source-ui-contract-test.py
+          python3 scripts/appstore/delete-contract-test.py
+          python3 scripts/appstore/public-gate-contract-test.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-composer20-unsigned
+          path: build/Mirsa.ipa

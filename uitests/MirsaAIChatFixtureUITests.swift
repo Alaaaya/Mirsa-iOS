@@ -2,6 +2,95 @@ import XCTest
 
 /// Screenshot of the REAL ForgeChatThreadView with a seeded no-network store (DEBUG harness only).
 final class MirsaAIChatFixtureUITests: XCTestCase {
+    private func openEmptyChat(_ state: String = "", theme: String = "liquid", largeText: Bool = false) -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-embedded", "-MirsaChatFixture",
+                               "-MirsaChatEmbeddedFixture", "-MirsaChatEmptyFixture", "-mirsa.theme", theme,
+                               "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar_SA"]
+        if !state.isEmpty { app.launchArguments.append(state) }
+        if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch()
+        let newChat = app.buttons["chat-new"]
+        XCTAssertTrue(newChat.waitForExistence(timeout: 20))
+        newChat.tap()
+        XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 10))
+        return app
+    }
+
+    private func waitForLandscape(_ app: XCUIApplication) -> Bool {
+        let predicate = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: app)], timeout: 10) == .completed
+    }
+
+    private func assertComposer(_ app: XCUIApplication, keyboard: Bool = false, name: String) {
+        let field = app.textFields["chat-input"]
+        let multiline = app.textViews["chat-input"]
+        let input = field.exists ? field : multiline
+        XCTAssertTrue(input.waitForExistence(timeout: 5), "composer missing")
+        XCTAssertTrue(input.isHittable, "composer not reachable")
+        let bounds = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(input.frame.width, 30)
+        XCTAssertGreaterThanOrEqual(input.frame.minY, bounds.minY)
+        XCTAssertLessThanOrEqual(input.frame.maxY, bounds.maxY)
+        let send = app.buttons["chat-send"]
+        XCTAssertTrue(send.exists)
+        XCTAssertLessThanOrEqual(send.frame.maxY, bounds.maxY)
+        if keyboard {
+            let keys = app.keyboards.firstMatch
+            XCTAssertTrue(keys.waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(input.frame.maxY, keys.frame.minY + 1, "composer obscured by keyboard")
+        } else {
+            let dock = app.otherElements["mirsa-tab-dock"]
+            if dock.exists { XCTAssertLessThanOrEqual(input.frame.maxY, dock.frame.minY + 1, "composer obscured by dock") }
+        }
+        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        a.name = name; a.lifetime = .keepAlways; add(a)
+    }
+
+    func testEmptyNewChatComposerKeyboardAndRotation() {
+        let app = openEmptyChat()
+        assertComposer(app, name: "empty_portrait")
+        XCTAssertFalse(app.buttons["chat-send"].isEnabled)
+        let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+        input.tap(); input.typeText("hello")
+        XCTAssertTrue(app.buttons["chat-send"].isEnabled)
+        assertComposer(app, keyboard: true, name: "empty_portrait_keyboard")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitForLandscape(app))
+        assertComposer(app, keyboard: true, name: "empty_landscape_keyboard")
+        app.swipeDown()
+        // Interactive keyboard dismissal can depend on scroll position. Relaunch to
+        // assert the keyboard-off landscape independently of that gesture.
+        app.terminate()
+        let landscape = openEmptyChat()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitForLandscape(landscape))
+        assertComposer(landscape, name: "empty_landscape")
+        landscape.terminate()
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    func testQuotaZeroKeepsComposerAndInlineStatus() {
+        let app = openEmptyChat("-MirsaChatQuotaFixture")
+        assertComposer(app, name: "quota_zero")
+        XCTAssertTrue(app.staticTexts["chat-composer-status"].exists)
+        app.terminate()
+    }
+
+    func testRegistrationFailureKeepsComposerAndInlineStatus() {
+        let app = openEmptyChat("-MirsaChatRegistrationFailureFixture")
+        assertComposer(app, name: "registration_failed")
+        XCTAssertTrue(app.staticTexts["chat-composer-status"].exists)
+        app.terminate()
+    }
+
+    func testRegistrationPendingClassicLargeTextKeepsComposer() {
+        let app = openEmptyChat("-MirsaChatRegistrationPendingFixture", theme: "classic", largeText: true)
+        assertComposer(app, name: "registration_pending_classic_large_text")
+        app.terminate()
+    }
+
     func testChatFixtureScreenshot() {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
