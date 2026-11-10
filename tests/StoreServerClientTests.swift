@@ -106,6 +106,36 @@ private actor ServerFixture {
 }
 
 final class StoreServerClientTests: XCTestCase {
+    func testLoginAvailabilityRequiresSuccessfulServerAccountGate() async throws {
+        let fixture = ServerFixture()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() },
+            vault: ServerFixtureVault(), http: { try await fixture.respond($0) })
+        let allowed = await client.loginAvailable()
+        XCTAssertTrue(allowed) // signed_out is an allowed owner, not an Apple login.
+        let accounts = await fixture.count("/account")
+        let logins = await fixture.count("/login")
+        XCTAssertEqual(accounts, 1)
+        XCTAssertEqual(logins, 0)
+        await fixture.fail("staging_denied")
+        let denied = await client.loginAvailable()
+        XCTAssertFalse(denied)
+    }
+
+    func testLoginAvailabilityFailsClosedForNetworkAndMalformedAccount() async throws {
+        let fixture = ServerFixture()
+        let network = MirsaStoreServerClient(identity: { await fixture.identity() },
+            vault: ServerFixtureVault(), http: { _ in throw URLError(.notConnectedToInternet) })
+        let offline = await network.loginAvailable()
+        XCTAssertFalse(offline)
+        let malformed = MirsaStoreServerClient(identity: { await fixture.identity() },
+            vault: ServerFixtureVault(), http: { request in
+                if request.url?.path.hasSuffix("/devices") == true { return try await fixture.respond(request) }
+                return (Data(#"{"status":"enabled"}"#.utf8), 200)
+            })
+        let invalid = await malformed.loginAvailable()
+        XCTAssertFalse(invalid)
+    }
+
     func testAllRoutesIncludingEnrollmentAndArtifactCarryExistingForgeBinding() async throws {
         let fixture = ServerFixture()
         let owner = await fixture.identity()
