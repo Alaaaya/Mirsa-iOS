@@ -1,0 +1,9 @@
+# On-device authentication 403 investigation
+
+The 2.3 test IPA routes Store authentication through the phone. A credential-free bag fetch on 2026-11-11 advertises `https://auth.itunes.apple.com/auth/v1/native`. Before this patch, Bag.normalizedAuthEndpoint silently replaced that route with `/auth/v1/native/fast/`. These are distinct routes, not equivalent trailing-slash forms. The patch preserves Apple's selected native route and retains the legacy MZFinance trailing-slash normalization.
+
+The regression reads a synthetic bag, validates SAP metadata, constructs the signed credential request and verifies the advertised route is unchanged. Existing tests cover exact signed bytes, stable GUID, attempt 1 without a code and attempt 2 with password+code. No account password or code is stored by this investigation. No real login was attempted.
+
+Protocol comparison with the independently studied iPadn implementation found additional differences, not proven causes of this owner's failure. Mirsa uses Configurator 2.17 rather than 2.21 and retains challenge cookies. More importantly, iPadn implements Apple's Store-scoped AMD proof provisioning for native authentication, while this ApplePackage implementation currently supplies only the SAP action signature. If Apple responds with an AMD provisioning/reset challenge, changing the route alone is insufficient. A public anisette response is not an equivalent Store-scoped proof. Do not import the reference's GPL/proprietary vendor runtime without resolving distribution rights.
+
+This is a candidate fix for a demonstrated routing defect, not a verified explanation of the device's HTTP 403. Device login and 2FA success must be tested by the owner. No automatic fallback to another authentication route or replay of credentials is added. No publication is authorized.
