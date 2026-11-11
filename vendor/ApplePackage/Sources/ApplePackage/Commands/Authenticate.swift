@@ -20,10 +20,10 @@ struct LiveStoreHTTPTransport: StoreHTTPTransport {
         do {
             let response = try await client.execute(request: request,
                 delegate: ResponseAccumulator(request: request, maxBodySize: maxBodySize)).futureResult.get()
-            _ = client.shutdown()
+            try? await client.shutdown()
             return response
         } catch {
-            _ = client.shutdown()
+            try? await client.shutdown()
             throw error
         }
     }
