@@ -492,8 +492,9 @@ struct MirsaIPhoneHome<Menu: View>: View {
     @ViewBuilder private func iconImage(_ id: String, side: CGFloat) -> some View {
         switch id {
         case MirsaIPhoneSystem.settings:
-            LinearGradient(colors: [Color(white: 0.62), Color(white: 0.38)], startPoint: .top, endPoint: .bottom)
-                .overlay(Image(systemName: "gearshape.fill").font(.system(size: side * 0.62)).foregroundStyle(Color(white: 0.2)))
+            // Mirsa's Aurora accent instead of the stock gray, white gear.
+            MirsaPalette.accentGradient
+                .overlay(Image(systemName: "gearshape.fill").font(.system(size: side * 0.62)).foregroundStyle(.white))
         case MirsaIPhoneSystem.downloads:
             LinearGradient(colors: [Color(red: 0.25, green: 0.62, blue: 1), Color(red: 0.05, green: 0.38, blue: 0.95)], startPoint: .top, endPoint: .bottom)
                 .overlay(Image(systemName: "arrow.down.circle.fill").font(.system(size: side * 0.55)).foregroundStyle(.white))
