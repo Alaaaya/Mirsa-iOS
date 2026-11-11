@@ -228,6 +228,7 @@ struct ForgeChatSwipeToReply: ViewModifier {
                         .offset(x: dx - 36)
                 }
             }
+            .contentShape(Rectangle())
             .simultaneousGesture(
                 DragGesture(minimumDistance: 16)
                     .onChanged { v in
@@ -242,6 +243,23 @@ struct ForgeChatSwipeToReply: ViewModifier {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { dx = 0 }
                     }
             )
+    }
+}
+
+/// Long press that opens the menu while the finger is still down (iMessage-style), not on release.
+/// A timer starts on touch-down and is cancelled if the finger lifts or moves away (scroll or swipe).
+struct ForgeChatHoldToMenu: ViewModifier {
+    var duration: Double = 0.35
+    let action: () -> Void
+    @State private var pending: DispatchWorkItem?
+    func body(content: Content) -> some View {
+        content.onLongPressGesture(minimumDuration: duration, maximumDistance: 10, perform: {}, onPressingChanged: { pressing in
+            pending?.cancel(); pending = nil
+            guard pressing else { return }
+            let work = DispatchWorkItem { action() }
+            pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+        })
     }
 }
 
