@@ -56,14 +56,13 @@ actor MirsaStoreClient {
             let session = try await engine.authentication()
             try check(run)
             let id = UUID()
-            try vault.write(Data(password.utf8), key: "challenge")
             challenge = Challenge(session: session, email: email, id: id,
                                   expires: Date().addingTimeInterval(300), attempts: 0)
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 300_000_000_000)
                 await self?.expireChallenge(id)
             }
-            return try await authenticate(code: "", run: run)
+            return try await authenticate(code: "", password: password, run: run)
         } catch {
             try check(run)
             if let auth = error as? AuthenticationError, case .verificationCodeRequired = auth {
@@ -76,7 +75,7 @@ actor MirsaStoreClient {
     }
 
     /// Retains the *same* SAP signer, routing and cookies for a bounded 2FA continuation.
-    func verify(code: String) async throws -> MirsaStoreLogin {
+    func verify(code: String, password: String) async throws -> MirsaStoreLogin {
         let run = try begin()
         defer { busy = false }
         guard var pending = challenge, pending.expires > Date(), pending.attempts < 3 else {
@@ -84,12 +83,12 @@ actor MirsaStoreClient {
             try vault.remove("challenge")
             throw MirsaStoreError.signedOut
         }
-        guard code.utf8.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else {
+        guard MirsaStoreCode.valid(code) != nil, !password.isEmpty, password.utf8.count <= 1024 else {
             throw MirsaStoreError.invalidInput
         }
         pending.attempts += 1
         challenge = pending
-        do { return try await authenticate(code: code, run: run) }
+        do { return try await authenticate(code: MirsaStoreCode.valid(code)!, password: password, run: run) }
         catch {
             // Keep the same session for a corrected code, but never beyond three submissions.
             if (challenge?.attempts ?? 3) >= 3 {
@@ -142,6 +141,33 @@ actor MirsaStoreClient {
         } catch { throw safe(error) }
     }
 
+    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
+        guard !ids.isEmpty, ids.count <= 20, Set(ids).count == ids.count,
+              ids.allSatisfy(MirsaStoreServerClient.numericVersion) else { throw MirsaStoreError.invalidInput }
+        let run = try begin(); defer { busy = false }
+        var owner = try requiredAccount()
+        let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
+        try check(run)
+        guard fresh.id == app.id else { throw MirsaStoreError.invalidPackage }
+        var entries: [MirsaStoreServerClient.VersionMetadata] = []
+        for id in ids {
+            do {
+                let version = try await engine.versionMetadata(account: &owner, app: fresh, version: id)
+                try check(run)
+                guard !version.isEmpty, version.utf8.count <= 128,
+                      !version.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                    throw MirsaStoreError.invalidPackage
+                }
+                entries.append(.init(externalVersionID: id, status: "ready", version: version))
+            } catch {
+                try check(run)
+                entries.append(.init(externalVersionID: id, status: "unavailable", version: nil))
+            }
+        }
+        try persist(owner)
+        return entries
+    }
+
     /// Returns a local encrypted IPA with the account's original SINF, not a decrypted/re-signed app.
     /// Caller may hand this URL to the local importer. No automatic install or sharing.
     func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
@@ -168,11 +194,8 @@ actor MirsaStoreClient {
         }
     }
 
-    private func authenticate(code: String, run: UInt64) async throws -> MirsaStoreLogin {
+    private func authenticate(code: String, password: String, run: UInt64) async throws -> MirsaStoreLogin {
         guard let pending = challenge else { throw MirsaStoreError.signedOut }
-        guard let bytes = try vault.read("challenge"), let password = String(data: bytes, encoding: .utf8) else {
-            throw MirsaStoreError.signedOut
-        }
         let owner = try await pending.session.authenticate(email: pending.email, password: password, code: code)
         try check(run)
         guard challenge?.id == pending.id, pending.expires > Date() else {
@@ -206,6 +229,7 @@ actor MirsaStoreClient {
             try vault.write(Data(guid.utf8), key: "machine")
         }
         try vault.remove("challenge")
+        if let account = try loadAccount(), !account.password.isEmpty { try persist(account) }
         engine.configure(guid: guid)
         prepared = true
     }
@@ -234,7 +258,9 @@ actor MirsaStoreClient {
         MirsaStoreAccount(email: owner.email, country: try country(owner), name: owner.firstName)
     }
     private func persist(_ owner: Account) throws {
-        try vault.write(try JSONEncoder().encode(owner), key: "account")
+        var session = owner
+        session.password = ""
+        try vault.write(try JSONEncoder().encode(session), key: "account")
     }
     private func validate(output: DownloadOutput, app: MirsaStoreApp, version: String?) throws {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
