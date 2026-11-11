@@ -494,10 +494,15 @@ enum MirsaAppIconImage {
     }()
 }
 
-/// Assistant avatar: the Mirsa app icon itself, in the iOS icon shape. Falls back to the vector sail mark.
+/// Assistant avatar: the Mirsa AI artwork (asset MirsaAIAvatar, round), then the app icon, then the vector sail mark.
 struct MirsaSailMark: View {
+    private static let avatar = UIImage(named: "MirsaAIAvatar")
     var body: some View {
-        if let img = MirsaAppIconImage.image {
+        if let img = Self.avatar {
+            Image(uiImage: img).resizable().interpolation(.high).aspectRatio(1, contentMode: .fit)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+        } else if let img = MirsaAppIconImage.image {
             GeometryReader { g in
                 Image(uiImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
                     .frame(width: g.size.width, height: g.size.height)
