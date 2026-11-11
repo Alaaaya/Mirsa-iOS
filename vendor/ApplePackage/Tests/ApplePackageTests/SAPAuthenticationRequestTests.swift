@@ -174,4 +174,25 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         XCTAssertEqual(try bodyData(request), recorded.first)
     }
 
+    func testInitialNativeRequestMatchesAdvertisedOnDeviceProtocol() async throws {
+        let advertised = try XCTUnwrap(URL(string: "https://auth.itunes.apple.com/auth/v1/native?pod=25"))
+        let endpoint = try Authenticator.createInitialRequestEndpoint(baseURL: advertised, deviceIdentifier: "001122334455")
+        XCTAssertEqual(endpoint, advertised)
+        let request = try await makeRequest(endpoint: endpoint.absoluteString, code: "123456")
+        XCTAssertEqual(request.url, advertised)
+        XCTAssertEqual(request.method.rawValue, "POST")
+        XCTAssertEqual(request.headers.first(name: "User-Agent"), Configuration.userAgent)
+        XCTAssertTrue(Configuration.userAgent.hasPrefix("Configurator/2.21 "))
+        XCTAssertEqual(request.headers.first(name: "Content-Type"), "application/x-apple-plist")
+        let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(request), format: nil) as? [String: String])
+        XCTAssertEqual(fields, ["appleId": "reader+ä@example.invalid", "attempt": "2", "guid": "001122334455",
+                               "password": "test<&password123456", "rmp": "0", "why": "signIn"])
+    }
+
+    func testInitialLegacyRequestRetainsGuidSuffixAndPod() throws {
+        let base = try XCTUnwrap(Bag.normalizedAuthEndpoint(from: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate?Pod=25"))
+        let endpoint = try Authenticator.createInitialRequestEndpoint(baseURL: base, deviceIdentifier: "001122334455")
+        XCTAssertEqual(endpoint.absoluteString, "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/?Pod=25&guid=001122334455")
+    }
+
 }
