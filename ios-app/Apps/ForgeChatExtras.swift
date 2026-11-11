@@ -252,19 +252,49 @@ struct ForgeChatSwipeToReply: ViewModifier {
 }
 
 /// Long press that opens the menu while the finger is still down (iMessage-style), not on release.
-/// A timer starts on touch-down and is cancelled if the finger lifts or moves away (scroll or swipe).
+/// Backed by UILongPressGestureRecognizer: if the finger moves more than 10 pt before 0.35 s the
+/// press fails and the scroll continues normally. The menu never opens while the enclosing
+/// scroll view is dragging or decelerating.
 struct ForgeChatHoldToMenu: ViewModifier {
     var duration: Double = 0.35
     let action: () -> Void
-    @State private var pending: DispatchWorkItem?
     func body(content: Content) -> some View {
-        content.onLongPressGesture(minimumDuration: duration, maximumDistance: 10, perform: {}, onPressingChanged: { pressing in
-            pending?.cancel(); pending = nil
-            guard pressing else { return }
-            let work = DispatchWorkItem { action() }
-            pending = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
-        })
+        content.gesture(ForgeChatHoldRecognizer(duration: duration, action: action))
+    }
+}
+
+struct ForgeChatHoldRecognizer: UIGestureRecognizerRepresentable {
+    let duration: Double
+    let action: () -> Void
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        // Recognise alongside the scroll pan so scrolling is never blocked; movement fails the press.
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let g = UILongPressGestureRecognizer()
+        g.minimumPressDuration = duration
+        g.allowableMovement = 10
+        g.cancelsTouchesInView = false
+        g.delegate = context.coordinator
+        return g
+    }
+    func updateUIGestureRecognizer(_ g: UILongPressGestureRecognizer, context: Context) {
+        g.minimumPressDuration = duration
+        g.allowableMovement = 10
+    }
+    func handleUIGestureRecognizerAction(_ g: UILongPressGestureRecognizer, context: Context) {
+        guard g.state == .began, !Self.scrolling(g.view) else { return }
+        action()
+    }
+    /// True while any enclosing scroll view is being dragged or is still decelerating.
+    static func scrolling(_ view: UIView?) -> Bool {
+        var v = view
+        while let current = v {
+            if let sv = current as? UIScrollView, sv.isDragging || sv.isDecelerating || (sv.isTracking && sv.panGestureRecognizer.state == .changed) { return true }
+            v = current.superview
+        }
+        return false
     }
 }
 
