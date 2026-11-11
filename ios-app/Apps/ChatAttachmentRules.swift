@@ -10,6 +10,15 @@ enum ChatAttachmentRules {
     static let textMaxBytes = 262_144
     static let urlMaxLength = 2048
     static let nameMax = 100
+    /// Binary files (.zip / .deb / .dylib), behind MirsaFeatures.binaryAttachmentsEnabled: 5 MiB decoded each.
+    static let binaryMaxBytes = 5_242_880
+    /// Server-side active storage per device (informational on the client; the server answers 409 attachment_storage_limit).
+    static let deviceStorageMaxBytes = 20 * 1_048_576
+    static let binaryMimes: [String: String] = [
+        "zip": "application/zip",
+        "deb": "application/vnd.debian.binary-package",
+        "dylib": "application/x-mach-binary",
+    ]
 
     // MARK: Links
 
@@ -78,7 +87,7 @@ enum ChatAttachmentRules {
 
     // MARK: Text files
 
-    enum FileProblem: Error, Equatable { case type, size, utf8, control, json }
+    enum FileProblem: Error, Equatable { case type, size, utf8, control, json, binarySize, signature }
 
     /// Only .txt (text/plain) and .json (application/json), at most 256 KiB, strict UTF-8, no control bytes.
     static func validateTextFile(name: String, data: Data) -> Result<(name: String, mime: String), FileProblem> {
@@ -94,6 +103,36 @@ enum ChatAttachmentRules {
         if data.contains(where: { ($0 < 0x20 && $0 != 0x09 && $0 != 0x0A && $0 != 0x0D) || $0 == 0x7F }) { return .failure(.control) }
         if mime == "application/json", (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) == nil { return .failure(.json) }
         return .success((safeName(name), mime))
+    }
+
+    // MARK: Binary files (.zip / .deb / .dylib)
+
+    /// MIME for a binary attachment by extension, or nil when the extension is not one of the three.
+    static func binaryMime(forName name: String) -> String? { binaryMimes[(name as NSString).pathExtension.lowercased()] }
+
+    /// Extension, size (1 byte … 5 MiB) and container family only (ZIP "PK", DEB "!<arch>\n", Mach-O / FAT magic).
+    /// Nothing is extracted, loaded or executed; the server does the real checks.
+    static func validateBinaryFile(name: String, data: Data) -> Result<(name: String, mime: String), FileProblem> {
+        guard let mime = binaryMime(forName: name) else { return .failure(.type) }
+        if data.isEmpty || data.count > binaryMaxBytes { return .failure(.binarySize) }
+        let head = [UInt8](data.prefix(8))
+        let ok: Bool
+        switch mime {
+        case "application/zip":
+            ok = head.count >= 4 && head[0] == 0x50 && head[1] == 0x4B && ((head[2] == 0x03 && head[3] == 0x04) || (head[2] == 0x05 && head[3] == 0x06))
+        case "application/vnd.debian.binary-package":
+            ok = head == Array("!<arch>\n".utf8)
+        default:
+            let magics: [[UInt8]] = [[0xFE, 0xED, 0xFA, 0xCE], [0xCE, 0xFA, 0xED, 0xFE], [0xFE, 0xED, 0xFA, 0xCF], [0xCF, 0xFA, 0xED, 0xFE], [0xCA, 0xFE, 0xBA, 0xBE]]
+            ok = head.count >= 4 && magics.contains(Array(head.prefix(4)))
+        }
+        return ok ? .success((safeName(name), mime)) : .failure(.signature)
+    }
+
+    /// The problem with a binary file, or nil when it is acceptable.
+    static func binaryFileProblem(name: String, data: Data) -> FileProblem? {
+        if case .failure(let p) = validateBinaryFile(name: name, data: data) { return p }
+        return nil
     }
 
     /// The problem with a text file, or nil when it is acceptable.
