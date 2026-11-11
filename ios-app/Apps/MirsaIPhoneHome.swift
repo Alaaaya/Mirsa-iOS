@@ -754,7 +754,10 @@ struct MirsaIPhoneHome<Menu: View>: View {
             } preview: {
                 icon(id, side: 96).padding(14)
             })
-            .modifier(MirsaIPhoneDrag(enabled: editing, id: id))
+            .modifier(MirsaIPhoneDrag(enabled: editing, id: id, onEnd: {
+                // A drag out of a folder that ended without a drop: close the (already invisible) folder for real.
+                if folderDragOut, openFolderID == token { closeFolder() }
+            }))
             .dropDestination(for: String.self) { items, _ in
                 guard editing, let dragged = items.first, folder(token)?.appIDs.contains(dragged) == true else { return false }
                 moveInFolder(dragged, before: id, folder: token); return true
@@ -842,7 +845,24 @@ private struct MirsaIPhoneDeleteAlert: ViewModifier {
 private struct MirsaIPhoneDrag: ViewModifier {
     let enabled: Bool
     let id: String
+    /// Called once the drag session is over (dropped or cancelled). SwiftUI has no drag-end
+    /// callback, so it rides on the item provider's lifetime: the system releases it when the session ends.
+    var onEnd: (() -> Void)? = nil
     func body(content: Content) -> some View {
-        if enabled { content.draggable(id) } else { content }
+        if enabled, let onEnd {
+            content.onDrag {
+                let p = MirsaDragEndProvider(object: id as NSString)
+                p.onEnd = onEnd
+                return p
+            }
+        } else if enabled { content.draggable(id) } else { content }
+    }
+}
+
+private final class MirsaDragEndProvider: NSItemProvider {
+    var onEnd: (() -> Void)?
+    deinit {
+        guard let f = onEnd else { return }
+        DispatchQueue.main.async { f() }
     }
 }
