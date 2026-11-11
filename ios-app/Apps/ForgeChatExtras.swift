@@ -27,6 +27,8 @@ enum ForgeChatExtrasText {
     static var originalGone: String { tr("Original message unavailable", "الرسالة الأصلية مو موجودة", ckb: "نامە ڕەسەنەکە بەردەست نییە", kmr: "Peyama eslî tune ye") }
     static var attachment: String { tr("Attachment", "مرفق", ckb: "هاوپێچ", kmr: "Pêvek") }
     static func unread(_ n: Int) -> String { tr("\(n) new", "\(n) جديد", ckb: "\(n) نوێ", kmr: "\(n) nû") }
+    static var selectText: String { tr("Select Text", "تحديد النص", ckb: "دیاریکردنی دەق", kmr: "Nivîsê hilbijêre") }
+    static var done: String { tr("Done", "تم", ckb: "تەواو", kmr: "Temam") }
     static var newMessages: String { tr("New messages", "رسائل جديدة", ckb: "نامەی نوێ", kmr: "Peyamên nû") }
 }
 
@@ -284,10 +286,16 @@ struct ForgeChatMessageMenu: View {
     let onDelete: () -> Void
     let onClose: () -> Void
     @State private var shown = false
+    @State private var selecting = false
+
+    /// Mirsa surface for the menu pieces: raised card colour with a faint violet-to-blue edge.
+    private var edge: LinearGradient {
+        LinearGradient(colors: [MirsaPalette.accent.opacity(0.55), MirsaPalette.accent2.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.35)).ignoresSafeArea()
+            Rectangle().fill(.ultraThinMaterial).overlay(MirsaPalette.sheet.opacity(0.55)).ignoresSafeArea()
                 .onTapGesture(perform: onClose)
                 .accessibilityAddTraits(.isButton).accessibilityLabel(ForgeChatText.close)
             VStack(alignment: target.isUser ? .trailing : .leading, spacing: 10) {
@@ -301,8 +309,9 @@ struct ForgeChatMessageMenu: View {
                         }
                     }
                     .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(Capsule().fill(.ultraThinMaterial))
-                    .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5))
+                    .background(Capsule().fill(MirsaPalette.cardRaised))
+                    .overlay(Capsule().stroke(edge, lineWidth: 0.8))
+                    .shadow(color: MirsaPalette.accent.opacity(0.25), radius: 14, y: 4)
                     .scaleEffect(shown ? 1 : 0.6, anchor: target.isUser ? .bottomTrailing : .bottomLeading).opacity(shown ? 1 : 0)
                     .accessibilityIdentifier("chat-reaction-bar")
                 }
@@ -310,25 +319,30 @@ struct ForgeChatMessageMenu: View {
                     .padding(.horizontal, 16).padding(.vertical, 11)
                     .background {
                         if target.isUser { RoundedRectangle(cornerRadius: 22, style: .continuous).fill(MirsaPalette.accentGradient) }
-                        else { RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white.opacity(0.12)) }
+                        else { RoundedRectangle(cornerRadius: 20, style: .continuous).fill(MirsaChatTheme.bubble) }
                     }
                     .frame(maxWidth: 300, alignment: target.isUser ? .trailing : .leading)
                 VStack(spacing: 0) {
                     row(ForgeChatExtrasText.reply, "arrowshape.turn.up.left", id: "chat-menu-reply", action: onReply)
-                    Divider().overlay(.white.opacity(0.1))
+                    Divider().overlay(MirsaPalette.stroke)
                     row(ForgeChatExtrasText.copy, "doc.on.doc", id: "chat-menu-copy", action: onCopy)
+                    if !target.text.isEmpty {
+                        Divider().overlay(MirsaPalette.stroke)
+                        row(ForgeChatExtrasText.selectText, "selection.pin.in.out", id: "chat-menu-select") { selecting = true }
+                    }
                     if target.canEdit {
-                        Divider().overlay(.white.opacity(0.1))
+                        Divider().overlay(MirsaPalette.stroke)
                         row(ForgeChatExtrasText.edit, "pencil", id: "chat-menu-edit", action: onEdit)
                     }
                     if target.canDelete {
-                        Divider().overlay(.white.opacity(0.1))
+                        Divider().overlay(MirsaPalette.stroke)
                         row(ForgeChatExtrasText.delete, "trash", id: "chat-menu-delete", destructive: true, action: onDelete)
                     }
                 }
                 .frame(width: 230)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 0.5))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MirsaPalette.cardRaised))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(edge, lineWidth: 0.8))
+                .shadow(color: MirsaPalette.accent.opacity(0.22), radius: 16, y: 6)
                 .scaleEffect(shown ? 1 : 0.8, anchor: target.isUser ? .topTrailing : .topLeading).opacity(shown ? 1 : 0)
             }
             .frame(maxWidth: .infinity, alignment: target.isUser ? .trailing : .leading)
@@ -341,6 +355,9 @@ struct ForgeChatMessageMenu: View {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) { shown = true }
         }
         .accessibilityIdentifier("chat-message-menu")
+        .sheet(isPresented: $selecting, onDismiss: onClose) {
+            ForgeChatSelectTextSheet(text: target.text)
+        }
     }
 
     private func row(_ title: String, _ icon: String, id: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
@@ -349,13 +366,60 @@ struct ForgeChatMessageMenu: View {
                 Text(title).font(.system(size: 16))
                 Spacer()
                 Image(systemName: icon).font(.system(size: 15))
+                    .foregroundStyle(destructive ? AnyShapeStyle(MirsaPalette.danger) : AnyShapeStyle(MirsaPalette.accentGradient))
             }
-            .foregroundStyle(destructive ? Color.red : .white)
+            .foregroundStyle(destructive ? MirsaPalette.danger : MirsaPalette.textPrimary)
             .padding(.horizontal, 16).frame(height: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
     }
+}
+
+/// «Select Text»: the whole message in a read-only text view so any part of it can be selected and copied.
+struct ForgeChatSelectTextSheet: View {
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ForgeChatSelectableText(text: text)
+                .padding(.horizontal, 14)
+                .background(MirsaPalette.sheet.ignoresSafeArea())
+                .navigationTitle(ForgeChatExtrasText.selectText)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(ForgeChatExtrasText.done) { dismiss() }.tint(MirsaPalette.accentSoft)
+                            .accessibilityIdentifier("chat-select-done")
+                    }
+                }
+        }
+        .environment(\.layoutDirection, .leftToRight)
+        .environment(\.colorScheme, .dark)
+        .presentationDetents([.medium, .large])
+        .presentationBackground(MirsaPalette.sheet)
+        .accessibilityIdentifier("chat-select-sheet")
+    }
+}
+
+struct ForgeChatSelectableText: UIViewRepresentable {
+    let text: String
+    func makeUIView(context: Context) -> UITextView {
+        let v = UITextView()
+        v.isEditable = false
+        v.isSelectable = true
+        v.backgroundColor = .clear
+        v.textColor = .white
+        v.tintColor = UIColor(MirsaPalette.accent)
+        v.font = .systemFont(ofSize: 17)
+        v.textAlignment = .natural
+        v.textContainerInset = UIEdgeInsets(top: 16, left: 2, bottom: 24, right: 2)
+        v.alwaysBounceVertical = true
+        v.text = text
+        DispatchQueue.main.async { v.becomeFirstResponder(); v.selectAll(nil) }
+        return v
+    }
+    func updateUIView(_ v: UITextView, context: Context) { if v.text != text { v.text = text } }
 }
 
 /// Small count badge for the «Mirsa AI» segment.
