@@ -483,8 +483,36 @@ struct ForgeChatRowChevron<Content: View>: View {
     }
 }
 
-/// Mirsa sail mark used as the assistant avatar (vector, no asset needed).
+/// Mirsa's own app icon, read once from the bundle (CFBundleIcons), so the chat avatar always matches the installed icon.
+enum MirsaAppIconImage {
+    static let image: UIImage? = {
+        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+              let p = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = p["CFBundleIconFiles"] as? [String] else { return UIImage(named: "AppIcon") }
+        for f in files.reversed() { if let i = UIImage(named: f) { return i } }
+        return UIImage(named: "AppIcon")
+    }()
+}
+
+/// Assistant avatar: the Mirsa app icon itself, in the iOS icon shape. Falls back to the vector sail mark.
 struct MirsaSailMark: View {
+    var body: some View {
+        if let img = MirsaAppIconImage.image {
+            GeometryReader { g in
+                Image(uiImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                    .frame(width: g.size.width, height: g.size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: g.size.width * 0.225, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: g.size.width * 0.225, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 0.5))
+            }
+            .accessibilityHidden(true)
+        } else {
+            MirsaSailVector()
+        }
+    }
+}
+
+/// Vector fallback when the bundle icon cannot be read.
+private struct MirsaSailVector: View {
     var body: some View {
         ZStack {
             Circle().fill(Color(red: 0.055, green: 0.165, blue: 0.33))
