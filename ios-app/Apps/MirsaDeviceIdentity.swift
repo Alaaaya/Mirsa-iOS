@@ -7,7 +7,7 @@ import AirliftFFI
 ///   kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly and never synced to iCloud: it stays on this iPhone and is not
 ///   restored to a new phone from a backup. Keychain items survive app updates and delete + reinstall as long as the
 ///   app is signed with the same team (same keychain access group).
-/// - UDID: read once from lockdown (UniqueDeviceID) over LocalDevVPN + pairing file, stored in the Keychain the same way.
+/// - UDID (only while MirsaFeatures.stableDeviceLink is ON; OFF = never read, never stored): read once from lockdown (UniqueDeviceID) over LocalDevVPN + pairing file, stored in the Keychain the same way.
 ///   Never shown in the UI; sent only as the optional device_udid field behind MirsaFeatures.stableDeviceLink.
 enum MirsaDeviceIdentity {
     static let idService = "com.alaa.mirsa.forge.device"   // same service as before, so existing installs keep their ID
@@ -44,8 +44,9 @@ enum MirsaDeviceIdentity {
 
     // MARK: UDID
 
+    /// nil whenever MirsaFeatures.stableDeviceLink is OFF: the UDID is never read from the Keychain then.
     static func storedUDID() -> String? {
-        guard let s = read(udidService), validUDID(s) else { return nil }
+        guard MirsaFeatures.stableDeviceLink, let s = read(udidService), validUDID(s) else { return nil }
         return s
     }
 
@@ -57,7 +58,9 @@ enum MirsaDeviceIdentity {
 
     @MainActor private static var reading = false
     /// Reads UniqueDeviceID from lockdown once when LocalDevVPN is up and the pairing file exists. Silent on failure.
+    /// With MirsaFeatures.stableDeviceLink OFF nothing is read from lockdown or stored; any UDID a test build left is removed.
     @MainActor static func refreshUDIDIfPossible(_ vm: AppViewModel) {
+        guard MirsaFeatures.stableDeviceLink else { removeUDID(); return }
         guard storedUDID() == nil, !reading else { return }
         let path = PairingController.pairingFilePath()
         guard FileManager.default.fileExists(atPath: path),
@@ -71,12 +74,14 @@ enum MirsaDeviceIdentity {
             let udid = out.map { String(cString: $0) }
             if let p = out { al_string_free(p) }
             if let p = err { al_string_free(p) }
-            if rc == 0, let u = udid, validUDID(u) { _ = write(udidService, u) }
+            if rc == 0, let u = udid, validUDID(u), MirsaFeatures.stableDeviceLink { _ = write(udidService, u) }
             Task { @MainActor in reading = false }
         }
     }
 
     // MARK: Keychain
+
+    private static func removeUDID() { _ = SecItemDelete(base(udidService) as CFDictionary) }
 
     private static func base(_ service: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
