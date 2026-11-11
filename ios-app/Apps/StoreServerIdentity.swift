@@ -31,3 +31,9 @@ extension MirsaStoreServerClient {
         })
     }()
 }
+
+extension MirsaStoreOnDeviceClient {
+    static let shared = MirsaStoreOnDeviceClient(gate: {
+        await MirsaStoreServerClient.shared.loginAvailable()
+    })
+}
