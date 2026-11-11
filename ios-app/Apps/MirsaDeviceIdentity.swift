@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import AirliftFFI
 
 /// Stable Mirsa device identity.
 /// - deviceID: the existing random lowercase UUID (format and header unchanged), stored in the Keychain with
