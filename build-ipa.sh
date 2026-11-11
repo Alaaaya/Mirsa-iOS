@@ -7,7 +7,15 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 echo "==> Building Mirsa ($CONFIG)..."
-rm -rf build/DerivedData build/Payload build/*.app build/*.ipa
+# CI may reuse compiler outputs; local/release callers retain clean-build defaults.
+BUILD_ACTIONS=(clean build)
+if [ "${MIRSA_INCREMENTAL_BUILD:-0}" = "1" ]; then
+    BUILD_ACTIONS=(build)
+else
+    rm -rf build/DerivedData
+fi
+# Always package from fresh staging, never from cached IPA/app copies.
+rm -rf build/Payload build/*.app build/*.ipa
 mkdir -p build
 
 xcodebuild -project Mirsa.xcodeproj \
@@ -15,7 +23,7 @@ xcodebuild -project Mirsa.xcodeproj \
     -configuration "$CONFIG" \
     -derivedDataPath build/DerivedData \
     -destination 'generic/platform=iOS' \
-    clean build \
+    "${BUILD_ACTIONS[@]}" \
     CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO"
 
 APP_PATH="$(find build/DerivedData/Build/Products -name "Mirsa.app" -type d | head -n 1)"

@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [apps-sideloader]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: write
 env:
@@ -10,6 +13,7 @@ env:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +26,27 @@ jobs:
           sudo xcode-select -s "$XC"
           xcodebuild -version
 
+      - name: Identify Xcode cache toolchain
+        id: toolchain
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      # Includes Xcode's SourcePackages under DerivedData and standalone SwiftPM builds.
+      # Never restore across Xcode/project/dependency changes.
+      - name: Cache SwiftPM and DerivedData
+        id: swift-cache
+        uses: actions/cache@v4
+        timeout-minutes: 8
+        with:
+          path: |
+            .build
+            vendor/ApplePackage/.build
+            build/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-${{ runner.arch }}-swift-v1-${{ steps.toolchain.outputs.version }}-${{ hashFiles('**/Package.resolved', '**/Package.swift', '**/*.xcodeproj/project.pbxproj', 'project.yml') }}
+
+      - name: Record cache result
+        run: echo 'SwiftPM/DerivedData exact cache hit = ${{ steps.swift-cache.outputs.cache-hit }}' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate on-device App Store backend without simulator
         run: bash scripts/appstore/package-tests.sh
 
@@ -32,7 +57,7 @@ jobs:
         continue-on-error: true
         env:
           MIRSA_AUTH_PREFLIGHT: "1"
-        run: swift test --package-path vendor/ApplePackage --filter AuthenticationDiagnosticTests.testCredentialFreeLiveSAPPreflight
+        run: swift test --skip-build --package-path vendor/ApplePackage --filter AuthenticationDiagnosticTests.testCredentialFreeLiveSAPPreflight
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,22 +83,30 @@ jobs:
             -output AirliftFFI.xcframework
 
       - name: Generate Xcode project
-        run: brew install xcodegen && xcodegen generate
+        run: |
+          command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
 
       - name: Stamp build number
         run: /usr/libexec/PlistBuddy -c "Add :MirsaBuild string ${{ github.run_number }}" ios-app/Info.plist
 
       - name: Build unsigned IPA
+        env:
+          MIRSA_INCREMENTAL_BUILD: "1"
         run: |
           bash build-ipa.sh
 
       - name: Verify actual IPA upgrade from live 243
         run: python3 scripts/verify_release_upgrade.py build/Mirsa.ipa
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 5
         with:
           name: Mirsa-unsigned
           path: build/Mirsa.ipa
+          if-no-files-found: error
+          compression-level: 0
 
       # Mirsa checks the latest release on launch and offers to update itself.
       - name: Publish release for in-app updates
