@@ -589,8 +589,7 @@ struct ForgeChatThreadView: View {
                 ForgeChatQuote(ref: ref, exists: messageText(ref.messageID) != nil || ref.messageID == id) { jumpTo = ref.messageID }
             }
             content()
-                .modifier(ForgeChatSwipeToReply(enabled: menuTarget == nil) { startReply(id: id, text: text, isUser: isUser) })
-                .onLongPressGesture(minimumDuration: 0.35) { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
+                .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
             if let e = local.reactions[id] {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
             }
@@ -600,6 +599,8 @@ struct ForgeChatThreadView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.white.opacity(flashID == id ? 0.12 : 0)).padding(-6)
                 .animation(.easeOut(duration: 0.5), value: flashID)
         }
+        // The whole row, empty space beside the bubble included, takes the swipe.
+        .modifier(ForgeChatSwipeToReply(enabled: menuTarget == nil) { startReply(id: id, text: text, isUser: isUser) })
     }
 
     var body: some View {
