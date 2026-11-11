@@ -17,7 +17,7 @@ public actor Authenticator {
         case failure(AuthenticationServiceError)
     }
 
-    private let signer: SAPSigner
+    private let signer: SAPSigner?
     private let deviceIdentifier: String
     private var endpoint: URL
     private var cookies: [Cookie]
@@ -33,8 +33,13 @@ public actor Authenticator {
         catch { throw AuthenticationServiceError.wrapping(error, stage: .bag) }
         try bag.requireSupportedAuthentication()
         endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
-        do { signer = try await SAPSigner.connect() }
-        catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
+        // Fast Configurator authentication does not use SAP/AMD signatures.
+        if Self.isConfiguratorEndpoint(bag.authEndpoint) {
+            signer = nil
+        } else {
+            do { signer = try await SAPSigner.connect() }
+            catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
+        }
         self.cookies = cookies
     }
 
@@ -104,24 +109,32 @@ public actor Authenticator {
         return try approvedEndpoint(comps.url.get())
     }
 
+    static func isConfiguratorEndpoint(_ endpoint: URL) -> Bool {
+        endpoint.scheme == "https" && endpoint.host == "auth.itunes.apple.com"
+            && endpoint.path == "/auth/v1/native/fast/"
+    }
+
     static func makeRequest(
         endpoint: URL, email: String, password: String, code: String, cookies: [Cookie], deviceIdentifier: String,
-        sapSigner: any SAPRequestSigning,
+        sapSigner: (any SAPRequestSigning)?,
     ) async throws -> HTTPClient.Request {
         let parameters: [String: String] = [
             "appleId": email, "attempt": "\(code.isEmpty ? "1" : "2")", "guid": deviceIdentifier, "password": "\(password)\(code)",
             "rmp": "0", "why": "signIn",
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
-        var headers: [(String, String)] = [("User-Agent", Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
+        var headers: [(String, String)] = [("User-Agent", isConfiguratorEndpoint(endpoint) ? "Configurator/2.17" : Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
         for item in cookies.buildCookieHeader(endpoint) {
             headers.append(item)
         }
         _ = try approvedEndpoint(endpoint)
-        let signature: Data
-        do { signature = try await sapSigner.sign(data) }
-        catch { throw AuthenticationServiceError.wrapping(error, stage: .signing) }
-        headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
+        if !isConfiguratorEndpoint(endpoint) {
+            guard let sapSigner else { throw AuthenticationServiceError(stage: .signing) }
+            let signature: Data
+            do { signature = try await sapSigner.sign(data) }
+            catch { throw AuthenticationServiceError.wrapping(error, stage: .signing) }
+            headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
+        }
         APLogger.logRequest(method: "POST", url: endpoint.absoluteString, headers: headers)
         return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
     }
