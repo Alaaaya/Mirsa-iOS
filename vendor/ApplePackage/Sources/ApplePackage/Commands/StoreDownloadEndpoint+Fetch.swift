@@ -107,15 +107,22 @@ extension StoreDownloadEndpoint {
         var redirectAttempt = 0
         var finalResponse: HTTPClient.Response?
         let maxRedirects = 3
+        let amd = StoreAMDProof.shared(deviceIdentifier: deviceIdentifier)
+        var handshake = StoreAMDHandshake(provider: amd)
+        var amdRetries = 0
 
         while redirectAttempt <= maxRedirects {
             currentURL = try Self.validatedURL(currentURL)
+            // A missing profile or unusable identifier must not block a download; Apple asks with SP.
+            var amdHeaders: [String: String] = [:]
+            if StoreAMDHeaderPolicy.allows(currentURL) { amdHeaders = (try? await amd.headers()) ?? [:] }
             let request = try makeRequest(
                 account: account,
                 app: app,
                 url: currentURL,
                 guid: deviceIdentifier,
                 externalVersionID: externalVersionID,
+                amdHeaders: amdHeaders,
             )
             let response = try await client.execute(request: request).get()
             defer { finalResponse = response }
@@ -127,6 +134,12 @@ extension StoreDownloadEndpoint {
             )
 
             account.cookie.mergeCookies(response.cookies)
+
+            // Device registration, bounded by the handshake budget and a hard cap.
+            if amdRetries < 4, try await handshake.respond(to: response) {
+                amdRetries += 1
+                continue
+            }
 
             if [301, 302, 303, 307, 308].contains(response.status.code) {
                 guard let location = response.headers.first(name: "location"),
@@ -160,6 +173,7 @@ extension StoreDownloadEndpoint {
             format: nil,
         ) as? [String: Any]
         guard let dict = plist else { try ensureFailed(Strings.invalidResponse) }
+        if StoreAMDAction.isActionMessage(dict["customerMessage"] as? String) { throw StoreAMDError(.parse) }
 
         return dict
     }
@@ -170,6 +184,7 @@ extension StoreDownloadEndpoint {
         url: URL,
         guid: String,
         externalVersionID: String,
+        amdHeaders: [String: String] = [:],
     ) throws -> HTTPClient.Request {
         var payload: [String: Any] = [
             "creditDisplay": "",
@@ -194,6 +209,7 @@ extension StoreDownloadEndpoint {
         for item in account.cookie.buildCookieHeader(url) {
             headers.append(item)
         }
+        headers.append(contentsOf: try StoreAMDHeaderPolicy.headers(amdHeaders, for: url))
 
         APLogger.logRequest(method: "POST", url: url.absoluteString, headers: headers)
 
