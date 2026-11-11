@@ -7,7 +7,7 @@ import SwiftUI
 struct AppStoreAccountView: View {
     var onDownloaded: (URL) async throws -> Void
 
-    private let client = MirsaStoreServerClient.shared
+    private let client = MirsaStoreOnDeviceClient.shared
     @State private var account: MirsaStoreAccount?
     @State private var email = ""
     @State private var password = ""
@@ -67,8 +67,8 @@ struct AppStoreAccountView: View {
             Button(t("Sign out", "تسجيل الخروج", "چوونە دەرەوە", "Derkeve"), role: .destructive) { signOut() }
             Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal"), role: .cancel) {}
         } message: {
-            Text(t("Your server session, challenges and server downloads are deleted. Imported IPAs stay.",
-                   "بتنمسح جلسة دخولك ورموز التحقق والتنزيلات عن سيرفر مرسى. ملفات IPA المستوردة بتضل.",
+            Text(t("Your local Apple session and verification challenge are deleted. Imported IPAs stay.",
+                   "بتنمسح جلسة دخول Apple ورموز التحقق من آيفونك. ملفات IPA المستوردة بتضل.",
                    "دانیشتن و کۆدەکان و داگرتنەکانی سێرڤەر دەسڕدرێنەوە. IPA هاوردەکراوەکان دەمێنن.",
                    "Danişîn, kod û daxistinên serverê tên jêbirin. IPAyên hatine anîn dimînin."))
         }
@@ -84,10 +84,10 @@ struct AppStoreAccountView: View {
                     "Sepanên ku hesabê te yê Apple xwedî ye dakêşe. Mirsa şîfreya wan venake, îmze nake û parve nake."),
                   systemImage: "lock.shield.fill")
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-            Text(t("Your email and password go over HTTPS to the Mirsa server for Apple sign-in. The password is not saved. Apple may require a verification code.",
-                   "إيميلك وكلمة السر بينبعتوا لسيرفر مرسى عبر HTTPS للدخول عند Apple. كلمة السر ما بتنحفظ وممكن Apple تطلب رمز تحقق.",
-                   "ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ سێرڤەری Mirsa دەنێردرێن بۆ Apple. وشەی نهێنی هەڵناگیرێت و Apple ڕەنگە کۆد بخوازێت.",
-                   "E-name û şîfreya te bi HTTPS ji servera Mirsa re ji bo Apple tên şandin. Şîfre nayê tomarkirin û dibe ku Apple kodê bixwaze."))
+            Text(t("Your iPhone sends your email and password directly to Apple over HTTPS. The password is not saved. Apple may require a verification code.",
+                   "آيفونك بيبعت إيميلك وكلمة السر مباشرة لـApple عبر HTTPS. كلمة السر ما بتنحفظ وممكن Apple تطلب رمز تحقق.",
+                   "ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ Apple دەنێردرێن بۆ Apple. وشەی نهێنی هەڵناگیرێت و Apple ڕەنگە کۆد بخوازێت.",
+                   "E-name û şîfreya te bi HTTPS ji Apple re ji bo Apple tên şandin. Şîfre nayê tomarkirin û dibe ku Apple kodê bixwaze."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             Button { withAnimation(.easeOut(duration: 0.2)) { showSteps.toggle() } } label: {
                 HStack {
@@ -101,8 +101,8 @@ struct AppStoreAccountView: View {
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             if showSteps {
                 VStack(alignment: .leading, spacing: 8) {
-                    step("1", t("Mirsa sends your email and password over HTTPS to its server to sign in to Apple. Your password is not saved. Only the session is kept.",
-                                "مرسى بيبعت إيميلك وكلمة السر لسيرفرو عبر HTTPS ليسجّل دخول عند Apple. كلمة السر ما بتنحفظ، بس جلسة الدخول.",
+                    step("1", t("Your iPhone signs in directly to Apple over HTTPS. Your password is not saved. Only the session is kept.",
+                                "آيفونك بيسجّل دخول مباشرة عند Apple عبر HTTPS. كلمة السر ما بتنحفظ، بس جلسة الدخول.",
                                 "Mirsa ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ سێرڤەری خۆی دەنێرێت بۆ چوونەژوورەوەی Apple. وشەی نهێنی هەڵناگیرێت، تەنها دانیشتن.",
                                 "Mirsa e-name û şîfreya te bi HTTPS ji servera xwe re dişîne ji bo têketina Apple. Şîfre nayê tomarkirin, tenê danişîn dimîne."))
                     step("2", t("If Apple asks, type the 6-digit code it sends to your devices.",
@@ -159,12 +159,12 @@ struct AppStoreAccountView: View {
                 .fixedSize(horizontal: false, vertical: true)
             TextField(t("Code shown on your iPhone", "الرمز يلي وصل عآيفونك", "کۆدی سەر ئایفۆنەکەت", "Koda li iPhone ya te"), text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode).disabled(busy != nil)
                 .focused($focus).fieldStyle()
-                .onChange(of: code) { _, v in code = String(v.filter { $0.isASCII && $0.isNumber }.prefix(6)) }
+                .onChange(of: code) { _, v in code = MirsaStoreCode.normalize(v) }
             SecureField(t("Re-enter password for this verification", "اكتب كلمة السر من جديد للتحقق", "وشەی نهێنی بۆ پشتڕاستکردنەوە دووبارە بنووسە", "Ji bo piştrastkirinê şîfreyê dîsa binivîse"), text: $password)
                 .textContentType(.password).focused($focus).fieldStyle().disabled(busy != nil)
             Button { submitCode() } label: { Text(t("Verify code", "تحقق من الرمز", "کۆدەکە پشتڕاست بکەرەوە", "Kodê piştrast bike")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaPrimary).disabled(code.count != 6 || password.isEmpty || busy != nil)
-            Text(t("Re-enter your password for this request. Two verification tries within five minutes, then start again. A challenge does not confirm that a code was delivered.", "اكتب كلمة السر من جديد لهالطلب. محاولتين خلال 5 دقايق وبعدين ابدأ من جديد. طلب الرمز مو تأكيد إنو وصلك.",
+                .buttonStyle(.mirsaPrimary).disabled(MirsaStoreCode.valid(code) == nil || password.isEmpty || busy != nil)
+            Text(t("Re-enter your password for this request. Three verification tries within five minutes, then start again. A challenge does not confirm that a code was delivered.", "اكتب كلمة السر من جديد لهالطلب. 3 محاولات خلال 5 دقايق وبعدين ابدأ من جديد. طلب الرمز مو تأكيد إنو وصلك.",
                    "وشەی نهێنی بۆ ئەم داواکارییە دووبارە بنووسە. دوو هەوڵ لە پێنج خولەکدا، پاشان دووبارە دەست پێبکە. داوای کۆد گەیشتنی کۆد پشتڕاست ناکاتەوە.", "Ji bo vê daxwazê şîfreyê dîsa binivîse. Di pênc deqeyan de du hewil, paşê ji nû ve dest pê bike. Daxwaza kodê ne piştrastkirina gihîştina kodê ye."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button(t("Cancel and start over", "إلغاء والبدء من جديد", "هەڵوەشاندنەوە و دەستپێکردنەوە", "Betal bike û ji nû ve dest pê bike")) { cancelVerification() }
@@ -182,8 +182,8 @@ struct AppStoreAccountView: View {
                 .autocorrectionDisabled().focused($focus).fieldStyle()
             SecureField(t("Password", "كلمة السر", "وشەی نهێنی", "Şîfre"), text: $password)
                 .textContentType(.password).focused($focus).fieldStyle().disabled(busy != nil)
-            Text(t("Sent over HTTPS to the Mirsa server for Apple sign-in. Your password is not saved. Apple may ask for a code.", "بتنبعت لسيرفر مرسى عبر HTTPS للدخول عند Apple. كلمة السر ما بتنحفظ. ممكن Apple تطلب رمز تحقق.",
-                   "بە HTTPS بۆ سێرڤەری Mirsa دەنێردرێت بۆ چوونەژوورەوەی Apple. وشەی نهێنی هەڵناگیرێت. Apple ڕەنگە کۆد بخوازێت.", "Bi HTTPS ji servera Mirsa re ji bo têketina Apple tê şandin. Şîfre nayê tomarkirin. Dibe ku Apple kodê bixwaze."))
+            Text(t("Sent directly from your iPhone to Apple over HTTPS. Your password is not saved. Apple may ask for a code.", "بتنبعت مباشرة من آيفونك لـApple عبر HTTPS. كلمة السر ما بتنحفظ. ممكن Apple تطلب رمز تحقق.",
+                   "بە HTTPS بۆ Apple دەنێردرێت بۆ چوونەژوورەوەی Apple. وشەی نهێنی هەڵناگیرێت. Apple ڕەنگە کۆد بخوازێت.", "Bi HTTPS ji Apple re ji bo têketina Apple tê şandin. Şîfre nayê tomarkirin. Dibe ku Apple kodê bixwaze."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button { signIn() } label: { Text(t("Sign in", "تسجيل الدخول", "چوونەژوورەوە", "Têkeve")).frame(maxWidth: .infinity) }
                 .buttonStyle(.mirsaPrimary)
@@ -334,6 +334,7 @@ struct AppStoreAccountView: View {
     }
 
     private func submitCode() {
+        guard busy == nil else { return }
         let c = code
         let secret = password
         password = ""; code = ""
@@ -456,6 +457,7 @@ struct AppStoreAccountView: View {
     private func codeReset() { code = "" }
 
     private func describe(_ error: Error) -> String {
+        if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic.localizedDescription }
         if let server = error as? MirsaStoreServerError {
             switch server {
             case .code(let code):
