@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import UIKit
 
 // MARK: - Feature switch and config (Mirsa 2.1 chat attachments)
@@ -56,6 +57,7 @@ struct ChatAttachmentError: Error, Equatable {
         case (403, _): return tr("This device could not be verified. Reopen Mirsa and try again.", "ما قدرنا نتحقق من هالجهاز. افتح مرسى من جديد وجرّب.", ckb: "ئەم ئامێرە پشتڕاست نەکرایەوە. میرسا دووبارە بکەرەوە.", kmr: "Ev cihaz nehat piştrastkirin. Mirsa ji nû ve veke.")
         case (404, _): return tr("This attachment or request was not found.", "المرفق أو الطلب مو موجود.", ckb: "ئەم هاوپێچە یان داواکارییە نەدۆزرایەوە.", kmr: "Ev pêvek an daxwaz nehat dîtin.")
         case (410, _): return tr("This attachment expired. Upload it again.", "صلاحية المرفق خلصت. ارفعه من جديد.", ckb: "ئەم هاوپێچە بەسەرچووە. دووبارە باری بکەرەوە.", kmr: "Dema vê pêvekê qediya. Dîsa bar bike.")
+        case (422, "attachment_integrity"): return tr("The downloaded file doesn't match the original (size or checksum). It was not saved.", "الملف النازل ما بيطابق الأصلي (الحجم أو التجزئة)، وما انحفظ.", ckb: "فایلی داگیراو لەگەڵ ئەسڵەکە ناگونجێت (قەبارە یان checksum)، پاشەکەوت نەکرا.", kmr: "Pelê hatî daxistin li gorî ya eslî nayê (mezinahî an checksum). Nehat tomarkirin.")
         case (422, "attachment_type") where MirsaFeatures.binaryAttachmentsEnabled: return tr("Only photos, .txt, .json, .zip, .deb and .dylib files, or https links.", "بس صور، أو ملفات ‎.txt‎ و ‎.json‎ و ‎.zip‎ و ‎.deb‎ و ‎.dylib‎، أو روابط https.", ckb: "تەنها وێنە، فایلی ‎.txt‎، ‎.json‎، ‎.zip‎، ‎.deb‎ و ‎.dylib‎، یان بەستەری https.", kmr: "Tenê wêne, pelên .txt, .json, .zip, .deb û .dylib, an girêdanên https.")
         case (422, "attachment_type"): return tr("Only photos, .txt and .json files, or https links.", "بس صور، أو ملفات ‎.txt‎ و ‎.json‎، أو روابط https.", ckb: "تەنها وێنە، فایلی ‎.txt‎ و ‎.json‎، یان بەستەری https.", kmr: "Tenê wêne, pelên .txt û .json, an girêdanên https.")
         case (422, "attachment_url"): return tr("This link is not allowed. Use a public https page, not a download.", "هالرابط مو مسموح. استعمل صفحة https عامة، مو ملف تحميل.", ckb: "ئەم بەستەرە ڕێگەپێدراو نییە. پەڕەیەکی گشتی https بەکاربهێنە، نەک داگرتن.", kmr: "Ev girêdan nayê qebûlkirin. Rûpeleke giştî ya https bi kar bîne, ne daxistinek.")
@@ -184,7 +186,7 @@ enum ChatAttachmentImage {
     }
 
     /// Binary for image/file (validated MIME), {url, contextOnly:true} for a link. Links are never fetched.
-    func read(_ id: UUID, threadID: UUID) async throws -> ChatAttachmentReadResult {
+    func read(_ id: UUID, threadID: UUID, expected: ChatAttachmentMeta? = nil) async throws -> ChatAttachmentReadResult {
         if let c = readCache.object(forKey: id as NSUUID), let mime = known[id]?.mime { return .bytes(c as Data, mime: mime) }
         if ChatAttachmentConfig.fixtureUI && !isEnabled, let p = payloads[id] {
             switch p { case .image(let d, _): return .bytes(d, mime: "image/jpeg"); case .text(let d, _, let m), .binary(let d, _, let m): return .bytes(d, mime: m); case .link(let u, _): return .link(u) }
@@ -199,9 +201,25 @@ enum ChatAttachmentImage {
             return .link(url)
         }
         guard ["image/jpeg", "text/plain", "application/json"].contains(mime) || (binaryOK && Self.isBinaryMime(mime)) else { throw ChatAttachmentError(status: 422, code: "attachment_type") }
-        if Self.isBinaryMime(mime) { return .bytes(data, mime: mime) } // not cached: up to 5 MiB
+        if Self.isBinaryMime(mime) { // not cached: up to 5 MiB
+            try Self.verifyBinary(data, mime: mime, meta: expected ?? known[id])
+            return .bytes(data, mime: mime)
+        }
         readCache.setObject(data as NSData, forKey: id as NSUUID)
         return .bytes(data, mime: mime)
+    }
+
+    /// The raw bytes of a .zip / .deb / .dylib must match the attachment's metadata before they are shown or saved:
+    /// same MIME, 1 byte … 5 MiB, exact size, SHA-256 (lowercase hex) and container magic. Nothing is extracted or run.
+    nonisolated static func verifyBinary(_ data: Data, mime: String, meta: ChatAttachmentMeta?) throws {
+        let bad = ChatAttachmentError(status: 422, code: "attachment_integrity")
+        guard let meta, let size = meta.size, let sha = meta.sha256?.lowercased(),
+              sha.utf8.count == 64, sha.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw bad }
+        guard !data.isEmpty, data.count <= ChatAttachmentRules.binaryMaxBytes, Int64(data.count) == size else { throw bad }
+        if let m = meta.mime?.lowercased(), m != mime { throw bad }
+        guard SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == sha else { throw bad }
+        let name = ChatAttachmentRules.binaryMimes.first(where: { $0.value == mime }).map { "f." + $0.key } ?? ""
+        if ChatAttachmentRules.binaryFileProblem(name: name, data: data) != nil { throw bad }
     }
 
     /// Only unattached drafts can be deleted (attached items answer 409 attachment_in_use).

@@ -138,8 +138,11 @@ struct ChatAttachmentMetaChip: View {
         guard AttachmentUploader.shared.isEnabled || ChatAttachmentConfig.fixtureUI else { return }
         downloading = true; downloadProblem = nil
         defer { downloading = false }
-        guard case .bytes(let d, let mime)? = try? await AttachmentUploader.shared.read(meta.id, threadID: threadID),
-              AttachmentUploader.isBinaryMime(mime) else { downloadProblem = ChatAttachmentText.downloadFailed; return }
+        let result: ChatAttachmentReadResult
+        do { result = try await AttachmentUploader.shared.read(meta.id, threadID: threadID, expected: meta) }
+        catch let e as ChatAttachmentError where e.code == "attachment_integrity" { downloadProblem = e.message; return }
+        catch { downloadProblem = ChatAttachmentText.downloadFailed; return }
+        guard case .bytes(let d, let mime) = result, AttachmentUploader.isBinaryMime(mime) else { downloadProblem = ChatAttachmentText.downloadFailed; return }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirsa-attachments/\(meta.id.uuidString)", isDirectory: true)
         let name = ChatAttachmentRules.safeName(meta.name ?? "attachment")
         do {

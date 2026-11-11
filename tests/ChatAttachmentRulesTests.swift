@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import UIKit
+import CryptoKit
 @testable import Mirsa
 
 /// Mirsa 2.1 attachments contract: client-side rules (URL validation, text files, image normalisation).
@@ -113,5 +114,26 @@ final class ChatAttachmentRulesTests: XCTestCase {
         } else {
             XCTAssertEqual(ChatAttachmentConfig.endpoint, ChatAttachmentConfig.productionBaseURL)
         }
+    }
+
+    func testBinaryReadIsVerifiedBySizeHashMimeAndMagic() throws {
+        let zip = Data([0x50, 0x4B, 0x03, 0x04]) + Data(repeating: 7, count: 60)
+        let sha = SHA256.hash(data: zip).map { String(format: "%02x", $0) }.joined()
+        func meta(size: Int64? = 64, sha256: String? = sha, mime: String? = "application/zip") -> ChatAttachmentMeta {
+            ChatAttachmentMeta(id: UUID(), kind: "file", name: "a.zip", mime: mime, size: size, sha256: sha256, expiresAt: nil, available: true, url: nil)
+        }
+        XCTAssertNoThrow(try AttachmentUploader.verifyBinary(zip, mime: "application/zip", meta: meta()))
+        XCTAssertThrowsError(try AttachmentUploader.verifyBinary(zip, mime: "application/zip", meta: nil))
+        XCTAssertThrowsError(try AttachmentUploader.verifyBinary(zip, mime: "application/zip", meta: meta(size: 63)))
+        XCTAssertThrowsError(try AttachmentUploader.verifyBinary(zip, mime: "application/zip", meta: meta(sha256: String(repeating: "0", count: 64))))
+        XCTAssertThrowsError(try AttachmentUploader.verifyBinary(zip, mime: "application/zip", meta: meta(sha256: nil)))
+        XCTAssertThrowsError(try AttachmentUploader.verifyBinary(zip, mime: "application/zip", meta: meta(mime: "application/x-mach-binary")))
+        let fake = Data(repeating: 1, count: 64)
+        let fsha = SHA256.hash(data: fake).map { String(format: "%02x", $0) }.joined()
+        XCTAssertThrowsError(try AttachmentUploader.verifyBinary(fake, mime: "application/zip", meta: meta(sha256: fsha)))
+        XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.ZIP"), "application/zip")
+        XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.deb"), "application/vnd.debian.binary-package")
+        XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.dylib"), "application/x-mach-binary")
+        XCTAssertEqual(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: Data([0x50, 0x4B, 0x03, 0x04]) + Data(count: ChatAttachmentRules.binaryMaxBytes)), .binarySize)
     }
 }
