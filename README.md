@@ -2,10 +2,10 @@
   <img src="assets/mirsa-hero.jpg" width="100%" alt="Mirsa. Make it yours. Your apps, your sources, your iPhone." />
   <h1>Mirsa · مرسى</h1>
   <p><strong>غيّر تفاصيل آيفونك، على ذوقك.</strong><br />Make your iPhone feel like yours.</p>
-  <p>Wallet artwork, passcode themes and lock-screen wallpapers.<br />On your device. No jailbreak required on supported iOS versions.</p>
+  <p>Install apps, add sources and manage your container.<br />On your device. No jailbreak required on supported iOS versions.</p>
   <p><code>iPhone</code> &nbsp; <code>Swift + Rust</code> &nbsp; <a href="LICENSE">MIT License</a></p>
   <br />
-  <p><a href="#install">Install</a> &nbsp; · &nbsp; <a href="#customize">Customize</a> &nbsp; · &nbsp; <a href="#compatibility">Compatibility</a> &nbsp; · &nbsp; <a href="#build">Build</a></p>
+  <p><a href="#install">Install</a> &nbsp; · &nbsp; <a href="#compatibility">Compatibility</a> &nbsp; · &nbsp; <a href="#build">Build</a></p>
 </div>
 
 ---
@@ -58,9 +58,9 @@ On **iOS 27.0–27.2 beta 2**, Mirsa offers **on-device pairing**, with no compu
 
 <strong>Connect and install apps · اتصل وثبّت التطبيقات</strong>
 
-Turn on **Wi-Fi** and **LocalDevVPN**, and keep the VPN connected while Mirsa uses device services. You can then add sources in Mirsa and install apps from their catalogs. Pairing does not remove the customization limits in the [compatibility table](#compatibility).
+Turn on **Wi-Fi** and **LocalDevVPN**, and keep the VPN connected while Mirsa uses device services. You can then add sources in Mirsa and install apps from their catalogs.
 
-شغّل **Wi-Fi** و**LocalDevVPN**، وخلّي الـVPN متصل أثناء استخدام مرسى لخدمات الجهاز. بعدها فيك تضيف السورسات داخل مرسى وتثبّت التطبيقات منها. الاقتران ما بيلغي حدود أدوات التخصيص المذكورة في [جدول التوافق](#compatibility).
+شغّل **Wi-Fi** و**LocalDevVPN**، وخلّي الـVPN متصل أثناء استخدام مرسى لخدمات الجهاز. بعدها فيك تضيف السورسات داخل مرسى وتثبّت التطبيقات منها.
 
 <details>
 <summary><strong>Mirsa source · سورس مرسى</strong></summary>
@@ -83,31 +83,18 @@ https://raw.githubusercontent.com/Alaaaya/Mirsa/main/source.json
 
 </details>
 
-## Customize
-
-| In Mirsa | What you can change |
-| :--- | :--- |
-| **Wallet artwork** | Choose card backgrounds, detect your cards and apply artwork individually or in a batch. Only the appearance changes, not the card itself. |
-| **Passcode themes** | Frame an image across the keypad or create separate button cutouts. Preview and reposition your design, then share it as a `.passthm` theme. |
-| **Lock-screen wallpapers** | Import `.tendies` archives from Files and apply their PosterBoard assets. Respring after installation to refresh the lock screen. |
-
 ## Compatibility
-
-Support depends on the feature, not just the iOS version. The file-transfer patch affects **customization tools only**, not app installing or the container.
-
-الدعم بيختلف حسب الميزة. إصلاح طريقة نقل الملفات بيأثر على **أدوات التخصيص فقط**، مو على تثبيت التطبيقات أو الحاوية.
 
 | Feature · الميزة | Compatibility · التوافق |
 | :--- | :--- |
-| **App installing & container**<br />**تثبيت التطبيقات والحاوية** | App installing/sideloading, sources, the container and downloads keep working on newer iOS versions with **pairing + LocalDevVPN**. The customization cutoff below does not apply to them.<br />تثبيت التطبيقات والسورسات والحاوية والتنزيلات بتضل شغالة على إصدارات iOS الأحدث مع **الاقتران + LocalDevVPN**. حدّ التخصيص المذكور بالأسفل ما بيشملها. |
-| **Customization tools**<br />**أدوات التخصيص** | Wallpapers, Wallet artwork and passcode themes rely on the file-transfer method Apple patched. **iOS 18–26:** import an existing pairing record. **iOS 27.0–27.2 beta 2:** import a record, or use on-device pairing where available. **iOS 27.2 beta 3 and later: not supported for these tools.**<br />الخلفيات وتصاميم Wallet وثيمات رمز القفل بتعتمد على طريقة نقل الملفات اللي سكّرتها Apple. **iOS 18–26:** استيراد ملف اقتران موجود. **iOS 27.0–27.2 beta 2:** استيراد ملف، أو الاقتران من الجهاز إذا كان متاح. **iOS 27.2 beta 3 والأحدث: أدوات التخصيص هاي غير مدعومة.** |
+| **App installing & container**<br />**تثبيت التطبيقات والحاوية** | App installing/sideloading, sources, the container and downloads keep working on newer iOS versions with **pairing + LocalDevVPN**.<br />تثبيت التطبيقات والسورسات والحاوية والتنزيلات بتضل شغالة على إصدارات iOS الأحدث مع **الاقتران + LocalDevVPN**. |
 
-Individual features may behave differently between releases. Back up your device before changing system caches.<br />
-بعض الميزات ممكن تختلف بين الإصدارات. اعمل نسخة احتياطية قبل تعديل كاش النظام.
+Individual features may behave differently between releases.<br />
+بعض الميزات ممكن تختلف بين الإصدارات.
 
 ## Connect your iPhone
 
-Mirsa needs two things before it can apply changes.
+Mirsa needs two things before it can install apps.
 
 | Requirement | Purpose |
 | :--- | :--- |
