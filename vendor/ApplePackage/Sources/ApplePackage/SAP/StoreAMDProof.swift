@@ -174,7 +174,8 @@ enum StoreAMDHeaderPolicy {
         var result: [(String, String)] = []
         for name in names {
             guard let value = amd[name] else { continue }
-            guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else {
+            // Byte check: "\r\n" is one Character, so String.contains("\r") would miss it.
+            guard !value.isEmpty, value.utf8.count <= 2048, !value.utf8.contains(where: { $0 == 13 || $0 == 10 || $0 == 0 }) else {
                 throw StoreAMDError(.headers)
             }
             result.append((name, value))
