@@ -38,7 +38,8 @@ private struct AppleStoreAuthentication: MirsaStoreAuthentication {
     let authenticator: Authenticator
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         do { return try await authenticator.authenticate(email: email, password: password, code: code) }
-        catch AuthenticationError.verificationCodeRequired { throw AuthenticationError.verificationCodeRequired }
+        catch let error as AuthenticationError { throw error }
+        catch let error as StoreAMDError { throw error }
         catch { throw MirsaStoreAuthDiagnostic(.wrapping(error, stage: .authentication)) }
     }
 }
