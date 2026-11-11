@@ -577,4 +577,33 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         } catch AuthenticationError.verificationCodeRejected { }
     }
 
+    func testAppleDomainCookieIsRetainedAcrossTwoFactorContinuation() async throws {
+        var challenge = try response(fields: ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"])
+        challenge.headers.add(name: "Set-Cookie", value: "session=fixture-session; Domain=.itunes.apple.com; Path=/; Secure; HttpOnly")
+        let http = try ScriptedHTTP([challenge, response(fields: successFields)])
+        let auth = try session(http, proof: OfflineAMD(), signer: RecordingSigner())
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTFail("Expected code")
+        } catch AuthenticationError.verificationCodeRequired { }
+        _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: " 654321\n")
+        let requests = await http.recorded()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertNil(requests[0].headers.first(name: "Cookie"))
+        XCTAssertEqual(requests[1].headers.first(name: "Cookie"), "session=fixture-session")
+        let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(requests[1]), format: nil) as? [String: String])
+        XCTAssertEqual(fields["password"], "fixture654321")
+        XCTAssertEqual(fields["attempt"], "2")
+    }
+
+    func testLeadingDotCookieDomainRemainsBoundaryScoped() throws {
+        for domain in [".itunes.apple.com", ".ITUNES.APPLE.COM", "itunes.apple.com"] {
+            let cookies = [Cookie(name: "session", value: "fixture", path: "/", domain: domain, httpOnly: true, secure: true)]
+            XCTAssertEqual(cookies.buildCookieHeader(try XCTUnwrap(URL(string: "https://auth.itunes.apple.com/auth/v1/native"))).count, 1)
+            for url in ["https://evilitunes.apple.com/", "https://itunes.apple.com.evil.invalid/", "http://auth.itunes.apple.com/"] {
+                XCTAssertTrue(cookies.buildCookieHeader(try XCTUnwrap(URL(string: url))).isEmpty)
+            }
+        }
+    }
+
 }
