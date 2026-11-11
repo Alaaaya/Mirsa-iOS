@@ -75,6 +75,29 @@ final class ChatAttachmentRulesTests: XCTestCase {
         XCTAssertTrue(out.starts(with: [0xFF, 0xD8]))
     }
 
+    func testBinaryFilesExtensionSizeAndSignature() {
+        let zip = Data([0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0])
+        let deb = Data("!<arch>\ndebian-binary".utf8)
+        let dylib = Data([0xCF, 0xFA, 0xED, 0xFE, 7, 0, 0, 1])
+        XCTAssertNil(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: zip))
+        XCTAssertNil(ChatAttachmentRules.binaryFileProblem(name: "a.DEB", data: deb))
+        XCTAssertNil(ChatAttachmentRules.binaryFileProblem(name: "libx.dylib", data: dylib))
+        XCTAssertEqual(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: deb), .signature)
+        XCTAssertEqual(ChatAttachmentRules.binaryFileProblem(name: "a.ipa", data: zip), .type)
+        XCTAssertEqual(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: Data()), .binarySize)
+        var big = zip; big.append(Data(count: 5_242_880 - zip.count))
+        XCTAssertNil(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: big))
+        big.append(0)
+        XCTAssertEqual(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: big), .binarySize)
+        XCTAssertEqual(ChatAttachmentRules.binaryMaxBytes, 5_242_880)
+        XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.zip"), "application/zip")
+        XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.deb"), "application/vnd.debian.binary-package")
+        XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.dylib"), "application/x-mach-binary")
+        XCTAssertEqual(ChatAttachmentRules.textMaxBytes, 262_144)
+        XCTAssertEqual(ChatAttachmentRules.imageMaxBytes, 1_048_576)
+        XCTAssertFalse(MirsaFeatures.binaryAttachmentsEnabled)
+    }
+
     func testSendIDsAreUniqueAndAtMostThree() {
         let ids = (0..<5).map { _ in UUID() }
         XCTAssertEqual(ChatAttachmentRules.sendIDs(ids + ids), Array(ids.prefix(3)))
