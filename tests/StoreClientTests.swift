@@ -173,6 +173,8 @@ final class MirsaStoreClientTests: XCTestCase {
         guard case .signedIn(let summary) = result else { return XCTFail("login missing") }
         XCTAssertEqual(summary.country, "DE")
         XCTAssertNotNil(vault.data["account"])
+        XCTAssertEqual(try JSONDecoder().decode(Account.self, from: vault.data["account"]!).password, "")
+        XCTAssertFalse(String(data: vault.data["account"]!, encoding: .utf8)!.contains("fixture-password"))
         XCTAssertEqual(engine.guids.first?.count, 12)
         let restored = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         let current = try await restored.currentAccount()
@@ -186,26 +188,60 @@ final class MirsaStoreClientTests: XCTestCase {
     func testTwoFactorReusesOneSAPSession() async throws {
         let engine = StoreTestEngine()
         engine.auth.twoFactor = true
-        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        let vault = StoreTestVault()
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
         XCTAssertEqual(first, .verificationRequired)
-        let second = try await client.verify(code: "123456")
+        XCTAssertNil(vault.data["challenge"])
+        let second = try await client.verify(code: "123456", password: "fixture-password")
         guard case .signedIn = second else { return XCTFail("verification missing") }
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "123456"])
     }
+    func testNativeOwnerGateDeniesBeforeAppleAuthentication() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { false })
+        do {
+            _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+            XCTFail("Owner restriction bypassed")
+        } catch { XCTAssertEqual(error as? MirsaStoreServerError, .code("staging_denied")) }
+        XCTAssertEqual(engine.authCreations, 0)
+        XCTAssertTrue(vault.data.isEmpty)
+    }
+    func testNativeOwnerGateUsesLocalSessionForLatinVerification() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        engine.auth.twoFactor = true
+        let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { true })
+        let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        XCTAssertEqual(first, .verificationRequired)
+        XCTAssertNil(vault.data["challenge"])
+        do {
+            _ = try await client.verify(code: "182737", password: "")
+            XCTFail("Missing verification password accepted")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        // The fixture accepts 123456; a fresh password is passed directly without a saved secret.
+        let second = try await client.verify(code: "123456", password: "fixture-password")
+        guard case .signedIn = second else { return XCTFail("No local session") }
+        XCTAssertEqual(engine.authCreations, 1)
+        XCTAssertEqual(engine.auth.calls, ["", "123456"])
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertEqual(try JSONDecoder().decode(Account.self, from: vault.data["account"]!).password, "")
+    }
+
     func testTwoFactorSubmissionLimitAndSignoutClearsChallenge() async throws {
         let engine = StoreTestEngine()
         engine.auth.twoFactor = true
         let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
         _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
         for _ in 0..<3 {
-            do { _ = try await client.verify(code: "999999"); XCTFail("wrong code accepted") } catch {}
+            do { _ = try await client.verify(code: "999999", password: "fixture-password"); XCTFail("wrong code accepted") } catch {}
         }
-        do { _ = try await client.verify(code: "123456"); XCTFail("expired challenge accepted") } catch {}
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("expired challenge accepted") } catch {}
         XCTAssertEqual(engine.auth.calls.count, 4)
         try await client.signOut()
-        do { _ = try await client.verify(code: "123456"); XCTFail("signed out challenge accepted") } catch {}
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("signed out challenge accepted") } catch {}
     }
     func testAcquisitionUsesFreshAccountRegionAndRejectsUnknownOrPaidPrice() async throws {
         let engine = StoreTestEngine()

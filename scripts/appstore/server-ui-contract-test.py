@@ -14,7 +14,7 @@ for match in pattern.finditer(source):
     assert all(value.strip() for value in values), values
     rows.append(dict(zip(["en", "ar", "ckb", "kmr"], values)))
 assert len(rows) == len(re.findall(r'\bt\(\s*"', source)), "Every Store UI string needs all four languages"
-assert "MirsaStoreServerClient.shared" in source
+assert "MirsaStoreOnDeviceClient.shared" in source
 assert "MirsaStoreClient.shared" not in source
 assert ".environment(\\.layoutDirection, .leftToRight)" in source
 assert 'defer { password = ""; code = "" }' in source
