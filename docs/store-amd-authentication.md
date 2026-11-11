@@ -26,3 +26,17 @@ AMD errors expose only an allowlisted step and numeric HTTP/Keychain status. The
 The same bounded handshake runs before HTTP status/redirect rejection, including non-200 challenges. A valid Apple HTTP Date synchronizes a local OTP time offset, used for both provisioning begin and fresh proof headers. A challenge without a valid Date fails with a distinct clock diagnostic rather than silently exhausting provisioning retries.
 
 The production login loop accepts an internal injected signer/provider/executor for offline testing. Full-loop tests cover SP on 200/403/500/302 followed by success, repeated SP budget rejection, and SP then Configurator 2FA then code on the same Authenticator/signing state. Clock-skew and diagnostic wrapping regressions require no credentials or network. Device acceptance remains unproven until tested on the owner's iPhone.
+
+## Additional owner review
+
+AMD action headers are trimmed and uppercased; AMD-Action customer messages use the last colon component. Unknown challenges show تسجيل الجهاز ما كمل with only header-presence and challenge byte length in addition to the prior step/numeric-status diagnostics, never challenge contents.
+
+A device-only random 32-byte Keychain salt binds the native hardware value and rotates on RP. An RP without a loaded profile is ignored. Unreadable profile Keychain results are no-profile, never a stale usable profile; persistence errors still fail safely during provisioning.
+
+The bounded challenge responder also covers buyProduct and download dispatch before status/redirect handling. Fresh proof headers are allowed only on native/native-fast authentication and buyProduct, not dispatch, other Apple routes, or CDN. Dispatch retries preserve request parameters and the existing bounded pod redirects; no proof headers are sent on that route.
+
+Configurator/2.21 is intentional protocol metadata, retained from the independently inspected iPadn protocol reference at 6adae1f0b32f0858fbbac0abad82ec9e0ffb6821, Services/HTTPClient.swift constant (not copied implementation). This confirms the reference choice, not Apple acceptance on a physical device.
+
+Verification codes are trimmed and must be exactly six ASCII digits when supplied. Rejection has distinct الرمز مرفوض text; the existing UI retains its same Authenticator. Offline tests include SP during attempt 2 with the unchanged password-plus-code body, same signer and session.
+
+MIRSA-PROVENANCE.txt is bundled with the existing MIT notices and lists each unmodified release static archive SHA256. Release binary provenance is not a reproducible source-build claim.
