@@ -600,7 +600,8 @@ struct ForgeChatThreadView: View {
     @State private var replyTo: ForgeChatReplyRef?
     @State private var editingID: UUID?
     @State private var menuTarget: ForgeChatMenuTarget?
-    @AppStorage("mirsa.chat.reactionsHintSeen") private var reactionsHintSeen = false
+    // Mirsa 2.3: the reactions tip shows once above the composer when the chat opens; ✕ hides it for good.
+    @AppStorage("mirsa.chat.reactionsTipDismissed") private var reactionsTipDismissed = false
     @State private var deleteTarget: ForgeChatMenuTarget?
     @State private var jumpTo: UUID?
     @State private var flashID: UUID?
@@ -729,6 +730,10 @@ struct ForgeChatThreadView: View {
         // This also tracks the keyboard's safe area without fixed device heights.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
+                if !reactionsTipDismissed {
+                    ForgeChatReactionsTip { withAnimation(.easeOut(duration: 0.18)) { reactionsTipDismissed = true } }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 if let editingID {
                     ForgeChatComposerContext(title: ForgeChatExtrasText.editing, line: ForgeChatLocal.snippet(messageText(editingID)), icon: "pencil") {
                         withAnimation(.easeOut(duration: 0.18)) { self.editingID = nil; text = "" }
@@ -776,8 +781,7 @@ struct ForgeChatThreadView: View {
                     onReply: { closeMenu(); startReply(id: t.id, text: t.text, isUser: t.isUser) },
                     onEdit: { closeMenu(); replyTo = nil; editingID = t.id; text = t.text; composerFocused = true },
                     onDelete: { closeMenu(); deleteTarget = t },
-                    onClose: closeMenu,
-                    showHint: !t.isUser && !reactionsHintSeen)
+                    onClose: closeMenu)
                 .transition(.opacity)
                 .zIndex(10)
             }
@@ -897,7 +901,6 @@ struct ForgeChatThreadView: View {
     }
 
     private func closeMenu() {
-        if menuTarget?.isUser == false { reactionsHintSeen = true } // the tip shows once, on the first Mirsa AI reply
         withAnimation(.easeOut(duration: 0.18)) { menuTarget = nil }
     }
     private func markSeen() { local.markSeen(threadID, updatedAt: store.threads.first { $0.id == threadID }?.updatedAt) }
@@ -1113,5 +1116,31 @@ struct MirsaAuroraSlice: View {
         }
         .clipped()
         .allowsHitTesting(false)
+    }
+}
+
+
+/// Mirsa 2.3: one-time reactions tip above the Mirsa AI composer, same text as before in all four languages.
+struct ForgeChatReactionsTip: View {
+    let onDismiss: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "hand.tap").foregroundStyle(MirsaPalette.accentGradient)
+            Text(ForgeChatExtrasText.reactionsHint).font(.footnote).foregroundStyle(.white.opacity(0.92))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(MirsaChatTheme.muted)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(ForgeChatText.close)
+            .accessibilityIdentifier("chat-reactions-tip-close")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MirsaPalette.cardRaised))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(MirsaPalette.accent.opacity(0.4), lineWidth: 0.8))
+        .padding(.horizontal, 14).padding(.top, 8)
+        .accessibilityIdentifier("chat-reactions-tip")
     }
 }
