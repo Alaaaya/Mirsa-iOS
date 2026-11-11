@@ -8,6 +8,11 @@ enum MirsaManagedTmp {
     private static let lock = NSLock()
     private static var active = Set<String>()
     private static var served: [String: Date] = [:]
+    // Foundation can expose the same iOS workspace through /var or /private/var.
+    // Every registry lookup, including directory enumeration, needs the same key.
+    private static func key(_ path: String) -> String {
+        MirsaContainerCleanup.canonicalDarwinPath(URL(fileURLWithPath: path).resolvingSymlinksInPath())
+    }
 
     // Reject symlinks at every caller-controlled component, including the root itself.
     // Darwin's system /var and /tmp aliases are permitted, not arbitrary parent links.
@@ -39,7 +44,7 @@ enum MirsaManagedTmp {
         let safe = String(label.filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(24))
         let dir = base.appendingPathComponent(safe + "-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)
-        active.insert(dir.path)
+        active.insert(key(dir.path))
         return dir
     }
 
@@ -53,7 +58,7 @@ enum MirsaManagedTmp {
         }
         guard let base = safeRoot(r ?? root), owned(dir, base: base),
               let checked = safeRoot(dir) else { return }
-        active.remove(checked.path); served[checked.path] = nil
+        active.remove(key(checked.path)); served[key(checked.path)] = nil
         try? FileManager.default.removeItem(at: checked)
     }
 
@@ -61,15 +66,15 @@ enum MirsaManagedTmp {
     static func markServed(_ dir: URL, until: Date, root r: URL? = nil) {
         lock.lock(); defer { lock.unlock() }
         guard let base = safeRoot(r ?? root), owned(dir, base: base), let checked = safeRoot(dir) else { return }
-        active.remove(checked.path)
-        served[checked.path] = until
+        active.remove(key(checked.path))
+        served[key(checked.path)] = until
     }
 
     /// Successful producer hands ownership to its caller; caller must end after copying/consuming.
     /// This stays active, so even manual cleaning cannot remove an in-flight consumer.
     static func isActive(_ path: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return active.contains(path) || (served[path].map { $0 > Date() } ?? false)
+        return active.contains(key(path)) || (served[key(path)].map { $0 > Date() } ?? false)
     }
 
     static func isOwned(_ dir: URL, root r: URL? = nil) -> Bool {
@@ -87,9 +92,9 @@ enum MirsaManagedTmp {
         }
         var removed = 0
         for item in items {
-            guard owned(item, base: base), !active.contains(item.path) else { continue }
-            if let until = served[item.path], until > now { continue }
-            served[item.path] = nil
+            guard owned(item, base: base), !active.contains(key(item.path)) else { continue }
+            if let until = served[key(item.path)], until > now { continue }
+            served[key(item.path)] = nil
             let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? now
             guard now.timeIntervalSince(modified) > maxAge else { continue }
             do { try FileManager.default.removeItem(at: item); removed += 1 } catch {}
