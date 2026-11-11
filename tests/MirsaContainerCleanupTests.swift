@@ -28,6 +28,14 @@ final class MirsaContainerCleanupTests: XCTestCase {
         MirsaContainerCleanup.scan(root: root ?? tmp, scope: scope, delete: delete,
             cutoff: cutoff, protectedPaths: protected, now: Date().addingTimeInterval(120), beforeDelete: race)
     }
+    func testOSProvidedTmpRootCountsRealContainerFile() throws {
+        let marker = fm.temporaryDirectory.appendingPathComponent("cleaner-root-" + UUID().uuidString + ".ipa")
+        try Data(count: 4096).write(to: marker)
+        defer { try? fm.removeItem(at: marker) }
+        let measured = MirsaContainerCleanup.scan(root: fm.temporaryDirectory, scope: .temporary,
+            delete: false, cutoff: Date.distantPast, protectedPaths: [])
+        XCTAssertGreaterThanOrEqual(measured.bytes, 4096)
+    }
     func testWholeTmpCountsRootHiddenIPAsAndNestedUnzipSigningLeftovers() throws {
         let files = try [file("old.ipa", bytes: 101), file(".abandoned.zip", bytes: 102),
                          file("unzip/Payload/App.app/executable", bytes: 103),
@@ -37,17 +45,17 @@ final class MirsaContainerCleanupTests: XCTestCase {
         files.forEach { XCTAssertFalse(fm.fileExists(atPath: $0.path)) }
         XCTAssertEqual(scan(delete: false).bytes, 0)
     }
-    func testOnlyDisposableCachesAndNoSystemDatabases() throws {
+    func testAllDisposableCachesIncludingUnknownProducerAndNoSystemDatabases() throws {
         let ipa = try file("old.ipa", under: cache, bytes: 100)
         let extracted = try file("unzip-old/Payload/App.app/bin", under: cache, bytes: 200)
         let saved = try file("com.apple.URLSession/Cache.db", under: cache)
         let wal = try file("Cache.db-wal", under: cache)
         let unknown = try file("unknown-service/file", under: cache)
         let webkit = try file("WebKit/data", under: cache)
-        XCTAssertEqual(scan(cache, scope: .caches, delete: false).bytes, 300)
-        XCTAssertEqual(scan(cache, scope: .caches).removed, 2)
-        for url in [saved, wal, unknown, webkit] { XCTAssertTrue(fm.fileExists(atPath: url.path)) }
-        for url in [ipa, extracted] { XCTAssertFalse(fm.fileExists(atPath: url.path)) }
+        XCTAssertEqual(scan(cache, scope: .caches, delete: false).bytes, 331)
+        XCTAssertEqual(scan(cache, scope: .caches).removed, 3)
+        for url in [saved, wal, webkit] { XCTAssertTrue(fm.fileExists(atPath: url.path)) }
+        for url in [ipa, extracted, unknown] { XCTAssertFalse(fm.fileExists(atPath: url.path)) }
     }
     func testPersistentLibraryProjectsSavedIPAsAndColdLaunchInboxSurvive() throws {
         var protectedFiles: [URL] = []
