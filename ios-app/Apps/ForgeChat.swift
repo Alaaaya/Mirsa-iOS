@@ -386,6 +386,7 @@ struct ForgeChatRoot: View {
     @State private var toDelete: UUID?
     @State private var showIDHelp = false
     @ObservedObject private var local = ForgeChatLocal.shared
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -438,7 +439,7 @@ struct ForgeChatRoot: View {
             }
             .task { // poll only while this screen is visible
                 await store.flush()
-                while !Task.isCancelled { await store.refreshThreads(); try? await Task.sleep(nanoseconds: 15_000_000_000) }
+                while !Task.isCancelled { if scenePhase == .active { await store.refreshThreads() }; try? await Task.sleep(nanoseconds: 15_000_000_000) }
             }
         }
     }
@@ -762,7 +763,7 @@ struct ForgeChatThreadView: View {
         .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
-            while !Task.isCancelled && !ForgeChatStore.fixture { await store.read(threadID); try? await Task.sleep(nanoseconds: 8_000_000_000) }
+            while !Task.isCancelled && !ForgeChatStore.fixture { if scenePhase == .active { await store.read(threadID) }; try? await Task.sleep(nanoseconds: 8_000_000_000) } // stops reading in the background
         }
     }
 
