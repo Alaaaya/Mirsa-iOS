@@ -18,6 +18,8 @@ public enum Bag {
         var sapSetupEndpoint: String?
         var sapCertificateEndpoint: String?
         var advertisedAuthEndpoint: Bool = false
+        /// Apple's HTTP `Date`, used to correct the machine OTP clock.
+        var serverDate: Date?
 
         func requireSupportedAuthentication() throws {
             guard advertisedAuthEndpoint, sapVersion == "200",
@@ -91,14 +93,17 @@ public enum Bag {
             bodySize: response.body?.readableBytes,
         )
 
+        let serverDate = StoreAMDClock.serverDate(response.headers)
         guard var body = response.body,
               let data = body.readData(length: body.readableBytes)
         else {
             APLogger.debug("bag: empty response body, using default auth endpoint")
-            return BagOutput(authEndpoint: URL(string: defaultAuthEndpoint)!)
+            return BagOutput(authEndpoint: URL(string: defaultAuthEndpoint)!, serverDate: serverDate)
         }
 
-        return parse(data)
+        var output = parse(data)
+        output.serverDate = serverDate
+        return output
     }
 
     static func parse(_ data: Data) -> BagOutput {
