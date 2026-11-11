@@ -29,6 +29,9 @@ enum ForgeChatExtrasText {
     static func unread(_ n: Int) -> String { tr("\(n) new", "\(n) جديد", ckb: "\(n) نوێ", kmr: "\(n) nû") }
     static var selectText: String { tr("Select Text", "تحديد النص", ckb: "دیاریکردنی دەق", kmr: "Nivîsê hilbijêre") }
     static var done: String { tr("Done", "تم", ckb: "تەواو", kmr: "Temam") }
+    /// Mirsa 2.3: one-time tip on the first long press of a Mirsa AI reply, also shown in Settings › Mirsa AI.
+    static var reactionsHint: String { tr("Press and hold to react, copy or reply. 👎 sends the reply for review so we know what went wrong, and nobody but us sees it.", "اضغط مطوّل لتتفاعل أو تنسخ أو ترد. 👎 بيبعت الرد للمراجعة لنعرف شو كان غلط، وما حدا غيرنا بيشوفو.", ckb: "پەنجە ڕاگرە بۆ کاردانەوە، کۆپیکردن یان وەڵامدانەوە. 👎 وەڵامەکە دەنێرێت بۆ پێداچوونەوە تا بزانین چی هەڵە بوو، و جگە لە ئێمە کەس نایبینێت.", kmr: "Ji bo bertek, kopîkirin an bersivdanê bi dirêjî bitikîne. 👎 bersivê ji bo vekolînê dişîne da ku em bizanin çi xelet bû, û ji bilî me kes wê nabîne.") }
+    static var reactionsHintTitle: String { tr("Reactions", "التفاعلات", ckb: "کاردانەوەکان", kmr: "Bertek") }
     static var newMessages: String { tr("New messages", "رسائل جديدة", ckb: "نامەی نوێ", kmr: "Peyamên nû") }
 }
 
@@ -285,6 +288,7 @@ struct ForgeChatMessageMenu: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onClose: () -> Void
+    var showHint: Bool = false
     @State private var shown = false
     @State private var selecting = false
 
@@ -299,6 +303,18 @@ struct ForgeChatMessageMenu: View {
                 .onTapGesture(perform: onClose)
                 .accessibilityAddTraits(.isButton).accessibilityLabel(ForgeChatText.close)
             VStack(alignment: target.isUser ? .trailing : .leading, spacing: 10) {
+                if showHint {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "hand.tap").foregroundStyle(MirsaPalette.accentGradient)
+                        Text(ForgeChatExtrasText.reactionsHint).font(.footnote).foregroundStyle(.white.opacity(0.92))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9).frame(maxWidth: 300, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MirsaPalette.cardRaised))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(edge, lineWidth: 0.8))
+                    .opacity(shown ? 1 : 0)
+                    .accessibilityIdentifier("chat-reactions-hint")
+                }
                 if target.reactable {
                     HStack(spacing: 4) {
                         ForEach(ForgeChatLocal.reactions, id: \.self) { e in

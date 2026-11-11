@@ -1148,6 +1148,11 @@ struct AppsSettingsSheet: View {
                 Section {
                     Toggle(tr("Completion sound & haptic", "صوت واهتزاز عند الانتهاء"), isOn: $completionFeedback)
                 }
+                // Mirsa 2.3: the same reactions tip the chat shows once on the first long press of a Mirsa AI reply.
+                Section(ForgeChatText.title) {
+                    Label { Text(ForgeChatExtrasText.reactionsHint).font(.footnote).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "hand.tap") }
+                        .accessibilityIdentifier("settings-chat-reactions-hint")
+                }
                 Section {
                     Button { dismiss(); NotificationCenter.default.post(name: .mirsaShowHidden, object: nil) } label: {
                         Label(tr("Privacy", "الخصوصية"), systemImage: "lock")
