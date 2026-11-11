@@ -205,6 +205,8 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         }
         func provision(_ challenge: Data) { provisionCalls += 1; generation += 1 }
         func reset() { resetCalls += 1; generation = 0 }
+        func hasProfile() -> Bool { generation > 0 }
+        func observeServerDate(_: Date) {}
         func snapshot() -> [Int] { [provisionCalls, resetCalls] }
     }
 
