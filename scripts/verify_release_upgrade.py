@@ -16,16 +16,16 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     names = [n for n in archive.namelist() if n.startswith("Payload/") and n.count("/") == 2 and n.endswith(".app/Info.plist")]
     assert len(names) == 1
     current = plistlib.loads(archive.read(names[0]))
-    assert current["CFBundleShortVersionString"] == "2.0"
+    assert current["CFBundleShortVersionString"] == "2.1"
     for name in archive.namelist():
         if name.endswith(".appex/Info.plist"):
             ext = plistlib.loads(archive.read(name))
             assert ext["CFBundleShortVersionString"] == current["CFBundleShortVersionString"]
             assert ext["CFBundleVersion"] == current["CFBundleVersion"]
 old = baseline["ipa"]["info"]["CFBundleVersion"]
-previous = "4.59.1"  # Actual verified production 1.9 IPA, build 259
+previous = "4.61.1"  # Actual verified production 2.0 IPA, build 261
 new = current["CFBundleVersion"]
-assert int(current["MirsaBuild"]) > 259, "actual MirsaBuild must advance past production 1.9"
+assert int(current["MirsaBuild"]) > 261, "actual MirsaBuild must advance past production 2.0"
 # JSON-encoded numeric versions are also valid Swift string literals.
 with tempfile.TemporaryDirectory() as tmp:
     script = pathlib.Path(tmp) / "Upgrade243.swift"
@@ -36,9 +36,9 @@ with tempfile.TemporaryDirectory() as tmp:
         ", installed: " + json.dumps(new) + "))\n" +
         "precondition(UpdaterMetadata.isNewer(remote: " + json.dumps(new) +
         ", installed: " + json.dumps(previous) + "))\n" +
-        'precondition(UpdaterMetadata.isNewer(remote: "2.0", installed: "1.3.243"))\n' +
-        'precondition(UpdaterMetadata.isNewer(remote: "2.0", installed: "1.4"))\n' +
-        'precondition(!UpdaterMetadata.isNewer(remote: "1.4", installed: "2.0"))\n' +
+        'precondition(UpdaterMetadata.isNewer(remote: "2.1", installed: "1.3.243"))\n' +
+        'precondition(UpdaterMetadata.isNewer(remote: "2.1", installed: "1.4"))\n' +
+        'precondition(!UpdaterMetadata.isNewer(remote: "1.4", installed: "2.1"))\n' +
         'print("Actual 243 updater migration PASS")\n'
     ).encode())
     subprocess.run(["swift", str(script)], check=True)

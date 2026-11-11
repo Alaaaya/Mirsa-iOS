@@ -1,4 +1,4 @@
-name: Mirsa 2.0 composer layout regression
+name: Mirsa 2.1 integrated regression
 on:
   workflow_dispatch:
     inputs:
@@ -159,16 +159,18 @@ jobs:
           set -o pipefail
           mkdir -p build
           bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
-      - name: Build unsigned IPA (isolated fixture 261, never published)
+      - name: Build unsigned IPA (isolated fixture 262, never published)
         run: |
           python3 - <<'PYTHON'
           import pathlib,re
-          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.0"', p.read_text());assert n==1;p.write_text(text)
+          p=pathlib.Path("project.yml");text,n=re.subn(r'MARKETING_VERSION: "[^"\n]+"', 'MARKETING_VERSION: "2.1"', p.read_text());assert n==1;p.write_text(text)
           PYTHON
-          /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 261" ios-app/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :MirsaBuild string 262" ios-app/Info.plist
           brew install xcodegen && xcodegen generate
-          export GITHUB_RUN_NUMBER=261
+          export GITHUB_RUN_NUMBER=262
           bash build-ipa.sh
+      - name: Verify packaged upgrade metadata
+        run: python3 scripts/verify_release_upgrade.py build/Mirsa.ipa
       - name: Localization coverage
         run: |
           python3 ios-app/localization-coverage-test.py

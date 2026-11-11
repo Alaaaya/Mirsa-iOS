@@ -127,4 +127,30 @@ final class ForgeChatTimelineTests: XCTestCase {
         XCTAssertEqual(ForgeChatTimeline.orderedIDs(confirmed: [], pending: [restored, restored]), [sent.id])
     }
 
+
+    // Mirsa 2.1 attachments: IDs survive relaunch/retry, legacy rows stay decodable, metadata is tolerant.
+    func testAttachmentIDsSurviveCodableAndEcho() throws {
+        let ids = [UUID(), UUID()]
+        let sent = ForgeChatOutgoing(id: UUID(), threadID: thread, newThread: true, text: "Hello", imageBase64: nil, attachmentIDs: ids)
+        let restored = try JSONDecoder().decode([ForgeChatOutgoing].self, from: JSONEncoder().encode([sent]))
+        XCTAssertEqual(restored.first?.attachmentIDs, ids)
+        XCTAssertEqual(restored.first?.id, sent.id)
+        XCTAssertEqual(ForgeChatTimeline.acceptedEcho(sent).attachmentIDs, ids)
+        let legacy = Data("[{\"id\":\"\(UUID().uuidString)\",\"threadID\":\"\(thread.uuidString)\",\"newThread\":true,\"text\":\"x\"}]".utf8)
+        XCTAssertNil(try JSONDecoder().decode([ForgeChatOutgoing].self, from: legacy).first?.attachmentIDs)
+    }
+
+    func testMessageAttachmentsDecodeTolerantly() throws {
+        let a = UUID()
+        let json = """
+        {"id":"\(UUID().uuidString)","threadID":"\(thread.uuidString)","role":"user","text":"hi",
+         "attachments":[{"id":"\(a.uuidString)","kind":"link","name":"example.com","url":"https://example.com","available":true},{"bogus":1},
+                        {"id":"\(UUID().uuidString)","kind":"image","name":"photo.jpg","mime":"image/jpeg","size":1234,"expiresAt":"2000-01-01T00:00:00Z","available":false}]}
+        """
+        let m = try JSONDecoder().decode(ForgeChatMessage.self, from: Data(json.utf8))
+        XCTAssertEqual(m.attachments?.count, 2)
+        XCTAssertEqual(m.attachments?.first?.id, a)
+        XCTAssertEqual(m.attachments?.last?.isExpired(), true)
+        XCTAssertNil(try JSONDecoder().decode(ForgeChatMessage.self, from: Data("{\"id\":\"\(UUID().uuidString)\",\"role\":\"kat\"}".utf8)).attachments)
+    }
 }
