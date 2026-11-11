@@ -57,6 +57,7 @@ struct MirsaApp: App {
                 if phase == .active { OpenInProjectCoordinator.shared.presentNext() }
                 if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
                 if phase == .active, !MirsaUITestHarness.active { Task { await ForgeStore.shared.syncFixInbox() } }
+                if phase == .active, !MirsaUITestHarness.active, !AppsStore.isSetupMode { MirsaDeviceIdentity.refreshUDIDIfPossible(vm) }
             }
         }
     }
