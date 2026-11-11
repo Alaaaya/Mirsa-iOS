@@ -41,6 +41,7 @@ struct ForgeChatReplyRef: Codable, Equatable { let messageID: UUID; let snippet:
     @Published private(set) var seen: [UUID: String] = [:]
     private let repliesKey = "mirsa.chat.replies.v1", reactionsKey = "mirsa.chat.reactions.v1", seenKey = "mirsa.chat.seen.v1"
     static let usedKey = "mirsa.chat.everUsed"
+    // No background polling for badges: they update only from reads the chat already makes while it is on screen and the app is active.
     private var hasBaseline: Bool
 
     init() {
@@ -360,21 +361,5 @@ struct ForgeChatUnreadTabBadge: ViewModifier {
     func body(content: Content) -> some View {
         let n = local.unreadCount(store.threads)
         content.badge(n)
-    }
-}
-
-/// Keeps the thread list fresh for badges while the app is open, but only for someone who already used the chat.
-struct ForgeChatUnreadPoller: ViewModifier {
-    @Environment(\.scenePhase) private var scenePhase
-    @AppStorage(ForgeChatLocal.usedKey) private var used = false
-    func body(content: Content) -> some View {
-        content.task(id: scenePhase == .active && used) {
-            guard scenePhase == .active, used, !ForgeChatStore.fixture else { return }
-            while !Task.isCancelled {
-                await ForgeChatStore.shared.refreshThreads()
-                ForgeChatLocal.shared.baselineIfNeeded(ForgeChatStore.shared.threads)
-                try? await Task.sleep(nanoseconds: 60_000_000_000)
-            }
-        }
     }
 }

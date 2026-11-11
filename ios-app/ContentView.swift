@@ -663,7 +663,6 @@ struct ContentView: View {
             }
         }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
-        .modifier(ForgeChatUnreadPoller())
         .onOpenURL { url in
             if OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]); return }
             // mirsa://launch?bundle=… from a Home Screen shortcut.
