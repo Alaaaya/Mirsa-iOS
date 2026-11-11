@@ -600,6 +600,7 @@ struct ForgeChatThreadView: View {
     @State private var replyTo: ForgeChatReplyRef?
     @State private var editingID: UUID?
     @State private var menuTarget: ForgeChatMenuTarget?
+    @AppStorage("mirsa.chat.reactionsHintSeen") private var reactionsHintSeen = false
     @State private var deleteTarget: ForgeChatMenuTarget?
     @State private var jumpTo: UUID?
     @State private var flashID: UUID?
@@ -775,7 +776,8 @@ struct ForgeChatThreadView: View {
                     onReply: { closeMenu(); startReply(id: t.id, text: t.text, isUser: t.isUser) },
                     onEdit: { closeMenu(); replyTo = nil; editingID = t.id; text = t.text; composerFocused = true },
                     onDelete: { closeMenu(); deleteTarget = t },
-                    onClose: closeMenu)
+                    onClose: closeMenu,
+                    showHint: !t.isUser && !reactionsHintSeen)
                 .transition(.opacity)
                 .zIndex(10)
             }
@@ -894,7 +896,10 @@ struct ForgeChatThreadView: View {
         .accessibilityHint(ForgeChatText.shortIDHelp)
     }
 
-    private func closeMenu() { withAnimation(.easeOut(duration: 0.18)) { menuTarget = nil } }
+    private func closeMenu() {
+        if menuTarget?.isUser == false { reactionsHintSeen = true } // the tip shows once, on the first Mirsa AI reply
+        withAnimation(.easeOut(duration: 0.18)) { menuTarget = nil }
+    }
     private func markSeen() { local.markSeen(threadID, updatedAt: store.threads.first { $0.id == threadID }?.updatedAt) }
 
     private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = true, after delay: Double = 0) {
