@@ -16,7 +16,11 @@ jobs:
       - name: Diagnose original IPA workspace lifetime
         run: |
           cat ios-app/Apps/MirsaContainerCleanup.swift ios-app/Apps/MirsaManagedTmp.swift scripts/diagnostics/original-ipa.swift > /tmp/original-ipa.swift
-          swift /tmp/original-ipa.swift
+          swift /tmp/original-ipa.swift | tee /tmp/original-ipa-diagnostic.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-ipa-diagnostic
+          path: /tmp/original-ipa-diagnostic.txt
 
       - name: Select newest Xcode
         run: |

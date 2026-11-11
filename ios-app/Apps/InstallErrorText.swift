@@ -5,7 +5,7 @@ import Foundation
 enum InstallErrorText {
     static func sanitize(_ raw: String, arabic: Bool) -> String {
         if raw == "MIRSA_SOURCE_IPA_MISSING" {
-            return arabic ? "ملف التطبيق مو موجود، نزّله من جديد" : "The app file is missing. Download it again."
+            return arabic ? "ملف التثبيت الأصلي مو موجود. استورد ملف الـIPA أو حمّله من الرابط من جديد." : "The original IPA is missing. Import the IPA again or download it from its link."
         }
         var text = raw
         // Rootcause appends a compiler-machine source location after the cause.

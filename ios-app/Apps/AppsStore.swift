@@ -72,10 +72,11 @@ final class AppsStore: ObservableObject {
     var downloadOperationID: UUID?
     @Published var pending: PendingImport? = nil
     @Published var prompt: SideloadPrompt? = nil
+    @Published var errorOffersReimport = false
     @Published var errorOffersSettings = false
     @Published var error: String? = nil {
         didSet {
-            if error == nil { errorOffersSettings = false }
+            if error == nil { errorOffersSettings = false; errorOffersReimport = false }
             if let error {
                 let safe = InstallErrorText.sanitize(error, arabic: L.isArabic)
                 if safe != error { self.error = safe }
@@ -560,6 +561,10 @@ final class AppsStore: ObservableObject {
         let publication = orig.deletingLastPathComponent().appendingPathComponent(".original-\(UUID().uuidString).ipa")
         defer { try? fm.removeItem(at: publication) }
         do {
+            guard fm.fileExists(atPath: p.originalIPA.path) else {
+                errorOffersReimport = true
+                throw SideloadError.message("MIRSA_SOURCE_IPA_MISSING")
+            }
             try fm.copyItem(at: p.originalIPA, to: publication)
             // Same-directory POSIX rename is atomic and preserves open readers.
             guard rename(publication.path, orig.path) == 0 else {

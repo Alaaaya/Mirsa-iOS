@@ -14,6 +14,22 @@ final class MirsaManagedTmpTests: XCTestCase {
     }
     private func exists(_ u: URL) -> Bool { fm.fileExists(atPath: u.path) }
 
+    func testDownloadCleanupPreservesPendingOriginalAcrossDarwinAliases() throws {
+        let download = try MirsaManagedTmp.begin("url-regression")
+        let pending = try MirsaManagedTmp.begin("import-regression")
+        defer { MirsaManagedTmp.end(download); MirsaManagedTmp.end(pending) }
+        let ipa = pending.appendingPathComponent("original.ipa")
+        try Data("pending archive".utf8).write(to: ipa)
+        let canonical = MirsaContainerCleanup.canonicalDarwinPath(pending)
+        XCTAssertTrue(MirsaManagedTmp.isActive(canonical))
+        if canonical.hasPrefix("/private/var/") {
+            XCTAssertTrue(MirsaManagedTmp.isActive(String(canonical.dropFirst("/private".count))))
+        }
+        MirsaManagedTmp.end(download)
+        MirsaManagedTmp.cleanNow()
+        XCTAssertEqual(try Data(contentsOf: ipa), Data("pending archive".utf8))
+    }
+
     func testSuccessAndThrowingFailureReleaseOwnership() throws {
         let success = try MirsaManagedTmp.begin("ok", root: root)
         MirsaManagedTmp.end(success, root: root)
@@ -202,7 +218,10 @@ final class MirsaManagedTmpTests: XCTestCase {
             wantsNotifications: false, hasExtensions: false, sizeBytes: 0)
         await store.commitPending(to: .container, vm: nil)
         XCTAssertNil(store.pending); XCTAssertFalse(exists(fail)); XCTAssertNotNil(store.error)
+        XCTAssertTrue(store.errorOffersReimport)
+        XCTAssertFalse(store.error?.contains("MIRSA_SOURCE_IPA_MISSING") ?? true)
         store.error = nil
+        XCTAssertFalse(store.errorOffersReimport)
     }
     func testFreshInactiveWaitsOneHourAndUnmanagedSiblingIsUntouched() throws {
         let inactive = root.appendingPathComponent("previous-run")
