@@ -5,6 +5,7 @@ import Foundation
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
+import NIOHTTP1
 import XCTest
 
 @MainActor
@@ -205,6 +206,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         }
         func provision(_ challenge: Data) { provisionCalls += 1; generation += 1 }
         func reset() { resetCalls += 1; generation = 0 }
+        func synchronize(dateHeader: String?) throws { var clock = StoreAMDClock(); try clock.synchronize(dateHeader) }
         func snapshot() -> [Int] { [provisionCalls, resetCalls] }
     }
 
@@ -301,6 +303,144 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         let session = mirsa_store_begin(challenge, challenge.count, hardware, 1700000000)
         XCTAssertNil(session)
         if let session { mirsa_store_session_free(session) }
+    }
+
+    private actor ScriptedHTTP {
+        private var responses: [HTTPClient.Response]
+        private var requests: [HTTPClient.Request] = []
+        init(_ responses: [HTTPClient.Response]) { self.responses = responses }
+        func execute(_ request: HTTPClient.Request) throws -> HTTPClient.Response {
+            requests.append(request)
+            guard !responses.isEmpty else { throw TestError.unexpectedBodyChunk }
+            return responses.removeFirst()
+        }
+        func recorded() -> [HTTPClient.Request] { requests }
+    }
+
+    private func response(status: HTTPResponseStatus = .ok, action: String? = nil,
+                          fields: [String: Any] = [:], date: String? = "Wed, 11 Nov 2026 22:00:00 GMT") throws -> HTTPClient.Response {
+        var headers = HTTPHeaders([("x-set-apple-store-front", "143441-1")])
+        if let date { headers.add(name: "Date", value: date) }
+        if let action {
+            headers.add(name: "X-Apple-AMD-Action", value: action)
+            headers.add(name: "X-Apple-AMD-Data", value: "AQ==")
+        }
+        let data = try PropertyListSerialization.data(fromPropertyList: fields, format: .xml, options: 0)
+        var buffer = ByteBufferAllocator().buffer(capacity: data.count)
+        buffer.writeBytes(data)
+        return .init(host: "auth.itunes.apple.com", status: status, version: .http1_1, headers: headers, body: buffer)
+    }
+
+    private var successFields: [String: Any] {
+        ["accountInfo": ["appleId": "offline@example.invalid", "address": ["firstName": "Test", "lastName": "Reader"]],
+         "passwordToken": "fixture-token", "dsPersonId": "fixture-person"]
+    }
+
+    private func session(_ http: ScriptedHTTP, proof: OfflineAMD, signer: RecordingSigner) throws -> Authenticator {
+        try Authenticator(endpoint: XCTUnwrap(URL(string: "https://auth.itunes.apple.com/auth/v1/native")),
+                          deviceIdentifier: "001122334455", signer: signer, amd: proof,
+                          executor: { request in try await http.execute(request) })
+    }
+
+    func testCompleteLoopSPProvisionRetrySuccessOnAnyHTTPStatus() async throws {
+        for status in [HTTPResponseStatus.ok, .forbidden, .internalServerError, .found] {
+            let http = try ScriptedHTTP([response(status: status, action: "SP"), response(fields: successFields)])
+            let proof = OfflineAMD()
+            let signer = RecordingSigner()
+            let auth = try session(http, proof: proof, signer: signer)
+            let account = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTAssertEqual(account.email, "offline@example.invalid")
+            let requests = await http.recorded()
+            XCTAssertEqual(requests.count, 2)
+            let bodies = try requests.map(bodyData)
+            XCTAssertEqual(bodies[0], bodies[1])
+            let signed = await signer.recordedBodies()
+            XCTAssertEqual(signed, bodies)
+            XCTAssertNil(requests[0].headers.first(name: "X-Apple-AMD"))
+            XCTAssertEqual(requests[1].headers.first(name: "X-Apple-AMD"), "otp-1")
+            let counts = await proof.snapshot()
+            XCTAssertEqual(counts, [1, 0])
+        }
+    }
+
+    func testCompleteLoopSPThenTwoFactorThenCodeUsesSameSession() async throws {
+        let http = try ScriptedHTTP([
+            response(status: .forbidden, action: "SP"),
+            response(fields: ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"]),
+            response(fields: successFields)
+        ])
+        let proof = OfflineAMD()
+        let signer = RecordingSigner()
+        let auth = try session(http, proof: proof, signer: signer)
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTFail("Expected verification code")
+        } catch AuthenticationError.verificationCodeRequired { }
+        _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "654321")
+        let requests = await http.recorded()
+        XCTAssertEqual(requests.count, 3)
+        let bodies = try requests.map(bodyData)
+        XCTAssertEqual(bodies[0], bodies[1])
+        let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[2], format: nil) as? [String: String])
+        XCTAssertEqual(fields["attempt"], "2")
+        XCTAssertEqual(fields["password"], "fixture654321")
+        XCTAssertEqual(requests[2].headers.first(name: "X-Apple-AMD"), "otp-1")
+        let signed = await signer.recordedBodies()
+        XCTAssertEqual(signed, bodies)
+        let counts = await proof.snapshot()
+        XCTAssertEqual(counts, [1, 0])
+    }
+
+    func testCompleteLoopRepeatedChallengeIsBounded() async throws {
+        let http = try ScriptedHTTP([response(status: .forbidden, action: "SP"), response(status: .forbidden, action: "SP")])
+        let proof = OfflineAMD()
+        let auth = try session(http, proof: proof, signer: RecordingSigner())
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTFail("Expected budget error")
+        } catch let error as StoreAMDError { XCTAssertEqual(error.step, .budget) }
+        let counts = await proof.snapshot()
+        XCTAssertEqual(counts, [1, 0])
+    }
+
+    func testCompleteLoopMissingOrInvalidDateGivesDistinctSafeError() async throws {
+        for date in [nil, "private-challenge-not-a-date"] as [String?] {
+            let http = try ScriptedHTTP([response(status: .forbidden, action: "SP", date: date)])
+            let proof = OfflineAMD()
+            let auth = try session(http, proof: proof, signer: RecordingSigner())
+            do {
+                _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+                XCTFail("Expected clock diagnostic")
+            } catch let error as StoreAMDError {
+                XCTAssertEqual(error.step, .clock)
+                XCTAssertFalse(error.localizedDescription.contains("private-challenge"))
+            }
+            let counts = await proof.snapshot()
+            XCTAssertEqual(counts, [0, 0])
+        }
+    }
+
+    func testAppleDateOffsetCorrectsPositiveAndNegativeClockSkew() throws {
+        let server = Date(timeIntervalSince1970: 1794434400) // Wed 11 Nov 2026 22:00 GMT
+        for skew: TimeInterval in [-86400, 86400] {
+            let local = server.addingTimeInterval(skew)
+            var clock = StoreAMDClock()
+            try clock.synchronize("Wed, 11 Nov 2026 22:00:00 GMT", now: local)
+            XCTAssertEqual(try clock.seconds(now: local.addingTimeInterval(5)), UInt32(server.timeIntervalSince1970 + 5))
+        }
+        var clock = StoreAMDClock()
+        XCTAssertThrowsError(try clock.synchronize(nil))
+        XCTAssertThrowsError(try clock.synchronize("secret"))
+    }
+
+    func testSafeAMDDiagnosticsSurviveAuthenticationWrapping() {
+        for step: StoreAMDError.Step in [.begin, .request, .finish, .http, .keychain, .clock] {
+            let error = StoreAMDError(step, httpStatus: 503, keychainStatus: -25308)
+            let diagnostic = AuthenticationServiceError.wrapping(error, stage: .authentication)
+            XCTAssertEqual(diagnostic.httpStatus, 503)
+            XCTAssertTrue(diagnostic.message?.contains("[AMD " + step.rawValue + "]") == true)
+            XCTAssertTrue(diagnostic.message?.contains("Keychain -25308") == true)
+        }
     }
 
 }
