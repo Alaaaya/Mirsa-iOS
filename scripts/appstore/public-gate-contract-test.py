@@ -8,7 +8,15 @@ assert "@State private var storeLoginAvailable = false" in tab
 assert "storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable()" in tab
 assert "if storeLoginAvailable {" in tab
 assert "Button { showingAppStore = true }" in tab
-assert "private let client = MirsaStoreServerClient.shared" in (root / "ios-app/Apps/AppStoreAccountView.swift").read_text()
+assert "private let client = MirsaStoreOnDeviceClient.shared" in (root / "ios-app/Apps/AppStoreAccountView.swift").read_text()
+native = (root / "ios-app/AppStore/StoreOnDeviceClient.swift").read_text()
+identity = (root / "ios-app/Apps/StoreServerIdentity.swift").read_text()
+assert "await MirsaStoreServerClient.shared.loginAvailable()" in identity
+assert "guard await gate()" in native
+for action in ["signIn", "verify", "search", "acquireFreeApp", "availableVersions", "versionMetadata", "downloadOwnedApp"]:
+    section = native.split("func " + action + "(", 1)[1].split("\n    func ", 1)[0]
+    assert "try await authorize()" in section, action
+assert "/login" not in native and "/verify" not in native
 client = (root / "ios-app/AppStore/StoreServerClient.swift").read_text()
 gate = client.split("func loginAvailable() async -> Bool {", 1)[1].split("func currentAccount()", 1)[0]
 assert "try await currentAccount()" in gate and "return false" in gate

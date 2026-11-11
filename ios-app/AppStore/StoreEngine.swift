@@ -51,9 +51,19 @@ protocol MirsaStoreEngine {
     func acquire(account: inout Account, app: Software) async throws
     func manifest(account: inout Account, app: Software, version: String?) async throws -> DownloadOutput
     func versions(account: inout Account, bundleID: String) async throws -> [String]
+    func versionMetadata(account: inout Account, app: Software, version: String) async throws -> String
+}
+
+extension MirsaStoreEngine {
+    func versionMetadata(account: inout Account, app: Software, version: String) async throws -> String {
+        throw MirsaStoreError.serviceUnavailable
+    }
 }
 
 struct ApplePackageStoreEngine: MirsaStoreEngine {
+    func versionMetadata(account: inout Account, app: Software, version: String) async throws -> String {
+        try await VersionLookup.getVersionMetadata(account: &account, app: app, versionID: version).displayVersion
+    }
     func configure(guid: String) {
         Configuration.deviceIdentifier = guid
         APLogger.verbose = false
