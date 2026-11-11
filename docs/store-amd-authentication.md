@@ -17,3 +17,12 @@ Inspected upstream LICENSE, THIRD_PARTY_NOTICES, src/adi, include/apple_auth/cor
 Offline regressions cover SP and RP, malformed/noncanonical/oversized challenges, retry bounds, unchanged endpoint and body, ActionSignature, fresh machine headers, Configurator code separation, and native malformed-input rejection. Xcode device compilation and tests must pass before the IPA is delivered. No credentials are used by these tests. No real-device or successful Apple-account login is claimed.
 
 Xcode static XCFramework headers share the build product include directory. The apple_auth module map lives inside Headers/apple_auth (with its local client_c_api.h reference), avoiding a root include/module.modulemap collision with AirliftFFI. Static library bytes are unchanged.
+
+
+## Owner review follow-up
+
+AMD errors expose only an allowlisted step and numeric HTTP/Keychain status. The authentication diagnostic wrapper preserves this safe text for the existing login alert. No response payload, challenge, proof, profile, credentials or arbitrary transport description is included.
+
+The same bounded handshake runs before HTTP status/redirect rejection, including non-200 challenges. A valid Apple HTTP Date synchronizes a local OTP time offset, used for both provisioning begin and fresh proof headers. A challenge without a valid Date fails with a distinct clock diagnostic rather than silently exhausting provisioning retries.
+
+The production login loop accepts an internal injected signer/provider/executor for offline testing. Full-loop tests cover SP on 200/403/500/302 followed by success, repeated SP budget rejection, and SP then Configurator 2FA then code on the same Authenticator/signing state. Clock-skew and diagnostic wrapping regressions require no credentials or network. Device acceptance remains unproven until tested on the owner's iPhone.
