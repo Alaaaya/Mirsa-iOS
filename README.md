@@ -31,6 +31,12 @@
 
 ---
 
+<h2>Mirsa 2.2</h2>
+
+Fixed stuck chat sends so an older failed message no longer blocks new messages. Saved text and attachments are kept for retry.
+
+صلّحت إرسال المحادثة حتى الرسالة القديمة العالقة ما توقف الرسائل الجديدة، مع الحفاظ على النص والمرفقات لإعادة المحاولة.
+
 <a id="install"></a>
 <h2>How to install / طريقة التثبيت</h2>
 
