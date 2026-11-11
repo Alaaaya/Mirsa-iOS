@@ -1,12 +1,21 @@
 import Foundation
 
+/// Separate namespace from the legacy/server migration cleanup. Otherwise the
+/// server capability check on a new launch would delete the native Apple session.
+struct MirsaStoreNativeVault: MirsaStoreVault {
+    private let base = MirsaStoreKeychain()
+    func read(_ key: String) throws -> Data? { try base.read("native." + key) }
+    func write(_ data: Data, key: String) throws { try base.write(data, key: "native." + key) }
+    func remove(_ key: String) throws { try base.remove("native." + key) }
+}
+
 /// The gate checks Mirsa's existing owner-device capability only. Apple credentials,
 /// cookies, SAP exchange, searches and downloads never pass through that gate.
 actor MirsaStoreOnDeviceClient {
     typealias Gate = () async -> Bool
     private let gate: Gate
     private let local: MirsaStoreClient
-    init(local: MirsaStoreClient = MirsaStoreClient(), gate: @escaping Gate) {
+    init(local: MirsaStoreClient = MirsaStoreClient(vault: MirsaStoreNativeVault()), gate: @escaping Gate) {
         self.local = local; self.gate = gate
     }
     private func authorize() async throws {
