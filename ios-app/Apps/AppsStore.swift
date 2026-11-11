@@ -415,6 +415,8 @@ final class AppsStore: ObservableObject {
     // MARK: Import
 
     @Published var explicitIncomingInstall = false
+    /// Tweaks a Mirsa AI «Inject» choice wants pre-checked in the next IPA editor. Consumed once.
+    @Published var injectTweakIDs: Set<UUID>?
 
     /// Explicit Open-in Apple ID never consults the default installation mode.
     /// Suppress the generic pending-choice sheet while committing this choice.
@@ -535,7 +537,9 @@ final class AppsStore: ObservableObject {
     }
 
     func cancelPending() {
-        guard busy == nil, let p = pending else { return }
+        guard busy == nil else { return }
+        injectTweakIDs = nil
+        guard let p = pending else { return }
         MirsaInstallActivity.shared.cancel()
         MirsaManagedTmp.end(p.workDir)
         pending = nil

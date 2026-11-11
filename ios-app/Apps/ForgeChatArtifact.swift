@@ -23,7 +23,7 @@ extension ForgeChatStore {
     func downloadArtifact(threadID: UUID, artifact a: ForgeChatArtifact, progress: @escaping (Double) -> Void) async throws -> URL {
         let d = try await callPublic(["action": "chat-artifact-download", "threadID": threadID.uuidString.lowercased(), "id": a.id.uuidString.lowercased()])
         guard let issued = try? JSONDecoder().decode(Issued.self, from: d), issued.url.scheme == "https" else { throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
-        let ext = ["ipa": "ipa", "apk": "apk", "zip": "zip"][a.kind] ?? "bin"
+        let ext = ["ipa": "ipa", "apk": "apk", "zip": "zip"][a.kind] ?? ForgeChatTweakArtifact.fileExtension(a) ?? "bin"
         let dir = try MirsaManagedTmp.begin("chat-artifact")
         var handedOff = false
         defer { if !handedOff { MirsaManagedTmp.end(dir) } }
@@ -63,7 +63,9 @@ struct ForgeChatArtifactCard: View {
     @State private var progress: Double?
     @State private var error: String?
     @State private var shareURL: URL?
+    @State private var injectURL: URL?
     private var isIPA: Bool { artifact.kind == "ipa" }
+    private var isTweak: Bool { !isIPA && artifact.kind != "apk" && ForgeChatTweakArtifact.fileExtension(artifact) != nil }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(artifact.name ?? artifact.kind.uppercased(), systemImage: isIPA ? "app.badge" : "doc.zipper").font(.caption.bold())
@@ -73,15 +75,29 @@ struct ForgeChatArtifactCard: View {
                 ProgressView(value: min(max(p, 0), 1))
                 Button(ForgeChatText.cancel) { task?.cancel(); progress = nil }.font(.caption)
             } else {
-                Button(isIPA ? ForgeChatText.install : (artifact.kind == "apk" ? ForgeChatText.download : ForgeChatText.share)) { start() }.buttonStyle(.borderedProminent)
+                HStack(spacing: 8) {
+                    Button(isIPA ? ForgeChatText.install : (artifact.kind == "apk" ? ForgeChatText.download : ForgeChatText.share)) { start() }.buttonStyle(.borderedProminent)
+                    if isTweak {
+                        Button { start(inject: true) } label: { Label(ForgeChatInjectText.inject, systemImage: "syringe.fill") }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("mirsa.chat.artifact.inject")
+                    }
+                }
             }
             if let error { Text(error).font(.caption2).foregroundStyle(.red) }
         }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { value in
             if value == nil { if let shareURL { MirsaManagedTmp.end(shareURL.deletingLastPathComponent()) }; shareURL = nil }
         })) { ForgeChatShare(url: $0.url) }
+        .sheet(item: Binding(get: { injectURL.map { ForgeShareItem(url: $0) } }, set: { if $0 == nil { injectURL = nil } })) { item in
+            ForgeChatInjectSheet(file: item.url) { keep in
+                // The certificate path hands the file to the attach sheet, which snapshots it;
+                // a leftover is removed by the managed-tmp sweep.
+                if !keep { MirsaManagedTmp.end(item.url.deletingLastPathComponent()) }
+            }
+        }
     }
-    private func start() {
+    private func start(inject: Bool = false) {
         error = nil; progress = 0
         task = Task {
             do {
@@ -91,7 +107,7 @@ struct ForgeChatArtifactCard: View {
                 if isIPA {
                     defer { MirsaManagedTmp.end(f.deletingLastPathComponent()) }
                     await AppsStore.shared.importIPA(from: f)
-                } else { shareURL = f }
+                } else if inject { injectURL = f } else { shareURL = f }
             } catch {
                 progress = nil
                 if Task.isCancelled || error is CancellationError { return }

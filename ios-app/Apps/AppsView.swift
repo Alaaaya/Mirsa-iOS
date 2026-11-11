@@ -842,6 +842,10 @@ struct InstallChoiceSheet: View {
         .sheet(isPresented: $showEditor) {
             IPAEditorView(pending: current, store: store)
         }
+        .task {
+            // A Mirsa AI «Inject» choice opens the editor with its tweak already checked.
+            if store.injectTweakIDs != nil { showEditor = true }
+        }
         .sheet(isPresented: $showLogin, onDismiss: {
             if let l = afterLogin, store.account != nil {
                 afterLogin = nil
