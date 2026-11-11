@@ -120,6 +120,14 @@ enum ForgeChatImage {
     private var deleteEpoch: [UUID: Int] = [:]
     private static let imageCache = NSCache<NSUUID, UIImage>()
 
+    #if DEBUG
+    /// Unit-test transport exercises the real queue without credentials, persistence or background retries.
+    private var testRequest: (([String: Any]) async throws -> Data)?
+    init(testRequest: @escaping ([String: Any]) async throws -> Data) {
+        self.testRequest = testRequest
+    }
+    #endif
+
     init() {
         if Self.fixture {
             let t = Self.fixtureThreadID
@@ -144,13 +152,26 @@ enum ForgeChatImage {
         sentEcho = UserDefaults.standard.data(forKey: echoKey).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? []
         for echo in sentEcho { ackedThreads.insert(echo.threadID) }
     }
-    private func saveEcho() { UserDefaults.standard.set(try? JSONEncoder().encode(sentEcho), forKey: echoKey) }
-    private func saveOutgoing() { UserDefaults.standard.set(try? JSONEncoder().encode(outgoing), forKey: key) }
+    private func saveEcho() {
+        #if DEBUG
+        if testRequest != nil { return }
+        #endif
+        UserDefaults.standard.set(try? JSONEncoder().encode(sentEcho), forKey: echoKey)
+    }
+    private func saveOutgoing() {
+        #if DEBUG
+        if testRequest != nil { return }
+        #endif
+        UserDefaults.standard.set(try? JSONEncoder().encode(outgoing), forKey: key)
+    }
 
     func callPublic(_ body: [String: Any]) async throws -> Data { try await call(body) }
     /// Last real failure (HTTP status + server code, or the network error) so the user and logs can see the true reason.
     @Published var lastDiagnostic: String?
     private func call(_ body: [String: Any], retryBind: Bool = true) async throws -> Data {
+        #if DEBUG
+        if let testRequest { return try await testRequest(body) }
+        #endif
         if Self.fixture { throw ForgeChatTransient.failed("fixture") }
         let r: ForgePreciseClient.Response
         do {
@@ -203,7 +224,6 @@ enum ForgeChatImage {
         guard !t.isEmpty else { return nil }
         guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return nil }
         if let tid = threadID, deleting.contains(tid) { return nil }
-        if let tid = threadID, hasInFlight(tid) { return nil } // no double send while a message is still unsent
         let ids = ChatAttachmentRules.sendIDs(attachmentIDs)
         // Never the legacy image together with attachmentIDs.
         let img = ids.isEmpty ? jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString() : nil
@@ -225,6 +245,9 @@ enum ForgeChatImage {
     private var retrying = false
     /// Keeps replaying saved messages (same id, server dedupes) with backoff until the server accepts them. Nothing is dropped silently.
     func startRetrying() {
+        #if DEBUG
+        if testRequest != nil { return }
+        #endif
         guard !retrying, !outgoing.isEmpty else { return }
         retrying = true
         Task { [weak self] in
@@ -241,7 +264,11 @@ enum ForgeChatImage {
     func flush() async {
         guard !Self.fixture, !flushing else { return }
         flushing = true; defer { flushing = false }
-        for o in outgoing where !deleting.contains(o.threadID) {
+        // One attempt per saved message per pass. A failed older row stays saved but
+        // cannot starve later rows, including messages appended while a request awaits.
+        var attempted = Set<UUID>()
+        while let o = outgoing.first(where: { !deleting.contains($0.threadID) && !attempted.contains($0.id) }) {
+            attempted.insert(o.id)
             var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text, "language": AppLanguageStore.snapshot.rawValue]
             if let ids = o.attachmentIDs, !ids.isEmpty {
                 body["attachmentIDs"] = ChatAttachmentRules.sendIDs(ids).map { $0.uuidString.lowercased() } // same IDs on every retry
@@ -253,12 +280,12 @@ enum ForgeChatImage {
                 let sent = try await call(body)
                 if deleting.contains(o.threadID) { continue } // delete started mid-send; delete waits for flush and wipes it
                 ackedThreads.insert(o.threadID); let echo = ForgeChatTimeline.acceptedEcho(o); sentEcho.removeAll { $0.id == o.id }; sentEcho.append(echo); saveEcho()
-                outgoing.removeAll { $0.id == o.id }; saveOutgoing(); error = nil
+                outgoing.removeAll { $0.id == o.id }; saveOutgoing(); if outgoing.isEmpty { error = nil }
                 if let ids = o.attachmentIDs, !ids.isEmpty { applySentAttachments(sent, threadID: o.threadID) }
             } catch let a as ChatAttachmentError {
                 if a.isTransient || a.status == 401 || a.status == 403 {
                     self.error = a.message
-                    break // keep the message with the same UUID and attachmentIDs for the retry loop
+                    continue // preserve identity/attachments; still attempt newer messages
                 }
                 // 410/404/409/422: refused before the message existed. Never retry these IDs silently:
                 // hand the text and the chips back to the composer, expired ones with Upload again.
@@ -267,11 +294,11 @@ enum ForgeChatImage {
                 returnedText[o.threadID] = o.text
                 self.error = a.message
             } catch let f as ForgeClient.Failure {
-                // Daily limit: the server refuses this message for good, so it cannot be replayed today.
-                error = f.errorDescription; outgoing.removeAll { $0.id == o.id }; saveOutgoing()
+                // Keep quota failures saved too. A limit must not silently erase user text.
+                error = f.errorDescription
             } catch {
                 self.error = lastDiagnostic == "message_too_long" ? ForgeChatText.tooLong : ForgeChatText.failed
-                break // keep the message, the retry loop replays it with the same id
+                continue // saved for retry, without blocking the rest of the queue
             }
         }
         await refreshThreads()
@@ -560,7 +587,7 @@ struct ForgeChatThreadView: View {
     private var draftCount: Int { ForgeChatText.messageCount(text) }
     private var attachmentsUI: Bool { ChatAttachmentConfig.uiEnabled }
     private var attachmentsReady: Bool { !attachmentsUI || drafts.readyIDs(threadID) != nil }
-    private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && (editingID != nil || (!unsent && attachmentsReady)) }
+    private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && (editingID != nil || attachmentsReady) }
     private var threadStatus: String { (store.threads.first { $0.id == threadID }?.status ?? "").lowercased() }
     /// Edit only while nothing has started on it: the newest row, a user message, and the request not yet being built.
     private func canEdit(_ id: UUID) -> Bool {
