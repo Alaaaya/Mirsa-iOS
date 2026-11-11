@@ -146,15 +146,13 @@ public enum Bag {
         return url
     }
 
-    /// Configurator uses the commerce fast service, not the account-service
-    /// native route (which expects device AMD data). Its trailing slash is required.
+    /// Keep Apple's advertised native route verbatim. `/native` and
+    /// `/native/fast/` are different services, not slash variants. Rewriting
+    /// the former to the latter can reject an otherwise valid signed request.
+    /// Only the legacy MZFinance route needs a trailing slash.
     static func normalizedAuthEndpoint(from urlString: String) -> URL? {
         guard var comps = URLComponents(string: urlString) else { return nil }
         if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
-            if host == "auth.itunes.apple.com",
-               ["/auth/v1/native", "/auth/v1/native/", "/auth/v1/native/fast", "/auth/v1/native/fast/"].contains(comps.path) {
-                comps.path = "/auth/v1/native/fast/"
-            }
             let legacyHost =
                 host == "buy.itunes.apple.com" || host.range(of: "^p[0-9]+-buy[.]itunes[.]apple[.]com$", options: .regularExpression) != nil
             if legacyHost, comps.path == "/WebObjects/MZFinance.woa/wa/authenticate" {

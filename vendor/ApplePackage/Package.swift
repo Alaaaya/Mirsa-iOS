@@ -25,6 +25,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     ],
     targets: [
+        .binaryTarget(name: "apple_auth", path: "Artifacts/apple_auth.xcframework"),
+        .target(name: "CStoreAMD", dependencies: ["apple_auth"], publicHeadersPath: "include",
+                linkerSettings: [.linkedLibrary("c++")]),
         .target(name: "CApplePackage", publicHeadersPath: "include"),
         .executableTarget(
             name: "ApplePackageTool",
@@ -37,6 +40,7 @@ let package = Package(
             name: "ApplePackage",
             dependencies: [
                 .target(name: "CApplePackage"),
+                .target(name: "CStoreAMD"),
                 .product(name: "OpenSSL", package: "openssl-spm"),
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
@@ -45,8 +49,9 @@ let package = Package(
             ],
             resources: [.process("SAP/Resources")],
         ),
-        .testTarget(name: "ApplePackageTests", dependencies: ["ApplePackage"], resources: [.copy("SAP/Fixtures")]),
+        .testTarget(name: "ApplePackageTests", dependencies: ["ApplePackage", "CStoreAMD"], resources: [.copy("SAP/Fixtures")]),
         .testTarget(name: "ApplePackageToolTests", dependencies: ["ApplePackageTool"]),
     ],
     swiftLanguageModes: [.v6],
+    cxxLanguageStandard: .cxx20,
 )
