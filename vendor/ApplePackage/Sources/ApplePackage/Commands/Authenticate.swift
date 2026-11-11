@@ -67,7 +67,7 @@ public actor Authenticator {
                 guard let resolved = URL(string: url.relativeString, relativeTo: endpoint)?.absoluteURL else {
                     try ensureFailed(Strings.failedToRetrieveRedirect)
                 }
-                endpoint = try Self.approvedEndpoint(resolved)
+                endpoint = try Self.approvedEndpoint(Bag.normalizedAuthEndpoint(from: resolved.absoluteString) ?? resolved)
                 redirects += 1
             case .codeRequired: throw AuthenticationError.verificationCodeRequired
             case let .failure(diagnostic): throw diagnostic
@@ -87,9 +87,15 @@ public actor Authenticator {
         return url
     }
 
-    private static func createInitialRequestEndpoint(baseURL: URL, deviceIdentifier: String) throws -> URL {
+    static func createInitialRequestEndpoint(baseURL: URL, deviceIdentifier: String) throws -> URL {
         guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: true) else {
             try ensureFailed("\(Strings.invalidAuthEndpoint): \(baseURL)")
+        }
+        // Native auth consumes GUID in the signed plist. Keep the advertised
+        // URL verbatim, including its query, just like the on-device protocol.
+        // Only the legacy MZFinance service needs the GUID query suffix.
+        if comps.host?.lowercased() == "auth.itunes.apple.com" {
+            return try approvedEndpoint(baseURL)
         }
         var query = comps.queryItems ?? []
         query.removeAll { $0.name == "guid" }
