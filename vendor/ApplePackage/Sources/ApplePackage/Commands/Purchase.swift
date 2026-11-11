@@ -43,13 +43,22 @@ public enum Purchase {
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
 
-        let request = try makeRequest(
-            account: account,
-            app: app,
-            guid: guid,
-            pricingParameters: pricingParameters,
-        )
-        let response = try await client.execute(request: request).get()
+        let amd = StoreAMDProof(deviceIdentifier: guid)
+        var handshake = StoreAMDHandshake(provider: amd)
+        var finalResponse: HTTPClient.Response?
+        for _ in 0..<8 {
+            let request = try makeRequest(
+                account: account, app: app, guid: guid, pricingParameters: pricingParameters,
+                amdHeaders: try await amd.headers()
+            )
+            let response = try await client.execute(request: request,
+                delegate: ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)).futureResult.get()
+            account.cookie.mergeCookies(response.cookies)
+            if try await handshake.respond(to: response) { continue }
+            finalResponse = response
+            break
+        }
+        guard let response = finalResponse else { throw StoreAMDError(.budget) }
 
         APLogger.logResponse(
             status: response.status.code,
@@ -114,6 +123,7 @@ public enum Purchase {
         app: Software,
         guid: String,
         pricingParameters: String,
+        amdHeaders: [String: String] = [:],
     ) throws -> HTTPClient.Request {
         let payload: [String: Any] = [
             "appExtVrsId": "0",
@@ -148,6 +158,7 @@ public enum Purchase {
             headers.append(item)
         }
 
+        try StoreAMDHeaderScope.append(amdHeaders, to: &headers, url: URL(string: urlString)!)
         APLogger.logRequest(method: "POST", url: urlString, headers: headers)
 
         return try .init(

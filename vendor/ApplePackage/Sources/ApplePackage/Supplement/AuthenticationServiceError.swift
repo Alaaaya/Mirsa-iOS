@@ -26,6 +26,9 @@ public struct AuthenticationServiceError: Error, Sendable {
         if let amd = error as? StoreAMDError {
             return .init(stage: stage, httpStatus: amd.httpStatus, message: amd.errorDescription)
         }
+        if let auth = error as? AuthenticationError {
+            return .init(stage: stage, message: auth.errorDescription)
+        }
         let ns = error as NSError
         // No arbitrary errorDescription: networking errors may contain URLs or headers.
         return .init(stage: stage, networkCode: ns.domain == NSURLErrorDomain ? ns.code : nil, transport: transport)

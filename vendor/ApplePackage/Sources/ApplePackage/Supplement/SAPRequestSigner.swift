@@ -8,10 +8,12 @@ extension SAPSigner: SAPRequestSigning {}
 
 public enum AuthenticationError: LocalizedError {
     case verificationCodeRequired
+    case verificationCodeRejected
 
     public var errorDescription: String? {
         switch self {
         case .verificationCodeRequired: Strings.authRequiresVerificationCode
+        case .verificationCodeRejected: "الرمز مرفوض"
         }
     }
 }

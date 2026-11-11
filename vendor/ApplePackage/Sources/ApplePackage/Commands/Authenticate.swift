@@ -59,6 +59,7 @@ public actor Authenticator {
     }
 
     public func authenticate(email: String, password: String, code: String = "") async throws -> Account {
+        let code = try Self.normalizedVerificationCode(code)
         guard !authenticating else { try ensureFailed("An authentication request is already in progress.") }
         authenticating = true
         defer { authenticating = false }
@@ -143,7 +144,8 @@ public actor Authenticator {
     }
 
     static func authenticationBody(email: String, password: String, code: String, deviceIdentifier: String) throws -> Data {
-        try PropertyListSerialization.data(fromPropertyList: [
+        let code = try normalizedVerificationCode(code)
+        return try PropertyListSerialization.data(fromPropertyList: [
             "appleId": email, "attempt": code.isEmpty ? "1" : "2", "guid": deviceIdentifier,
             "password": password + code, "rmp": "0", "why": "signIn",
         ], format: .xml, options: 0)
@@ -163,14 +165,17 @@ public actor Authenticator {
         do { signature = try await sapSigner.sign(data) }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .signing) }
         headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
-        for name in ["X-Apple-AMD", "X-Apple-AMD-M"] {
-            if let value = amdHeaders[name] {
-                guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else { throw StoreAMDError(.headers) }
-                headers.append((name, value))
-            }
-        }
+        try StoreAMDHeaderScope.append(amdHeaders, to: &headers, url: endpoint)
         APLogger.logRequest(method: "POST", url: endpoint.absoluteString, headers: headers)
         return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
+    }
+
+    static func normalizedVerificationCode(_ input: String) throws -> String {
+        let code = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard code.isEmpty || (code.utf8.count == 6 && code.utf8.allSatisfy({ (48...57).contains($0) })) else {
+            throw AuthenticationError.verificationCodeRejected
+        }
+        return code
     }
 
     static func requiresVerificationCode(_ fields: [String: Any], submittedCode: Bool) -> Bool {
@@ -179,6 +184,9 @@ public actor Authenticator {
     }
 
     static func rejection(_ fields: [String: Any], status: Int, secrets: [String]) -> AuthenticationServiceError {
+        if (fields["customerMessage"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("AMD-Action") {
+            return .init(stage: .authentication, httpStatus: status, message: "تسجيل الجهاز ما كمل")
+        }
         let knownSecrets = ["passwordToken", "dsPersonId", "appleId", "password", "token", "cookie"].compactMap { fields[$0] as? String }
         return .init(stage: .authentication, httpStatus: status, appleCode: fields["failureType"],
               message: (fields["dialog"] as? [String: Any])?["explanation"] as? String
@@ -224,6 +232,15 @@ public actor Authenticator {
 
         guard let dic = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
             return .failure(diagnostic)
+        }
+
+        if !code.isEmpty,
+           (dic["failureType"] as? String) == "" &&
+           (dic["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message" {
+            throw AuthenticationError.verificationCodeRejected
+        }
+        if !code.isEmpty, dic["accountInfo"] == nil, dic["failureType"] != nil {
+            throw AuthenticationError.verificationCodeRejected
         }
 
         if Self.requiresVerificationCode(dic, submittedCode: !code.isEmpty) {

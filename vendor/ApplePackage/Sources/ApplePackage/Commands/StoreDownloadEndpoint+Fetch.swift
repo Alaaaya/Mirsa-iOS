@@ -107,8 +107,10 @@ extension StoreDownloadEndpoint {
         var redirectAttempt = 0
         var finalResponse: HTTPClient.Response?
         let maxRedirects = 3
+        let amd = StoreAMDProof(deviceIdentifier: deviceIdentifier)
+        var handshake = StoreAMDHandshake(provider: amd)
 
-        while redirectAttempt <= maxRedirects {
+        for _ in 0..<8 {
             currentURL = try Self.validatedURL(currentURL)
             let request = try makeRequest(
                 account: account,
@@ -117,8 +119,8 @@ extension StoreDownloadEndpoint {
                 guid: deviceIdentifier,
                 externalVersionID: externalVersionID,
             )
-            let response = try await client.execute(request: request).get()
-            defer { finalResponse = response }
+            let response = try await client.execute(request: request,
+                delegate: ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)).futureResult.get()
 
             APLogger.logResponse(
                 status: response.status.code,
@@ -127,6 +129,9 @@ extension StoreDownloadEndpoint {
             )
 
             account.cookie.mergeCookies(response.cookies)
+
+            // Dispatch handles challenges but deliberately sends NO AMD proof headers.
+            if try await handshake.respond(to: response) { continue }
 
             if [301, 302, 303, 307, 308].contains(response.status.code) {
                 guard let location = response.headers.first(name: "location"),
@@ -139,10 +144,11 @@ extension StoreDownloadEndpoint {
                 redirectAttempt += 1
                 continue
             }
+            finalResponse = response
             break
         }
 
-        guard let finalResponse else { try ensureFailed(Strings.noResponseReceived) }
+        guard let finalResponse else { throw StoreAMDError(.budget) }
 
         guard finalResponse.status == .ok else {
             throw StoreDownloadHTTPError(statusCode: finalResponse.status.code, emptyBody: (finalResponse.body?.readableBytes ?? 0) == 0)
