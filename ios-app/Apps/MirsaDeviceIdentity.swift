@@ -4,8 +4,9 @@ import AirliftFFI
 
 /// Stable Mirsa device identity.
 /// - deviceID: the existing random lowercase UUID (format and header unchanged), stored in the Keychain with
-///   kSecAttrAccessibleAfterFirstUnlock and never synced to iCloud. Keychain items survive app updates and
-///   delete + reinstall as long as the app is signed with the same team (same keychain access group).
+///   kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly and never synced to iCloud: it stays on this iPhone and is not
+///   restored to a new phone from a backup. Keychain items survive app updates and delete + reinstall as long as the
+///   app is signed with the same team (same keychain access group).
 /// - UDID: read once from lockdown (UniqueDeviceID) over LocalDevVPN + pairing file, stored in the Keychain the same way.
 ///   Never shown in the UI; sent only as the optional device_udid field behind MirsaFeatures.stableDeviceLink.
 enum MirsaDeviceIdentity {
@@ -95,7 +96,7 @@ enum MirsaDeviceIdentity {
     @discardableResult
     private static func write(_ service: String, _ value: String) -> Bool {
         let attrs: [String: Any] = [kSecValueData as String: Data(value.utf8),
-                                    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+                                    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let st = SecItemUpdate(base(service) as CFDictionary, attrs as CFDictionary)
         if st == errSecSuccess { return true }
         guard st == errSecItemNotFound else { return false }
@@ -103,9 +104,9 @@ enum MirsaDeviceIdentity {
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
-    /// Older builds wrote the ID with ...AfterFirstUnlockThisDeviceOnly; move it to AfterFirstUnlock (still not synced). Value untouched.
+    /// Keep the item ...AfterFirstUnlockThisDeviceOnly (also resets test builds that used AfterFirstUnlock). Value untouched.
     private static func ensureAttributes(_ service: String) {
-        let attrs: [String: Any] = [kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        let attrs: [String: Any] = [kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         _ = SecItemUpdate(base(service) as CFDictionary, attrs as CFDictionary)
     }
 }
