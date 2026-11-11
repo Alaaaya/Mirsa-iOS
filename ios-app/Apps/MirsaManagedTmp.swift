@@ -44,7 +44,13 @@ enum MirsaManagedTmp {
     }
 
     static func end(_ dir: URL, root r: URL? = nil) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer {
+            lock.unlock()
+            // Every completed sign/install workspace also sweeps stale legacy files.
+            // Keep the pre-process cutoff for unregistered in-flight producers.
+            if r == nil { _ = sweep(maxAge: 0) }
+        }
         guard let base = safeRoot(r ?? root), owned(dir, base: base),
               let checked = safeRoot(dir) else { return }
         active.remove(checked.path); served[checked.path] = nil
