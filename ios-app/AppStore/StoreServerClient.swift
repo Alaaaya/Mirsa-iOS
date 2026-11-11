@@ -190,14 +190,14 @@ actor MirsaStoreServerClient {
         guard let challenge = pending, challenge.expires > Date(), challenge.attempts < 2 else {
             pending = nil; throw MirsaStoreServerError(code: "challenge_expired")
         }
-        guard code.utf8.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }),
+        guard let normalizedCode = MirsaStoreCode.valid(code),
               !password.isEmpty, password.utf8.count <= 1024 else { throw MirsaStoreError.invalidInput }
         let (owner, token) = try await credentials(run)
         guard pending?.id == challenge.id else { throw MirsaStoreServerError(code: "challenge_expired") }
         pending = (challenge.id, challenge.expires, challenge.attempts + 1)
         do {
             let state = try await perform(request("/verify",
-                body: ["challengeID": challenge.id, "password": password, "code": code],
+                body: ["challengeID": challenge.id, "password": password, "code": normalizedCode],
                 owner: owner, device: token), as: State.self)
             try check(run)
             return try login(state)

@@ -56,20 +56,34 @@ public enum Bag {
 
         APLogger.logRequest(method: "GET", url: url.absoluteString, headers: headers)
 
-        let request = try HTTPClient.Request(
-            url: url.absoluteString,
-            method: .GET,
-            headers: .init(headers),
-        )
-
-        let response: HTTPClient.Response
-        do {
-            let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
-            response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
-        } catch { throw AuthenticationServiceError.wrapping(error, stage: .bag, transport: true) }
-        guard response.status == .ok else {
-            throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+        // Bag routing can move between Apple pods. Resolve a bounded, Apple-only
+        // chain explicitly even when the caller correctly disables automatic redirects.
+        var target = url
+        var finalResponse: HTTPClient.Response?
+        for hop in 0...3 {
+            _ = try Authenticator.approvedEndpoint(target)
+            let request = try HTTPClient.Request(url: target.absoluteString, method: .GET,
+                                                 headers: .init(headers), body: .none)
+            let response: HTTPClient.Response
+            do {
+                let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
+                response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
+            } catch { throw AuthenticationServiceError.wrapping(error, stage: .bag, transport: true) }
+            if [301, 302, 303, 307, 308].contains(Int(response.status.code)) {
+                guard hop < 3, let location = response.headers.first(name: "location"),
+                      let next = URL(string: location, relativeTo: target)?.absoluteURL else {
+                    throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+                }
+                target = try Authenticator.approvedEndpoint(next)
+                continue
+            }
+            guard response.status == .ok else {
+                throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+            }
+            finalResponse = response
+            break
         }
+        guard let response = finalResponse else { throw AuthenticationServiceError(stage: .bag) }
 
         APLogger.logResponse(
             status: response.status.code,
