@@ -141,7 +141,11 @@ public extension [Cookie] {
     }
 
     private func matchesDomain(cookieDomain: String, requestHost: String) -> Bool {
-        let normalizedCookieDomain = cookieDomain.lowercased()
+        // RFC 6265 ignores a leading dot in Domain. Apple uses .apple.com
+        // and .itunes.apple.com session cookies across the 2FA continuation.
+        let domain = cookieDomain.lowercased()
+        let normalizedCookieDomain = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+        guard !normalizedCookieDomain.isEmpty else { return false }
         let normalizedRequestHost = requestHost.lowercased()
 
         return false

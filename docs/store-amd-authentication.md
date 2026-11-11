@@ -40,3 +40,9 @@ Configurator/2.21 is intentional protocol metadata, retained from the independen
 Verification codes are trimmed and must be exactly six ASCII digits when supplied. Rejection has distinct الرمز مرفوض text; the existing UI retains its same Authenticator. Offline tests include SP during attempt 2 with the unchanged password-plus-code body, same signer and session.
 
 MIRSA-PROVENANCE.txt is bundled with the existing MIT notices and lists each unmodified release static archive SHA256. Release binary provenance is not a reproducible source-build claim.
+
+## Device second-step rejection investigation
+
+The owner reached Apple's six-digit challenge on 4.86.1. The screenshot alone does not distinguish an expired/rejected code, changed re-entered password or a lost session. The existing client uses the same Authenticator, endpoint, SAP signer, merged response cookies and password-plus-trimmed-code attempt 2, matching the inspected protocol reference. No separate code-verification endpoint is indicated by that protocol.
+
+A concrete cookie defect was found locally: Domain=.itunes.apple.com was compared including its leading dot, so it failed even for auth.itunes.apple.com and never reached the continuation. RFC 6265 domain matching ignores that leading dot. The correction retains HTTPS, path, expiry and hostname-boundary checks. Offline coverage now drives a real two-step Authenticator sequence with a dotted-domain Set-Cookie and asserts that attempt 2 carries the cookie and exact signed password-plus-code payload. A device confirmation is still needed; this source defect is not proof it caused this particular Apple rejection. No credentials or live authentication were used.
