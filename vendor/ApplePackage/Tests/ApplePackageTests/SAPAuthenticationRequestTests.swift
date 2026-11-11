@@ -169,7 +169,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         XCTAssertEqual(bag.authEndpoint.absoluteString, advertised)
         let signer = RecordingSigner()
         let request = try await makeRequest(endpoint: bag.authEndpoint.absoluteString, code: "123456", signer: signer)
-        XCTAssertEqual(request.url, advertised)
+        XCTAssertEqual(request.url.absoluteString, advertised)
         let recorded = await signer.recordedBodies()
         XCTAssertEqual(try bodyData(request), recorded.first)
     }
