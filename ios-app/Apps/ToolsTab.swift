@@ -23,6 +23,9 @@ struct ToolsTab: View {
     }()
     @Namespace private var ns
     @State private var chatComposerFocused = false
+    @ObservedObject private var chatStore = ForgeChatStore.shared
+    @ObservedObject private var chatLocal = ForgeChatLocal.shared
+    private var unread: Int { chatLocal.unreadCount(chatStore.threads) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,6 +59,7 @@ struct ToolsTab: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
+                            .overlay(alignment: .topTrailing) { if s == .create { ForgeChatUnreadDot(count: unread).offset(x: 12, y: -8) } }
                         Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
