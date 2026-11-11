@@ -468,7 +468,10 @@ final class AppsStore: ObservableObject {
                                     name: name, version: version, icon: Self.findIcon(in: app, info: info),
                                     wantsNotifications: modes.contains("remote-notification"),
                                     hasExtensions: hasExt, sizeBytes: size)
-            if !url.standardizedFileURL.path.hasPrefix(DownloadsLibrary.root.standardizedFileURL.path + "/") {
+            // An «Inject» from Mirsa AI works on a temporary copy of an installed app's
+            // saved IPA: it is never added to Downloads, and the work dir is removed
+            // after install or cancel like any pending import.
+            if injectTweakIDs == nil, !url.standardizedFileURL.path.hasPrefix(DownloadsLibrary.root.standardizedFileURL.path + "/") {
                 DownloadsLibrary.shared.add(ipa: ipa, bundleID: bid, name: name, version: version, size: size, icon: pending?.icon)
             }
             prepared = true
