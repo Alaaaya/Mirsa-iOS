@@ -9,17 +9,40 @@ import AsyncHTTPClient
 import Foundation
 import NIOHTTP1
 
+/// One HTTP exchange; injectable so the sign-in loop can be exercised offline.
+protocol StoreHTTPTransport: Sendable {
+    func execute(_ request: HTTPClient.Request, maxBodySize: Int) async throws -> HTTPClient.Response
+}
+
+struct LiveStoreHTTPTransport: StoreHTTPTransport {
+    func execute(_ request: HTTPClient.Request, maxBodySize: Int) async throws -> HTTPClient.Response {
+        let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
+        do {
+            let response = try await client.execute(request: request,
+                delegate: ResponseAccumulator(request: request, maxBodySize: maxBodySize)).futureResult.get()
+            _ = client.shutdown()
+            return response
+        } catch {
+            _ = client.shutdown()
+            throw error
+        }
+    }
+}
+
 public actor Authenticator {
     private enum LoginResponse {
         case success(Account)
         case codeRequired
+        case codeRejected
+        case deviceRegistration
         case redirect(URL)
         case failure(AuthenticationServiceError)
     }
 
-    private let signer: SAPSigner
+    private let signer: any SAPRequestSigning
     private let deviceIdentifier: String
-    private let amd: StoreAMDProof
+    private let amd: any StoreAMDProviding
+    private let transport: any StoreHTTPTransport
     private var endpoint: URL
     private var cookies: [Cookie]
     private var storeFront = ""
@@ -29,7 +52,9 @@ public actor Authenticator {
     /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
     public init(cookies: [Cookie] = []) async throws {
         deviceIdentifier = Configuration.deviceIdentifier
-        amd = StoreAMDProof(deviceIdentifier: Configuration.deviceIdentifier)
+        let proof = StoreAMDProof.shared(deviceIdentifier: Configuration.deviceIdentifier)
+        amd = proof
+        transport = LiveStoreHTTPTransport()
         let bag: Bag.BagOutput
         do { bag = try await Bag.fetchBag(redirectConfiguration: .disallow) }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .bag) }
@@ -37,6 +62,18 @@ public actor Authenticator {
         endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
         do { signer = try await SAPSigner.connect() }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
+        self.cookies = cookies
+        if let date = bag.serverDate { await proof.observeServerDate(date) }
+    }
+
+    /// Offline seam: no bag fetch, no SAP exchange, no network.
+    init(endpoint: URL, deviceIdentifier: String, signer: any SAPRequestSigning, amd: any StoreAMDProviding,
+         transport: any StoreHTTPTransport, cookies: [Cookie] = []) {
+        self.endpoint = endpoint
+        self.deviceIdentifier = deviceIdentifier
+        self.signer = signer
+        self.amd = amd
+        self.transport = transport
         self.cookies = cookies
     }
 
@@ -46,32 +83,29 @@ public actor Authenticator {
     }
 
     public func authenticate(email: String, password: String, code: String = "") async throws -> Account {
+        let code = try Self.validatedCode(code)
         guard !authenticating else { try ensureFailed("An authentication request is already in progress.") }
         authenticating = true
         defer { authenticating = false }
-        let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
-        defer { _ = client.shutdown() }
         var redirects = 0
         var handshake = StoreAMDHandshake(provider: amd)
         // Freeze the serialized password body for this attempt (including 2FA).
         // Every retry signs these exact bytes; only machine OTP headers refresh.
         let signedBody = try Self.authenticationBody(email: email, password: password, code: code, deviceIdentifier: deviceIdentifier)
-        for _ in 0 ..< 8 {
+        for _ in 0 ..< 10 {
+            // Machine OTP only on the native auth routes; stripped on legacy redirects.
+            var amdHeaders: [String: String] = [:]
+            if StoreAMDHeaderPolicy.allows(endpoint) { amdHeaders = try await amd.headers() }
             let request = try await Self.makeRequest(
                 endpoint: endpoint, email: email, password: password, code: code, cookies: cookies, deviceIdentifier: deviceIdentifier,
-                sapSigner: signer, serializedBody: signedBody, amdHeaders: try await amd.headers(),
+                sapSigner: signer, serializedBody: signedBody, amdHeaders: amdHeaders,
             )
-            let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
             let response: HTTPClient.Response
-            do { response = try await client.execute(request: request, delegate: accumulator).futureResult.get() }
+            do { response = try await transport.execute(request, maxBodySize: 2 * 1024 * 1024) }
             catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
             let result = try parseResponse(response, email: email, password: password, code: code)
-            if response.status == .ok {
-                let data = response.body.map { Data($0.readableBytesView) } ?? Data()
-                let fields = (try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]) ?? [:]
-                if try await handshake.respond(fields: fields, action: response.headers.first(name: "X-Apple-AMD-Action"),
-                                               challenge: response.headers.first(name: "X-Apple-AMD-Data")) { continue }
-            }
+            // AMD actions can arrive with any HTTP status; the header alone is enough.
+            if try await handshake.respond(to: response) { continue }
             switch result {
             case let .success(account): return account
             case let .redirect(url):
@@ -82,6 +116,8 @@ public actor Authenticator {
                 endpoint = try Self.approvedEndpoint(Bag.normalizedAuthEndpoint(from: resolved.absoluteString) ?? resolved)
                 redirects += 1
             case .codeRequired: throw AuthenticationError.verificationCodeRequired
+            case .codeRejected: throw AuthenticationError.codeRejected
+            case .deviceRegistration: throw StoreAMDError(.parse)
             case let .failure(diagnostic): throw diagnostic
             }
         }
@@ -116,6 +152,16 @@ public actor Authenticator {
         return try approvedEndpoint(comps.url.get())
     }
 
+    /// Empty for the password step; otherwise exactly six ASCII digits after trimming.
+    static func validatedCode(_ code: String) throws -> String {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        guard trimmed.utf8.count == 6, trimmed.utf8.allSatisfy({ (48...57).contains($0) }) else {
+            throw AuthenticationError.invalidVerificationCode
+        }
+        return trimmed
+    }
+
     static func authenticationBody(email: String, password: String, code: String, deviceIdentifier: String) throws -> Data {
         try PropertyListSerialization.data(fromPropertyList: [
             "appleId": email, "attempt": code.isEmpty ? "1" : "2", "guid": deviceIdentifier,
@@ -137,12 +183,7 @@ public actor Authenticator {
         do { signature = try await sapSigner.sign(data) }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .signing) }
         headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
-        for name in ["X-Apple-AMD", "X-Apple-AMD-M"] {
-            if let value = amdHeaders[name] {
-                guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else { throw StoreAMDError() }
-                headers.append((name, value))
-            }
-        }
+        headers.append(contentsOf: try StoreAMDHeaderPolicy.headers(amdHeaders, for: endpoint))
         APLogger.logRequest(method: "POST", url: endpoint.absoluteString, headers: headers)
         return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
     }
@@ -150,6 +191,19 @@ public actor Authenticator {
     static func requiresVerificationCode(_ fields: [String: Any], submittedCode: Bool) -> Bool {
         !submittedCode && (fields["failureType"] as? String) == ""
             && (fields["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message"
+    }
+
+    /// A submitted code that Apple answers with the Configurator prompt again (or 5005) was not accepted.
+    static func rejectsVerificationCode(_ fields: [String: Any], submittedCode: Bool) -> Bool {
+        guard submittedCode else { return false }
+        let failure = fields["failureType"].map { String(describing: $0) } ?? ""
+        return (fields["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message" || failure == "5005"
+    }
+
+    /// Apple's raw `AMD-Action...` text is never shown; it means device registration did not finish.
+    static func isUnresolvedDeviceRegistration(_ fields: [String: Any]) -> Bool {
+        let explanation = (fields["dialog"] as? [String: Any])?["explanation"] as? String
+        return StoreAMDAction.isActionMessage(explanation) || StoreAMDAction.isActionMessage(fields["customerMessage"] as? String)
     }
 
     static func rejection(_ fields: [String: Any], status: Int, secrets: [String]) -> AuthenticationServiceError {
@@ -191,6 +245,8 @@ public actor Authenticator {
         let fields = (try? PropertyListSerialization.propertyList(from: responseData, format: nil) as? [String: Any])
             ?? (try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]) ?? [:]
         let diagnostic = Self.rejection(fields, status: Int(response.status.code), secrets: [email, password + code, password, code])
+        if Self.rejectsVerificationCode(fields, submittedCode: !code.isEmpty) { return .codeRejected }
+        if Self.isUnresolvedDeviceRegistration(fields) { return .deviceRegistration }
         guard response.status == .ok else { return .failure(diagnostic) }
         guard var body = response.body, body.readableBytes <= 2 * 1024 * 1024, let data = body.readData(length: body.readableBytes) else {
             return .failure(diagnostic)
