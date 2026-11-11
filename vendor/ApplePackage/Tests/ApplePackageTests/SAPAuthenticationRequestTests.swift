@@ -443,4 +443,138 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         }
     }
 
+    func testAMDParserNormalizesHeaderAndLastMessageComponent() throws {
+        for action in [" sp ", "\tSp\n"] {
+            XCTAssertEqual(try StoreAMDAction.parse(fields: [:], actionHeader: action, challenge: "AQ=="), .provision(Data([1])))
+        }
+        for message in ["AMD-Action::SP", "AMD-Action:extra: sp ", " AMD-Action::rp "] {
+            let parsed = try StoreAMDAction.parse(fields: ["customerMessage": message], actionHeader: " ", challenge: "AQ==")
+            XCTAssertEqual(parsed, message.contains("rp") ? .reset : .provision(Data([1])))
+        }
+        for message in ["AMD-Action", "AMD-Action::private-value"] {
+            do {
+                _ = try StoreAMDAction.parse(fields: ["customerMessage": message], actionHeader: nil, challenge: "private-challenge")
+                XCTFail("Unresolved challenge")
+            } catch let error as StoreAMDError {
+                XCTAssertTrue(error.localizedDescription.contains("تسجيل الجهاز ما كمل"))
+                XCTAssertTrue(error.localizedDescription.contains("header=false"))
+                XCTAssertTrue(error.localizedDescription.contains("AMDDataLength=17"))
+                XCTAssertFalse(error.localizedDescription.contains("private"))
+            }
+        }
+        let diagnostic = Authenticator.rejection(["customerMessage": "AMD-Action::private"], status: 200, secrets: [])
+        XCTAssertEqual(diagnostic.message, "تسجيل الجهاز ما كمل")
+    }
+
+    func testRPWithoutProfileDoesNotResetOrConsumeBudget() async throws {
+        let proof = OfflineAMD()
+        var handshake = StoreAMDHandshake(provider: proof)
+        for _ in 0..<3 {
+            let handled = try await handshake.respond(fields: [:], action: " rp ", challenge: nil)
+            XCTAssertFalse(handled)
+        }
+        let counts = await proof.snapshot()
+        XCTAssertEqual(counts, [0, 0])
+        _ = try await handshake.respond(fields: [:], action: "SP", challenge: "AQ==")
+        _ = try await handshake.respond(fields: [:], action: "RP", challenge: nil)
+        let after = await proof.snapshot()
+        XCTAssertEqual(after, [1, 1])
+    }
+
+    func testAMDHeadersAreScopedToNativeAndPurchaseOnly() async throws {
+        let proof = ["X-Apple-AMD": "otp", "X-Apple-AMD-M": "machine"]
+        for endpoint in [
+            "https://auth.itunes.apple.com/auth/v1/native",
+            "https://auth.itunes.apple.com/auth/v1/native/fast/",
+            "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
+        ] {
+            var headers: [(String, String)] = []
+            try StoreAMDHeaderScope.append(proof, to: &headers, url: XCTUnwrap(URL(string: endpoint)))
+            XCTAssertEqual(headers.count, 2)
+        }
+        for endpoint in [
+            "https://auth.itunes.apple.com/auth/v1/otp/1.5/finish",
+            "https://auth.itunes.apple.com/login",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "https://cdn.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
+            "https://p25-buy.itunes.apple.com.evil.invalid/auth/v1/native",
+            "http://auth.itunes.apple.com/auth/v1/native",
+        ] {
+            var headers: [(String, String)] = []
+            try StoreAMDHeaderScope.append(proof, to: &headers, url: XCTUnwrap(URL(string: endpoint)))
+            XCTAssertTrue(headers.isEmpty)
+        }
+        let request = try await Authenticator.makeRequest(endpoint: XCTUnwrap(URL(string: "https://auth.itunes.apple.com/login")),
+            email: "offline@example.invalid", password: "fixture", code: "", cookies: [], deviceIdentifier: "001122334455",
+            sapSigner: RecordingSigner(), amdHeaders: proof)
+        XCTAssertNil(request.headers.first(name: "X-Apple-AMD"))
+        XCTAssertNotNil(request.headers.first(name: "X-Apple-ActionSignature"))
+    }
+
+    func testDispatchChallengeUsesSharedBoundedHandlerWithoutProofHeaders() async throws {
+        let proof = OfflineAMD()
+        var handshake = StoreAMDHandshake(provider: proof)
+        let handled = try await handshake.respond(to: response(status: .forbidden, action: " sp "))
+        XCTAssertTrue(handled)
+        do {
+            _ = try await handshake.respond(to: response(status: .internalServerError, action: "SP"))
+            XCTFail("Repeated dispatch challenge")
+        } catch let error as StoreAMDError { XCTAssertEqual(error.step, .budget) }
+        let counts = await proof.snapshot()
+        XCTAssertEqual(counts, [1, 0])
+    }
+
+    func testVerificationCodeTrimmingAndSixASCIIDigitsOnly() throws {
+        XCTAssertEqual(try Authenticator.normalizedVerificationCode(" 123456\n"), "123456")
+        XCTAssertEqual(try Authenticator.normalizedVerificationCode(" "), "")
+        for invalid in ["12345", "1234567", "12 3456", "١٢٣٤٥٦", "abcdef"] {
+            XCTAssertThrowsError(try Authenticator.normalizedVerificationCode(invalid)) { error in
+                XCTAssertEqual(error.localizedDescription, "الرمز مرفوض")
+            }
+        }
+        XCTAssertEqual(AuthenticationServiceError.wrapping(AuthenticationError.verificationCodeRejected, stage: .authentication).message, "الرمز مرفوض")
+    }
+
+    func testSPDuringAttemptTwoPreservesCodeAndSameAuthenticator() async throws {
+        let http = try ScriptedHTTP([
+            response(fields: ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"]),
+            response(status: .forbidden, action: "SP"),
+            response(fields: successFields)
+        ])
+        let proof = OfflineAMD()
+        let signer = RecordingSigner()
+        let auth = try session(http, proof: proof, signer: signer)
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTFail("Expected code")
+        } catch AuthenticationError.verificationCodeRequired { }
+        _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: " 654321\n")
+        let requests = await http.recorded()
+        XCTAssertEqual(requests.count, 3)
+        let bodies = try requests.map(bodyData)
+        XCTAssertEqual(bodies[1], bodies[2])
+        let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[2], format: nil) as? [String: String])
+        XCTAssertEqual(fields["attempt"], "2")
+        XCTAssertEqual(fields["password"], "fixture654321")
+        XCTAssertEqual(requests[2].headers.first(name: "X-Apple-AMD"), "otp-1")
+        let signed = await signer.recordedBodies()
+        XCTAssertEqual(signed, bodies)
+    }
+
+    func testRejectedCodeIsDistinctFromInitialCodeChallenge() async throws {
+        let rejected: [String: Any] = ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"]
+        let http = try ScriptedHTTP([response(fields: rejected), response(fields: rejected)])
+        let auth = try session(http, proof: OfflineAMD(), signer: RecordingSigner())
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTFail("Expected code")
+        } catch AuthenticationError.verificationCodeRequired { }
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "123456")
+            XCTFail("Expected rejected code")
+        } catch AuthenticationError.verificationCodeRejected { }
+    }
+
 }

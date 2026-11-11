@@ -10,16 +10,22 @@ struct StoreAMDError: Error, LocalizedError, Sendable {
     let step: Step
     let httpStatus: Int?
     let keychainStatus: Int32?
-    init(_ step: Step = .challenge, httpStatus: Int? = nil, keychainStatus: Int32? = nil) {
+    let actionHeaderPresent: Bool?
+    let amdDataLength: Int?
+    init(_ step: Step = .challenge, httpStatus: Int? = nil, keychainStatus: Int32? = nil, actionHeaderPresent: Bool? = nil, amdDataLength: Int? = nil) {
         self.step = step
         self.httpStatus = httpStatus
+        self.actionHeaderPresent = actionHeaderPresent
+        self.amdDataLength = amdDataLength
         self.keychainStatus = keychainStatus
     }
     var errorDescription: String? {
-        var text = "App Store device provisioning failed [AMD " + step.rawValue + "]"
+        var text = "تسجيل الجهاز ما كمل [AMD " + step.rawValue + "]"
         if let httpStatus { text += " HTTP " + String(httpStatus) }
         if let keychainStatus { text += " Keychain " + String(keychainStatus) }
         if step == .clock { text += ". Could not synchronize Apple time. Check automatic date and time, then retry." }
+        if let actionHeaderPresent { text += " header=" + String(actionHeaderPresent) }
+        if let amdDataLength { text += " AMDDataLength=" + String(amdDataLength) }
         return text
     }
 }
@@ -49,20 +55,26 @@ enum StoreAMDAction: Equatable, Sendable {
     case reset
 
     static func parse(fields: [String: Any], actionHeader: String?, challenge: String?) throws -> Self? {
-        let message = fields["customerMessage"] as? String ?? ""
+        let message = (fields["customerMessage"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let header = actionHeader?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         let action: String
-        if let header = actionHeader, !header.isEmpty { action = header }
-        else if message == "AMD-Action::SP" { action = "SP" }
-        else if message == "AMD-Action::RP" { action = "RP" }
-        else { return nil }
+        if !header.isEmpty { action = header }
+        else if message.hasPrefix("AMD-Action"), let last = message.lastIndex(of: ":") {
+            action = String(message[message.index(after: last)...]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        } else if message.hasPrefix("AMD-Action") {
+            throw StoreAMDError(.challenge, actionHeaderPresent: actionHeader != nil, amdDataLength: challenge?.utf8.count ?? 0)
+        } else { return nil }
+        func invalid() -> StoreAMDError {
+            StoreAMDError(.challenge, actionHeaderPresent: actionHeader != nil, amdDataLength: challenge?.utf8.count ?? 0)
+        }
         switch action {
         case "RP": return .reset
         case "SP":
             guard let challenge, !challenge.isEmpty, challenge.utf8.count <= 16384,
                   let data = Data(base64Encoded: challenge), !data.isEmpty,
-                  data.base64EncodedString() == challenge else { throw StoreAMDError() }
+                  data.base64EncodedString() == challenge else { throw invalid() }
             return .provision(data)
-        default: throw StoreAMDError()
+        default: throw invalid()
         }
     }
 }
@@ -102,19 +114,49 @@ private final class AMDProfileHandle: @unchecked Sendable {
 
 actor StoreAMDProof: StoreAMDProviding {
     private let device: String
-    private let hardware: [UInt8]
+    private var hardware: [UInt8] = []
     private var profile: AMDProfileHandle?
     private var loaded = false
     private var clock = StoreAMDClock()
 
     init(deviceIdentifier: String) {
         device = deviceIdentifier
-        hardware = Array(Insecure.SHA1.hash(data: Data(("Mirsa:StoreAMD:v1:" + deviceIdentifier).utf8)))
+
     }
 
     private var keyQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.mirsa.store-amd.v1",
          kSecAttrAccount as String: device]
+    }
+
+    private var saltQuery: [String: Any] {
+        var query = keyQuery
+        query[kSecAttrService as String] = "com.mirsa.store-amd.salt.v1"
+        return query
+    }
+
+    private func selectHardware(rotating: Bool = false) throws {
+        var query = saltQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let salt: Data
+        if !rotating, status == errSecSuccess, let stored = item as? Data, stored.count == 32 {
+            salt = stored
+        } else {
+            var bytes = [UInt8](repeating: 0, count: 32)
+            let randomStatus = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+            guard randomStatus == errSecSuccess else { throw StoreAMDError(.device) }
+            salt = Data(bytes)
+            var attributes = saltQuery
+            attributes[kSecValueData as String] = salt
+            attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let updated = SecItemUpdate(saltQuery as CFDictionary, [kSecValueData as String: salt] as CFDictionary)
+            let saved = updated == errSecItemNotFound ? SecItemAdd(attributes as CFDictionary, nil) : updated
+            guard saved == errSecSuccess else { throw StoreAMDError(.keychain, keychainStatus: saved) }
+        }
+        hardware = Array(Insecure.SHA1.hash(data: Data(("Mirsa:StoreAMD:v2:" + device).utf8) + salt))
     }
 
     private func checkDevice() throws {
@@ -130,7 +172,13 @@ actor StoreAMDProof: StoreAMDProviding {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw StoreAMDError(.keychain, keychainStatus: status) }
+        // A locked/unreadable Keychain must never be interpreted as a usable profile.
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            profile = nil
+            loaded = true
+            return
+        }
+        try selectHardware()
         if let data = item as? Data {
             let pointer = data.withUnsafeBytes { bytes in
                 hardware.withUnsafeBufferPointer { hw in
@@ -147,6 +195,7 @@ actor StoreAMDProof: StoreAMDProviding {
         let status = SecItemDelete(keyQuery as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw StoreAMDError(.keychain, keychainStatus: status) }
         profile = nil
+        try selectHardware(rotating: true)
         loaded = true
     }
 
@@ -168,7 +217,8 @@ actor StoreAMDProof: StoreAMDProviding {
     private func seconds() throws -> UInt32 { try clock.seconds() }
 
     func provision(_ challenge: Data) async throws {
-        try checkDevice()
+        try load()
+        if hardware.isEmpty { try selectHardware() }
         let now = try seconds()
         let session = challenge.withUnsafeBytes { bytes in
             hardware.withUnsafeBufferPointer { hw in
@@ -233,13 +283,55 @@ struct StoreAMDHandshake: Sendable {
     let provider: any StoreAMDProviding
     private var budget = StoreAMDBudget()
     init(provider: any StoreAMDProviding) { self.provider = provider }
+    mutating func respond(to response: HTTPClient.Response, isolation: isolated (any Actor)? = #isolation) async throws -> Bool {
+        let data = response.body.map { Data($0.readableBytesView) } ?? Data()
+        let fields = (try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+            ?? (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        let action = response.headers.first(name: "X-Apple-AMD-Action")
+        let challenge = response.headers.first(name: "X-Apple-AMD-Data")
+        guard try StoreAMDAction.parse(fields: fields, actionHeader: action, challenge: challenge) != nil else { return false }
+        // Do not require a clock or mutate state for ignored RP.
+        if try StoreAMDAction.parse(fields: fields, actionHeader: action, challenge: challenge) == .reset,
+           try await provider.headers().isEmpty { return false }
+        try await provider.synchronize(dateHeader: response.headers.first(name: "Date"))
+        return try await respond(fields: fields, action: action, challenge: challenge)
+    }
+
     mutating func respond(fields: [String: Any], action: String?, challenge: String?, isolation: isolated (any Actor)? = #isolation) async throws -> Bool {
         guard let next = try StoreAMDAction.parse(fields: fields, actionHeader: action, challenge: challenge) else { return false }
+        // An RP without an existing profile is a no-op, not a device reset.
+        if next == .reset, try await provider.headers().isEmpty { return false }
         try budget.accept(next)
         switch next {
         case let .provision(data): try await provider.provision(data)
         case .reset: try await provider.reset()
         }
         return true
+    }
+}
+
+
+// Proofs are never sent to arbitrary Apple routes, dispatch URLs, CDN or redirects.
+enum StoreAMDHeaderScope {
+    static func permits(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443, let host = url.host?.lowercased() else { return false }
+        let path = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
+        if host == "auth.itunes.apple.com" {
+            return path == "/auth/v1/native" || path == "/auth/v1/native/fast"
+        }
+        let purchaseHost = host == "buy.itunes.apple.com" ||
+            host.range(of: "^p[0-9]+-buy\\.itunes\\.apple\\.com$", options: .regularExpression) != nil
+        return purchaseHost && path == "/WebObjects/MZFinance.woa/wa/buyProduct"
+    }
+
+    static func append(_ proof: [String: String], to headers: inout [(String, String)], url: URL) throws {
+        guard permits(url) else { return }
+        for name in ["X-Apple-AMD", "X-Apple-AMD-M"] {
+            if let value = proof[name] {
+                guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else { throw StoreAMDError(.headers) }
+                headers.append((name, value))
+            }
+        }
     }
 }
