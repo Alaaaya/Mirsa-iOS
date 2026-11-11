@@ -132,6 +132,25 @@ enum ForgeChatImage {
         if Self.fixture {
             let t = Self.fixtureThreadID
             #if DEBUG
+            if let indexText = ProcessInfo.processInfo.environment["MIRSA_NATIVE_REPLAY_INDEX"] {
+                struct Replay: Decodable { let cases: [Case] }
+                struct Case: Decodable { let message: ForgeChatMessage }
+                guard let index = Int(indexText),
+                      let url = Bundle.main.url(forResource: "NativeReplayFragments", withExtension: "json"),
+                      let data = try? Data(contentsOf: url),
+                      let replay = try? JSONDecoder().decode(Replay.self, from: data),
+                      replay.cases.indices.contains(index) else {
+                    fatalError("Invalid native replay fragment")
+                }
+                // Single captured response fragment, not a reconstructed server history.
+                // The existing style host selects t; message identities remain exactly captured.
+                let message = replay.cases[index].message
+                precondition(message.role == "result" && message.result?.artifact != nil)
+                threads = [ForgeChatThread(id: t, title: "Captured fragment replay", status: "open", createdAt: nil, updatedAt: nil)]
+                messages = [t: [message]]
+                ackedThreads.insert(t)
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("-MirsaChatEmptyFixture") {
                 let args = ProcessInfo.processInfo.arguments
                 if args.contains("-MirsaChatQuotaFixture") { error = ForgeChatText.limit }

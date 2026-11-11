@@ -1,0 +1,125 @@
+name: Mirsa 2.2 captured fragment native replay
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Validate approved fragments and exact base before build
+        run: python3 scripts/native-replay-validate.py
+      - name: Record exact replay provenance
+        run: |
+          mkdir -p build
+          git rev-parse HEAD > build/replay-commit.txt
+          git diff --exit-code
+          shasum -a 256 ios-app/NativeReplayFragments.json ios-app/Apps/ForgeChat.swift ios-app/Apps/ForgeChatArtifact.swift ios-app/Apps/ForgeChatTimeline.swift > build/replay-input-hashes.txt
+          echo "Source base a10f6e82f1b42e567955fb74ebfa0036f798f21b, released Mirsa 2.2; DEBUG fragment replay, not shipped IPA or live-client HTTP" > build/limits.txt
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run Mirsa AI fixture UITest
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/NativeReattachReplayUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+      - name: Record simulator build identity
+        if: always()
+        run: |
+          APP=build/SimulatorData/Build/Products/Debug-iphonesimulator/Mirsa.app
+          if [ -f "$APP/Info.plist" ]; then
+            /usr/libexec/PlistBuddy -c Print:CFBundleShortVersionString "$APP/Info.plist" > build/client-version.txt
+            /usr/libexec/PlistBuddy -c Print:CFBundleVersion "$APP/Info.plist" > build/client-build.txt
+            shasum -a 256 "$APP/Mirsa" > build/client-binary-sha256.txt
+          fi
+      - name: Export named screenshots
+        if: always()
+        run: |
+          if [ -d build/AIUI.xcresult ]; then
+            mkdir -p build/raw build/shots
+            xcrun xcresulttool export attachments --path build/AIUI.xcresult --output-path build/raw
+            python3 - <<'PY'
+          import json, os, re, shutil, subprocess, tempfile, hashlib
+          m = json.load(open("build/raw/manifest.json"))
+          for t in m:
+              for a in t.get("attachments", []):
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
+                  exported = a["exportedFileName"]
+                  ext = os.path.splitext(exported)[1].lower()
+                  if ext not in (".png", ".txt"):
+                      raise RuntimeError("Unexpected attachment extension: " + ext)
+                  kind = "screenshotPNG" if ext == ".png" else "accessibilityTXT"
+                  # Extension follows the real exported artifact, never the human label.
+                  name = os.path.splitext(name)[0] + ext
+                  folder = os.path.join("build/shots", kind)
+                  os.makedirs(folder, exist_ok=True)
+                  dest = os.path.join(folder, name)
+                  if os.path.exists(dest): raise RuntimeError("Duplicate attachment name")
+                  source = os.path.join("build/raw", exported)
+                  raw = open(source, "rb").read()
+                  if ext == ".png":
+                      if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                          raise RuntimeError("Invalid PNG signature")
+                      # sips transcodes through the macOS image decoder, not just file naming.
+                      with tempfile.TemporaryDirectory() as tmp:
+                          decoded = os.path.join(tmp, "decoded.png")
+                          subprocess.run(["sips", "-s", "format", "png", source, "--out", decoded],
+                                         check=True, capture_output=True)
+                          probe = subprocess.check_output(["sips", "-g", "pixelWidth", "-g", "pixelHeight", decoded], text=True)
+                          dims = re.findall(r"pixel(?:Width|Height):\s*(\d+)", probe)
+                          if len(dims) != 2 or any(int(v) <= 0 for v in dims):
+                              raise RuntimeError("PNG decode dimensions invalid")
+                  else:
+                      raw.decode("utf-8", errors="strict")
+                  shutil.copy(source, dest)
+                  print(kind, name, hashlib.sha256(raw).hexdigest(), "validated")
+          print("\n".join(sorted(os.listdir("build/shots"))))
+          PY
+          fi
+          mkdir -p build/crashes
+          cp ~/Library/Logs/DiagnosticReports/*Mirsa* build/crashes/ 2>/dev/null || true
+          ls build/crashes
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mirsa22-native-fragment-replay
+          path: |
+            build/shots
+            build/crashes
+            build/ai-ui.log
+            build/AIUI.xcresult
+            build/replay-commit.txt
+            build/replay-input-hashes.txt
+            build/limits.txt
+            build/client-*.txt
+          if-no-files-found: warn
