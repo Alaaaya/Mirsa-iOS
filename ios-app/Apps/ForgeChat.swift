@@ -607,7 +607,8 @@ struct ForgeChatThreadView: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .background(.ultraThinMaterial.opacity(0.85))
+            // Same Aurora as the conversation behind it (screen-aligned slice), not a flat gray material.
+            .background { MirsaAuroraSlice().ignoresSafeArea(edges: .bottom) }
         }
         .background(AuroraBackground().ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
@@ -898,5 +899,22 @@ struct ForgeChatReportSheet: View {
         .presentationDetents([.height(350)])
         .presentationBackground { AuroraBackground() }
         .preferredColorScheme(.dark)
+    }
+}
+
+/// The slice of the full-screen Aurora that sits under this view, so a bar over the chat
+/// shows exactly the colours of the background around it (both instances follow the same clock).
+struct MirsaAuroraSlice: View {
+    var body: some View {
+        GeometryReader { g in
+            let f = g.frame(in: .global)
+            let screen = UIScreen.main.bounds.size
+            AuroraBackground()
+                .frame(width: screen.width, height: screen.height)
+                .offset(x: -f.minX, y: -f.minY)
+                .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        }
+        .clipped()
+        .allowsHitTesting(false)
     }
 }
