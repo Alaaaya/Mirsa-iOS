@@ -43,21 +43,32 @@ public enum Purchase {
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
 
-        let request = try makeRequest(
-            account: account,
-            app: app,
-            guid: guid,
-            pricingParameters: pricingParameters,
-        )
-        let response = try await client.execute(request: request).get()
+        // Same bounded device-registration handshake as sign-in.
+        let amd = StoreAMDProof.shared(deviceIdentifier: guid)
+        var handshake = StoreAMDHandshake(provider: amd)
+        var accepted: HTTPClient.Response?
+        for _ in 0 ..< 5 {
+            let request = try makeRequest(
+                account: account,
+                app: app,
+                guid: guid,
+                pricingParameters: pricingParameters,
+                amdHeaders: (try? await amd.headers()) ?? [:],
+            )
+            let current = try await client.execute(request: request).get()
 
-        APLogger.logResponse(
-            status: response.status.code,
-            headers: response.headers.map { ($0.name, $0.value) },
-            bodySize: response.body?.readableBytes,
-        )
+            APLogger.logResponse(
+                status: current.status.code,
+                headers: current.headers.map { ($0.name, $0.value) },
+                bodySize: current.body?.readableBytes,
+            )
 
-        account.cookie.mergeCookies(response.cookies)
+            account.cookie.mergeCookies(current.cookies)
+            if try await handshake.respond(to: current) { continue }
+            accepted = current
+            break
+        }
+        guard let response = accepted else { throw StoreAMDError(.parse) }
 
         try ensure(response.status == .ok, Strings.requestFailed(status: response.status.code))
 
@@ -81,6 +92,8 @@ public enum Purchase {
         {
             try ensureFailed(Strings.termsAcceptanceRequired(url: urlString))
         }
+
+        if StoreAMDAction.isActionMessage(dict["customerMessage"] as? String) { throw StoreAMDError(.parse) }
 
         if let failureType = dict["failureType"] as? String {
             let customerMessage = dict["customerMessage"] as? String
@@ -114,6 +127,7 @@ public enum Purchase {
         app: Software,
         guid: String,
         pricingParameters: String,
+        amdHeaders: [String: String] = [:],
     ) throws -> HTTPClient.Request {
         let payload: [String: Any] = [
             "appExtVrsId": "0",
@@ -144,9 +158,11 @@ public enum Purchase {
         let host = Configuration.purchaseAPIHost(pod: account.pod)
         let urlString = "https://\(host)/WebObjects/MZFinance.woa/wa/buyProduct"
 
-        for item in account.cookie.buildCookieHeader(URL(string: urlString)!) {
+        let url = try URL(string: urlString).get()
+        for item in account.cookie.buildCookieHeader(url) {
             headers.append(item)
         }
+        headers.append(contentsOf: try StoreAMDHeaderPolicy.headers(amdHeaders, for: url))
 
         APLogger.logRequest(method: "POST", url: urlString, headers: headers)
 
