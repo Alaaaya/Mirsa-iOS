@@ -50,17 +50,8 @@ enum MirsaContainerCleanup {
              "mirsa-tweak-library", "mirsatweaklibrary", "mirsabundlefiles", "personalappslibrary", "mirsapersonalapps", "download inbox"].contains(n)
     }
 
-    // Only recognizable disposable root leftovers in Caches. URLCache/WebKit/system databases
-    // are not guessed at or reset. tmp itself is entirely disposable except the denylist above.
-    private static func disposableCache(_ name: String) -> Bool {
-        let n = name.lowercased()
-        return ["ipa", "zip", "tmp", "temp"].contains((n as NSString).pathExtension) ||
-            ["mirsa-managed", "mirsa-screenshots", "mirsascreenshots", "unzip-", "extract-",
-             "sign-", "signing-", "cert-install-", "personal-url-", "store-download-",
-             "store-server-", "container-extract-", "forgeinj-", "mirsa-open-in-"].contains {
-                n == $0 || n.hasPrefix($0)
-            }
-    }
+    // Caches is disposable regardless of a producer's filename. Persistent stores
+    // and system-owned databases remain protected by the denylist above.
 
     private static func info(_ parent: Int32, _ name: String) -> stat? {
         var s = stat()
@@ -90,7 +81,26 @@ enum MirsaContainerCleanup {
     /// Resolve only Darwin's known /var and /tmp aliases. Arbitrary ancestor links fail closed.
     private static func openRoot(_ url: URL) -> (Int32, [Int32], [Link], String)? {
         guard url.isFileURL else { return nil }
-        let parts = canonicalDarwinPath(url).split(separator: "/").map(String.init)
+        // iOS permits opening our container roots, but denies opening ancestors such
+        // as /private/var/mobile. Anchor at the exact OS-provided disposable root,
+        // not at /. Arbitrary/test roots still use the strict component walker below.
+        let canonical = canonicalDarwinPath(url)
+        let fm = FileManager.default
+        let trusted = [fm.temporaryDirectory] + fm.urls(for: .cachesDirectory, in: .userDomainMask)
+        if trusted.contains(where: { canonicalDarwinPath($0) == canonical }) {
+            let fd = open(canonical, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            guard fd >= 0 else { return nil }
+            var opened = stat(), named = stat()
+            guard fstat(fd, &opened) == 0,
+                  lstat(canonical, &named) == 0,
+                  sameNode(named, Identity(opened)),
+                  (named.st_mode & S_IFMT) == S_IFDIR else {
+                close(fd); return nil
+            }
+            // Retain a path identity check so a replaced/moved root fails closed.
+            return (fd, [fd], [Link(parent: AT_FDCWD, name: canonical, identity: Identity(opened))], canonical)
+        }
+        let parts = canonical.split(separator: "/").map(String.init)
         guard !parts.isEmpty else { return nil }
         let first = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
         guard first >= 0 else { return nil }
@@ -144,7 +154,6 @@ enum MirsaContainerCleanup {
                     $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(cString: $0) }
                 }
                 guard name != ".", name != "..", !name.contains("/"), !protected(name),
-                      !(depth == 0 && scope == .caches && !disposableCache(name)),
                       let s = info(directory, name), s.st_dev == rootDevice else { continue }
                 let current = path + "/" + name
                 let identity = Identity(s)
