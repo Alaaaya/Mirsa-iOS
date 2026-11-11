@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Diagnose original IPA workspace lifetime
+        run: |
+          cat ios-app/Apps/MirsaContainerCleanup.swift ios-app/Apps/MirsaManagedTmp.swift scripts/diagnostics/original-ipa.swift > /tmp/original-ipa.swift
+          swift /tmp/original-ipa.swift
+
       - name: Select newest Xcode
         run: |
           ls -d /Applications/Xcode*.app
