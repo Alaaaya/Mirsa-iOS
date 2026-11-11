@@ -152,11 +152,11 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             let original = "https://auth.itunes.apple.com\(path)?guid=example"
             XCTAssertEqual(
                 Bag.normalizedAuthEndpoint(from: original)?.absoluteString,
-                original,
+                "https://auth.itunes.apple.com/auth/v1/native/fast/?guid=example",
             )
         }
     }
-    func testLiveBagNativeRouteIsNotRewrittenToFast() async throws {
+    func testLiveBagNativeRouteUsesConfiguratorFast() async throws {
         let advertised = "https://auth.itunes.apple.com/auth/v1/native"
         let xml = try PropertyListSerialization.data(fromPropertyList: [
             "authenticateAccount": advertised,
@@ -166,12 +166,17 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         ], format: .xml, options: 0)
         let bag = Bag.parse(xml)
         try bag.requireSupportedAuthentication()
-        XCTAssertEqual(bag.authEndpoint.absoluteString, advertised)
+        XCTAssertEqual(bag.authEndpoint.absoluteString, "https://auth.itunes.apple.com/auth/v1/native/fast/")
         let signer = RecordingSigner()
         let request = try await makeRequest(endpoint: bag.authEndpoint.absoluteString, code: "123456", signer: signer)
-        XCTAssertEqual(request.url.absoluteString, advertised)
+        XCTAssertEqual(request.url.absoluteString, "https://auth.itunes.apple.com/auth/v1/native/fast/")
         let recorded = await signer.recordedBodies()
-        XCTAssertEqual(try bodyData(request), recorded.first)
+        XCTAssertTrue(recorded.isEmpty)
+        XCTAssertNil(request.headers.first(name: "X-Apple-ActionSignature"))
+        XCTAssertEqual(request.headers.first(name: "User-Agent"), "Configurator/2.17")
+        let parameters = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(request), format: nil) as? [String: String])
+        XCTAssertEqual(parameters["password"], "test<&password123456")
+        XCTAssertEqual(parameters["attempt"], "2")
     }
 
     func testInitialNativeRequestMatchesAdvertisedOnDeviceProtocol() async throws {
@@ -193,6 +198,19 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         let base = try XCTUnwrap(Bag.normalizedAuthEndpoint(from: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate?Pod=25"))
         let endpoint = try Authenticator.createInitialRequestEndpoint(baseURL: base, deviceIdentifier: "001122334455")
         XCTAssertEqual(endpoint.absoluteString, "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/?Pod=25&guid=001122334455")
+    }
+
+    func testFastAuthenticationNeedsNoSignerAndKeepsTwoFactorBody() async throws {
+        let endpoint = try XCTUnwrap(URL(string: "https://auth.itunes.apple.com/auth/v1/native/fast/"))
+        for code in ["", "654321"] {
+            let request = try await Authenticator.makeRequest(endpoint: endpoint, email: "fixture@example.invalid",
+                password: "secret", code: code, cookies: [], deviceIdentifier: "001122334455", sapSigner: nil)
+            XCTAssertNil(request.headers.first(name: "X-Apple-ActionSignature"))
+            XCTAssertEqual(request.headers.first(name: "User-Agent"), "Configurator/2.17")
+            let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(request), format: nil) as? [String: String])
+            XCTAssertEqual(fields["password"], "secret" + code)
+            XCTAssertEqual(fields["attempt"], code.isEmpty ? "1" : "2")
+        }
     }
 
 }
