@@ -112,6 +112,8 @@ struct AppsTab: View {
                                     onImport: { showPicker = true },
                                     onImportLink: { showURLImport = true },
                                     onDownloads: { segment = .downloads },
+                                    // Same path as the context menu's Delete (store.delete); the «−» alert is the confirmation.
+                                    onDelete: { app in Task { await store.delete(app, vm: vm) } },
                                     menu: { app in menu(for: app) })
                 } else {
                     MirsaHomeScreen(apps: hiddenStore.visible(store.containerApps + store.realApps, ns: .main, id: { $0.id }),
