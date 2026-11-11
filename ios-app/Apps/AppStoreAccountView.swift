@@ -159,11 +159,11 @@ struct AppStoreAccountView: View {
                 .fixedSize(horizontal: false, vertical: true)
             TextField(t("Code shown on your iPhone", "الرمز يلي وصل عآيفونك", "کۆدی سەر ئایفۆنەکەت", "Koda li iPhone ya te"), text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode).disabled(busy != nil)
                 .focused($focus).fieldStyle()
-                .onChange(of: code) { _, v in code = String(v.filter { $0.isASCII && $0.isNumber }.prefix(6)) }
+                .onChange(of: code) { _, v in code = MirsaStoreCode.normalize(v) }
             SecureField(t("Re-enter password for this verification", "اكتب كلمة السر من جديد للتحقق", "وشەی نهێنی بۆ پشتڕاستکردنەوە دووبارە بنووسە", "Ji bo piştrastkirinê şîfreyê dîsa binivîse"), text: $password)
                 .textContentType(.password).focused($focus).fieldStyle().disabled(busy != nil)
             Button { submitCode() } label: { Text(t("Verify code", "تحقق من الرمز", "کۆدەکە پشتڕاست بکەرەوە", "Kodê piştrast bike")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaPrimary).disabled(code.count != 6 || password.isEmpty || busy != nil)
+                .buttonStyle(.mirsaPrimary).disabled(MirsaStoreCode.valid(code) == nil || password.isEmpty || busy != nil)
             Text(t("Re-enter your password for this request. Two verification tries within five minutes, then start again. A challenge does not confirm that a code was delivered.", "اكتب كلمة السر من جديد لهالطلب. محاولتين خلال 5 دقايق وبعدين ابدأ من جديد. طلب الرمز مو تأكيد إنو وصلك.",
                    "وشەی نهێنی بۆ ئەم داواکارییە دووبارە بنووسە. دوو هەوڵ لە پێنج خولەکدا، پاشان دووبارە دەست پێبکە. داوای کۆد گەیشتنی کۆد پشتڕاست ناکاتەوە.", "Ji bo vê daxwazê şîfreyê dîsa binivîse. Di pênc deqeyan de du hewil, paşê ji nû ve dest pê bike. Daxwaza kodê ne piştrastkirina gihîştina kodê ye."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)

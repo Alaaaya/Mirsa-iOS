@@ -106,6 +106,38 @@ private actor ServerFixture {
 }
 
 final class StoreServerClientTests: XCTestCase {
+    func testVerificationInputDoesNotSilentlyDropOrTruncateDigits() {
+        XCTAssertEqual(MirsaStoreCode.valid("٠٠١٢٣٤"), "001234")
+        XCTAssertEqual(MirsaStoreCode.valid("۰۱۲۳۴۵"), "012345")
+        XCTAssertEqual(MirsaStoreCode.valid("\u{200F}١٢ ٣٤\n٥٦"), "123456")
+        XCTAssertNil(MirsaStoreCode.valid("1234567"))
+        XCTAssertNil(MirsaStoreCode.valid("12x3456"))
+        XCTAssertNil(MirsaStoreCode.valid("１２３４５６"))
+        XCTAssertEqual(MirsaStoreCode.normalize("12x٣"), "12x3")
+    }
+
+    func testArabicVerificationUsesOneNormalizedRequestAndNeverSavesPassword() async throws {
+        let fixture = ServerFixture()
+        let vault = ServerFixtureVault()
+        let client = MirsaStoreServerClient(identity: { await fixture.identity() }, vault: vault,
+                                           http: { try await fixture.respond($0) })
+        _ = try await client.signIn(email: "fixture@example.invalid", password: "login-fixture-secret")
+        do {
+            _ = try await client.verify(code: "1234567", password: "verify-fixture-secret")
+            XCTFail("Long codes must not be truncated into a valid code")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        let before = await fixture.count("/verify")
+        XCTAssertEqual(before, 0)
+        _ = try await client.verify(code: "٠٠١٢٣٤", password: "verify-fixture-secret")
+        let body = await fixture.verifyBody()
+        XCTAssertEqual(body?["code"], "001234")
+        XCTAssertEqual(body?["password"], "verify-fixture-secret")
+        let calls = await fixture.count("/verify")
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(vault.items.count, 1)
+        XCTAssertFalse(vault.items.values.contains { String(data: $0, encoding: .utf8)?.contains("secret") == true })
+    }
+
     func testLoginAvailabilityRequiresSuccessfulServerAccountGate() async throws {
         let fixture = ServerFixture()
         let client = MirsaStoreServerClient(identity: { await fixture.identity() },
