@@ -1,0 +1,113 @@
+name: Mirsa container cleanup fix verification
+on:
+  push:
+    branches: [mirsa/tmp-clean-fix]
+permissions:
+  contents: read
+env:
+  MIRSA_VERSION: "2.2"
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build real simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run cleanup and preserved policy tests
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/Cleanup.xcresult -only-testing:MirsaTests/MirsaContainerCleanupTests -only-testing:MirsaTests/MirsaManagedTmpTests -only-testing:MirsaTests/WiFiPathPolicyTests -only-testing:MirsaTests/UpdaterMetadataTests -only-testing:MirsaTests/SourceDeletionTests -only-testing:MirsaTests/ExistingProjectLibrariesTests -only-testing:MirsaTests/CertificateInstallTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/cleanup-tests.log
+          grep -E "Executed [1-9][0-9]* tests?, with 0 failures" build/cleanup-tests.log
+
+          python3 - <<'PYTEST'
+          import re
+          from pathlib import Path
+          text = Path("build/cleanup-tests.log").read_text()
+          container = re.findall(r"func (test\w+)\(", Path("tests/MirsaContainerCleanupTests.swift").read_text())
+          for name in container:
+              assert re.search(r"Test Case '-\[MirsaTests\.MirsaContainerCleanupTests " + name + r"\]' passed", text), name + " did not execute and pass"
+          cleanup = re.findall(r"func (test\w+)\(", Path("tests/MirsaManagedTmpTests.swift").read_text())
+          assert len(cleanup) >= 12, cleanup
+          for name in cleanup:
+              assert re.search(r"Test Case '-\[MirsaTests\.MirsaManagedTmpTests " + name + r"\]' passed", text), name + " did not execute and pass"
+          assert not re.search(r"Test Case .*MirsaManagedTmpTests.*skipped", text), "Cleanup tests skipped"
+          names = ("testStateMapping", "testCellularActiveWithWiFiAvailableBlocks",
+                   "testVerdictIsAuthoritative", "testEveryLanguageHasEveryNewMessage",
+                   "testNextStepAddedOnceForAnyFailure")
+          for name in names:
+              assert re.search(r"Test Case '-\[MirsaTests\.WiFiPathPolicyTests " + name + r"\]' passed", text), name + " did not execute and pass"
+          assert not re.search(r"Test Case .*WiFiPathPolicyTests.*skipped", text), "WiFi tests skipped"
+          print("All five named WiFiPathPolicyTests executed and passed")
+          PYTEST
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Mirsa-tmp-clean-fix-policy-proof
+          path: |
+            build/cleanup-tests.log
+            build/Cleanup.xcresult
+          if-no-files-found: error
+
+  unsigned-ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - name: App Store standalone backend tests
+        run: bash scripts/appstore/package-tests.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Build AirliftFFI for iOS (device)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Build unsigned IPA (same script as unsigned-ipa.yml, no release publishing)
+        run: |
+          brew install xcodegen && xcodegen generate
+          bash build-ipa.sh
+      - name: Localization coverage
+        run: |
+          python3 ios-app/localization-coverage-test.py
+          python3 ios-app/localization-plural-test.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-tmp-clean-fix-device
+          path: build/Mirsa.ipa
