@@ -497,6 +497,9 @@ struct AppStoreAccountView: View {
         case .serviceUnavailable: return t("Apple could not finish this. Check connection, country and account, then retry.", "Apple ما قدرت تكمل. تأكد من الإنترنت والدولة والحساب.", "Apple نەیتوانی تەواوی بکات. ئینتەرنێت، وڵات و ئەکاونت بپشکنە.", "Apple nikaribû biqedîne. Înternet, welat û hesab kontrol bike.")
         case .licenseRequired: return t("This Apple Account does not own this app. Tap Get free license first (free apps only).", "حسابك ما بيملك التطبيق. دوس احصل على ترخيص مجاني أول (للمجانية بس).", "ئەم ئەکاونتە خاوەنی ئەپەکە نییە. سەرەتا مۆڵەتی بێبەرامبەر وەربگرە (تەنها بێبەرامبەرەکان).", "Ev hesab xwediyê sepanê nîne. Pêşî lîsansa belaş bigire (tenê belaş).")
         case .operationCancelled: return t("Cancelled.", "انلغت.", "هەڵوەشێنرایەوە.", "Hat betalkirin.")
+        case .codeRejected: return t("The code was rejected. Check the newest code from Apple and try again.", "الرمز مرفوض. شوف آخر رمز من Apple وجرّب مرة ثانية.", "کۆدەکە ڕەتکرایەوە. نوێترین کۆدی Apple ببینە و دووبارە هەوڵ بدەرەوە.", "Kod hat redkirin. Koda herî nû ya Apple kontrol bike û dîsa biceribîne.")
+        case .invalidCode: return t("Enter exactly 6 digits.", "اكتب 6 أرقام بالضبط.", "تەنها ٦ ژمارە بنووسە.", "Tam 6 hejmaran binivîse.")
+        case .deviceRegistration(let stage): return t("Device registration didn't finish. Try signing in again.", "تسجيل الجهاز ما كمل. جرّب تسجّل دخول مرة ثانية.", "تۆمارکردنی ئامێر تەواو نەبوو. دووبارە بچۆ ژوورەوە.", "Tomarkirina amûrê neqediya. Dîsa têkeve.") + " [" + stage + "]"
         }
     }
 }

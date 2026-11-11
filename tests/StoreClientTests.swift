@@ -41,10 +41,14 @@ private final class StoreTestAuth: MirsaStoreAuthentication {
     var diagnostic: MirsaStoreAuthDiagnostic?
     var paused: CheckedContinuation<Account, Error>?
     var pause = false
+    var rejectWrongCode = false
+    var amdFailure: StoreAMDError?
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
         if let diagnostic { throw diagnostic }
         if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
+        if let amdFailure { throw amdFailure }
+        if rejectWrongCode && !code.isEmpty && code != "123456" { throw AuthenticationError.codeRejected }
         if twoFactor && code != "123456" { throw AuthenticationError.verificationCodeRequired }
         return testOwner()
     }
@@ -197,6 +201,32 @@ final class MirsaStoreClientTests: XCTestCase {
         guard case .signedIn = second else { return XCTFail("verification missing") }
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "123456"])
+    }
+    func testRejectedCodeKeepsSameSessionAndIsLocalized() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        engine.auth.rejectWrongCode = true
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        XCTAssertEqual(first, .verificationRequired)
+        do { _ = try await client.verify(code: "000000", password: "fixture-password"); XCTFail("wrong code accepted") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .codeRejected) }
+        do { _ = try await client.verify(code: "12345", password: "fixture-password"); XCTFail("short code sent") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidCode) }
+        let second = try await client.verify(code: "123456", password: "fixture-password")
+        guard case .signedIn = second else { return XCTFail("verification missing") }
+        XCTAssertEqual(engine.authCreations, 1)
+        XCTAssertEqual(engine.auth.calls, ["", "000000", "123456"])
+    }
+    func testDeviceRegistrationFailureShowsStageNotAppleText() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.amdFailure = StoreAMDError(.http(503))
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        do { _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password"); XCTFail("accepted") }
+        catch {
+            XCTAssertEqual(error as? MirsaStoreError, .deviceRegistration("amd:http-503"))
+            XCTAssertFalse(error.localizedDescription.contains("AMD-Action"))
+        }
     }
     func testNativeOwnerGateDeniesBeforeAppleAuthentication() async throws {
         let engine = StoreTestEngine(), vault = StoreTestVault()

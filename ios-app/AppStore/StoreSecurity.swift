@@ -6,8 +6,17 @@ enum MirsaStoreError: Error, Equatable, LocalizedError {
     case busy, signedOut, verificationRequired, invalidInput, freeAppsOnly
     case keychain(Int32), invalidPackage, untrustedURL, serviceUnavailable
     case licenseRequired, operationCancelled
+    /// Apple did not accept the submitted verification code.
+    case codeRejected
+    /// The verification code was not exactly six digits; nothing was sent.
+    case invalidCode
+    /// Device registration (AMD) did not finish; carries a secret-free stage code such as `amd:http-503`.
+    case deviceRegistration(String)
     var errorDescription: String? {
         switch self {
+        case .codeRejected: return tr("The code was rejected. Check the newest code from Apple and try again.", "الرمز مرفوض. شوف آخر رمز من Apple وجرّب مرة ثانية.", ckb: "کۆدەکە ڕەتکرایەوە. نوێترین کۆدی Apple ببینە و دووبارە هەوڵ بدەرەوە.", kmr: "Kod hat redkirin. Koda herî nû ya Apple kontrol bike û dîsa biceribîne.")
+        case .invalidCode: return tr("Enter exactly 6 digits.", "اكتب 6 أرقام بالضبط.", ckb: "تەنها ٦ ژمارە بنووسە.", kmr: "Tam 6 hejmaran binivîse.")
+        case let .deviceRegistration(stage): return tr("Device registration didn't finish. Try signing in again.", "تسجيل الجهاز ما كمل. جرّب تسجّل دخول مرة ثانية.", ckb: "تۆمارکردنی ئامێر تەواو نەبوو. دووبارە بچۆ ژوورەوە.", kmr: "Tomarkirina amûrê neqediya. Dîsa têkeve.") + " [" + stage + "]"
         case .busy: return "Another App Store operation is still running."
         case .signedOut: return "Sign in to your Apple Account first."
         case .verificationRequired: return "Enter the six-digit verification code from Apple."

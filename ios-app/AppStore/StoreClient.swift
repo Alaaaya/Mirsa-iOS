@@ -83,7 +83,9 @@ actor MirsaStoreClient {
             try vault.remove("challenge")
             throw MirsaStoreError.signedOut
         }
-        guard MirsaStoreCode.valid(code) != nil, !password.isEmpty, password.utf8.count <= 1024 else {
+        // Six ASCII digits are checked before anything is sent to Apple.
+        guard MirsaStoreCode.valid(code) != nil else { throw MirsaStoreError.invalidCode }
+        guard !password.isEmpty, password.utf8.count <= 1024 else {
             throw MirsaStoreError.invalidInput
         }
         pending.attempts += 1
@@ -280,9 +282,15 @@ actor MirsaStoreClient {
         if let diagnostic = error as? AuthenticationServiceError { return MirsaStoreAuthDiagnostic(diagnostic) }
         if let error = error as? MirsaStoreError { return error }
         if error is CancellationError { return MirsaStoreError.operationCancelled }
-        if let auth = error as? AuthenticationError, case .verificationCodeRequired = auth {
-            return MirsaStoreError.verificationRequired
+        if let auth = error as? AuthenticationError {
+            switch auth {
+            case .verificationCodeRequired: return MirsaStoreError.verificationRequired
+            case .codeRejected: return MirsaStoreError.codeRejected
+            case .invalidVerificationCode: return MirsaStoreError.invalidCode
+            }
         }
+        // Never Apple's raw "AMD-Action" text; only the secret-free stage.
+        if let amd = error as? StoreAMDError { return MirsaStoreError.deviceRegistration(amd.diagnostic) }
         if case ApplePackageError.licenseRequired = error { return MirsaStoreError.licenseRequired }
         // Do not surface arbitrary URL/body/account descriptions to telemetry or UI.
         return MirsaStoreError.serviceUnavailable
