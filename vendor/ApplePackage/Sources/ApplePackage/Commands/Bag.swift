@@ -146,22 +146,13 @@ public enum Bag {
         return url
     }
 
-    /// The bag advertises the native auth endpoint without the `/fast/` sub-path
-    /// that the login flow requires; the no-trailing-slash variant 301s to an
-    /// HTML page. The legacy authenticate route also requires its trailing
-    /// slash; the bare route can return a bodyless 301 without Location.
+    /// Keep Apple's advertised native route verbatim. `/native` and
+    /// `/native/fast/` are different services, not slash variants. Rewriting
+    /// the former to the latter can reject an otherwise valid signed request.
+    /// Only the legacy MZFinance route needs a trailing slash.
     static func normalizedAuthEndpoint(from urlString: String) -> URL? {
         guard var comps = URLComponents(string: urlString) else { return nil }
-        if comps.host == "auth.itunes.apple.com" {
-            var path = comps.path
-            while path.hasSuffix("/") {
-                path.removeLast()
-            }
-            if !path.hasSuffix("/fast") {
-                path += "/fast"
-            }
-            comps.path = path + "/"
-        } else if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
+        if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
             let legacyHost =
                 host == "buy.itunes.apple.com" || host.range(of: "^p[0-9]+-buy[.]itunes[.]apple[.]com$", options: .regularExpression) != nil
             if legacyHost, comps.path == "/WebObjects/MZFinance.woa/wa/authenticate" {

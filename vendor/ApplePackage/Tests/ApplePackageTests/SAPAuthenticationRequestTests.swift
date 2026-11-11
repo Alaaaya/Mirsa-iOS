@@ -152,8 +152,26 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             let original = "https://auth.itunes.apple.com\(path)?guid=example"
             XCTAssertEqual(
                 Bag.normalizedAuthEndpoint(from: original)?.absoluteString,
-                "https://auth.itunes.apple.com/auth/v1/native/fast/?guid=example",
+                original,
             )
         }
     }
+    func testLiveBagNativeRouteIsNotRewrittenToFast() async throws {
+        let advertised = "https://auth.itunes.apple.com/auth/v1/native"
+        let xml = try PropertyListSerialization.data(fromPropertyList: [
+            "authenticateAccount": advertised,
+            "sign-sap-version": "200",
+            "sign-sap-setup": "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy",
+            "sign-sap-setup-cert": "https://s.mzstatic.com/sap/setupCert.plist"
+        ], format: .xml, options: 0)
+        let bag = Bag.parse(xml)
+        try bag.requireSupportedAuthentication()
+        XCTAssertEqual(bag.authEndpoint.absoluteString, advertised)
+        let signer = RecordingSigner()
+        let request = try await makeRequest(endpoint: bag.authEndpoint.absoluteString, code: "123456", signer: signer)
+        XCTAssertEqual(request.url, advertised)
+        let recorded = await signer.recordedBodies()
+        XCTAssertEqual(try bodyData(request), recorded.first)
+    }
+
 }
