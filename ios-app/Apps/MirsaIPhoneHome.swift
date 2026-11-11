@@ -145,13 +145,13 @@ struct MirsaIPhoneHome<Menu: View>: View {
         GeometryReader { geo in
             let iconSide: CGFloat = min(64, (geo.size.width - 2 * 26 - 3 * 24) / 4)
             let rowHeight = iconSide + 34
-            let gridHeight = max(rowHeight, geo.size.height - 70 - 48 - 108)
+            let gridHeight = max(rowHeight, geo.size.height - 44 - 12 - 48 - 108)
             let rows = max(1, Int(gridHeight / (rowHeight + 12)))
             let capacity = rows * 4
             let ids = gridIDs
             let pages = max(1, (ids.count + capacity - 1) / capacity)
             VStack(spacing: 0) {
-                topBar.frame(height: 62)
+                topBar.frame(height: 44)
                 TabView(selection: $page) {
                     ForEach(0..<pages, id: \.self) { p in
                         VStack(spacing: 0) {
@@ -161,6 +161,8 @@ struct MirsaIPhoneHome<Menu: View>: View {
                                 }
                             }
                             .padding(.horizontal, 26)
+                            // Room for the red badge on the first row: TabView pages clip their content.
+                            .padding(.top, 12)
                             if apps.isEmpty && p == 0 {
                                 Text(MirsaIPhoneText.empty).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
                                     .shadow(color: .black.opacity(0.4), radius: 3).padding(.top, 28)
