@@ -6,6 +6,8 @@ import UIKit
 enum MirsaFeatures {
     /// Owner-approved production attachments, verified against the live contract.
     static let chatAttachments21 = true
+    /// .zip / .deb / .dylib chat attachments (5 MiB each). OFF until Kat confirms the server rollout.
+    static let binaryAttachmentsEnabled = false
 }
 
 @MainActor enum ChatAttachmentConfig {
@@ -52,6 +54,7 @@ struct ChatAttachmentError: Error, Equatable {
         case (403, _): return tr("This device could not be verified. Reopen Mirsa and try again.", "ما قدرنا نتحقق من هالجهاز. افتح مرسى من جديد وجرّب.", ckb: "ئەم ئامێرە پشتڕاست نەکرایەوە. میرسا دووبارە بکەرەوە.", kmr: "Ev cihaz nehat piştrastkirin. Mirsa ji nû ve veke.")
         case (404, _): return tr("This attachment or request was not found.", "المرفق أو الطلب مو موجود.", ckb: "ئەم هاوپێچە یان داواکارییە نەدۆزرایەوە.", kmr: "Ev pêvek an daxwaz nehat dîtin.")
         case (410, _): return tr("This attachment expired. Upload it again.", "صلاحية المرفق خلصت. ارفعه من جديد.", ckb: "ئەم هاوپێچە بەسەرچووە. دووبارە باری بکەرەوە.", kmr: "Dema vê pêvekê qediya. Dîsa bar bike.")
+        case (422, "attachment_type") where MirsaFeatures.binaryAttachmentsEnabled: return tr("Only photos, .txt, .json, .zip, .deb and .dylib files, or https links.", "بس صور، أو ملفات ‎.txt‎ و ‎.json‎ و ‎.zip‎ و ‎.deb‎ و ‎.dylib‎، أو روابط https.", ckb: "تەنها وێنە، فایلی ‎.txt‎، ‎.json‎، ‎.zip‎، ‎.deb‎ و ‎.dylib‎، یان بەستەری https.", kmr: "Tenê wêne, pelên .txt, .json, .zip, .deb û .dylib, an girêdanên https.")
         case (422, "attachment_type"): return tr("Only photos, .txt and .json files, or https links.", "بس صور، أو ملفات ‎.txt‎ و ‎.json‎، أو روابط https.", ckb: "تەنها وێنە، فایلی ‎.txt‎ و ‎.json‎، یان بەستەری https.", kmr: "Tenê wêne, pelên .txt û .json, an girêdanên https.")
         case (422, "attachment_url"): return tr("This link is not allowed. Use a public https page, not a download.", "هالرابط مو مسموح. استعمل صفحة https عامة، مو ملف تحميل.", ckb: "ئەم بەستەرە ڕێگەپێدراو نییە. پەڕەیەکی گشتی https بەکاربهێنە، نەک داگرتن.", kmr: "Ev girêdan nayê qebûlkirin. Rûpeleke giştî ya https bi kar bîne, ne daxistinek.")
         case (422, "attachment_utf8"): return tr("The file must be UTF-8 text.", "لازم يكون الملف نص UTF-8.", ckb: "فایلەکە دەبێت دەقی UTF-8 بێت.", kmr: "Pel divê nivîsa UTF-8 be.")
@@ -59,6 +62,7 @@ struct ChatAttachmentError: Error, Equatable {
         case (422, "attachment_size"): return tr("The attachment is too large.", "المرفق كبير كتير.", ckb: "هاوپێچەکە زۆر گەورەیە.", kmr: "Pêvek pir mezin e.")
         case (422, "bad_attachment_ids"): return tr("These attachments can't be sent together. Remove and add them again.", "ما فينا نبعت هالمرفقات سوا. شيلهم وضيفهم من جديد.", ckb: "ناتوانرێت ئەم هاوپێچانە پێکەوە بنێردرێن. لایان ببە و دووبارە زیادیان بکە.", kmr: "Ev pêvek bi hev re nayên şandin. Rake û dîsa zêde bike.")
         case (422, _): return tr("This attachment is not valid.", "هالمرفق مو صالح.", ckb: "ئەم هاوپێچە دروست نییە.", kmr: "Ev pêvek ne derbasdar e.")
+        case (409, "attachment_storage_limit") where MirsaFeatures.binaryAttachmentsEnabled: return tr("Attachment storage for this device is full (20 MB). Remove older drafts or wait until they expire (24 hours).", "مساحة المرفقات لهالجهاز امتلت (20 ميغا). شيل مسودات قديمة أو استنى لتنتهي صلاحيتها (24 ساعة).", ckb: "شوێنی هاوپێچەکانی ئەم ئامێرە پڕ بووە (20 MB). ڕەشنووسە کۆنەکان لابەرە یان چاوەڕێ بکە تا بەسەردەچن (24 کاتژمێر).", kmr: "Cihê pêvekan li ser vê cihazê tije ye (20 MB). Pêşnûmeyên kevn rake an li benda qedandina wan bimîne (24 demjimêr).")
         case (409, "attachment_storage_limit"): return tr("Attachment storage is full on this device. Remove older drafts or wait until they expire (24 hours).", "مساحة المرفقات لهالجهاز امتلت. شيل مسودات قديمة أو استنى لتنتهي صلاحيتها (24 ساعة).", ckb: "شوێنی هاوپێچەکانی ئەم ئامێرە پڕ بووە. ڕەشنووسە کۆنەکان لابەرە یان چاوەڕێ بکە تا بەسەردەچن (24 کاتژمێر).", kmr: "Cihê pêvekan li ser vê cihazê tije ye. Pêşnûmeyên kevn rake an li benda qedandina wan bimîne (24 demjimêr).")
         case (409, "attachment_in_use"): return tr("This attachment is already part of a sent message.", "هالمرفق صار جزء من رسالة انبعتت.", ckb: "ئەم هاوپێچە بەشێکە لە نامەیەکی نێردراو.", kmr: "Ev pêvek jixwe beşek ji peyameke şandî ye.")
         case (409, _): return tr("This attachment conflicts with an earlier one. Upload it again.", "هالمرفق متعارض مع واحد قبله. ارفعه من جديد.", ckb: "ئەم هاوپێچە لەگەڵ یەکێکی پێشوو ناکۆکە. دووبارە باری بکەرەوە.", kmr: "Ev pêvek bi yekî berê re li hev nake. Dîsa bar bike.")
@@ -74,14 +78,20 @@ struct ChatAttachmentError: Error, Equatable {
 enum ChatAttachmentPayload: Equatable {
     case image(jpeg: Data, name: String)
     case text(data: Data, name: String, mime: String)
+    /// .zip / .deb / .dylib, uploaded as kind=file. Stored opaque; never extracted, loaded or run.
+    case binary(data: Data, name: String, mime: String)
     case link(url: URL, name: String)
 
     var kind: String {
-        switch self { case .image: return "image"; case .text: return "file"; case .link: return "link" }
+        switch self { case .image: return "image"; case .text, .binary: return "file"; case .link: return "link" }
     }
     var name: String {
-        switch self { case .image(_, let n), .text(_, let n, _), .link(_, let n): return n }
+        switch self { case .image(_, let n), .text(_, let n, _), .binary(_, let n, _), .link(_, let n): return n }
     }
+    var byteCount: Int? {
+        switch self { case .image(let d, _), .text(let d, _, _), .binary(let d, _, _): return d.count; case .link: return nil }
+    }
+    var isBinary: Bool { if case .binary = self { return true }; return false }
 }
 
 enum ChatAttachmentReadResult: Equatable {
@@ -128,17 +138,44 @@ enum ChatAttachmentImage {
     /// Payload per uploaded ID, in memory only, so 410 can offer Upload again.
     private(set) var payloads: [UUID: ChatAttachmentPayload] = [:]
     private let readCache = NSCache<NSUUID, NSData>()
+    /// Binary uploads go one at a time.
+    private var binaryBusy = false
+    private var binaryWaiters: [CheckedContinuation<Void, Never>] = []
+
+    private func acquireBinarySlot() async {
+        if !binaryBusy { binaryBusy = true; return }
+        await withCheckedContinuation { binaryWaiters.append($0) }
+    }
+    private func releaseBinarySlot() {
+        if binaryWaiters.isEmpty { binaryBusy = false } else { binaryWaiters.removeFirst().resume() }
+    }
+
+    nonisolated static func isBinaryMime(_ mime: String?) -> Bool {
+        guard let mime else { return false }
+        return ChatAttachmentRules.binaryMimes.values.contains(mime.lowercased())
+    }
 
     func put(_ payload: ChatAttachmentPayload, threadID: UUID) async throws -> ChatAttachmentMeta {
+        if payload.isBinary {
+            guard MirsaFeatures.binaryAttachmentsEnabled || ChatAttachmentConfig.fixtureUI else { throw ChatAttachmentError(status: 422, code: "attachment_type") }
+            await acquireBinarySlot()
+            defer { releaseBinarySlot() }
+            return try await putNow(payload, threadID: threadID)
+        }
+        return try await putNow(payload, threadID: threadID)
+    }
+
+    private func putNow(_ payload: ChatAttachmentPayload, threadID: UUID) async throws -> ChatAttachmentMeta {
         if ChatAttachmentConfig.fixtureUI && !isEnabled { return remember(fixtureMeta(payload), payload) }
         var body: [String: Any] = ["action": "chat-attachment-put", "threadID": threadID.uuidString.lowercased(),
                                    "kind": payload.kind, "name": ChatAttachmentRules.safeName(payload.name)]
         switch payload {
         case .image(let jpeg, _): body["mime"] = "image/jpeg"; body["base64"] = jpeg.base64EncodedString()
-        case .text(let data, _, let mime): body["mime"] = mime; body["base64"] = data.base64EncodedString()
+        case .text(let data, _, let mime), .binary(let data, _, let mime): body["mime"] = mime; body["base64"] = data.base64EncodedString()
         case .link(let url, _): body["url"] = url.absoluteString
         }
-        let (data, _) = try await post(body, maxBytes: 64 * 1024)
+        // 5 MiB decoded is ~7 MB of JSON: give the upload more time on slow connections.
+        let (data, _) = try await post(body, maxBytes: 64 * 1024, timeout: payload.isBinary ? 180 : 60)
         struct W: Decodable { let attachment: ChatAttachmentMeta; let replayed: Bool? }
         guard let w = try? JSONDecoder().decode(W.self, from: data) else { throw ChatAttachmentError(status: 503, code: "attachment_unavailable") }
         return remember(w.attachment, payload)
@@ -148,16 +185,19 @@ enum ChatAttachmentImage {
     func read(_ id: UUID, threadID: UUID) async throws -> ChatAttachmentReadResult {
         if let c = readCache.object(forKey: id as NSUUID), let mime = known[id]?.mime { return .bytes(c as Data, mime: mime) }
         if ChatAttachmentConfig.fixtureUI && !isEnabled, let p = payloads[id] {
-            switch p { case .image(let d, _): return .bytes(d, mime: "image/jpeg"); case .text(let d, _, let m): return .bytes(d, mime: m); case .link(let u, _): return .link(u) }
+            switch p { case .image(let d, _): return .bytes(d, mime: "image/jpeg"); case .text(let d, _, let m), .binary(let d, _, let m): return .bytes(d, mime: m); case .link(let u, _): return .link(u) }
         }
+        let binaryOK = MirsaFeatures.binaryAttachmentsEnabled
         let (data, http) = try await post(["action": "chat-attachment-read", "id": id.uuidString.lowercased(), "threadID": threadID.uuidString.lowercased()],
-                                          maxBytes: ChatAttachmentRules.imageMaxBytes + 1024)
+                                          maxBytes: (binaryOK ? ChatAttachmentRules.binaryMaxBytes : ChatAttachmentRules.imageMaxBytes) + 1024,
+                                          timeout: binaryOK ? 180 : 60)
         let mime = (http.mimeType ?? "").lowercased()
         if mime == "application/json", let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], o["contextOnly"] as? Bool == true,
            let s = o["url"] as? String, case .success(let url) = ChatAttachmentRules.validateLink(s) {
             return .link(url)
         }
-        guard ["image/jpeg", "text/plain", "application/json"].contains(mime) else { throw ChatAttachmentError(status: 422, code: "attachment_type") }
+        guard ["image/jpeg", "text/plain", "application/json"].contains(mime) || (binaryOK && Self.isBinaryMime(mime)) else { throw ChatAttachmentError(status: 422, code: "attachment_type") }
+        if Self.isBinaryMime(mime) { return .bytes(data, mime: mime) } // not cached: up to 5 MiB
         readCache.setObject(data as NSData, forKey: id as NSUUID)
         return .bytes(data, mime: mime)
     }
@@ -182,20 +222,20 @@ enum ChatAttachmentImage {
 
     private func fixtureMeta(_ p: ChatAttachmentPayload) -> ChatAttachmentMeta {
         let size: Int64?
-        switch p { case .image(let d, _): size = Int64(d.count); case .text(let d, _, _): size = Int64(d.count); case .link: size = nil }
+        switch p { case .image(let d, _): size = Int64(d.count); case .text(let d, _, _), .binary(let d, _, _): size = Int64(d.count); case .link: size = nil }
         var url: String?
         if case .link(let u, _) = p { url = u.absoluteString }
-        let mime: String? = { switch p { case .image: return "image/jpeg"; case .text(_, _, let m): return m; case .link: return nil } }()
+        let mime: String? = { switch p { case .image: return "image/jpeg"; case .text(_, _, let m), .binary(_, _, let m): return m; case .link: return nil } }()
         return ChatAttachmentMeta(id: UUID(), kind: p.kind, name: ChatAttachmentRules.safeName(p.name), mime: mime, size: size,
                                   expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400)), available: true, url: url)
     }
 
     /// One request with the chat's existing credentials. Errors are {error:<code>} with 401/403/404/410/422/409/503.
-    private func post(_ body: [String: Any], maxBytes: Int) async throws -> (Data, HTTPURLResponse) {
+    private func post(_ body: [String: Any], maxBytes: Int, timeout: TimeInterval = 60) async throws -> (Data, HTTPURLResponse) {
         guard let url = ChatAttachmentConfig.endpoint else { throw ChatAttachmentError.disabled }
         let c: ForgeFixCredentials
         do { c = try await ForgeClient.fixToken() } catch { throw ChatAttachmentError(status: 401, code: "session") }
-        var req = URLRequest(url: url, timeoutInterval: 60)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = "POST"
         for (k, v) in Self.headers(c) { req.setValue(v, forHTTPHeaderField: k) }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -320,7 +360,9 @@ enum ChatAttachmentText {
     static var comingSoon: String { tr("Attachment upload is coming soon. Your text still sends.", "رفع المرفقات جاي قريباً. نصّك بينبعت عادي.", ckb: "بارکردنی هاوپێچ بەم زووانە دێت. دەقەکەت هەر دەنێردرێت.", kmr: "Barkirina pêvekan nêzîk e. Nivîsa te dîsa tê şandin.") }
     static var needsUpload: String { tr("Wait for uploads to finish, or remove the unavailable ones.", "استنى ليخلص الرفع، أو شيل المرفقات المو متاحة.", ckb: "چاوەڕێ بکە تا بارکردن تەواو دەبێت، یان ئەوانەی بەردەست نین لابە.", kmr: "Li benda qedandina barkirinê bimîne, an yên ne berdest rake.") }
     /// Short in-app explanation of the feature (shown above the chips).
-    static var help: String { tr("Attachments help Mirsa understand your request: up to 3 photos, .txt/.json files (max 256 KB) or https links. Links are context only and never opened. Attachments expire after 24 hours.", "المرفقات بتساعد مرسى يفهم طلبك: لحد 3 صور، ملفات ‎.txt/.json‎ (لحد 256 KB) أو روابط https. الروابط للسياق بس وما بتنفتح. المرفقات بتنتهي بعد 24 ساعة.", ckb: "هاوپێچەکان یارمەتی میرسا دەدەن داواکارییەکەت تێبگات: تا 3 وێنە، فایلی ‎.txt/.json‎ (تا 256 KB) یان بەستەری https. بەستەرەکان تەنها بۆ زانیارین و ناکرێنەوە. هاوپێچەکان دوای 24 کاتژمێر بەسەردەچن.", kmr: "Pêvek alîkariya Mirsa dikin ku daxwaza te fêm bike: heta 3 wêne, pelên .txt/.json (herî zêde 256 KB) an girêdanên https. Girêdan tenê ji bo çarçoveyê ne û nayên vekirin. Pêvek piştî 24 demjimêran diqedin.") }
+    static var help: String { MirsaFeatures.binaryAttachmentsEnabled ? helpBinary : helpText }
+    static var helpBinary: String { tr("Attachments help Mirsa understand your request: up to 3 per message, photos, .txt/.json files (max 256 KB), .zip/.deb/.dylib files (max 5 MB each) or https links. Files are stored privately, never opened or run, and expire after 24 hours. Up to 20 MB per device.", "المرفقات بتساعد مرسى يفهم طلبك: لحد 3 بالرسالة، صور، ملفات ‎.txt/.json‎ (لحد 256 KB)، ملفات ‎.zip/.deb/.dylib‎ (لحد 5 ميغا للملف) أو روابط https. الملفات بتنحفظ بشكل خاص، ما بتنفتح ولا بتشتغل، وبتنحذف بعد 24 ساعة. لحد 20 ميغا للجهاز.", ckb: "هاوپێچەکان یارمەتی میرسا دەدەن داواکارییەکەت تێبگات: تا 3 بۆ هەر نامەیەک، وێنە، فایلی ‎.txt/.json‎ (تا 256 KB)، فایلی ‎.zip/.deb/.dylib‎ (تا 5 MB بۆ هەر فایلێک) یان بەستەری https. فایلەکان بە تایبەتی هەڵدەگیرێن، ناکرێنەوە و کار ناکەن، و دوای 24 کاتژمێر بەسەردەچن. تا 20 MB بۆ هەر ئامێرێک.", kmr: "Pêvek alîkariya Mirsa dikin ku daxwaza te fêm bike: heta 3 di peyamekê de, wêne, pelên .txt/.json (herî zêde 256 KB), pelên .zip/.deb/.dylib (her yek herî zêde 5 MB) an girêdanên https. Pel bi taybetî tên tomarkirin, nayên vekirin û naxebitin, û piştî 24 demjimêran diqedin. Heta 20 MB ji bo her cihazekê.") }
+    static var helpText: String { tr("Attachments help Mirsa understand your request: up to 3 photos, .txt/.json files (max 256 KB) or https links. Links are context only and never opened. Attachments expire after 24 hours.", "المرفقات بتساعد مرسى يفهم طلبك: لحد 3 صور، ملفات ‎.txt/.json‎ (لحد 256 KB) أو روابط https. الروابط للسياق بس وما بتنفتح. المرفقات بتنتهي بعد 24 ساعة.", ckb: "هاوپێچەکان یارمەتی میرسا دەدەن داواکارییەکەت تێبگات: تا 3 وێنە، فایلی ‎.txt/.json‎ (تا 256 KB) یان بەستەری https. بەستەرەکان تەنها بۆ زانیارین و ناکرێنەوە. هاوپێچەکان دوای 24 کاتژمێر بەسەردەچن.", kmr: "Pêvek alîkariya Mirsa dikin ku daxwaza te fêm bike: heta 3 wêne, pelên .txt/.json (herî zêde 256 KB) an girêdanên https. Girêdan tenê ji bo çarçoveyê ne û nayên vekirin. Pêvek piştî 24 demjimêran diqedin.") }
     static var linkHelp: String { tr("Paste a public https link. Mirsa keeps it as context only and never opens or downloads it. App, archive and installer files (IPA, APK, ZIP, DEB…) are not accepted.", "الصق رابط https عام. مرسى بيحتفظ فيه للسياق بس، وما بيفتحه ولا بينزّله. ملفات التطبيقات والأرشيف والتثبيت (IPA، APK، ZIP، DEB…) مو مقبولة.", ckb: "بەستەرێکی گشتی https بلکێنە. میرسا تەنها وەک زانیاری هەڵیدەگرێت و هەرگیز نایکاتەوە یان دایناگرێت. فایلی ئەپ، ئەرشیف و دامەزراندن (IPA، APK، ZIP، DEB…) وەرناگیرێن.", kmr: "Girêdaneke giştî ya https bi cih bike. Mirsa wê tenê ji bo çarçoveyê digire û qet venake an danaxe. Pelên sepan, arşîv û sazkirinê (IPA, APK, ZIP, DEB…) nayên qebûlkirin.") }
 
     static func link(_ p: ChatAttachmentRules.LinkProblem) -> String {
@@ -335,11 +377,16 @@ enum ChatAttachmentText {
 
     static func file(_ p: ChatAttachmentRules.FileProblem) -> String {
         switch p {
+        case .type where MirsaFeatures.binaryAttachmentsEnabled: return tr("Only .txt, .json, .zip, .deb and .dylib files.", "بس ملفات ‎.txt‎ و ‎.json‎ و ‎.zip‎ و ‎.deb‎ و ‎.dylib‎.", ckb: "تەنها فایلی ‎.txt‎، ‎.json‎، ‎.zip‎، ‎.deb‎ و ‎.dylib‎.", kmr: "Tenê pelên .txt, .json, .zip, .deb û .dylib.")
         case .type: return tr("Only .txt and .json files.", "بس ملفات ‎.txt‎ و ‎.json‎.", ckb: "تەنها فایلی ‎.txt‎ و ‎.json‎.", kmr: "Tenê pelên .txt û .json.")
         case .size: return tr("The file must be under 256 KB.", "لازم يكون الملف أقل من 256 KB.", ckb: "فایلەکە دەبێت کەمتر لە 256 KB بێت.", kmr: "Pel divê ji 256 KB kêmtir be.")
         case .utf8, .control: return ChatAttachmentError(status: 422, code: "attachment_utf8").message
         case .json: return ChatAttachmentError(status: 422, code: "attachment_json").message
+        case .binarySize: return tr("The file must be 5 MB or smaller.", "لازم يكون الملف 5 ميغا أو أقل.", ckb: "فایلەکە دەبێت 5 MB یان کەمتر بێت.", kmr: "Pel divê 5 MB an kêmtir be.")
+        case .signature: return tr("This file doesn't look like a real .zip, .deb or .dylib.", "هالملف ما بيبين إنه ‎.zip‎ أو ‎.deb‎ أو ‎.dylib‎ حقيقي.", ckb: "ئەم فایلە وەک ‎.zip‎، ‎.deb‎ یان ‎.dylib‎ ی ڕاستەقینە دیار نییە.", kmr: "Ev pel wekî .zip, .deb an .dylib a rastîn xuya nake.")
         }
     }
+    static var downloading: String { tr("Downloading…", "عم ينزل…", ckb: "دادەگیرێت…", kmr: "Tê daxistin…") }
+    static var downloadFailed: String { tr("Couldn't download the file.", "ما قدرنا ننزّل الملف.", ckb: "فایلەکە دانەگیرا.", kmr: "Pel nehat daxistin.") }
     static var imageFailed: String { tr("This photo could not be prepared.", "ما قدرنا نجهّز هالصورة.", ckb: "ئەم وێنەیە ئامادە نەکرا.", kmr: "Ev wêne nehat amadekirin.") }
 }

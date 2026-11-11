@@ -12,7 +12,11 @@ struct ChatDraftAttachmentChip: View {
     let onUploadAgain: () -> Void
 
     private var icon: String {
-        switch item.payload { case .image: return "photo"; case .text: return "doc.text"; case .link: return "link" }
+        switch item.payload { case .image: return "photo"; case .text: return "doc.text"; case .binary: return "doc.zipper"; case .link: return "link" }
+    }
+    private var sizeText: String? {
+        guard case .binary = item.payload, let n = item.payload.byteCount else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
     }
     private var problem: String? {
         switch item.state { case .failed(let m), .unavailable(let m): return m; default: return nil }
@@ -26,6 +30,7 @@ struct ChatDraftAttachmentChip: View {
                 Image(systemName: icon).font(.system(size: 12, weight: .semibold))
             }
             Text(item.payload.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle).frame(maxWidth: 140, alignment: .leading)
+            if let sizeText { Text(sizeText).font(.system(size: 11)).foregroundStyle(MirsaChatTheme.muted).lineLimit(1) }
             switch item.state {
             case .uploading: ProgressView().controlSize(.mini).tint(.white)
             case .ready: Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(.green)
@@ -63,6 +68,10 @@ struct ChatAttachmentMetaChip: View {
     @State private var image: UIImage?
     @State private var text: String?
     @State private var showText = false
+    @State private var shareURL: URL?
+    @State private var downloading = false
+    @State private var downloadProblem: String?
+    private var isBinary: Bool { AttachmentUploader.isBinaryMime(meta.mime) }
 
     private var unavailable: Bool { meta.isExpired() }
     private var sizeText: String? { meta.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } }
@@ -76,6 +85,9 @@ struct ChatAttachmentMetaChip: View {
             }
         }
         .task(id: meta.id) { await loadImage() }
+        .sheet(item: Binding(get: { shareURL.map(ChatShareFile.init) }, set: { if $0 == nil { shareURL = nil } })) { f in
+            ChatActivityView(items: [f.url]).ignoresSafeArea()
+        }
         .sheet(isPresented: $showText) {
             NavigationStack {
                 ScrollView { Text(text ?? "").font(.system(.footnote, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
@@ -89,11 +101,12 @@ struct ChatAttachmentMetaChip: View {
 
     private var chip: some View {
         HStack(spacing: 8) {
-            Image(systemName: unavailable ? "clock.badge.xmark" : meta.kind == "link" ? "link" : meta.kind == "image" ? "photo" : "doc.text")
+            Image(systemName: unavailable ? "clock.badge.xmark" : meta.kind == "link" ? "link" : meta.kind == "image" ? "photo" : isBinary ? "doc.zipper" : "doc.text")
                 .font(.system(size: 13, weight: .semibold))
             VStack(alignment: .leading, spacing: 2) {
                 Text(meta.kind == "link" ? (meta.url.flatMap { URL(string: $0)?.host } ?? meta.name ?? "") : (meta.name ?? "")).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                Text(unavailable ? ChatAttachmentText.unavailable : meta.kind == "link" ? ChatAttachmentText.contextOnly : (sizeText ?? ""))
+                Text(unavailable ? ChatAttachmentText.unavailable : meta.kind == "link" ? ChatAttachmentText.contextOnly
+                     : downloading ? ChatAttachmentText.downloading : (downloadProblem ?? sizeText ?? ""))
                     .font(.system(size: 11)).foregroundStyle(MirsaChatTheme.muted)
             }
         }
@@ -102,7 +115,11 @@ struct ChatAttachmentMetaChip: View {
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5))
         .contentShape(Rectangle())
-        .onTapGesture { if meta.kind == "file", !unavailable { Task { await loadText() } } }
+        .onTapGesture {
+            guard meta.kind == "file", !unavailable else { return }
+            if isBinary { if MirsaFeatures.binaryAttachmentsEnabled, !downloading { Task { await download() } } }
+            else { Task { await loadText() } }
+        }
         .contextMenu {
             if meta.kind == "link", let u = meta.url { Button { UIPasteboard.general.string = u } label: { Label(ChatAttachmentText.copyLink, systemImage: "doc.on.doc") } }
         }
@@ -114,6 +131,23 @@ struct ChatAttachmentMetaChip: View {
         guard meta.kind == "image", !unavailable, image == nil else { return }
         guard AttachmentUploader.shared.isEnabled || ChatAttachmentConfig.fixtureUI else { return }
         if case .bytes(let d, _)? = try? await AttachmentUploader.shared.read(meta.id, threadID: threadID) { image = UIImage(data: d) }
+    }
+    /// .zip / .deb / .dylib: downloaded through chat-attachment-read into a private temp file and handed to the share sheet.
+    /// Never opened, extracted or loaded here.
+    private func download() async {
+        guard AttachmentUploader.shared.isEnabled || ChatAttachmentConfig.fixtureUI else { return }
+        downloading = true; downloadProblem = nil
+        defer { downloading = false }
+        guard case .bytes(let d, let mime)? = try? await AttachmentUploader.shared.read(meta.id, threadID: threadID),
+              AttachmentUploader.isBinaryMime(mime) else { downloadProblem = ChatAttachmentText.downloadFailed; return }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirsa-attachments/\(meta.id.uuidString)", isDirectory: true)
+        let name = ChatAttachmentRules.safeName(meta.name ?? "attachment")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(name)
+            try d.write(to: url, options: [.atomic, .completeFileProtection])
+            shareURL = url
+        } catch { downloadProblem = ChatAttachmentText.downloadFailed }
     }
     private func loadText() async {
         guard AttachmentUploader.shared.isEnabled || ChatAttachmentConfig.fixtureUI else { return }
@@ -184,7 +218,7 @@ struct ChatAttachmentPickers: ViewModifier {
         if enabled {
             content
                 .photosPicker(isPresented: $showPhotos, selection: $attachPhoto, matching: .images)
-                .fileImporter(isPresented: $showFiles, allowedContentTypes: [.plainText, .json], allowsMultipleSelection: false) { handleFile($0) }
+                .fileImporter(isPresented: $showFiles, allowedContentTypes: Self.fileTypes, allowsMultipleSelection: false) { handleFile($0) }
                 .sheet(isPresented: $showLink) {
                     ChatLinkAttachmentSheet { url in add(.link(url: url, name: ChatAttachmentRules.linkName(url))) }
                 }
@@ -209,11 +243,27 @@ struct ChatAttachmentPickers: ViewModifier {
         drafts.add(payload, thread: threadID)
     }
 
+    /// .txt / .json always; .zip / .deb / .dylib only with MirsaFeatures.binaryAttachmentsEnabled.
+    /// No new exported UTIs: dynamic types by extension, and .data as a fallback when iOS knows none
+    /// (the extension and size are still checked below, so .data does not mean any file).
+    static var fileTypes: [UTType] {
+        var types: [UTType] = [.plainText, .json]
+        guard MirsaFeatures.binaryAttachmentsEnabled else { return types }
+        types.append(.zip)
+        let extra = ["deb", "dylib"].map { UTType(filenameExtension: $0) }
+        types.append(contentsOf: extra.compactMap { $0 })
+        if extra.contains(where: { $0 == nil }) { types.append(.data) }
+        return types
+    }
+
     /// Only .txt / .json, at most 256 KiB, strict UTF-8 without control bytes, JSON must parse.
     private func handleFile(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if MirsaFeatures.binaryAttachmentsEnabled, ChatAttachmentRules.binaryMime(forName: url.lastPathComponent) != nil {
+            handleBinary(url); return
+        }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         guard size <= ChatAttachmentRules.textMaxBytes else { note = ChatAttachmentText.file(.size); return }
         guard let data = try? Data(contentsOf: url) else { note = ChatAttachmentText.file(.type); return }
@@ -222,6 +272,38 @@ struct ChatAttachmentPickers: ViewModifier {
         case .failure(let problem): note = ChatAttachmentText.file(problem)
         }
     }
+}
+
+extension ChatAttachmentPickers {
+    /// Size is checked before reading; at most 5 MiB + 1 byte is ever read, then extension and container family.
+    fileprivate func handleBinary(_ url: URL) {
+        let name = url.lastPathComponent
+        if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size > ChatAttachmentRules.binaryMaxBytes {
+            note = ChatAttachmentText.file(.binarySize); return
+        }
+        guard let h = try? FileHandle(forReadingFrom: url) else { note = ChatAttachmentText.file(.type); return }
+        defer { try? h.close() }
+        guard let data = try? h.read(upToCount: ChatAttachmentRules.binaryMaxBytes + 1) else { note = ChatAttachmentText.file(.type); return }
+        switch ChatAttachmentRules.validateBinaryFile(name: name, data: data) {
+        case .success(let ok): addBinary(.binary(data: data, name: ok.name, mime: ok.mime))
+        case .failure(let p): note = ChatAttachmentText.file(p)
+        }
+    }
+
+    fileprivate func addBinary(_ payload: ChatAttachmentPayload) {
+        let drafts = ChatAttachmentDrafts.shared
+        guard drafts.canAdd(threadID) else { return }
+        note = nil
+        drafts.add(payload, thread: threadID)
+    }
+}
+
+struct ChatShareFile: Identifiable { let url: URL; var id: String { url.path } }
+
+struct ChatActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
 #if DEBUG
@@ -290,6 +372,25 @@ enum ChatAttachmentSelfTest {
         expect(ChatAttachmentRules.textFileProblem(name: "a.txt", data: Data(repeating: 0x41, count: 262_145)) == .size, "size")
         let ids = (0..<5).map { _ in UUID() }
         expect(ChatAttachmentRules.sendIDs(ids + ids).count == 3, "max 3 unique")
+        // Binary files (flag-independent rules).
+        let zip = Data([0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0])
+        let deb = Data("!<arch>\ndebian-binary".utf8)
+        let dylib = Data([0xCF, 0xFA, 0xED, 0xFE, 7, 0, 0, 1])
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: zip) == nil, "zip ok")
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.DEB", data: deb) == nil, "deb ok")
+        expect(ChatAttachmentRules.binaryFileProblem(name: "libx.dylib", data: dylib) == nil, "dylib ok")
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: deb) == .signature, "zip signature")
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.dylib", data: zip) == .signature, "dylib signature")
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.ipa", data: zip) == .type, "ipa type")
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: Data()) == .binarySize, "empty")
+        var big = zip; big.append(Data(count: 5_242_880 - zip.count))
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: big) == nil, "5 MiB exact")
+        big.append(0)
+        expect(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: big) == .binarySize, "5 MiB + 1")
+        expect(ChatAttachmentRules.binaryMime(forName: "x.deb") == "application/vnd.debian.binary-package", "deb mime")
+        expect(ChatAttachmentRules.binaryMime(forName: "x.dylib") == "application/x-mach-binary", "dylib mime")
+        expect(ChatAttachmentRules.binaryMime(forName: "x.zip") == "application/zip", "zip mime")
+        expect(!MirsaFeatures.binaryAttachmentsEnabled, "binary flag off")
         return failures
     }
 }
