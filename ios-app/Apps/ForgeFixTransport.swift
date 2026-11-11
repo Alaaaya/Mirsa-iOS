@@ -66,7 +66,7 @@ extension ForgeClient {
         request.setValue(credentials.deviceID, forHTTPHeaderField: "x-mirsa-device")
         request.setValue(credentials.deviceToken, forHTTPHeaderField: "x-mirsa-device-token")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ForgeClient.withDeviceLink(body))
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil; config.urlCache = nil
         let session = URLSession(configuration: config, delegate: OTANoRedirect(), delegateQueue: nil)

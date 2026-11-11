@@ -395,6 +395,28 @@ pub unsafe extern "C" fn al_device_respring(
     }
 }
 
+/// Read the device UniqueDeviceID from lockdown over the pairing tunnel.
+/// On success writes a heap string to `out_udid` (free with al_string_free). Returns 0 on success, 1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn al_device_udid(
+    pairing_path: *const c_char,
+    out_udid: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        exploit::device_udid(pairing_path, out_udid, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(_) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr("Rust panic in al_device_udid".to_string());
+            }
+            1
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Target Host Configuration
 // ---------------------------------------------------------------------------

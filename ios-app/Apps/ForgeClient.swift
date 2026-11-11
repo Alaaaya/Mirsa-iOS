@@ -22,17 +22,14 @@ enum ForgeClient {
         return try await auth.token(forceRefresh: false)
     }
 
-    /// Random per-install ID kept in the Keychain (this device only, no hardware fingerprint). Without App Attest the server cannot prove it
-    /// belongs to a physical device; the server binds it to the signed-in account and limits new IDs per account and per IP instead.
-    static func deviceID() -> String {
-        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.alaa.mirsa.forge.device"]
-        var out: AnyObject?
-        var get = q; get[kSecReturnData as String] = true; get[kSecMatchLimit as String] = kSecMatchLimitOne
-        if SecItemCopyMatching(get as CFDictionary, &out) == errSecSuccess, let d = out as? Data, let s = String(data: d, encoding: .utf8), UUID(uuidString: s) != nil { return s }
-        let id = UUID().uuidString.lowercased()
-        var add = q; add[kSecValueData as String] = Data(id.utf8); add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(add as CFDictionary, nil)
-        return id
+    /// Random per-install ID (lowercase UUID, unchanged format). Kept in the Keychain so it survives updates and reinstalls;
+    /// see MirsaDeviceIdentity. Without App Attest the server cannot prove it belongs to a physical device.
+    static func deviceID() -> String { MirsaDeviceIdentity.deviceID() }
+
+    /// Adds the optional device_udid field only when MirsaFeatures.stableDeviceLink is ON and a UDID was read from lockdown.
+    static func withDeviceLink(_ body: [String: Any]) -> [String: Any] {
+        guard MirsaFeatures.stableDeviceLink, body["device_udid"] == nil, let udid = MirsaDeviceIdentity.storedUDID() else { return body }
+        var b = body; b["device_udid"] = udid; return b
     }
 
     static func failure(_ status: Int, _ data: Data) -> Failure {
@@ -65,7 +62,7 @@ enum ForgeClient {
         req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(deviceID(), forHTTPHeaderField: "x-mirsa-device")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try JSONSerialization.data(withJSONObject: withDeviceLink(body))
         let cfg = URLSessionConfiguration.ephemeral; cfg.httpCookieStorage = nil
         let session = URLSession(configuration: cfg, delegate: OTANoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
