@@ -17,8 +17,9 @@ public actor Authenticator {
         case failure(AuthenticationServiceError)
     }
 
-    private let signer: SAPSigner?
+    private let signer: SAPSigner
     private let deviceIdentifier: String
+    private let amd: StoreAMDProof
     private var endpoint: URL
     private var cookies: [Cookie]
     private var storeFront = ""
@@ -28,18 +29,14 @@ public actor Authenticator {
     /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
     public init(cookies: [Cookie] = []) async throws {
         deviceIdentifier = Configuration.deviceIdentifier
+        amd = StoreAMDProof(deviceIdentifier: Configuration.deviceIdentifier)
         let bag: Bag.BagOutput
         do { bag = try await Bag.fetchBag(redirectConfiguration: .disallow) }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .bag) }
         try bag.requireSupportedAuthentication()
         endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
-        // Fast Configurator authentication does not use SAP/AMD signatures.
-        if Self.isConfiguratorEndpoint(bag.authEndpoint) {
-            signer = nil
-        } else {
-            do { signer = try await SAPSigner.connect() }
-            catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
-        }
+        do { signer = try await SAPSigner.connect() }
+        catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
         self.cookies = cookies
     }
 
@@ -55,16 +52,26 @@ public actor Authenticator {
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
         var redirects = 0
-        for _ in 0 ..< 5 {
+        var handshake = StoreAMDHandshake(provider: amd)
+        // Freeze the serialized password body for this attempt (including 2FA).
+        // Every retry signs these exact bytes; only machine OTP headers refresh.
+        let signedBody = try Self.authenticationBody(email: email, password: password, code: code, deviceIdentifier: deviceIdentifier)
+        for _ in 0 ..< 8 {
             let request = try await Self.makeRequest(
                 endpoint: endpoint, email: email, password: password, code: code, cookies: cookies, deviceIdentifier: deviceIdentifier,
-                sapSigner: signer,
+                sapSigner: signer, serializedBody: signedBody, amdHeaders: try await amd.headers(),
             )
             let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
             let response: HTTPClient.Response
             do { response = try await client.execute(request: request, delegate: accumulator).futureResult.get() }
             catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
             let result = try parseResponse(response, email: email, password: password, code: code)
+            if response.status == .ok {
+                let data = response.body.map { Data($0.readableBytesView) } ?? Data()
+                let fields = (try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]) ?? [:]
+                if try await handshake.respond(fields: fields, action: response.headers.first(name: "X-Apple-AMD-Action"),
+                                               challenge: response.headers.first(name: "X-Apple-AMD-Data")) { continue }
+            }
             switch result {
             case let .success(account): return account
             case let .redirect(url):
@@ -109,34 +116,40 @@ public actor Authenticator {
         return try approvedEndpoint(comps.url.get())
     }
 
-    static func isConfiguratorEndpoint(_ endpoint: URL) -> Bool {
-        endpoint.scheme == "https" && endpoint.host == "auth.itunes.apple.com"
-            && endpoint.path == "/auth/v1/native/fast/"
+    static func authenticationBody(email: String, password: String, code: String, deviceIdentifier: String) throws -> Data {
+        try PropertyListSerialization.data(fromPropertyList: [
+            "appleId": email, "attempt": code.isEmpty ? "1" : "2", "guid": deviceIdentifier,
+            "password": password + code, "rmp": "0", "why": "signIn",
+        ], format: .xml, options: 0)
     }
 
     static func makeRequest(
         endpoint: URL, email: String, password: String, code: String, cookies: [Cookie], deviceIdentifier: String,
-        sapSigner: (any SAPRequestSigning)?,
+        sapSigner: any SAPRequestSigning, serializedBody: Data? = nil, amdHeaders: [String: String] = [:],
     ) async throws -> HTTPClient.Request {
-        let parameters: [String: String] = [
-            "appleId": email, "attempt": "\(code.isEmpty ? "1" : "2")", "guid": deviceIdentifier, "password": "\(password)\(code)",
-            "rmp": "0", "why": "signIn",
-        ]
-        let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
-        var headers: [(String, String)] = [("User-Agent", isConfiguratorEndpoint(endpoint) ? "Configurator/2.17" : Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
+        let data = try serializedBody ?? authenticationBody(email: email, password: password, code: code, deviceIdentifier: deviceIdentifier)
+        var headers: [(String, String)] = [("User-Agent", Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
         for item in cookies.buildCookieHeader(endpoint) {
             headers.append(item)
         }
         _ = try approvedEndpoint(endpoint)
-        if !isConfiguratorEndpoint(endpoint) {
-            guard let sapSigner else { throw AuthenticationServiceError(stage: .signing) }
-            let signature: Data
-            do { signature = try await sapSigner.sign(data) }
-            catch { throw AuthenticationServiceError.wrapping(error, stage: .signing) }
-            headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
+        let signature: Data
+        do { signature = try await sapSigner.sign(data) }
+        catch { throw AuthenticationServiceError.wrapping(error, stage: .signing) }
+        headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
+        for name in ["X-Apple-AMD", "X-Apple-AMD-M"] {
+            if let value = amdHeaders[name] {
+                guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else { throw StoreAMDError() }
+                headers.append((name, value))
+            }
         }
         APLogger.logRequest(method: "POST", url: endpoint.absoluteString, headers: headers)
         return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
+    }
+
+    static func requiresVerificationCode(_ fields: [String: Any], submittedCode: Bool) -> Bool {
+        !submittedCode && (fields["failureType"] as? String) == ""
+            && (fields["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message"
     }
 
     static func rejection(_ fields: [String: Any], status: Int, secrets: [String]) -> AuthenticationServiceError {
@@ -187,9 +200,7 @@ public actor Authenticator {
             return .failure(diagnostic)
         }
 
-        if let failureType = dic["failureType"] as? String, failureType.isEmpty, code.isEmpty,
-           let customerMessage = dic["customerMessage"] as? String, customerMessage == "MZFinance.BadLogin.Configurator_message"
-        {
+        if Self.requiresVerificationCode(dic, submittedCode: !code.isEmpty) {
             return .codeRequired
         }
 
