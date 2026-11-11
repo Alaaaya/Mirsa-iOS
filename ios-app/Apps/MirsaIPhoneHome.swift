@@ -321,74 +321,82 @@ struct MirsaIPhoneHome<Menu: View>: View {
     }
 
     // MARK: body
+    // Split into small pieces so the Swift type checker stays fast.
     var body: some View {
-        GeometryReader { geo in
-            let iconSide: CGFloat = min(64, (geo.size.width - 2 * 26 - 3 * 24) / 4)
-            let rowHeight = iconSide + 34
-            let gridHeight = max(rowHeight, geo.size.height - 44 - 12 - 48 - 108)
-            let rows = max(1, Int(gridHeight / (rowHeight + 12)))
-            let capacity = rows * 4
-            let ids = gridIDs
-            let pages = max(1, (ids.count + capacity - 1) / capacity)
-            let cell = (geo.size.width - 2 * 26 - 3 * 12) / 4
-            ZStack {
-                VStack(spacing: 0) {
-                    topBar.frame(height: 44)
-                    TabView(selection: $page) {
-                        ForEach(0..<pages, id: \.self) { p in
-                            VStack(spacing: 0) {
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                                    ForEach(Array(ids.dropFirst(p * capacity).prefix(capacity)), id: \.self) { id in
-                                        tile(id, side: iconSide, showLabel: true, cell: cell)
-                                    }
-                                }
-                                .padding(.horizontal, 26)
-                                // Room for the red badge on the first row: TabView pages clip their content.
-                                .padding(.top, 12)
-                                if apps.isEmpty && p == 0 {
-                                    Text(MirsaIPhoneText.empty).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
-                                        .shadow(color: .black.opacity(0.4), radius: 3).padding(.top, 28)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .contentShape(Rectangle())
-                            .onLongPressGesture(minimumDuration: 0.6) { if !editing { startEditing() } }
-                            // Empty space on a page: move there (end of this page).
-                            .dropDestination(for: String.self) { items, _ in
-                                guard editing, let dragged = items.first, canDrag(dragged) else { return false }
-                                move(dragged, toIndex: (p + 1) * capacity)
-                                if folderDragOut { closeFolder() }
-                                return true
-                            }
-                            .tag(p)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .onChange(of: page) { _, _ in flashDots() }
-                    .onChange(of: pages) { _, n in page = min(page, n - 1) }
-                    pageIndicator(pages: pages).frame(height: 48)
-                    dock(side: iconSide).padding(.horizontal, 10).padding(.bottom, 6)
-                }
-                if openFolderID != nil { folderOverlay(side: iconSide).transition(.opacity.combined(with: .scale(scale: 0.92))) }
+        GeometryReader { geo in homeContent(size: geo.size) }
+            .background { background.ignoresSafeArea() }
+            .overlay { if searching { searchOverlay.transition(.opacity) } }
+            .photosPicker(isPresented: $pickingPhoto, selection: $photo, matching: .images)
+            .onChange(of: photo) { _, item in if let item { Task { await saveWallpaper(item) } } }
+            .onAppear(perform: loadWallpaper)
+            .onDisappear { dotsTask?.cancel(); dragOutTask?.cancel() }
+            .modifier(deleteAlert)
+            .foregroundStyle(.white)
+            .environment(\.layoutDirection, .leftToRight)
+            .accessibilityIdentifier("mirsa-iphone-home")
+    }
+
+    private var deleteAlert: MirsaIPhoneDeleteAlert {
+        MirsaIPhoneDeleteAlert(pending: $pendingDelete, onConfirm: confirmDelete)
+    }
+
+    private func homeContent(size: CGSize) -> some View {
+        let iconSide: CGFloat = min(64, (size.width - 2 * 26 - 3 * 24) / 4)
+        let rowHeight = iconSide + 34
+        let gridHeight = max(rowHeight, size.height - 44 - 12 - 48 - 108)
+        let rows = max(1, Int(gridHeight / (rowHeight + 12)))
+        let capacity = rows * 4
+        let ids = gridIDs
+        let pages = max(1, (ids.count + capacity - 1) / capacity)
+        let cell = (size.width - 2 * 26 - 3 * 12) / 4
+        return ZStack {
+            VStack(spacing: 0) {
+                topBar.frame(height: 44)
+                homePages(ids: ids, pages: pages, capacity: capacity, side: iconSide, cell: cell)
+                pageIndicator(pages: pages).frame(height: 48)
+                dock(side: iconSide).padding(.horizontal, 10).padding(.bottom, 6)
+            }
+            if openFolderID != nil { folderOverlay(side: iconSide).transition(.opacity.combined(with: .scale(scale: 0.92))) }
+        }
+    }
+
+    private func homePages(ids: [String], pages: Int, capacity: Int, side: CGFloat, cell: CGFloat) -> some View {
+        TabView(selection: $page) {
+            ForEach(0..<pages, id: \.self) { p in
+                homePage(Array(ids.dropFirst(p * capacity).prefix(capacity)), index: p, capacity: capacity, side: side, cell: cell)
             }
         }
-        .background { background.ignoresSafeArea() }
-        .overlay { if searching { searchOverlay.transition(.opacity) } }
-        .photosPicker(isPresented: $pickingPhoto, selection: $photo, matching: .images)
-        .onChange(of: photo) { _, item in if let item { Task { await saveWallpaper(item) } } }
-        .onAppear(perform: loadWallpaper)
-        .onDisappear { dotsTask?.cancel(); dragOutTask?.cancel() }
-        .alert(MirsaIPhoneText.deleteTitle(pendingDelete?.name ?? ""),
-               isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-               presenting: pendingDelete) { a in
-            Button(MirsaIPhoneText.delete, role: .destructive) { confirmDelete(a) }
-            Button(MirsaIPhoneText.cancel, role: .cancel) {}
-        } message: { _ in
-            Text(MirsaIPhoneText.deleteMessage)
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .onChange(of: page) { _, _ in flashDots() }
+        .onChange(of: pages) { _, n in page = min(page, n - 1) }
+    }
+
+    private func homePage(_ pageIDs: [String], index p: Int, capacity: Int, side: CGFloat, cell: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                ForEach(pageIDs, id: \.self) { id in
+                    tile(id, side: side, showLabel: true, cell: cell)
+                }
+            }
+            .padding(.horizontal, 26)
+            // Room for the red badge and the «−» badge on the first row: TabView pages clip their content.
+            .padding(.top, 12)
+            if apps.isEmpty && p == 0 {
+                Text(MirsaIPhoneText.empty).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
+                    .shadow(color: .black.opacity(0.4), radius: 3).padding(.top, 28)
+            }
+            Spacer(minLength: 0)
         }
-        .foregroundStyle(.white)
-        .environment(\.layoutDirection, .leftToRight)
-        .accessibilityIdentifier("mirsa-iphone-home")
+        .contentShape(Rectangle())
+        .onLongPressGesture(minimumDuration: 0.6) { if !editing { startEditing() } }
+        // Empty space on a page: move there (end of this page).
+        .dropDestination(for: String.self) { items, _ in
+            guard editing, let dragged = items.first, canDrag(dragged) else { return false }
+            move(dragged, toIndex: (p + 1) * capacity)
+            if folderDragOut { closeFolder() }
+            return true
+        }
+        .tag(p)
     }
 
     @ViewBuilder private var background: some View {
@@ -637,79 +645,104 @@ struct MirsaIPhoneHome<Menu: View>: View {
             let members = visibleMembers(f)
             let pages = max(1, (members.count + 8) / 9)
             GeometryReader { g in
-                let panel = min(g.size.width - 56, 340)
-                let fside = min(side, (panel - 28) / 3 - 22)
-                ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                        .overlay(Color.black.opacity(0.25))
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { closeFolder() }
-                        .dropDestination(for: String.self) { items, _ in
-                            guard editing, let dragged = items.first else { return false }
-                            moveOut(dragged, from: token); return true
-                        } isTargeted: { dragOutHover($0) }
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityLabel(MirsaIPhoneText.done)
-                    VStack(alignment: .leading, spacing: 20) {
-                        if editing {
-                            HStack(spacing: 6) {
-                                TextField(MirsaIPhoneText.folder, text: Binding(get: { folder(token)?.name ?? "" }, set: { renameFolder(token, to: $0) }))
-                                    .font(.system(size: 28, weight: .bold))
-                                    .submitLabel(.done)
-                                    .accessibilityIdentifier("iphone-folder-name-field")
-                                if !(folder(token)?.name ?? "").isEmpty {
-                                    Button { renameFolder(token, to: "") } label: {
-                                        Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.white.opacity(0.6))
-                                    }.buttonStyle(.plain).accessibilityLabel(MirsaIPhoneText.cancel)
-                                }
-                            }
-                            .padding(.horizontal, 14).frame(height: 48)
-                            .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        } else {
-                            Text(folderName(f)).font(.system(size: 32, weight: .bold)).lineLimit(1)
-                                .shadow(color: .black.opacity(0.3), radius: 3)
-                                .padding(.horizontal, 6)
-                                .accessibilityAddTraits(.isHeader)
-                        }
-                        TabView(selection: $folderPage) {
-                            ForEach(0..<pages, id: \.self) { p in
-                                VStack(spacing: 0) {
-                                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 16) {
-                                        ForEach(Array(members.dropFirst(p * 9).prefix(9)), id: \.self) { id in
-                                            folderTile(id, folder: token, side: fside)
-                                        }
-                                    }
-                                    // Room for the «−» badge on the first row: TabView pages clip their content.
-                                    .padding(.top, 16)
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 14)
-                                .tag(p)
-                            }
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: pages > 1 ? .always : .never))
-                        .frame(width: panel, height: panel)
-                        .background(RoundedRectangle(cornerRadius: 38, style: .continuous).fill(.ultraThinMaterial))
-                        .clipShape(RoundedRectangle(cornerRadius: 38, style: .continuous))
-                        .contentShape(RoundedRectangle(cornerRadius: 38, style: .continuous))
-                        // Empty space in the panel: to the end of this folder.
-                        .dropDestination(for: String.self) { items, _ in
-                            guard editing, let dragged = items.first, f.appIDs.contains(dragged) else { return false }
-                            moveInFolder(dragged, before: nil, folder: token); return true
-                        }
-                        .accessibilityIdentifier("iphone-folder-panel")
-                    }
-                    .frame(width: panel)
-                    .padding(.bottom, 40)
-                }
-                .frame(width: g.size.width, height: g.size.height)
+                folderLayer(token: token, folder: f, members: members, pages: pages, side: side, size: g.size)
             }
             .environment(\.colorScheme, .dark)
             .opacity(folderDragOut ? 0 : 1)
             .allowsHitTesting(!folderDragOut)
             .onChange(of: pages) { _, n in folderPage = min(folderPage, n - 1) }
         }
+    }
+
+    private func folderLayer(token: String, folder f: MirsaIPhoneFolder, members: [String], pages: Int, side: CGFloat, size: CGSize) -> some View {
+        let panel = min(size.width - 56, 340)
+        let fside = min(side, (panel - 28) / 3 - 22)
+        return ZStack {
+            folderBackdrop(token: token)
+            VStack(alignment: .leading, spacing: 20) {
+                folderTitle(token: token, folder: f)
+                folderPanel(token: token, folder: f, members: members, pages: pages, panel: panel, side: fside)
+            }
+            .frame(width: panel)
+            .padding(.bottom, 40)
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    /// Blurred, darkened backdrop: tap to close; hover a dragged app here to fade the folder and drop on the grid.
+    private func folderBackdrop(token: String) -> some View {
+        Rectangle().fill(.ultraThinMaterial)
+            .overlay(Color.black.opacity(0.25))
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture { closeFolder() }
+            .dropDestination(for: String.self) { items, _ in
+                guard editing, let dragged = items.first else { return false }
+                moveOut(dragged, from: token)
+                return true
+            } isTargeted: { over in dragOutHover(over) }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(MirsaIPhoneText.done)
+    }
+
+    @ViewBuilder private func folderTitle(token: String, folder f: MirsaIPhoneFolder) -> some View {
+        if editing {
+            let name = Binding<String>(get: { folder(token)?.name ?? "" }, set: { renameFolder(token, to: $0) })
+            HStack(spacing: 6) {
+                TextField(MirsaIPhoneText.folder, text: name)
+                    .font(.system(size: 28, weight: .bold))
+                    .submitLabel(.done)
+                    .accessibilityIdentifier("iphone-folder-name-field")
+                if !f.name.isEmpty {
+                    Button { renameFolder(token, to: "") } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.white.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(MirsaIPhoneText.cancel)
+                }
+            }
+            .padding(.horizontal, 14).frame(height: 48)
+            .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        } else {
+            Text(folderName(f)).font(.system(size: 32, weight: .bold)).lineLimit(1)
+                .shadow(color: .black.opacity(0.3), radius: 3)
+                .padding(.horizontal, 6)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    private func folderPanel(token: String, folder f: MirsaIPhoneFolder, members: [String], pages: Int, panel: CGFloat, side: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 38, style: .continuous)
+        return TabView(selection: $folderPage) {
+            ForEach(0..<pages, id: \.self) { p in
+                folderGridPage(Array(members.dropFirst(p * 9).prefix(9)), index: p, token: token, side: side)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: pages > 1 ? .always : .never))
+        .frame(width: panel, height: panel)
+        .background(shape.fill(.ultraThinMaterial))
+        .clipShape(shape)
+        .contentShape(shape)
+        // Empty space in the panel: to the end of this folder.
+        .dropDestination(for: String.self) { items, _ in
+            guard editing, let dragged = items.first, f.appIDs.contains(dragged) else { return false }
+            moveInFolder(dragged, before: nil, folder: token)
+            return true
+        }
+        .accessibilityIdentifier("iphone-folder-panel")
+    }
+
+    private func folderGridPage(_ pageIDs: [String], index p: Int, token: String, side: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 16) {
+                ForEach(pageIDs, id: \.self) { id in folderTile(id, folder: token, side: side) }
+            }
+            // Room for the «−» badge on the first row: TabView pages clip their content.
+            .padding(.top, 16)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .tag(p)
     }
 
     /// App inside an open folder: launches normally, same long-press menu, jiggles and drags while editing.
@@ -787,6 +820,22 @@ private struct MirsaIPhoneTileMenu<Items: View, Preview: View>: ViewModifier {
     @ViewBuilder let preview: () -> Preview
     func body(content: Content) -> some View {
         if editing { content } else { content.contextMenu(menuItems: items, preview: preview) }
+    }
+}
+
+/// iOS «Delete “App”?» confirmation for the «−» badge.
+private struct MirsaIPhoneDeleteAlert: ViewModifier {
+    @Binding var pending: ManagedApp?
+    let onConfirm: (ManagedApp) -> Void
+    func body(content: Content) -> some View {
+        content.alert(MirsaIPhoneText.deleteTitle(pending?.name ?? ""),
+                      isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                      presenting: pending) { a in
+            Button(MirsaIPhoneText.delete, role: .destructive) { onConfirm(a) }
+            Button(MirsaIPhoneText.cancel, role: .cancel) {}
+        } message: { _ in
+            Text(MirsaIPhoneText.deleteMessage)
+        }
     }
 }
 
