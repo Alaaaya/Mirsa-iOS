@@ -23,6 +23,9 @@ public struct AuthenticationServiceError: Error, Sendable {
 
     public static func wrapping(_ error: Error, stage: Stage, transport: Bool = false) -> AuthenticationServiceError {
         if let diagnostic = error as? AuthenticationServiceError { return diagnostic }
+        if let amd = error as? StoreAMDError {
+            return .init(stage: stage, httpStatus: amd.httpStatus, message: amd.errorDescription)
+        }
         let ns = error as NSError
         // No arbitrary errorDescription: networking errors may contain URLs or headers.
         return .init(stage: stage, networkCode: ns.domain == NSURLErrorDomain ? ns.code : nil, transport: transport)

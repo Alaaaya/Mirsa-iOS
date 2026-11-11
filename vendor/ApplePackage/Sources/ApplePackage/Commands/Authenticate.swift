@@ -17,9 +17,10 @@ public actor Authenticator {
         case failure(AuthenticationServiceError)
     }
 
-    private let signer: SAPSigner
+    private let signer: any SAPRequestSigning
     private let deviceIdentifier: String
-    private let amd: StoreAMDProof
+    private let amd: any StoreAMDProviding
+    private let executor: (@Sendable (HTTPClient.Request) async throws -> HTTPClient.Response)?
     private var endpoint: URL
     private var cookies: [Cookie]
     private var storeFront = ""
@@ -28,6 +29,7 @@ public actor Authenticator {
 
     /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
     public init(cookies: [Cookie] = []) async throws {
+        executor = nil
         deviceIdentifier = Configuration.deviceIdentifier
         amd = StoreAMDProof(deviceIdentifier: Configuration.deviceIdentifier)
         let bag: Bag.BagOutput
@@ -38,6 +40,17 @@ public actor Authenticator {
         do { signer = try await SAPSigner.connect() }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
         self.cookies = cookies
+    }
+
+    // Offline tests exercise the same complete login loop, without SAP or network access.
+    init(endpoint: URL, deviceIdentifier: String, signer: any SAPRequestSigning, amd: any StoreAMDProviding,
+         executor: @escaping @Sendable (HTTPClient.Request) async throws -> HTTPClient.Response) throws {
+        self.endpoint = try Self.approvedEndpoint(endpoint)
+        self.deviceIdentifier = deviceIdentifier
+        self.signer = signer
+        self.amd = amd
+        self.executor = executor
+        cookies = []
     }
 
     public static func authenticate(email: String, password: String, code: String = "", cookies: [Cookie] = []) async throws -> Account {
@@ -63,15 +76,28 @@ public actor Authenticator {
             )
             let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
             let response: HTTPClient.Response
-            do { response = try await client.execute(request: request, delegate: accumulator).futureResult.get() }
-            catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
-            let result = try parseResponse(response, email: email, password: password, code: code)
-            if response.status == .ok {
-                let data = response.body.map { Data($0.readableBytesView) } ?? Data()
-                let fields = (try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]) ?? [:]
-                if try await handshake.respond(fields: fields, action: response.headers.first(name: "X-Apple-AMD-Action"),
-                                               challenge: response.headers.first(name: "X-Apple-AMD-Data")) { continue }
+            do {
+                if let executor { response = try await executor(request) }
+                else { response = try await client.execute(request: request, delegate: accumulator).futureResult.get() }
             }
+            catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
+            let data = response.body.map { Data($0.readableBytesView) } ?? Data()
+            let fields = (try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+                ?? (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            let action = response.headers.first(name: "X-Apple-AMD-Action")
+            // Apple can challenge on any status, before redirects or login rejection.
+            if let date = response.headers.first(name: "Date") {
+                try await amd.synchronize(dateHeader: date)
+            } else if try StoreAMDAction.parse(fields: fields, actionHeader: action,
+                                               challenge: response.headers.first(name: "X-Apple-AMD-Data")) != nil {
+                throw StoreAMDError(.clock)
+            }
+            if try await handshake.respond(fields: fields, action: action,
+                                           challenge: response.headers.first(name: "X-Apple-AMD-Data")) {
+                cookies.mergeCookies(response.cookies)
+                continue
+            }
+            let result = try parseResponse(response, email: email, password: password, code: code)
             switch result {
             case let .success(account): return account
             case let .redirect(url):
@@ -139,7 +165,7 @@ public actor Authenticator {
         headers.append(("X-Apple-ActionSignature", signature.base64EncodedString()))
         for name in ["X-Apple-AMD", "X-Apple-AMD-M"] {
             if let value = amdHeaders[name] {
-                guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else { throw StoreAMDError() }
+                guard !value.isEmpty, value.utf8.count <= 2048, !value.contains("\r"), !value.contains("\n") else { throw StoreAMDError(.headers) }
                 headers.append((name, value))
             }
         }
