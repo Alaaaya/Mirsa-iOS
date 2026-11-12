@@ -13,6 +13,13 @@ struct MirsaStoreApp: Sendable, Equatable, Identifiable {
         self.id = id; self.bundleID = bundleID; self.name = name; self.version = version
         self.price = price; self.artworkURL = artworkURL
     }
+    /// Selected catalogue identity, reused for version lists without a redundant lookup.
+    var software: Software {
+        Software(id: id, bundleID: bundleID, name: name, version: version, price: price,
+                 artistName: "", sellerName: "", description: "", averageUserRating: 0,
+                 userRatingCount: 0, artworkUrl: artworkURL, screenshotUrls: [], minimumOsVersion: "",
+                 releaseDate: "", primaryGenreName: "")
+    }
     init(_ software: Software) {
         id = software.id; bundleID = software.bundleID; name = software.name
         version = software.version; price = software.price; artworkURL = software.artworkUrl
@@ -50,7 +57,7 @@ protocol MirsaStoreEngine {
     func lookup(bundleID: String, country: String) async throws -> Software
     func acquire(account: inout Account, app: Software) async throws
     func manifest(account: inout Account, app: Software, version: String?) async throws -> DownloadOutput
-    func versions(account: inout Account, bundleID: String) async throws -> [String]
+    func versions(account: inout Account, app: Software) async throws -> [String]
     func versionMetadata(account: inout Account, app: Software, version: String) async throws -> String
 }
 
@@ -87,7 +94,7 @@ struct ApplePackageStoreEngine: MirsaStoreEngine {
     func manifest(account: inout Account, app: Software, version: String?) async throws -> DownloadOutput {
         try await Download.download(account: &account, app: app, externalVersionID: version)
     }
-    func versions(account: inout Account, bundleID: String) async throws -> [String] {
-        try await VersionFinder.list(account: &account, bundleIdentifier: bundleID, entityType: .iPhone)
+    func versions(account: inout Account, app: Software) async throws -> [String] {
+        try await VersionFinder.list(account: &account, app: app)
     }
 }

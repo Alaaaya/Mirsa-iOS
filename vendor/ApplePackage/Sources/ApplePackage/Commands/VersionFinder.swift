@@ -19,10 +19,24 @@ public enum VersionFinder {
             try ensureFailed(Strings.unsupportedStoreIdentifier(account.store))
         }
         let app = try await Lookup.lookup(bundleID: bundleIdentifier, countryCode: countryCode, entityType: entityType)
+        return try await list(account: &account, app: app, entityType: entityType, externalVersionID: externalVersionID)
+    }
+
+    /// Use the already selected catalogue record. Do not re-run an iPhone-only
+    /// public lookup before Apple's authenticated version-list request.
+    public static func list(
+        account: inout Account,
+        app: Software,
+        entityType: EntityType? = nil,
+        externalVersionID: String? = nil
+    ) async throws -> [String] {
         let resolvedExternalVersionID: String
         if let externalVersionID {
             resolvedExternalVersionID = externalVersionID
         } else if let entityType {
+            guard let countryCode = Configuration.countryCode(for: account.store) else {
+                try ensureFailed(Strings.unsupportedStoreIdentifier(account.store))
+            }
             let metadata = try await PlatformVersionLookup.lookup(
                 appID: app.id,
                 countryCode: countryCode,
