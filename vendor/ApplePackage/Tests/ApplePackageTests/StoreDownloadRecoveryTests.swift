@@ -4,6 +4,68 @@ import AsyncHTTPClient
 import Testing
 
 struct StoreDownloadRecoveryTests {
+    @Test
+    func `volumeStore gateway errors retry twice with backoff and preserve final diagnostic`() async throws {
+        var attempts = 0
+        var waits: [UInt64] = []
+        let result = try await StoreDownloadEndpoint.retryVolumeStore(operation: {
+            attempts += 1
+            if attempts < 3 { throw StoreProductDiagnostic(endpoint: .volumeStore, status: 504, fields: [:], account: fixtureAccount) }
+            return ["success": true]
+        }, wait: { waits.append($0) })
+        #expect(result["success"] as? Bool == true)
+        #expect(attempts == 3)
+        #expect(waits == [1_000_000_000, 3_000_000_000])
+        attempts = 0
+        do {
+            _ = try await StoreDownloadEndpoint.retryVolumeStore(operation: {
+                attempts += 1
+                throw StoreProductDiagnostic(endpoint: .volumeStore, status: 503, fields: [:], account: fixtureAccount)
+            }, wait: { _ in })
+            Issue.record("Expected final gateway error")
+        } catch let error as StoreProductDiagnostic {
+            #expect(error.httpStatus == 503)
+            #expect(error.stage == "volumeStore")
+            #expect(attempts == 3)
+        }
+    }
+
+    @Test
+    func `explicit failures other endpoints and cancellation never retry`() async throws {
+        let errors = [
+            StoreProductDiagnostic(endpoint: .volumeStore, status: 403, fields: [:], account: fixtureAccount),
+            StoreProductDiagnostic(endpoint: .volumeStore, status: 500, fields: ["failureType": "9610"], account: fixtureAccount),
+            StoreProductDiagnostic(endpoint: .volumeStore, status: 503, fields: ["customerMessage": "Rejected"], account: fixtureAccount),
+            StoreProductDiagnostic(endpoint: .redownload, status: 504, fields: [:], account: fixtureAccount),
+        ]
+        for error in errors {
+            var calls = 0
+            do {
+                _ = try await StoreDownloadEndpoint.retryVolumeStore(operation: { calls += 1; throw error }, wait: { _ in Issue.record("Unexpected retry") })
+                Issue.record("Expected failure")
+            } catch { #expect(calls == 1) }
+        }
+        var calls = 0
+        do {
+            _ = try await StoreDownloadEndpoint.retryVolumeStore(operation: {
+                calls += 1
+                throw StoreProductDiagnostic(endpoint: .volumeStore, status: 504, fields: [:], account: fixtureAccount)
+            }, wait: { _ in throw CancellationError() })
+            Issue.record("Expected cancellation")
+        } catch is CancellationError { #expect(calls == 1) }
+    }
+
+    @Test
+    func `official version labels do not require release dates but must match identity`() throws {
+        var metadata: [String: Any] = ["itemId": fixtureSoftware.id, "softwareVersionBundleId": fixtureSoftware.bundleID,
+            "softwareVersionExternalIdentifier": "123", "bundleShortVersionString": "2.9.9"]
+        #expect(try VersionLookup.displayName(["songList": [["metadata": metadata]]], app: fixtureSoftware, versionID: "123") == "2.9.9")
+        metadata["softwareVersionExternalIdentifier"] = "999"
+        #expect(throws: (any Error).self) {
+            try VersionLookup.displayName(["songList": [["metadata": metadata]]], app: fixtureSoftware, versionID: "123")
+        }
+    }
+
     private var fixtureSoftware: Software {
         Software(id: 123, bundleID: "example.app", name: "Fixture", version: "1.0", price: 0,
                  artistName: "", sellerName: "", description: "", averageUserRating: 0,

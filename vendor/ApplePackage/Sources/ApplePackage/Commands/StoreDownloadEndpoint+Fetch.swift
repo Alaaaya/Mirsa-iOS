@@ -18,13 +18,15 @@ extension StoreDownloadEndpoint {
         externalVersionID: String,
         entityType: EntityType = .iPhone,
     ) async throws -> [String: Any] {
-        let dict = try await StoreDownloadEndpoint.volumeStore.fetchProduct(
-            client: client,
-            account: &account,
-            app: app,
-            deviceIdentifier: deviceIdentifier,
-            externalVersionID: externalVersionID,
-        )
+        let dict = try await retryVolumeStore(operation: {
+            try await StoreDownloadEndpoint.volumeStore.fetchProduct(
+                client: client,
+                account: &account,
+                app: app,
+                deviceIdentifier: deviceIdentifier,
+                externalVersionID: externalVersionID,
+            )
+        })
 
         guard requiresRedownload(dict) else { return dict }
         APLogger.debug("store: volumeStore returned no package, trying redownload")
@@ -57,6 +59,25 @@ extension StoreDownloadEndpoint {
             )
             return try validateRecoveryResponse(response, app: app, version: version)
         }
+    }
+
+    /// Only retry the read-only volumeStore manifest request. Never retry licence
+    /// acquisition, authentication, explicit Apple failures, or the CDN/installer.
+    static func retryVolumeStore(
+        operation: () async throws -> [String: Any],
+        wait: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+    ) async throws -> [String: Any] {
+        for attempt in 0...2 {
+            try Task.checkCancellation()
+            do { return try await operation() }
+            catch let error as StoreProductDiagnostic {
+                guard attempt < 2, error.stage == "volumeStore",
+                      (500...599).contains(error.httpStatus),
+                      error.failureType == nil, error.customerMessage == nil else { throw error }
+                try await wait(attempt == 0 ? 1_000_000_000 : 3_000_000_000)
+            }
+        }
+        preconditionFailure("Bounded retries always return or throw")
     }
 
     static func validateRecoveryResponse(_ response: [String: Any], app: Software, version: String) throws -> [String: Any] {

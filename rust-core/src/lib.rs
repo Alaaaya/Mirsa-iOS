@@ -18,6 +18,7 @@ pub mod logging;
 pub mod pairing;
 pub mod container;
 mod ipa_editor;
+mod local_tls_identity;
 mod personal_sign;
 mod signing_progress;
 mod discovery_transport;

@@ -52,6 +52,9 @@ jobs:
         with:
           workspaces: rust-core
 
+      - name: Test device-local HTTPS identity generation
+        run: cd rust-core && cargo test --locked --lib local_tls_identity
+
       # rust-core changed (sideloader + container signer), so rebuild the
       # static library instead of using the prebuilt AirliftFFI.xcframework.
       - name: Build AirliftFFI for iOS (device)

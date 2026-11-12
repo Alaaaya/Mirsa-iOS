@@ -153,13 +153,11 @@ actor MirsaStoreClient {
               ids.allSatisfy(MirsaStoreServerClient.numericVersion) else { throw MirsaStoreError.invalidInput }
         let run = try begin(); defer { busy = false }
         var owner = try requiredAccount()
-        let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
-        try check(run)
-        guard fresh.id == app.id else { throw MirsaStoreError.invalidPackage }
         var entries: [MirsaStoreServerClient.VersionMetadata] = []
         for id in ids {
             do {
-                let version = try await engine.versionMetadata(account: &owner, app: fresh, version: id)
+                try Task.checkCancellation()
+                let version = try await engine.versionMetadata(account: &owner, app: app.software, version: id)
                 try check(run)
                 guard !version.isEmpty, version.utf8.count <= 128,
                       !version.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {

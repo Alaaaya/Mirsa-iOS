@@ -85,11 +85,13 @@ struct AppStoreAccountView: View {
                     "Sepanên ku hesabê te yê Apple xwedî ye dakêşe. Mirsa şîfreya wan venake, îmze nake û parve nake."),
                   systemImage: "lock.shield.fill")
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-            Text(t("Your iPhone sends your email and password directly to Apple over HTTPS. The password is not saved. Apple may require a verification code.",
-                   "آيفونك بيبعت إيميلك وكلمة السر مباشرة لـApple عبر HTTPS. كلمة السر ما بتنحفظ وممكن Apple تطلب رمز تحقق.",
-                   "ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ Apple دەنێردرێن بۆ Apple. وشەی نهێنی هەڵناگیرێت و Apple ڕەنگە کۆد بخوازێت.",
-                   "E-name û şîfreya te bi HTTPS ji Apple re ji bo Apple tên şandin. Şîfre nayê tomarkirin û dibe ku Apple kodê bixwaze."))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+            if account == nil {
+                Text(t("Sign in directly with Apple. Mirsa does not save your password.",
+                       "تسجيل الدخول مباشر مع Apple، ومرسى ما بيحفظ كلمة السر.",
+                       "چوونەژوورەوە ڕاستەوخۆ لەگەڵ Appleە. Mirsa وشەی نهێنی هەڵناگرێت.",
+                       "Têketin rasterast bi Apple ye. Mirsa şîfreya te tomar nake."))
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+            }
             Button { withAnimation(.easeOut(duration: 0.2)) { showSteps.toggle() } } label: {
                 HStack {
                     Text(t("How it works and limits", "كيف بيشتغل والحدود", "چۆن کار دەکات و سنوورەکان", "Çawa dixebite û sînor"))
@@ -183,9 +185,6 @@ struct AppStoreAccountView: View {
                 .autocorrectionDisabled().focused($focus).fieldStyle()
             SecureField(t("Password", "كلمة السر", "وشەی نهێنی", "Şîfre"), text: $password)
                 .textContentType(.password).focused($focus).fieldStyle().disabled(busy != nil)
-            Text(t("Sent directly from your iPhone to Apple over HTTPS. Your password is not saved. Apple may ask for a code.", "بتنبعت مباشرة من آيفونك لـApple عبر HTTPS. كلمة السر ما بتنحفظ. ممكن Apple تطلب رمز تحقق.",
-                   "بە HTTPS بۆ Apple دەنێردرێت بۆ چوونەژوورەوەی Apple. وشەی نهێنی هەڵناگیرێت. Apple ڕەنگە کۆد بخوازێت.", "Bi HTTPS ji Apple re ji bo têketina Apple tê şandin. Şîfre nayê tomarkirin. Dibe ku Apple kodê bixwaze."))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button { signIn() } label: { Text(t("Sign in", "تسجيل الدخول", "چوونەژوورەوە", "Têkeve")).frame(maxWidth: .infinity) }
                 .buttonStyle(.mirsaPrimary)
                 .disabled(email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || busy != nil)
@@ -272,6 +271,9 @@ struct AppStoreAccountView: View {
                             Text(t("Latest", "الأحدث", "نوێترین", "Ya herî nû")).tag("")
                             ForEach(visible, id: \.self) { id in Text(versionLabel(app, id)).tag(id) }
                         }.pickerStyle(.menu).tint(MirsaPalette.accentSoft)
+                        Button(t("Retry version names", "إعادة تحميل أسماء النسخ", "دووبارە بارکردنی ناوی وەشانەکان", "Navên guhertoyan dîsa bar bike")) {
+                            requestMetadata(app, ids: visible)
+                        }.buttonStyle(.mirsaSecondary).disabled(busy != nil)
                         if visible.count < list.count {
                             Button(t("Show 20 more versions", "عرض 20 نسخة كمان", "٢٠ وەشانی تریش نیشان بدە", "20 guhertoyên din nîşan bide")) {
                                 let next = min(list.count, visible.count + 20)
@@ -312,10 +314,14 @@ struct AppStoreAccountView: View {
         guard busy == nil else { return }
         focus = false
         busy = message
+        let pendingMetadata = Array(metadataTasks.values)
+        cancelMetadata()
         let generation = operationGeneration
         work = Task {
             defer { password = ""; code = "" }
-            do { try await op() }
+            // Release the native client's single-operation lock before foreground work.
+            for task in pendingMetadata { await task.value }
+            do { try Task.checkCancellation(); try await op() }
             catch is CancellationError {}
             catch { if generation == operationGeneration { notice = describe(error) } }
             if generation == operationGeneration { busy = nil; work = nil }
@@ -407,49 +413,44 @@ struct AppStoreAccountView: View {
     private func cancelMetadata() {
         for task in metadataTasks.values { task.cancel() }
         metadataTasks = [:]
+        for key in Array(metadata.keys) {
+            for id in Array(metadata[key] ?? [:]).map({ $0.key }) where metadata[key]?[id]?.status == "queued" {
+                metadata[key]?[id] = .init(externalVersionID: id, status: "unavailable", version: nil)
+            }
+        }
     }
 
     private func versionLabel(_ app: MirsaStoreApp, _ id: String) -> String {
         if let item = metadata[app.bundleID]?[id], item.status == "ready", let version = item.version {
             return "\(version) · ID \(id)"
         }
-        if metadata[app.bundleID]?[id]?.status == "unavailable" {
+        if metadata[app.bundleID]?[id]?.status != "queued" {
             return t("External ID \(id) · name unavailable", "رقم خارجي \(id) · الاسم مو متاح", "ناسنامەی دەرەکی \(id) · ناو بەردەست نییە", "ID ya derveyî \(id) · nav ne berdest e")
         }
         return t("External ID \(id) · loading name", "رقم خارجي \(id) · عم يتحمّل الاسم", "ناسنامەی دەرەکی \(id) · ناو بار دەکرێت", "ID ya derveyî \(id) · nav tê barkirin")
     }
 
     private func requestMetadata(_ app: MirsaStoreApp, ids: [String]) {
-        let ids = Array(ids.filter { metadata[app.bundleID]?[$0]?.status != "ready" && metadata[app.bundleID]?[$0]?.status != "unavailable" }.prefix(20))
+        let ids = Array(ids.filter { metadata[app.bundleID]?[$0]?.status != "ready" }.prefix(20))
         guard !ids.isEmpty else { return }
         let key = app.bundleID
-        metadataTasks[key]?.cancel()
+        let previous = metadataTasks[key]
+        previous?.cancel()
         let generation = operationGeneration
         metadataTasks[key] = Task {
-            var remaining = ids
-            // At most six metadata requests for the visible batch, never all catalog versions.
-            for attempt in 0..<6 {
-                guard !Task.isCancelled, generation == operationGeneration, !remaining.isEmpty else { return }
+            if let previous { await previous.value }
+            // One name at a time. A cancelled or failed request always leaves a terminal label.
+            for id in ids {
+                guard !Task.isCancelled, generation == operationGeneration else { return }
+                metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "queued", version: nil)
                 do {
-                    let entries = try await client.versionMetadata(app, externalVersionIDs: remaining)
-                    guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for item in entries { metadata[key, default: [:]][item.externalVersionID] = item }
-                    for id in remaining where !entries.contains(where: { $0.externalVersionID == id }) {
-                        metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
-                    }
-                    remaining = remaining.filter { metadata[key]?[$0]?.status == "queued" }
-                    if !remaining.isEmpty && attempt < 5 { try await Task.sleep(nanoseconds: 3_000_000_000) }
+                    let entries = try await client.versionMetadata(app, externalVersionIDs: [id])
+                    guard generation == operationGeneration else { return }
+                    metadata[key, default: [:]][id] = entries.first ?? .init(externalVersionID: id, status: "unavailable", version: nil)
                 } catch {
-                    guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for id in remaining {
-                        metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
-                    }
-                    return
+                    guard generation == operationGeneration else { return }
+                    metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
                 }
-            }
-            guard !Task.isCancelled, generation == operationGeneration else { return }
-            for id in remaining {
-                metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
             }
         }
     }

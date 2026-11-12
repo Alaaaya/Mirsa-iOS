@@ -69,7 +69,7 @@ extension MirsaStoreEngine {
 
 struct ApplePackageStoreEngine: MirsaStoreEngine {
     func versionMetadata(account: inout Account, app: Software, version: String) async throws -> String {
-        try await VersionLookup.getVersionMetadata(account: &account, app: app, versionID: version).displayVersion
+        try await VersionLookup.getVersionDisplayName(account: &account, app: app, versionID: version)
     }
     func configure(guid: String) {
         Configuration.deviceIdentifier = guid

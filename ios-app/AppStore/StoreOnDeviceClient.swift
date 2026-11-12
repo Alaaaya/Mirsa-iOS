@@ -4,6 +4,13 @@ import Foundation
 /// server capability check on a new launch would delete the native Apple session.
 struct MirsaStoreNativeVault: MirsaStoreVault {
     private let base = MirsaStoreKeychain()
+    /// Local display only. Does not authorize network requests or installation.
+    static func accountEmail() -> String? {
+        guard let bytes = try? MirsaStoreNativeVault().read("account"),
+              let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let email = object["email"] as? String, !email.isEmpty else { return nil }
+        return email
+    }
     func read(_ key: String) throws -> Data? { try base.read("native." + key) }
     func write(_ data: Data, key: String) throws { try base.write(data, key: "native." + key) }
     func remove(_ key: String) throws { try base.remove("native." + key) }

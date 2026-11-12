@@ -1064,6 +1064,7 @@ struct Request {
 }
 fn run(r: Request) -> Result<crate::personal_sign::Verification> {
     match r.operation.as_str() {
+        "local_tls_identity" => crate::local_tls_identity::generate(&r.output),
         #[cfg(test)]
         "__test_worker_panic" => panic!("synthetic worker panic"),
         "personal_sign" => return crate::personal_sign::sign_with_options(Path::new(&r.input), Path::new(&r.profile), &r.private_key, &r.certificate, &r.signing_options),

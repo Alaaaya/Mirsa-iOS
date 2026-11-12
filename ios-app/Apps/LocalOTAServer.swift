@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 
 /// Route chosen for the signed IPA handoff. Only `.local` means bytes are served from this device.
 enum OTARoute: Equatable {
@@ -83,6 +84,10 @@ final class LocalOTAServer: @unchecked Sendable {
     /// Injectable for tests. Applies to receiving the request header only.
     nonisolated(unsafe) static var headerTimeout: TimeInterval = 30
     let token = (0..<2).map { _ in String(format: "%016llx", UInt64.random(in: .min ... .max)) }.joined()
+    private let identity: SecIdentity?
+    struct Resource: Sendable { let data: Data; let contentType: String }
+    private var resources: [String: Resource] = [:]
+    func setResources(_ value: [String: Resource]) { lock.lock(); resources = value; lock.unlock() }
     private let file: URL
     private let size: Int64
     private let queue = DispatchQueue(label: "mirsa.local-ota")
@@ -100,13 +105,21 @@ final class LocalOTAServer: @unchecked Sendable {
     var port: UInt16 { lock.lock(); defer { lock.unlock() }; return _port }
     var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
     enum Failure: Error { case unreadable, start, timeout }
-    init(file: URL) throws {
+    init(file: URL, identity: SecIdentity? = nil) throws {
+        self.identity = identity
         self.file = file
         guard let s = (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize, s > 0 else { throw Failure.unreadable }
         size = Int64(s)
     }
     func start(lifetime: TimeInterval = 600, timeout: TimeInterval = 5) async throws -> UInt16 {
-        let params = NWParameters.tcp
+        let params: NWParameters
+        if let identity {
+            let tls = NWProtocolTLS.Options()
+            guard let local = sec_identity_create(identity) else { throw Failure.start }
+            sec_protocol_options_set_local_identity(tls.securityProtocolOptions, local)
+            sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+            params = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        } else { params = NWParameters.tcp }
         params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         let l = try NWListener(using: params)
         lock.lock(); listener = l; lock.unlock()
@@ -197,6 +210,13 @@ final class LocalOTAServer: @unchecked Sendable {
     private func respond(_ conn: NWConnection, request: String) {
         let line = request.components(separatedBy: "\r\n").first?.split(separator: " ").map(String.init) ?? []
         guard line.count >= 2, ["GET", "HEAD"].contains(line[0]) else { return fail(conn, 405, "Method Not Allowed") }
+        lock.lock(); let resource = resources[line[1]]; lock.unlock()
+        if let resource {
+            var response = Data("HTTP/1.1 200 OK\r\nContent-Type: \(resource.contentType)\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: \(resource.data.count)\r\nConnection: close\r\n\r\n".utf8)
+            if line[0] == "GET" { response.append(resource.data) }
+            conn.send(content: response, completion: .contentProcessed { _ in conn.cancel() })
+            return
+        }
         guard line[1] == "/\(token)/Mirsa.ipa" else { return fail(conn, 404, "Not Found") }
         let range: ClosedRange<Int64>?
         do { range = try LocalOTARange.parse(header(request, "Range"), size: size) } catch { return fail(conn, 416, "Range Not Satisfiable") }

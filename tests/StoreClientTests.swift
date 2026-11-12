@@ -63,6 +63,11 @@ private final class StoreTestEngine: MirsaStoreEngine {
     var seenVersion: String?
     var failManifest = false
     var versionApps: [Software] = []
+    var metadataApps: [Software] = []
+    func versionMetadata(account: inout Account, app: Software, version: String) async throws -> String {
+        metadataApps.append(app)
+        return "2.9.9"
+    }
     var versionsResult = ["123", "456"]
     var output: DownloadOutput {
         get throws {
@@ -114,6 +119,21 @@ final class MirsaStoreClientTests: XCTestCase {
         XCTAssertEqual(engine.versionApps.map(\.id), [selected.id])
         XCTAssertEqual(engine.versionApps.map(\.bundleID), [selected.bundleID])
         XCTAssertEqual(engine.acquisitions, 0)
+    }
+
+    func testVersionNamesUseSelectedIdentityWithoutLookup() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let selected = MirsaStoreApp(testSoftware())
+        engine.app = testSoftware(id: 999)
+        let names = try await client.versionMetadata(selected, externalVersionIDs: ["123"])
+        XCTAssertEqual(names.first?.version, "2.9.9")
+        XCTAssertEqual(names.first?.status, "ready")
+        XCTAssertTrue(engine.lookupCountries.isEmpty)
+        XCTAssertEqual(engine.metadataApps.map(\.id), [selected.id])
+        XCTAssertEqual(engine.acquisitions, 0)
+        XCTAssertEqual(engine.manifests, 0)
     }
 
     func testSafeAuthDiagnosticReachesUIAndClearsFailedChallenge() async throws {
