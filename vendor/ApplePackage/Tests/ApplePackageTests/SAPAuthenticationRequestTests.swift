@@ -574,7 +574,89 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         do {
             _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "123456")
             XCTFail("Expected rejected code")
-        } catch AuthenticationError.verificationCodeRejected { }
+        } catch let diagnostic as AuthenticationServiceError {
+            XCTAssertEqual(diagnostic.httpStatus, 200)
+            XCTAssertEqual(diagnostic.loginPhase, .verificationCode)
+            XCTAssertEqual(diagnostic.responseMessage, .configurator)
+            XCTAssertEqual(diagnostic.failureState, .empty)
+            XCTAssertNil(diagnostic.message)
+        }
+    }
+
+    private actor RefreshingOTP: StoreAMDProviding {
+        private var sequence = 0
+        func headers() -> [String: String] {
+            sequence += 1
+            return ["X-Apple-AMD": "fresh-otp-\(sequence)", "X-Apple-AMD-M": "stable-machine"]
+        }
+        func provision(_ challenge: Data) { }
+        func reset() { }
+        func synchronize(dateHeader: String?) throws { }
+    }
+
+    func testRejectedTwoFactorRetryUsesNewCodeFreshOTPAndStableSessionIdentity() async throws {
+        var challenge = try response(fields: ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"])
+        challenge.headers.add(name: "Set-Cookie", value: "session=fixture-session; Domain=.itunes.apple.com; Path=/; Secure")
+        let http = try ScriptedHTTP([challenge,
+            response(fields: ["failureType": "5005", "customerMessage": "Private owner address"]),
+            response(fields: successFields)])
+        let signer = RecordingSigner()
+        let auth = try Authenticator(endpoint: XCTUnwrap(URL(string: "https://auth.itunes.apple.com/auth/v1/native")),
+            deviceIdentifier: "001122334455", signer: signer, amd: RefreshingOTP(),
+            executor: { try await http.execute($0) })
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture")
+            XCTFail("Expected initial code challenge")
+        } catch AuthenticationError.verificationCodeRequired { }
+        do {
+            _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "123456")
+            XCTFail("Expected explicit Apple rejection")
+        } catch let error as AuthenticationServiceError {
+            XCTAssertEqual(error.appleCode, "5005")
+            XCTAssertEqual(error.loginPhase, .verificationCode)
+            XCTAssertEqual(error.responseMessage, .unrecognized)
+            XCTAssertNil(error.message)
+        }
+        _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "654321")
+        let requests = await http.recorded()
+        XCTAssertEqual(requests.count, 3)
+        let bodies = try requests.map(bodyData)
+        let signed = await signer.recordedBodies()
+        XCTAssertEqual(signed, bodies)
+        let passwords = ["fixture", "fixture123456", "fixture654321"]
+        for index in requests.indices {
+            let request = requests[index]
+            XCTAssertEqual(request.url, requests[0].url)
+            XCTAssertEqual(request.method, .POST)
+            XCTAssertEqual(request.headers.first(name: "X-Apple-AMD"), "fresh-otp-\(index + 1)")
+            XCTAssertEqual(request.headers.first(name: "X-Apple-AMD-M"), "stable-machine")
+            if index > 0 { XCTAssertEqual(request.headers.first(name: "Cookie"), "session=fixture-session") }
+            let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[index], format: nil) as? [String: String])
+            XCTAssertEqual(fields["guid"], "001122334455")
+            XCTAssertEqual(fields["password"], passwords[index])
+            XCTAssertEqual(fields["attempt"], index == 0 ? "1" : "2")
+            XCTAssertEqual(fields["why"], "signIn")
+            XCTAssertEqual(fields["rmp"], "0")
+        }
+    }
+
+    func testTwoFactorHTTPFailuresKeepStatusAndNeverBecomeWrongCode() async throws {
+        for status: HTTPResponseStatus in [.forbidden, .tooManyRequests, .internalServerError] {
+            let http = try ScriptedHTTP([response(status: status,
+                fields: ["failureType": "-5000", "customerMessage": "A private owner name",
+                         "dialog": ["explanation": "Do not export any of this"]])])
+            let auth = try session(http, proof: OfflineAMD(), signer: RecordingSigner())
+            do {
+                _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "123456")
+                XCTFail("Expected failure")
+            } catch let error as AuthenticationServiceError {
+                XCTAssertEqual(error.httpStatus, Int(status.code))
+                XCTAssertEqual(error.appleCode, "-5000")
+                XCTAssertEqual(error.loginPhase, .verificationCode)
+                XCTAssertEqual(error.responseMessage, .unrecognized)
+                XCTAssertNil(error.message)
+            }
+        }
     }
 
     func testAppleDomainCookieIsRetainedAcrossTwoFactorContinuation() async throws {

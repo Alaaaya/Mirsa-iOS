@@ -183,14 +183,34 @@ public actor Authenticator {
             && (fields["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message"
     }
 
-    static func rejection(_ fields: [String: Any], status: Int, secrets: [String]) -> AuthenticationServiceError {
-        if (fields["customerMessage"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("AMD-Action") {
-            return .init(stage: .authentication, httpStatus: status, message: "تسجيل الجهاز ما كمل")
-        }
-        let knownSecrets = ["passwordToken", "dsPersonId", "appleId", "password", "token", "cookie"].compactMap { fields[$0] as? String }
-        return .init(stage: .authentication, httpStatus: status, appleCode: fields["failureType"],
-              message: (fields["dialog"] as? [String: Any])?["explanation"] as? String
-                ?? fields["customerMessage"] as? String, secrets: secrets + knownSecrets)
+    static func rejection(_ fields: [String: Any], status: Int, secrets: [String],
+                          submittedCode: Bool = false) -> AuthenticationServiceError {
+        let rawMessage = fields["customerMessage"]
+        let message: AuthenticationServiceError.ResponseMessage
+        if rawMessage == nil { message = .missing }
+        else if let text = rawMessage as? String {
+            if text.isEmpty { message = .empty }
+            else {
+                // No prefix/regex acceptance of arbitrary strings, PII or server prose.
+                switch text.trimmingCharacters(in: .whitespacesAndNewlines) {
+                case "MZFinance.BadLogin.Configurator_message": message = .configurator
+                case "AMD-Action::SP": message = .amdSP
+                case "AMD-Action::RP": message = .amdRP
+                default: message = .unrecognized
+                }
+            }
+        } else { message = .unrecognized }
+        let code = fields["failureType"]
+        let safeCode = AuthenticationServiceError(stage: .authentication, appleCode: code).appleCode
+        let failure: AuthenticationServiceError.FailureState
+        if code == nil { failure = .missing }
+        else if (code as? String) == "" { failure = .empty }
+        else if safeCode != nil { failure = .numeric }
+        else { failure = .unrecognized }
+        // Arbitrary dialog/customer text is deliberately NOT exported, even redacted.
+        return .init(stage: .authentication, httpStatus: status, appleCode: safeCode,
+                     loginPhase: submittedCode ? .verificationCode : .password,
+                     responseMessage: message, failureState: failure)
     }
 
     private func parseResponse(_ response: HTTPClient.Response, email: String, password: String, code: String) throws -> LoginResponse {
@@ -224,7 +244,7 @@ public actor Authenticator {
         let responseData = response.body.map { Data($0.readableBytesView) } ?? Data()
         let fields = (try? PropertyListSerialization.propertyList(from: responseData, format: nil) as? [String: Any])
             ?? (try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]) ?? [:]
-        let diagnostic = Self.rejection(fields, status: Int(response.status.code), secrets: [email, password + code, password, code])
+        let diagnostic = Self.rejection(fields, status: Int(response.status.code), secrets: [email, password + code, password, code], submittedCode: !code.isEmpty)
         guard response.status == .ok else { return .failure(diagnostic) }
         guard var body = response.body, body.readableBytes <= 2 * 1024 * 1024, let data = body.readData(length: body.readableBytes) else {
             return .failure(diagnostic)
@@ -234,13 +254,10 @@ public actor Authenticator {
             return .failure(diagnostic)
         }
 
-        if !code.isEmpty,
-           (dic["failureType"] as? String) == "" &&
-           (dic["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message" {
-            throw AuthenticationError.verificationCodeRejected
-        }
-        if !code.isEmpty, dic["accountInfo"] == nil, dic["failureType"] != nil {
-            throw AuthenticationError.verificationCodeRejected
+        // A code submission can fail for account, transport or device reasons too.
+        // Keep Apple's bounded diagnostic instead of asserting the code was wrong.
+        if !code.isEmpty, dic["accountInfo"] == nil {
+            return .failure(diagnostic)
         }
 
         if Self.requiresVerificationCode(dic, submittedCode: !code.isEmpty) {

@@ -110,11 +110,15 @@ struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
     let httpStatus: Int?
     let appleCode: String?
     let appleMessage: String?
+    let loginPhase: AuthenticationServiceError.LoginPhase?
+    let responseMessage: AuthenticationServiceError.ResponseMessage?
+    let failureState: AuthenticationServiceError.FailureState?
     let networkCode: Int?
 
     init(_ error: AuthenticationServiceError) {
         stage = error.stage; transport = error.transport; httpStatus = error.httpStatus; appleCode = error.appleCode
         appleMessage = error.message; networkCode = error.networkCode
+        loginPhase = error.loginPhase; responseMessage = error.responseMessage; failureState = error.failureState
     }
 
     var errorDescription: String? {
@@ -133,6 +137,15 @@ struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
         if let httpStatus { fields.append("HTTP " + String(httpStatus)) }
         if let appleCode { fields.append("Apple " + appleCode) }
         if let networkCode { fields.append("Network " + String(networkCode)) }
+        if let loginPhase { fields.append("Phase " + loginPhase.rawValue) }
+        if let failureState { fields.append("failureType " + (appleCode ?? failureState.rawValue)) }
+        if let responseMessage { fields.append("customerMessage " + responseMessage.rawValue) }
+        if loginPhase == .verificationCode, responseMessage == .configurator {
+            fields.append(tr("Apple did not complete verification. Check your password and use the latest code.",
+                             "Apple ما كملت التحقق. تأكد من كلمة السر واكتب آخر رمز وصلك.",
+                             ckb: "Apple پشتڕاستکردنەوەی تەواو نەکرد. وشەی نهێنی و نوێترین کۆد بپشکنە.",
+                             kmr: "Apple piştrastkirin temam nekir. Şîfre û koda herî nû kontrol bike."))
+        }
         if let appleMessage { fields.append(appleMessage) }
         return fields.joined(separator: " · ")
     }
