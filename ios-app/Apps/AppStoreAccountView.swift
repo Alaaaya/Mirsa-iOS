@@ -37,7 +37,7 @@ struct AppStoreAccountView: View {
     @State private var metadataTasks: [String: Task<Void, Never>] = [:]
     @State private var metadataLimit: [String: Int] = [:]
     @State private var chosen: [String: String] = [:]
-    @State private var manualID: [String: String] = [:]
+    @State private var versionListAttempted: Set<Int64> = []
     @State private var term = ""
     @State private var results: [MirsaStoreApp] = []
     @State private var searched = false
@@ -119,7 +119,16 @@ struct AppStoreAccountView: View {
             .preferredColorScheme(.dark)
         }
         .onChange(of: busy) { _, value in busySince = value == nil ? nil : (busySince ?? Date()) }
-        .onChange(of: account) { _, value in ownership = [:]; if value == nil { selected = nil } }
+        .onChange(of: account) { _, value in
+            ownership = [:]; versionListAttempted = []; versions = [:]; chosen = [:]
+            if value == nil { selected = nil }
+        }
+        .task(id: busy == nil ? selected?.id : nil) {
+            guard busy == nil, let app = selected, versions[app.bundleID] == nil,
+                  !versionListAttempted.contains(app.id), ownership[app.id] != .licenseRequired else { return }
+            versionListAttempted.insert(app.id)
+            loadVersions(app)
+        }
         .onDisappear { password = ""; code = ""; work?.cancel(); cancelMetadata() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
@@ -182,10 +191,10 @@ struct AppStoreAccountView: View {
                                 "تطبيقات مجانية ما حصلت عليها: دوس احصل على ترخيص مجاني مرة وحدة. التطبيقات المدفوعة ما بتنشترى هون.",
                                 "ئەپە بێبەرامبەرەکان کە نەتهێناون: جارێک مۆڵەتی بێبەرامبەر بهێنە. ئەپی پارەدار لێرە ناکڕدرێت.",
                                 "Sepanên belaş ên te negirtine: carekê lîsansa belaş bigire. Sepanên bi pere li vir nayên kirîn."))
-                    step("5", t("Tap Older versions after obtaining the app's license. Choose an official external version ID, or enter one manually. The server checks it against Apple's current list; empty means latest.",
-                                "بعد ما حسابك يملك التطبيق، دوس نسخ أقدم واختار رقم نسخة رسمي أو اكتبو بإيدك. السيرفر بيتأكد إنو موجود بقائمة Apple. الفاضي يعني الأحدث.",
-                                "دوای وەرگرتنی مۆڵەت، وەشانە کۆنەکان بکەرەوە و ناسنامەیەکی فەرمی هەڵبژێرە یان بینووسە. سێرڤەر لە لیستی Apple دەپشکنێت. بەتاڵ واتە نوێترین.",
-                                "Piştî lîsansê Guhertoyên kevn veke û ID-eke fermî hilbijêre an binivîse. Server di lîsteya Apple de kontrol dike. Vala tê wateya herî nû."))
+                    step("5", t("Open the app page and choose Latest or an older version from Apple's official list, then tap Download. Names are labels; downloads use the selected external version ID.",
+                                "افتح صفحة التطبيق واختار الأحدث أو نسخة قديمة من قائمة Apple الرسمية، وبعدين دوس تنزيل. اسم النسخة للعرض، والتنزيل برقمها الرسمي.",
+                                "پەڕەی ئەپەکە بکەرەوە، نوێترین یان وەشانێکی کۆن لە لیستی فەرمی Apple هەڵبژێرە، پاشان دایبگرە.",
+                                "Rûpela sepanê veke, Ya herî nû an guhertoyeke kevn ji lîsteya fermî ya Apple hilbijêre, paşê Daxe bitikîne."))
                     step("6", t("Download. Mirsa keeps the original file and adds it to the App Store tab.",
                                 "نزّل. مرسى بيحتفظ بالملف الأصلي وبيضيفو لتبويب متجر أبل.",
                                 "دایبگرە. Mirsa فایلە ڕەسەنەکە دەپارێزێت و دەیخاتە بەشی فرۆشگای ئەپڵ.",
@@ -646,6 +655,7 @@ struct AppStoreAccountView: View {
         Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
             .padding(.top, MirsaSpacing.xs)
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+            versionRow(key: key, id: nil, title: t("Latest", "الأحدث", "نوێترین", "Ya herî nû"), subtitle: app.version)
             if let list = versions[key] {
                 if list.isEmpty {
                     Text(t("Apple returned no versions.", "Apple ما رجّعت نسخ.", "Apple هیچ وەشانێکی نەگەڕاندەوە.", "Apple guhertoyek neda."))
@@ -654,7 +664,6 @@ struct AppStoreAccountView: View {
                     let sorted = Self.newestFirst(list)
                     let visible = Array(sorted.prefix(metadataLimit[key] ?? 20))
                     VStack(spacing: 0) {
-                        versionRow(key: key, id: nil, title: t("Latest", "الأحدث", "نوێترین", "Ya herî nû"), subtitle: app.version)
                         ForEach(visible, id: \.self) { id in
                             Rectangle().fill(MirsaPalette.stroke).frame(height: 1)
                             versionRow(key: key, id: id, title: versionName(app, id), subtitle: "ID \(id)")
@@ -687,15 +696,7 @@ struct AppStoreAccountView: View {
                 Button { loadVersions(app) } label: { Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).frame(maxWidth: .infinity) }
                     .buttonStyle(.mirsaSecondary).disabled(busy != nil || ownership[app.id] == .licenseRequired)
             }
-            Text(t("Optional. Lists official Apple external version IDs, not human version names. The account must own the app. Leave empty for latest.",
-                   "اختياري. هاي أرقام نسخ Apple الرسمية مو أسماء النسخ. لازم حسابك يملك التطبيق. اتركو فاضي للأحدث.",
-                   "ئارەزوومەندانە. ناسنامە فەرمییەکانی وەشانی Apple نیشان دەدات نەک ناو. دەبێت خاوەنی ئەپەکە بیت. بەتاڵی بهێڵە بۆ نوێترین.",
-                   "Bijarte. ID-yên fermî yên Apple ne, ne navên guhertoyan. Divê hesab xwedî be. Ji bo herî nû vala bihêle."))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-            TextField(t("Version ID (optional)", "رقم النسخة (اختياري)", "ناسنامەی وەشان (ئارەزوومەندانە)", "ID ya guhertoyê (bijarte)"),
-                      text: Binding(get: { manualID[key] ?? "" }, set: { v in
-                          let d = String(v.filter { $0.isASCII && $0.isNumber }.prefix(20)); manualID[key] = d; chosen[key] = d.isEmpty ? nil : d }))
-                .keyboardType(.numberPad).focused($focus).fieldStyle()
+
         }
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
         Text(a.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1).truncationMode(.middle)
@@ -704,7 +705,7 @@ struct AppStoreAccountView: View {
     private func versionRow(key: String, id: String?, title: String, subtitle: String) -> some View {
         let on = chosen[key] == id
         return Button {
-            chosen[key] = id; manualID[key] = ""
+            chosen[key] = id
         } label: {
             HStack(spacing: MirsaSpacing.s) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -816,7 +817,7 @@ struct AppStoreAccountView: View {
         Task {
             do {
                 try await client.signOut()
-                account = nil; results = []; versions = [:]; chosen = [:]; manualID = [:]; searched = false
+                account = nil; results = []; versions = [:]; chosen = [:]; versionListAttempted = []; searched = false
             } catch { notice = describe(error); account = try? await client.currentAccount() }
         }
     }
