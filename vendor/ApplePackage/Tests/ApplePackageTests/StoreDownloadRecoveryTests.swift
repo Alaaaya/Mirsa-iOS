@@ -2,6 +2,9 @@
 import Foundation
 import AsyncHTTPClient
 import Testing
+import NIOCore
+import NIOPosix
+import NIOConcurrencyHelpers
 
 struct StoreDownloadRecoveryTests {
     private var fixtureSoftware: Software {
@@ -169,4 +172,81 @@ struct StoreDownloadRecoveryTests {
             }
         }
     }
+    private enum BodyError: Error { case unexpected }
+    private func payload(_ request: HTTPClient.Request) throws -> [String: Any] {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { try? group.syncShutdownGracefully() }
+        let loop = group.next()
+        let bytes = NIOLockedValueBox(Data())
+        let body = try #require(request.body)
+        try body.stream(.init { part in
+            guard case let .byteBuffer(buffer) = part else { return loop.makeFailedFuture(BodyError.unexpected) }
+            bytes.withLockedValue { $0.append(contentsOf: buffer.readableBytesView) }
+            return loop.makeSucceededFuture(())
+        }).wait()
+        return try #require(PropertyListSerialization.propertyList(from: bytes.withLockedValue { $0 }, format: nil) as? [String: Any])
+    }
+
+    @Test func whatsappAndParkingProUseIdenticalCanonicalTransportWithoutIdentityOrVersionMixups() throws {
+        var owner = fixtureAccount
+        owner.storeFront = "143480-7,29 t:fixture"; owner.pod = "25"
+        owner.cookie = [Cookie(name: "session", value: "fixture-cookie", path: "/", domain: ".itunes.apple.com", httpOnly: true, secure: true)]
+        let apps: [(Int64, String, String)] = [
+            (310633997, "net.whatsapp.WhatsApp", "894893172"),
+            (1479228698, "com.ParkingPro.CompanionApp", "900000001") // synthetic version, NOT an observed Apple version
+        ]
+        for (id, bundle, version) in apps {
+            let app = Software(id: id, bundleID: bundle, name: "Fixture", version: "1.0", price: 0,
+                artistName: "", sellerName: "", description: "", averageUserRating: 0, userRatingCount: 0,
+                artworkUrl: "", screenshotUrls: [], minimumOsVersion: "", releaseDate: "", primaryGenreName: "")
+            for selected in ["", version] {
+                for endpoint in [StoreDownloadEndpoint.volumeStore, .redownload, .update] {
+                    let url = try endpoint.url(pod: owner.pod, deviceIdentifier: "001122334455")
+                    let request = try endpoint.makeRequest(account: owner, app: app, url: url,
+                        guid: "001122334455", externalVersionID: selected, amdHeaders: ["X-Apple-AMD": "fixture-proof"])
+                    let body = try payload(request)
+                    #expect(request.method.rawValue == "POST")
+                    #expect((body["salableAdamId"] as? NSNumber)?.int64Value == id)
+                    #expect(body["guid"] as? String == "001122334455")
+                    #expect(body["serialNumber"] as? String == "0")
+                    if selected.isEmpty { #expect(body[endpoint.externalVersionIDKey] == nil) }
+                    else { #expect(body[endpoint.externalVersionIDKey] as? String == version) }
+                    #expect(request.headers.first(name: "X-Token") == owner.passwordToken)
+                    #expect(request.headers.first(name: "X-Dsid") == owner.directoryServicesIdentifier)
+                    #expect(request.headers.first(name: "X-Apple-Store-Front") == owner.storeFront)
+                    #expect(request.headers.first(name: "Cookie") == "session=fixture-cookie")
+                    #expect(request.headers.first(name: "X-Apple-AMD") == "fixture-proof")
+                    let error = StoreProductDiagnostic(endpoint: endpoint, status: 403, fields: [:], account: owner,
+                        app: app, externalVersionID: selected, requestURL: url)
+                    #expect(error.requestHost == url.host && error.requestPath == url.path)
+                    #expect(!error.requiresLicense)
+                }
+            }
+            for target in [try Purchase.purchaseURL(pod: owner.pod),
+                           try #require(URL(string: "https://p37-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct"))] {
+                let request = try Purchase.makeRequest(account: owner, app: app, guid: "001122334455",
+                    pricingParameters: "STDQ", amdHeaders: ["X-Apple-AMD": "fixture-proof"], endpointURL: target)
+                let body = try payload(request)
+                #expect(request.url == target)
+                #expect(request.method.rawValue == "POST")
+                #expect((body["salableAdamId"] as? NSNumber)?.int64Value == id)
+                #expect(body["appExtVrsId"] as? String == "0")
+                #expect(body["pricingParameters"] as? String == "STDQ")
+                #expect(body["price"] as? String == "0")
+                #expect(body["guid"] as? String == "001122334455")
+                #expect(request.headers.first(name: "X-Apple-AMD") == "fixture-proof")
+                #expect(request.headers.first(name: "Cookie") == "session=fixture-cookie")
+                #expect(request.headers.first(name: "X-Token") == owner.passwordToken)
+                #expect(request.headers.first(name: "X-Dsid") == owner.directoryServicesIdentifier)
+                #expect(request.headers.first(name: "X-Apple-Store-Front") == owner.storeFront)
+            }
+        }
+        for raw in ["http://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
+                    "https://buy.itunes.apple.com.evil.invalid/WebObjects/MZFinance.woa/wa/buyProduct",
+                    "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+                    "https://user:pass@buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct"] {
+            #expect(throws: (any Error).self) { try Purchase.validatedPurchaseURL(#require(URL(string: raw))) }
+        }
+    }
+
 }

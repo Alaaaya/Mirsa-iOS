@@ -133,6 +133,18 @@ actor MirsaStoreClient {
         } catch { throw safe(error) }
     }
 
+    /// Public fresh metadata in the current account store. Never acquires a licence.
+    func freeAppForRecovery(_ app: MirsaStoreApp) async throws -> MirsaStoreApp {
+        let run = try begin()
+        defer { busy = false }
+        let owner = try requiredAccount()
+        let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
+        try check(run)
+        guard fresh.id == app.id, fresh.bundleID == app.bundleID else { throw MirsaStoreError.invalidPackage }
+        try MirsaStorePolicy.requireFree(fresh.price)
+        return MirsaStoreApp(fresh)
+    }
+
     func availableVersions(_ app: MirsaStoreApp) async throws -> [String] {
         let run = try begin()
         defer { busy = false }
