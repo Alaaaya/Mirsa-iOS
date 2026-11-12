@@ -132,10 +132,11 @@ final class CodeStepSAPAuthenticationRequestTests: XCTestCase {
 
     func testValidCodeFollowsPodRedirectVerbatimWithSameBytesHeadersAndCookies() async throws {
         let redirect = Self.response(status: .found, headers: [
-            ("Location", Self.pod), ("Set-Cookie", "itspod=25; Path=/; Secure"),
+            ("Location", Self.pod), ("Set-Cookie", "itspod=25; Path=/; Domain=.apple.com; Secure"),
         ])
         let transport = ScriptedTransport([
-            Self.codeRequired(headers: [("Set-Cookie", "mzsession=fixture-session; Path=/; Secure; HttpOnly")]),
+            Self.codeRequired(headers: [("Set-Cookie", "mzsession=fixture-session; Path=/; Domain=.apple.com; Secure; HttpOnly"),
+                                        ("Set-Cookie", "hostonly=fixture-host; Path=/; Secure")]),
             redirect, Self.success,
         ])
         let signer = CountingSigner()
@@ -163,6 +164,9 @@ final class CodeStepSAPAuthenticationRequestTests: XCTestCase {
         // Cookies from step 1 and from the redirect reach the pod request.
         let podCookies = Set((sent[2].cookie ?? "").components(separatedBy: "; "))
         XCTAssertTrue(podCookies.isSuperset(of: ["mzsession=fixture-session", "itspod=25"]), "\(podCookies)")
+        // A host-only cookie from auth.itunes.apple.com stays on that host (as in a Go cookiejar).
+        XCTAssertFalse(podCookies.contains("hostonly=fixture-host"), "\(podCookies)")
+        XCTAssertTrue((sent[1].cookie ?? "").contains("hostonly=fixture-host"))
         // Every request is signed again over its exact body.
         let signed = await signer.signed()
         XCTAssertEqual(signed, sent.map(\.body))
