@@ -95,11 +95,16 @@ public actor Authenticator {
     /// one after RP and one after SP, the same bound ipatool's native login has.
     static let maximumAMDResends = 2
 
+    /// Secret-free reason the last `authenticate` call stopped, or nil after success / before any call.
+    public private(set) var lastFailureTag: AuthenticationTag?
+
     public func authenticate(email: String, password: String, code: String = "") async throws -> Account {
         let code = try Self.validatedCode(code)
         guard !authenticating else { try ensureFailed("An authentication request is already in progress.") }
         authenticating = true
         defer { authenticating = false }
+        lastFailureTag = nil
+        let step = code.isEmpty ? 1 : 2
         var redirects = 0
         var amdResends = 0
         var handshake = StoreAMDHandshake(provider: amd)
@@ -108,7 +113,8 @@ public actor Authenticator {
         // Every retry signs these exact bytes; only machine OTP headers refresh.
         let signedBody = try Self.authenticationBody(email: email, password: password, code: code, deviceIdentifier: deviceIdentifier)
         for _ in 0 ..< 10 {
-            // Machine OTP only on the native auth routes; stripped on legacy redirects.
+            // Machine OTP on the native auth routes and on Apple's pod authenticate redirect
+            // (ipatool keeps the same headers when only the destination changes).
             var amdHeaders: [String: String] = [:]
             if StoreAMDHeaderPolicy.allows(endpoint) { amdHeaders = try await amd.headers() }
             let request = try await Self.makeRequest(
@@ -117,41 +123,88 @@ public actor Authenticator {
             )
             let response: HTTPClient.Response
             do { response = try await transport.execute(request, maxBodySize: 2 * 1024 * 1024) }
-            catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
-            let result = try parseResponse(response, email: email, password: password, code: code)
-            // A credential or code rejection ends the call before any AMD handling, even when the
-            // same response carries X-Apple-AMD-Action: re-sending the password is what turns a
-            // single rejection into Apple's 5020 "entered incorrectly more than once" lock.
+            catch {
+                lastFailureTag = .init(kind: .transport, failureType: nil, customerMessage: nil, httpStatus: 0, amdAction: nil, step: step, stop: .transport)
+                throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true)
+            }
+            let fields = StoreAMDAction.fields(from: response.body.map { Data($0.readableBytesView) } ?? Data())
+            let action = StoreAMDAction.actionName(fields: fields, actionHeader: response.headers.first(name: "X-Apple-AMD-Action"))
+            func tag(_ kind: AuthenticationTag.Kind, _ stop: AuthenticationTag.Stop) -> AuthenticationTag {
+                .init(kind: kind, failureType: fields["failureType"], customerMessage: fields["customerMessage"],
+                      httpStatus: Int(response.status.code), amdAction: action, step: step, stop: stop)
+            }
+            let result: LoginResponse
+            do { result = try parseResponse(response, email: email, password: password, code: code) }
+            catch { lastFailureTag = tag(.failure, .result); throw error }
+            // A credential rejection (5020, -5000, BadLogin) ends the call before any AMD handling, even when
+            // the same response carries X-Apple-AMD-Action: re-sending the password is what turns a single
+            // rejection into Apple's 5020 "entered incorrectly more than once" lock. On the password step any
+            // other failureType is terminal too. On the code step ipatool checks the AMD action first
+            // (Configurator_message + SP means "register this machine", not "wrong code"), so an AMD action
+            // there is handled below and the same password+code is re-sent within the AMD budget.
             switch result {
-            case let .passwordRejected(appleCode): throw AuthenticationError.passwordRejected(appleCode)
-            case .codeRejected: throw AuthenticationError.codeRejected
-            case let .rejected(diagnostic): throw diagnostic
+            case let .passwordRejected(appleCode):
+                lastFailureTag = tag(.password, .classify)
+                throw AuthenticationError.passwordRejected(appleCode)
+            case .codeRejected where action == nil:
+                lastFailureTag = tag(.code, .classify)
+                throw AuthenticationError.codeRejected
+            case let .rejected(diagnostic) where action == nil || step == 1:
+                lastFailureTag = tag(.rejected, .classify)
+                throw diagnostic
             default: break
             }
             // AMD actions can arrive with any HTTP status; the header alone is enough.
             // Past the re-send budget, stop before provisioning and before sending the password again.
-            if amdResends >= Self.maximumAMDResends, Self.carriesAMDAction(response) { throw StoreAMDError(.parse) }
-            if try await handshake.respond(to: response) {
+            if amdResends >= Self.maximumAMDResends, action != nil {
+                lastFailureTag = tag(.amd, .amdBudget)
+                throw StoreAMDError(.parse)
+            }
+            let handled: Bool
+            do { handled = try await handshake.respond(to: response) }
+            catch {
+                lastFailureTag = tag(.amd, .amdAction)
+                throw error
+            }
+            if handled {
                 amdResends += 1
                 continue
             }
             switch result {
             case let .success(account): return account
             case let .redirect(url):
-                guard redirects < 3 else { try ensureFailed("Authentication redirect limit exceeded.") }
+                guard redirects < 3 else {
+                    lastFailureTag = tag(.redirect, .redirect)
+                    try ensureFailed("Authentication redirect limit exceeded.")
+                }
                 guard let resolved = URL(string: url.relativeString, relativeTo: endpoint)?.absoluteURL else {
+                    lastFailureTag = tag(.redirect, .redirect)
                     try ensureFailed(Strings.failedToRetrieveRedirect)
                 }
-                endpoint = try Self.approvedEndpoint(Bag.normalizedAuthEndpoint(from: resolved.absoluteString) ?? resolved)
+                // Destination used verbatim, as ipatool does for a redirect within one login attempt.
+                do { endpoint = try Self.approvedEndpoint(resolved) }
+                catch { lastFailureTag = tag(.redirect, .redirect); throw error }
                 redirects += 1
-            case .codeRequired: throw AuthenticationError.verificationCodeRequired
-            case .codeRejected: throw AuthenticationError.codeRejected
-            case let .passwordRejected(appleCode): throw AuthenticationError.passwordRejected(appleCode)
-            case let .rejected(diagnostic): throw diagnostic
-            case .deviceRegistration: throw StoreAMDError(.parse)
-            case let .failure(diagnostic): throw diagnostic
+            case .codeRequired:
+                throw AuthenticationError.verificationCodeRequired
+            case .codeRejected:
+                lastFailureTag = tag(.code, .result)
+                throw AuthenticationError.codeRejected
+            case let .passwordRejected(appleCode):
+                lastFailureTag = tag(.password, .result)
+                throw AuthenticationError.passwordRejected(appleCode)
+            case let .rejected(diagnostic):
+                lastFailureTag = tag(.rejected, .result)
+                throw diagnostic
+            case .deviceRegistration:
+                lastFailureTag = tag(.amd, .result)
+                throw StoreAMDError(.parse)
+            case let .failure(diagnostic):
+                lastFailureTag = tag(.failure, .result)
+                throw diagnostic
             }
         }
+        lastFailureTag = .init(kind: .redirect, failureType: nil, customerMessage: nil, httpStatus: 0, amdAction: nil, step: step, stop: .redirect)
         try ensureFailed("Authentication redirect limit exceeded.")
     }
 

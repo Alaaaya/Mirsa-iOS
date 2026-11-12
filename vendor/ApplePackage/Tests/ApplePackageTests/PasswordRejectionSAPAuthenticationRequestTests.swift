@@ -288,7 +288,8 @@ final class PasswordRejectionSAPAuthenticationRequestTests: XCTestCase {
         XCTAssertEqual(sent.count, 3)
         // Step 2 starts again at the advertised route, like a fresh ipatool login with the same cookie jar.
         XCTAssertEqual(sent[0].url, Self.endpoint.absoluteString)
-        XCTAssertEqual(sent[1].url, "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/")
+        // The redirect destination is used verbatim (ipatool), not rewritten with a trailing slash.
+        XCTAssertEqual(sent[1].url, "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate")
         XCTAssertEqual(sent[2].url, Self.endpoint.absoluteString)
         XCTAssertFalse(sent[2].url.contains("guid="))
         // Cookies set during step 1 reach step 2.
