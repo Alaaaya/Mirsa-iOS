@@ -40,6 +40,9 @@ enum StoreRecentSearches {
     static func adding(_ term: String, to data: Data) -> Data {
         encode(clean([term] + read(data)))
     }
+    static func removing(_ term: String, from data: Data) -> Data {
+        encode(read(data).filter { $0 != term })
+    }
     static func encode(_ values: [String]) -> Data { (try? JSONEncoder().encode(clean(values))) ?? Data() }
     private static func clean(_ values: [String]) -> [String] {
         var seen = Set<String>()
