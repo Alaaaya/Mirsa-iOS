@@ -457,6 +457,8 @@ struct AppStoreAccountView: View {
     private func codeReset() { code = "" }
 
     private func describe(_ error: Error) -> String {
+        // Localized text first, then Apple's secret-free reason tag (failureType, key-like message, step, stop).
+        if let tagged = error as? MirsaStoreTaggedError { return describe(tagged.base) + " " + tagged.tag }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic.localizedDescription }
         if let server = error as? MirsaStoreServerError {
             switch server {
