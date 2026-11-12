@@ -26,7 +26,11 @@ client=(r/'ios-app/AppStore/StoreClient.swift').read_text()
 original_client = subprocess.check_output(['git','show','2f15e57:ios-app/AppStore/StoreClient.swift'],cwd=r,text=True)
 extra_start = client.index('    /// Public fresh metadata')
 extra_end = client.index('    func availableVersions(', extra_start)
-assert client[:extra_start] + client[extra_end:] == original_client
+canonical = client[:extra_start] + client[extra_end:]
+# The approved one-tap free Get transaction is additive; versions and legacy engines stay exact.
+atomic_start = canonical.index('    /// One explicit free Get action')
+atomic_end = canonical.index('    /// Returns a local encrypted IPA', atomic_start)
+assert canonical[:atomic_start] + canonical[atomic_end:] == original_client
 fetch=(r/'vendor/ApplePackage/Sources/ApplePackage/Commands/StoreDownloadEndpoint+Fetch.swift').read_text()
 assert '"salableAdamId": app.id' in fetch
 assert 'guard fresh.id == app.id' in client
