@@ -17,15 +17,15 @@ def action(name):
 
 class OwnershipIntent(unittest.TestCase):
     def test_acquisition_has_one_explicit_entry_point(self):
-        self.assertEqual(VIEW.count("client.acquireFreeApp(app)"), 1)
-        self.assertIn("client.acquireFreeApp(app)", action("acquire"))
+        self.assertEqual(VIEW.count("client.acquireFreeAppAndDownload(app, externalVersionID: version)"), 1)
+        self.assertIn("client.acquireFreeAppAndDownload(app, externalVersionID: version)", action("acquire"))
         self.assertIn("guard app.price == 0", action("acquire"))
         self.assertIn("Button { acquire(app) }", VIEW)
         for name in ["search", "loadVersions", "download", "openChartApp"]:
             self.assertNotIn("acquireFreeApp", action(name))
             self.assertNotIn("acquire(app)", action(name))
 
-    def test_acquire_never_downloads_and_positive_result_updates_ownership(self):
+    def test_explicit_get_downloads_atomically_and_updates_ownership(self):
         body = action("acquire")
         self.assertNotIn("downloadOwnedApp", body)
         self.assertNotIn("loadVersions", body)
@@ -44,7 +44,8 @@ class OwnershipIntent(unittest.TestCase):
         body = action("download")
         self.assertIn("let version = chosen[app.bundleID]", body)
         self.assertIn("externalVersionID: version", body)
-        self.assertNotIn("chosen[", action("acquire"))
+        self.assertIn("let version = chosen[app.bundleID]", action("acquire"))
+        self.assertIn("externalVersionID: version", action("acquire"))
 
     def test_engine_and_ui_argument_parity(self):
         base_ref = "2f15e577d949a539a1b3a60ed350a2d42e31e027"
@@ -59,6 +60,14 @@ class OwnershipIntent(unittest.TestCase):
                 current = current[:a] + current[b:]
             elif path.endswith("StoreOnDeviceClient.swift"):
                 a = current.index('    func freeAppForRecovery(')
+                b = current.index('    func availableVersions(', a)
+                current = current[:a] + current[b:]
+            if path.endswith("StoreClient.swift"):
+                a = current.index('    /// One explicit free Get action')
+                b = current.index('    /// Returns a local encrypted IPA', a)
+                current = current[:a] + current[b:]
+            elif path.endswith("StoreOnDeviceClient.swift"):
+                a = current.index('    func acquireFreeAppAndDownload(')
                 b = current.index('    func availableVersions(', a)
                 current = current[:a] + current[b:]
             self.assertEqual(current, base, path)
@@ -77,7 +86,13 @@ class OwnershipIntent(unittest.TestCase):
         # Credential headers, guid, dsid, cookie handling, AMD and payload unchanged.
         def request(text):
             return text.split("    func makeRequest(", 1)[1].split("\n}\n", 1)[0]
-        self.assertEqual(request(current), request(base))
+        # Owner explicitly approved native ent/download. Legacy wire payload is unchanged.
+        body = request(current).replace('        kbSync: String? = nil,\n', '')
+        a = body.index('        if self == .entitlement {')
+        b = body.index('        if !externalVersionID.isEmpty {', a)
+        body = body[:a] + body[b:]
+        body = body.replace('self == .entitlement ? "application/x-www-form-urlencoded; charset=utf-8" : "application/x-apple-plist"', '"application/x-apple-plist"')
+        self.assertEqual(body, request(base))
 
 if __name__ == "__main__":
     unittest.main()
