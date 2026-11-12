@@ -57,4 +57,31 @@ struct StoreOwnershipEvidenceTests {
                                                                app: app, version: "880000004")
     }
 
+    @Test func licenceAndDownloadTransportContextIsAllowlistedAndRedacted() throws {
+        let path = "/WebObjects/MZFinance.woa/wa/buyProduct"
+        let url = try #require(URL(string: "https://p25-buy.itunes.apple.com" + path + "?guid=secret-guid&token=secret-token"))
+        let error = StoreProductDiagnostic(stage: "licence/STDQ", status: 403,
+            fields: ["failureType": 2059, "customerMessage": "Rejected secret-token fixture@example.invalid"],
+            account: account, requestURL: url, responseHeaders: [
+                ("Content-Type", "text/html"), ("Server", "Apple"), ("X-Request-ID", "safe-request-123"),
+                ("Set-Cookie", "session=secret-session"), ("X-Token", "secret-token"),
+                ("Location", "https://evil.invalid/private"), ("X-Dsid", "fixture-dsid"),
+                ("X-Session-ID", "secret-session"), ("X-Apple-Request-UUID", "bad\r\nheader")
+            ])
+        #expect(error.httpStatus == 403)
+        #expect(error.failureType == "2059")
+        #expect(error.requestHost == "p25-buy.itunes.apple.com")
+        #expect(error.requestPath == path)
+        #expect(error.responseContext == ["content-type": "text/html", "server": "Apple", "x-request-id": "safe-request-123"])
+        for secret in ["secret-token", "fixture@example.invalid", "secret-guid", "secret-session", "fixture-dsid", "evil.invalid"] {
+            #expect(!error.localizedDescription.contains(secret))
+        }
+        #expect(error.localizedDescription.contains("licence/STDQ"))
+        #expect(!error.requiresLicense)
+        let unsafe = StoreProductDiagnostic(stage: "licence/STDQ", status: 500, fields: [:], account: account,
+            requestURL: URL(string: "https://evil.invalid/" + account.passwordToken))
+        #expect(unsafe.requestHost == nil && unsafe.requestPath == nil)
+        #expect(!Purchase.confirmsExistingLicense(["failureType": "2059", "customerMessage": "Purchase couldn't be completed"]))
+    }
+
 }

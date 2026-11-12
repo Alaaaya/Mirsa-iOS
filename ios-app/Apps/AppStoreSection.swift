@@ -617,6 +617,7 @@ struct AppStorePurchasesPage: View {
     @State private var artwork: [Int64: String] = [:]
     @State private var loading = false
     @State private var error: String?
+    @State private var recovery: StoreFreeLicenseRecovery?
     @State private var downloading: Int64?
     @State private var reloadID = UUID()
     @State private var reloadTask: Task<Void, Never>?
@@ -670,8 +671,23 @@ struct AppStorePurchasesPage: View {
         .refreshable { await reload() }
         .task(id: loadIdentity) {
             reloadID = UUID(); reloadTask?.cancel()
-            purchases = []; artwork = [:]; error = nil; loading = false
+            recovery = nil; purchases = []; artwork = [:]; error = nil; loading = false
             if isActive { await reload() }
+        }
+        .confirmationDialog(tr("Refresh free licence and retry?", "تحديث الترخيص المجاني وإعادة التنزيل؟", ckb: "مۆڵەتی بێبەرامبەر نوێ بکەوە؟", kmr: "Lîsansa belaş nû bike?"),
+                            isPresented: Binding(get: { recovery != nil }, set: { if !$0 { recovery = nil } }), titleVisibility: .visible) {
+            if let pending = recovery {
+                Button(tr("Refresh free licence and retry once", "حدّث الترخيص المجاني وجرّب مرة", ckb: "نوێکردنەوە و هەوڵێکی تر", kmr: "Nû bike û carekê biceribîne")) {
+                    recovery = nil
+                    Task { await recoverDownload(pending) }
+                }
+            }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) { recovery = nil }
+        } message: {
+            Text(tr("Apple rejected the download, not ownership. Only a verified free licence is refreshed after your confirmation, then the same download is retried once. No paid purchase.",
+                    "Apple رفضت التنزيل، مو دليل إنك ما بتملك التطبيق. بموافقتك منحدّث الترخيص إذا مجاني بمتجر حسابك وبنعيد نفس التنزيل مرة وحدة. ما في شراء مدفوع.",
+                    ckb: "تەنها مۆڵەتی بێبەرامبەر بە ڕەزامەندی تۆ نوێ دەکرێتەوە، پاشان جارێک هەوڵ دەدرێت.",
+                    kmr: "Tenê bi razîbûna te lîsansa belaş nû dibe û carekê tê ceribandin."))
         }
         .onDisappear { reloadTask?.cancel() }
         .scrollDismissesKeyboard(.interactively)
@@ -854,7 +870,49 @@ struct AppStorePurchasesPage: View {
         } catch is CancellationError {}
         catch {
             guard model.sessionRevision == revision, model.account == account else { return }
-            self.error = tr("Download failed. Check your account and try again.", "التنزيل ما كمل. تأكد من حسابك وجرّب.", ckb: "داگرتن سەرکەوتوو نەبوو.", kmr: "Daxistin bi ser neket.")
+            if let diagnostic = error as? StoreProductDiagnostic {
+                if diagnostic.httpStatus == 403,
+                   let fresh = try? await MirsaStoreOnDeviceClient.shared.freeAppForRecovery(item.app),
+                   StoreFreeLicenseRecovery.canOffer(status: diagnostic.httpStatus, price: fresh.price),
+                   model.sessionRevision == revision, model.account == account, !Task.isCancelled {
+                    recovery = StoreFreeLicenseRecovery(app: fresh, externalVersionID: nil, revision: revision)
+                    return
+                }
+                self.error = diagnostic.localizedDescription
+            } else {
+                self.error = tr("Download failed. Try again.", "التنزيل ما كمل. جرّب مرة تانية.", ckb: "داگرتن سەرکەوتوو نەبوو.", kmr: "Daxistin bi ser neket.")
+            }
         }
     }
+    @MainActor private func recoverDownload(_ pending: StoreFreeLicenseRecovery) async {
+        guard isActive, !loading, downloading == nil, pending.revision == model.sessionRevision,
+              let account = model.account else { return }
+        downloading = pending.app.id; error = nil
+        defer { downloading = nil }
+        do {
+            let url = try await StoreFreeLicenseRecovery.retryOnce(consent: true, acquire: {
+                guard pending.revision == model.sessionRevision, model.account == account else { throw CancellationError() }
+                try await MirsaStoreOnDeviceClient.shared.acquireFreeApp(pending.app)
+            }, download: {
+                guard pending.revision == model.sessionRevision, model.account == account else { throw CancellationError() }
+                return try await MirsaStoreOnDeviceClient.shared.downloadOwnedApp(pending.app, externalVersionID: pending.externalVersionID)
+            })
+            defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
+            try Task.checkCancellation()
+            guard isActive, pending.revision == model.sessionRevision, model.account == account else { throw CancellationError() }
+            let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+            guard !Task.isCancelled, pending.revision == model.sessionRevision, model.account == account else {
+                try? FileManager.default.removeItem(at: EncryptedAppsStore.ipaURL(entry.id))
+                try? FileManager.default.removeItem(at: EncryptedAppsStore.iconURL(entry.id))
+                return
+            }
+            store.add(entry)
+        } catch is CancellationError {}
+        catch {
+            guard pending.revision == model.sessionRevision, model.account == account else { return }
+            self.error = (error as? StoreProductDiagnostic)?.localizedDescription
+                ?? tr("Free licence refresh or retry failed. No further retry was made.", "تحديث الترخيص أو إعادة التنزيل ما كملت، وما عدنا المحاولة.", ckb: "هەوڵەکە سەرکەوتوو نەبوو.", kmr: "Ceribandin bi ser neket.")
+        }
+    }
+
 }

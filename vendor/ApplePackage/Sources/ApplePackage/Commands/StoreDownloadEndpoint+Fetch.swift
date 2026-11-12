@@ -159,19 +159,19 @@ extension StoreDownloadEndpoint {
         // Preserve the narrow empty-500 recovery path and licence acquisition.
         if finalResponse.status != .ok {
             if finalResponse.status.code == 500 && responseData.isEmpty {
-                throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true, app: app, externalVersionID: externalVersionID)
+                throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true, app: app, externalVersionID: externalVersionID, requestURL: currentURL, responseHeaders: finalResponse.headers.map { ($0.name, $0.value) })
             }
-            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, app: app, externalVersionID: externalVersionID)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, app: app, externalVersionID: externalVersionID, requestURL: currentURL, responseHeaders: finalResponse.headers.map { ($0.name, $0.value) })
         }
         if (!failure.isEmpty && failure != Self.retryableFailureType && failure != "9610") ||
             (failure.isEmpty && !message.isEmpty) {
-            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, app: app, externalVersionID: externalVersionID)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, app: app, externalVersionID: externalVersionID, requestURL: currentURL, responseHeaders: finalResponse.headers.map { ($0.name, $0.value) })
         }
 
         guard var body = finalResponse.body,
               let data = body.readData(length: body.readableBytes)
         else {
-            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true, app: app, externalVersionID: externalVersionID)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true, app: app, externalVersionID: externalVersionID, requestURL: currentURL, responseHeaders: finalResponse.headers.map { ($0.name, $0.value) })
         }
 
         let plist = try PropertyListSerialization.propertyList(
@@ -238,7 +238,7 @@ extension StoreDownloadEndpoint {
     }
 }
 
-/// Bounded response fields only. No headers, request, body, URL, or account dump.
+/// Bounded response fields and explicitly allowlisted transport context. Never dumps credentials.
 public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
     public let stage: String
     public let httpStatus: UInt
@@ -249,13 +249,23 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
     public let requestedBundleID: String?
     public let requestedVersionID: String?
     public let accountStore: String?
+    public let requestHost: String?
+    public let requestPath: String?
+    public let responseContext: [String: String]
 
-    init(endpoint: StoreDownloadEndpoint, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false, app: Software? = nil, externalVersionID: String = "") {
+    init(endpoint: StoreDownloadEndpoint, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false, app: Software? = nil, externalVersionID: String = "", requestURL: URL? = nil, responseHeaders: [(String, String)] = []) {
+        let stage: String
         switch endpoint {
         case .volumeStore: stage = "volumeStore"
         case .redownload: stage = "redownload"
         case .update: stage = "updateProduct"
         }
+        self.init(stage: stage, status: status, fields: fields, account: account, emptyBody: emptyBody,
+                  app: app, externalVersionID: externalVersionID, requestURL: requestURL, responseHeaders: responseHeaders)
+    }
+
+    init(stage: String, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false, app: Software? = nil, externalVersionID: String = "", requestURL: URL? = nil, responseHeaders: [(String, String)] = []) {
+        self.stage = stage
         requestedAppID = app.map { Int($0.id) }
         requestedBundleID = (app?.bundleID).flatMap {
             $0.count <= 255 && $0.range(of: "^[A-Za-z0-9.-]+$", options: .regularExpression) != nil ? $0 : nil
@@ -268,6 +278,28 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
         let secrets = [account.email, account.password, account.appleId, account.passwordToken,
                        account.directoryServicesIdentifier, account.firstName, account.lastName,
                        Configuration.deviceIdentifier] + account.cookie.map(\.value)
+        let knownPaths = ["/WebObjects/MZFinance.woa/wa/buyProduct",
+                          "/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
+                          "/WebObjects/MZFinance.woa/wa/redownloadProduct",
+                          "/WebObjects/MZFinance.woa/wa/updateProduct",
+                          "/r/redownload", "/up/updateProduct"]
+        if let url = requestURL, (StoreAMDHeaderScope.permits(url) || (try? StoreDownloadEndpoint.validatedURL(url)) != nil), knownPaths.contains(url.path) {
+            requestHost = url.host?.lowercased()
+            requestPath = url.path
+        } else {
+            requestHost = nil; requestPath = nil
+        }
+        // No Set-Cookie, Location, auth, token, DSID, device or session header.
+        let allowed = ["content-type", "server", "x-request-id", "x-apple-request-uuid"]
+        var context: [String: String] = [:]
+        for (name, value) in responseHeaders {
+            let key = name.lowercased()
+            guard allowed.contains(key), context[key] == nil, value.count <= 160,
+                  value.range(of: "^[A-Za-z0-9 /;=._:+-]+$", options: .regularExpression) != nil,
+                  let clean = AuthenticationServiceError.redact(value, secrets: secrets) else { continue }
+            context[key] = clean
+        }
+        responseContext = context
         let code = (fields["failureType"] as? String) ?? (fields["failureType"] as? NSNumber)?.stringValue
         failureType = code.flatMap { $0.range(of: "^-?[0-9]{1,8}$", options: .regularExpression) != nil ? $0 : nil }
         customerMessage = AuthenticationServiceError.redact(fields["customerMessage"] as? String, secrets: secrets)
@@ -282,6 +314,9 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
         if let requestedBundleID { parts.append("bundle " + requestedBundleID) }
         if let accountStore { parts.append("accountStore " + accountStore) }
         if let requestedVersionID { parts.append("versionID " + requestedVersionID) }
+        if let requestHost { parts.append("host " + requestHost) }
+        if let requestPath { parts.append("path " + requestPath) }
+        for name in responseContext.keys.sorted() { parts.append(name + " " + (responseContext[name] ?? "")) }
         if let customerMessage { parts.append("customerMessage " + customerMessage) }
         return parts.joined(separator: " · ")
     }
