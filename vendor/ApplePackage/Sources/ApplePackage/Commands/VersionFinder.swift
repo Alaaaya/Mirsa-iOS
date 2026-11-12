@@ -18,7 +18,15 @@ public enum VersionFinder {
         guard let countryCode = Configuration.countryCode(for: account.store) else {
             try ensureFailed(Strings.unsupportedStoreIdentifier(account.store))
         }
-        let app = try await Lookup.lookup(bundleID: bundleIdentifier, countryCode: countryCode, entityType: entityType)
+        let app: Software
+        do {
+            app = try await Lookup.lookup(bundleID: bundleIdentifier, countryCode: countryCode, entityType: entityType)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Public catalog lookup (itunes.apple.com/lookup), before any commerce request.
+            throw StoreDownloadFailure(.init(operation: .versions, endpoint: .none, httpStatus: 0, stop: .lookup), reason: Strings.invalidResponse)
+        }
         return try await list(account: &account, app: app, entityType: entityType, externalVersionID: externalVersionID)
     }
 
@@ -33,7 +41,9 @@ public enum VersionFinder {
         let resolvedExternalVersionID: String
         if let externalVersionID {
             resolvedExternalVersionID = externalVersionID
-        } else if let entityType {
+        } else if let entityType, entityType == .appleTV {
+            // ipatool ListVersions pins a catalog version only for tvOS/watchOS/visionOS/macOS. For iPhone/iPad the
+            // version list comes from an UNPINNED volumeStore request (latest build + softwareVersionExternalIdentifiers).
             guard let countryCode = Configuration.countryCode(for: account.store) else {
                 try ensureFailed(Strings.unsupportedStoreIdentifier(account.store))
             }
@@ -50,46 +60,50 @@ public enum VersionFinder {
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
 
-        let dict = try await StoreDownloadEndpoint.fetchProductWithFallback(
-            client: client,
-            account: &account,
-            app: app,
-            deviceIdentifier: Configuration.deviceIdentifier,
-            externalVersionID: resolvedExternalVersionID,
-            entityType: entityType ?? .iPhone,
-        )
+        let fetched: (response: [String: Any], endpoint: StoreDownloadTag.Endpoint)
+        do {
+            fetched = try await StoreDownloadEndpoint.fetchProductTracked(
+                client: client,
+                account: &account,
+                app: app,
+                deviceIdentifier: Configuration.deviceIdentifier,
+                externalVersionID: resolvedExternalVersionID,
+                entityType: entityType ?? .iPhone,
+            )
+        } catch {
+            throw StoreDownloadFailure.map(error, .versions)
+        }
+        let dict = fetched.response
+        let at = fetched.endpoint
+
+        if let failure = dict["failureType"].map({ String(describing: $0) }), !failure.isEmpty {
+            switch failure {
+            case "2034", "2042":
+                throw StoreDownloadFailure.answer(.versions, at, dict, .failure, reason: Strings.passwordTokenExpired)
+            case "9610":
+                throw ApplePackageError.licenseRequired
+            default:
+                let reason = dict["customerMessage"] as? String == Strings.passwordChanged ? Strings.passwordTokenExpired : Strings.noItemsInResponse
+                throw StoreDownloadFailure.answer(.versions, at, dict, .failure, reason: reason)
+            }
+        }
 
         guard let items = dict["songList"] as? [[String: Any]], !items.isEmpty else {
-            if let failureType = dict["failureType"] as? String {
-                let customerMessage = dict["customerMessage"] as? String
-                switch failureType {
-                case "2034", "2042":
-                    try ensureFailed(Strings.passwordTokenExpired)
-                case "9610":
-                    throw ApplePackageError.licenseRequired
-                default:
-                    if customerMessage == Strings.passwordChanged {
-                        try ensureFailed(Strings.passwordTokenExpired)
-                    }
-                    if let customerMessage {
-                        try ensureFailed("\(customerMessage) (failureType: \(failureType))")
-                    }
-                    try ensureFailed("Apple failureType: \(failureType)")
-                }
-            } else {
-                try ensureFailed(Strings.noItemsInResponse)
-            }
+            let message = (dict["customerMessage"] as? String ?? "").isEmpty && dict["dialog"] == nil
+            throw StoreDownloadFailure.answer(.versions, at, dict, message ? .noItems : .failure, reason: Strings.noItemsInResponse)
         }
 
         let item = items[0]
         guard let metadata = item["metadata"] as? [String: Any],
               let identifiers = metadata["softwareVersionExternalIdentifiers"] as? [Any]
         else {
-            try ensureFailed(Strings.missingVersionIdentifiers)
+            throw StoreDownloadFailure.answer(.versions, at, dict, .noVersionIDs, reason: Strings.missingVersionIdentifiers)
         }
 
         let result = identifiers.map { "\($0)" }
-        try ensure(!result.isEmpty, Strings.noVersionsFound)
+        guard !result.isEmpty else {
+            throw StoreDownloadFailure.answer(.versions, at, dict, .noVersionIDs, reason: Strings.noVersionsFound)
+        }
 
         return result
     }
