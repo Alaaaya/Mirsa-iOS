@@ -7,6 +7,7 @@ import ApplePackage
 /// the file's private temp directory. Hook: AppStoreAccountView(onDownloaded: { url in ... }).
 struct AppStoreAccountView: View {
     var onDownloaded: (URL) async throws -> Void
+    var searchOnly = false
 
     private let client = MirsaStoreOnDeviceClient.shared
     @ObservedObject private var session = AppStoreSectionModel.shared
@@ -57,10 +58,17 @@ struct AppStoreAccountView: View {
                     if busy != nil { busyCard }
                     detailView(app, account: account)
                 } else {
-                    Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
-                        .font(MirsaFont.pageTitle).foregroundStyle(.white)
-                    infoCard
-                    if let account { signedInCards(account) } else if !session.loaded { ProgressView() } else if needsCode { verificationCard } else { signInCard }
+                    if !searchOnly {
+                        Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
+                            .font(MirsaFont.pageTitle).foregroundStyle(.white)
+                        infoCard
+                    }
+                    if let account { signedInCards(account) }
+                    else if !session.loaded { ProgressView() }
+                    else if searchOnly {
+                        Text(t("Sign in from the Account tab to search the App Store.", "سجّل دخول من تبويب الحساب لتبحث بمتجر Apple.", "لە بەشی ئەکاونت بچۆ ژوورەوە.", "Ji beşa Hesabê têkeve."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                    } else if needsCode { verificationCard } else { signInCard }
                     if busy != nil { busyCard }
                 }
             }
@@ -236,19 +244,22 @@ struct AppStoreAccountView: View {
     }
 
     @ViewBuilder private func signedInCards(_ a: MirsaStoreAccount) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(a.name.isEmpty ? a.email : a.name).font(MirsaFont.cardTitle).foregroundStyle(.white)
-                Text("\(a.email) · \(a.country.uppercased())").font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+        if !searchOnly {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(a.name.isEmpty ? a.email : a.name).font(MirsaFont.cardTitle).foregroundStyle(.white)
+                    Text("\(a.email) · \(a.country.uppercased())").font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                }
+                Spacer()
+                VStack(spacing: 4) {
+                    Button { confirmSignOut = true } label: { Image(systemName: "rectangle.portrait.and.arrow.right") }
+                        .buttonStyle(.mirsaSecondary)
+                    Text(t("Sign out", "خروج", "دەرچوون", "Derkeve")).font(MirsaFont.badge).foregroundStyle(MirsaPalette.textTertiary)
+                }
             }
-            Spacer()
-            VStack(spacing: 4) {
-                Button { confirmSignOut = true } label: { Image(systemName: "rectangle.portrait.and.arrow.right") }
-                    .buttonStyle(.mirsaSecondary)
-                Text(t("Sign out", "خروج", "دەرچوون", "Derkeve")).font(MirsaFont.badge).foregroundStyle(MirsaPalette.textTertiary)
-            }
+            .padding(MirsaSpacing.card).mirsaCard()
+
         }
-        .padding(MirsaSpacing.card).mirsaCard()
 
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
             Text(t("Search", "بحث", "گەڕان", "Lêgerîn")).font(MirsaFont.cardTitle).foregroundStyle(.white)
