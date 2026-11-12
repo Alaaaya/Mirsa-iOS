@@ -639,44 +639,28 @@ struct AppStorePurchasesPage: View {
                 if let account = model.account {
                     Text(account.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
                     AppStoreSearchField(placeholder: tr("Search purchases or App ID", "البحث بالمشتريات أو App ID", ckb: "گەڕان لە کڕینەکان", kmr: "Li kirînan bigere"), text: $query)
-                    Picker("", selection: $months) {
-                        Text(tr("All", "الكل", ckb: "هەموو", kmr: "Hemû")).tag(0)
-                        Text(tr("1 month", "شهر", ckb: "مانگێک", kmr: "1 meh")).tag(1)
-                        Text(tr("6 months", "٦ أشهر", ckb: "٦ مانگ", kmr: "6 meh")).tag(6)
-                        Text(tr("12 months", "سنة", ckb: "ساڵێک", kmr: "12 meh")).tag(12)
-                    }.pickerStyle(.segmented)
-                    Text(tr("Items: ", "العناصر: ", ckb: "بڕگەکان: ", kmr: "Tişt: ") + String(visible.count)).font(MirsaFont.sectionTitle)
+                    purchaseFilters
+                    HStack {
+                        Text(String(visible.count) + tr(" items", " عنصراً", ckb: " بڕگە", kmr: " tişt"))
+                            .font(MirsaFont.caption.weight(.semibold))
+                            .foregroundStyle(MirsaPalette.accentSoft)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(MirsaPalette.accentSoft.opacity(0.10), in: Capsule())
+                            .overlay(Capsule().strokeBorder(MirsaPalette.accentSoft.opacity(0.18), lineWidth: 1))
+                            .accessibilityIdentifier("store-purchases-count")
+                        Spacer()
+                    }
                     if loading { ProgressView() }
                     if let error {
                         Text(error).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.warning)
                     } else if !loading && visible.isEmpty {
                         Text(tr("No matching purchases.", "ما في مشتريات مطابقة.", ckb: "هیچ کڕینێک ناگونجێت.", kmr: "Kirînek li hev nayê.")).foregroundStyle(MirsaPalette.textSecondary)
                     }
-                    LazyVStack(spacing: 0) {
-                        ForEach(visible) { item in
-                            HStack(spacing: MirsaSpacing.s) {
-                                AsyncImage(url: artwork[item.id].flatMap { URL(string: $0) }) { image in image.resizable().scaledToFill() }
-                                placeholder: { Image(systemName: "app.dashed").font(.title2) }
-                                .frame(width: 56, height: 56).background(MirsaPalette.cardRaised)
-                                .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon))
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.name.isEmpty ? item.bundleID : item.name).font(MirsaFont.cardTitle).lineLimit(2)
-                                    if let date = item.date {
-                                        Text(date.formatted(date: .numeric, time: .omitted)).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
-                                    }
-                                }
-                                Spacer()
-                                if downloading == item.id { ProgressView() }
-                                else {
-                                    Button { Task { await download(item) } } label: {
-                                        Image(systemName: "icloud.and.arrow.down").font(.title2).foregroundStyle(MirsaPalette.accentSoft).frame(width: 40, height: 40)
-                                    }.disabled(loading || downloading != nil || store.busy != nil)
-                                    .accessibilityLabel(tr("Download", "تنزيل", ckb: "داگرتن", kmr: "Daxe"))
-                                }
-                            }.padding(MirsaSpacing.card)
-                            AppStoreRowDivider(inset: 84)
+                    LazyVStack(alignment: .leading, spacing: MirsaSpacing.l) {
+                        ForEach(StorePurchaseGroups.make(visible)) { group in
+                            purchaseGroup(group)
                         }
-                    }.mirsaCard()
+                    }
                 } else {
                     Text(tr("Sign in from the Account tab to load your Apple purchases.", "سجّل دخول من تبويب الحساب لتشوف مشتريات Apple تبعك.", ckb: "بچۆ ژوورەوە بۆ بینینی کڕینەکان.", kmr: "Ji bo kirînan têkeve hesabê te.")).foregroundStyle(MirsaPalette.textSecondary)
                 }
@@ -693,6 +677,96 @@ struct AppStorePurchasesPage: View {
         .background(AuroraBackground().ignoresSafeArea())
         .environment(\.layoutDirection, .leftToRight)
     }
+    private var purchaseFilters: some View {
+        HStack(spacing: 6) {
+            purchaseFilter(0, title: tr("All", "الكل", ckb: "هەموو", kmr: "Hemû"))
+            purchaseFilter(1, title: tr("1 month", "شهر", ckb: "مانگێک", kmr: "1 meh"))
+            purchaseFilter(6, title: tr("6 months", "٦ أشهر", ckb: "٦ مانگ", kmr: "6 meh"))
+            purchaseFilter(12, title: tr("12 months", "سنة", ckb: "ساڵێک", kmr: "12 meh"))
+        }
+    }
+
+    private func purchaseFilter(_ value: Int, title: String) -> some View {
+        Button { withAnimation(MirsaMotion.select) { months = value } } label: {
+            Text(title).font(MirsaFont.caption.weight(.semibold))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .foregroundStyle(months == value ? Color.white : MirsaPalette.textSecondary)
+                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                .background(months == value ? Color.white.opacity(0.14) : Color.white.opacity(0.035), in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(months == value ? 0.22 : 0.07), lineWidth: 1))
+        }
+        .buttonStyle(.mirsaPress)
+        .accessibilityAddTraits(months == value ? .isSelected : [])
+        .accessibilityIdentifier("store-purchases-filter-\(value)")
+    }
+
+    private func purchaseGroup(_ group: StorePurchaseGroups.Group) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(group.month.map { StorePurchaseGroups.title($0, locale: AppLanguageStore.shared.current.locale) }
+                 ?? tr("Date unavailable", "التاريخ مو متوفر", ckb: "بەروار بەردەست نییە", kmr: "Dîrok ne berdest e"))
+                .font(MirsaFont.sectionTitle).foregroundStyle(MirsaPalette.textSecondary)
+                .padding(.horizontal, 4)
+                .accessibilityAddTraits(.isHeader)
+            LazyVStack(spacing: 0) {
+                ForEach(group.items) { item in
+                    purchaseRow(item)
+                    if item.id != group.items.last?.id {
+                        Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+                            .padding(.horizontal, MirsaSpacing.card)
+                    }
+                }
+            }
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(MirsaPalette.accentSoft.opacity(0.035), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+    }
+
+    private func purchaseRow(_ item: MirsaStorePurchase) -> some View {
+        HStack(spacing: MirsaSpacing.s) {
+            // Physical LTR is app-wide. Put the real download action on the left.
+            Group {
+                if downloading == item.id { ProgressView() }
+                else {
+                    Button { Task { await download(item) } } label: {
+                        Image(systemName: "icloud.and.arrow.down")
+                            .font(.system(size: 21, weight: .medium))
+                            .foregroundStyle(MirsaPalette.accentSoft)
+                            .frame(width: 44, height: 44)
+                            .background(MirsaPalette.accentSoft.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.mirsaPress)
+                    .disabled(loading || downloading != nil || store.busy != nil)
+                    .accessibilityLabel(tr("Download", "تنزيل", ckb: "داگرتن", kmr: "Daxe") + " " + item.name)
+                    .accessibilityIdentifier("store-purchase-download-\(item.id)")
+                }
+            }.frame(width: 44, height: 44)
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(item.name.isEmpty ? item.bundleID : item.name)
+                    .font(MirsaFont.cardTitle).foregroundStyle(.white)
+                    .lineLimit(2).multilineTextAlignment(.trailing)
+                if let date = StorePurchaseGroups.validDate(item.date) {
+                    Text(date.formatted(.dateTime.day().month(.abbreviated).year()
+                        .locale(AppLanguageStore.shared.current.locale)))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                }
+                // History has no reliable size field. Do not invent one or fetch a package here.
+            }
+            AsyncImage(url: artwork[item.id].flatMap { URL(string: $0) }) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Image(systemName: "app.dashed").font(.title2).foregroundStyle(MirsaPalette.textTertiary)
+            }
+            .frame(width: 52, height: 52).background(MirsaPalette.cardRaised)
+            .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon, style: .continuous))
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, MirsaSpacing.card).padding(.vertical, 14)
+    }
+
     @MainActor private func reload() async {
         guard isActive, let account = model.account else { return }
         let revision = model.sessionRevision
