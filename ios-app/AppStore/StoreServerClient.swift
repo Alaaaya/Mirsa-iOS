@@ -159,6 +159,21 @@ actor MirsaStoreServerClient {
         }
     }
 
+    /// History shares the exact owner/device capability route used by commerce.
+    /// A simultaneous tab refresh is not an authorization denial. Wait for its
+    /// reservation, then perform a fresh, fail-closed check (never cache an allow).
+    func authorizeHistory() async throws {
+        let expectedGeneration = generation
+        let deadline = Date().addingTimeInterval(60)
+        while busy {
+            try check(expectedGeneration)
+            guard Date() < deadline else { throw MirsaStoreServerError(code: "busy") }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        try check(expectedGeneration)
+        _ = try await currentAccount()
+    }
+
     func currentAccount() async throws -> MirsaStoreAccount? {
         let run = try begin(); defer { busy = false }
         let (owner, token) = try await credentials(run)

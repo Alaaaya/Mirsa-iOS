@@ -35,5 +35,7 @@ extension MirsaStoreServerClient {
 extension MirsaStoreOnDeviceClient {
     static let shared = MirsaStoreOnDeviceClient(gate: {
         await MirsaStoreServerClient.shared.loginAvailable()
+    }, historyGate: {
+        try await MirsaStoreServerClient.shared.authorizeHistory()
     })
 }
