@@ -93,3 +93,35 @@ cookies, GUID, attempt, rmp and why=signIn. X-Dsid is not added speculatively:
 the inspected reference extracts dsPersonId for the resulting account, which is
 not evidence that an unknown pre-login DSID header should be synthesized.
 The owner still needs to validate login on-device after an actual CI archive.
+
+
+## Owner's hardware and 2FA routing hypotheses
+
+Inspected pinned apple-auth `src/client/store.cpp` at
+98c862f7bebc8283a9b87f1578e703f0765dc81d and the vendored `core.hpp`.
+This dependency explicitly requires a 20-byte HardwareId and creates an independent
+random 20-byte hardware binding beside a six-byte GUID and UUID device ID. The
+binding is used consistently to provision/import/export the profile. It is not
+the six-byte SAP machine ID in ipatool v2.6, nor the six-byte commerce GUID in
+ipatool main's separate AppleMediaServices emulator. Substituting six bytes at
+our C bridge would cause a 20-byte out-of-bounds read. No such change was made.
+The dependency's X-Mme-Device-Id is on its separate GSA provisioning calls, not
+its configurator authentication POST. Adding it to this POST is not supported
+by the inspected reference, so no speculative identity headers were added.
+
+The existing Authenticator persists the redirected endpoint, signer, cookies and
+GUID across the code challenge. StoreClient.verify uses that same session,
+without a bag request. AMD challenges are handled before HTTP failure/code
+classification, including on attempt two. Added a combined offline regression
+with pod redirect, first-step challenge/cookie, forbidden SP during code, updated
+cookie, then success. It asserts the pod remains unchanged and the exact signed
+password-plus-code body survives the AMD retry. These are offline protocol
+properties, not proof of successful device login.
+
+The prior generic alert could be generated locally before Apple was contacted:
+UI password reentry conflicted with the frozen challenge password. The UI now
+submits only the verification code and the original password remains in the
+five-minute memory-only challenge. Distinct local validation messages say no
+Apple request was made. Explicit Apple's failureType and bounded/redacted
+customerMessage are retained on actual rejection. Malformed AMD messages remain
+private and use safe device-challenge diagnostics instead.

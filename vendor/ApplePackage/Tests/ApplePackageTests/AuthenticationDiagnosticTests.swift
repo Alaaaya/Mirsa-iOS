@@ -37,7 +37,9 @@ final class AuthenticationDiagnosticTests: XCTestCase {
             XCTAssertEqual(error.responseMessage, expected)
             XCTAssertEqual(error.loginPhase, .verificationCode)
             XCTAssertEqual(error.failureState, .missing)
-            XCTAssertEqual(error.message, AuthenticationServiceError.redact(raw as? String, secrets: []))
+            let text = raw as? String
+            let isAMD = text?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("AMD-Action") == true
+            XCTAssertEqual(error.message, isAMD ? nil : AuthenticationServiceError.redact(text, secrets: []))
             let wrapped = AuthenticationServiceError.wrapping(error, stage: .signing)
             XCTAssertEqual(wrapped.responseMessage, expected)
             XCTAssertEqual(wrapped.loginPhase, .verificationCode)

@@ -581,7 +581,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             XCTAssertEqual(diagnostic.loginPhase, .verificationCode)
             XCTAssertEqual(diagnostic.responseMessage, .configurator)
             XCTAssertEqual(diagnostic.failureState, .empty)
-            XCTAssertNil(diagnostic.message)
+            XCTAssertEqual(diagnostic.message, AuthenticationServiceError.redact("MZFinance.BadLogin.Configurator_message", secrets: []))
         }
     }
 
@@ -617,7 +617,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             XCTAssertEqual(error.appleCode, "5005")
             XCTAssertEqual(error.loginPhase, .verificationCode)
             XCTAssertEqual(error.responseMessage, .unrecognized)
-            XCTAssertNil(error.message)
+            XCTAssertEqual(error.message, "Private owner address")
         }
         _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "654321")
         let requests = await http.recorded()
@@ -656,7 +656,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
                 XCTAssertEqual(error.appleCode, "-5000")
                 XCTAssertEqual(error.loginPhase, .verificationCode)
                 XCTAssertEqual(error.responseMessage, .unrecognized)
-                XCTAssertNil(error.message)
+                XCTAssertEqual(error.message, "A private owner name")
             }
         }
     }
@@ -705,7 +705,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             catch let error as AuthenticationServiceError {
                 XCTAssertEqual(error.appleCode, "5020")
                 XCTAssertEqual(error.loginPhase, .verificationCode)
-                XCTAssertNil(error.message)
+                XCTAssertEqual(error.message, "Private owner message")
             }
         }
         let requests = await http.recorded()
@@ -761,6 +761,41 @@ final class SAPAuthenticationRequestTests: XCTestCase {
                 "attempt": index == 2 ? "2" : "1", "rmp": "0", "why": "signIn"])
             if index > 0 { XCTAssertEqual(requests[index].headers.first(name: "Cookie"), "session=pod-cookie") }
         }
+    }
+
+    func testPodContinuationAndAMDDuringCodeShareEndpointCookiesAndExactSignedBody() async throws {
+        let podURL = "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/"
+        var redirect = try response(status: .found)
+        redirect.headers.add(name: "Location", value: podURL)
+        var challenge = try response(fields: ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"])
+        challenge.headers.add(name: "pod", value: "25")
+        challenge.headers.add(name: "Set-Cookie", value: "session=pod-first; Domain=.itunes.apple.com; Path=/; Secure")
+        var deviceChallenge = try response(status: .forbidden, action: "SP")
+        deviceChallenge.headers.add(name: "Set-Cookie", value: "session=pod-amd; Domain=.itunes.apple.com; Path=/; Secure")
+        let http = try ScriptedHTTP([redirect, challenge, deviceChallenge, response(fields: successFields)])
+        let signer = RecordingSigner()
+        let proof = OfflineAMD()
+        let auth = try session(http, proof: proof, signer: signer)
+        do { _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture"); XCTFail() }
+        catch AuthenticationError.verificationCodeRequired { }
+        let account = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "654321")
+        XCTAssertEqual(account.pod, "25")
+        let requests = await http.recorded()
+        XCTAssertEqual(requests.count, 4)
+        let bodies = try requests.map(bodyData)
+        XCTAssertEqual(bodies[0], bodies[1])
+        XCTAssertEqual(bodies[2], bodies[3])
+        let signed = await signer.recordedBodies()
+        XCTAssertEqual(signed, bodies)
+        // No bag restart. The second step and its AMD retry stay on the same pod.
+        for index in 1..<requests.count { XCTAssertEqual(requests[index].url.absoluteString, podURL) }
+        XCTAssertEqual(requests[2].headers.first(name: "Cookie"), "session=pod-first")
+        XCTAssertEqual(requests[3].headers.first(name: "Cookie"), "session=pod-amd")
+        XCTAssertEqual(requests[3].headers.first(name: "X-Apple-AMD"), "otp-1")
+        let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[3], format: nil) as? [String: String])
+        XCTAssertEqual(fields["password"], "fixture654321")
+        XCTAssertEqual(fields["guid"], "001122334455")
+        XCTAssertEqual(fields["attempt"], "2")
     }
 
 }
