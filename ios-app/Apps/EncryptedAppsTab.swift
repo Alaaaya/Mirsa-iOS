@@ -25,7 +25,7 @@ struct EncryptedAppsTab: View {
             AuroraBackground().ignoresSafeArea()
             page(.search) { searchPage }
             page(.downloads) { downloadsPage }
-            page(.purchases) { AppStorePurchasesPage(store: store, model: storeAccount, vm: vm) }
+            page(.purchases) { AppStorePurchasesPage(store: store, model: storeAccount, vm: vm, isActive: section == .purchases) }
             page(.account) {
                 AppStoreAccountPage(model: storeAccount, library: store, storeAvailable: storeLoginAvailable,
                                     onAddAccount: { showingAppStore = true },

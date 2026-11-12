@@ -250,9 +250,10 @@ actor MirsaStoreClient {
         guard run == generation, !Task.isCancelled else { throw MirsaStoreError.operationCancelled }
     }
     func purchaseHistory() async throws -> [MirsaStorePurchase] {
-        try prepare()
+        try Task.checkCancellation()
+        let run = try begin()
+        defer { busy = false }
         let owner = try requiredAccount()
-        let run = generation
         let result = try await MirsaStorePurchaseHistory.fetch(owner: owner)
         try check(run)
         guard try requiredAccount().directoryServicesIdentifier == owner.directoryServicesIdentifier else {

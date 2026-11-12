@@ -16,7 +16,10 @@ struct MirsaStorePurchase: Identifiable, Sendable {
 /// Read-only own-account DAAP history. Does not acquire licenses or change login state.
 enum MirsaStorePurchaseHistory {
     static func fetch(owner: Account) async throws -> [MirsaStorePurchase] {
+        try Task.checkCancellation()
+        let storeFront = try owner.commerceStoreFront()
         let signer = try await SAPSigner.connect()
+        try Task.checkCancellation()
         let root = "https://pd.itunes.apple.com/WebObjects/MZPurchaseDaap.woa/purchase"
         let query = "('com.apple.itunes.extended\\-media\\-kind:131072')"
         let config = URLSessionConfiguration.ephemeral
@@ -25,6 +28,7 @@ enum MirsaStorePurchaseHistory {
         let session = URLSession(configuration: config, delegate: HistoryRedirectPolicy(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         func request(_ path: String, body: Data?, binary: Bool = false) async throws -> Data {
+            try Task.checkCancellation()
             let url = URL(string: root + path)!
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
@@ -40,7 +44,7 @@ enum MirsaStorePurchaseHistory {
                 "User-Agent": "Configurator/2.21 (Macintosh; OS X 15.2; 24C5089c) AppleWebKit/0620.1.16.11.6",
                 "X-Dsid": owner.directoryServicesIdentifier,
                 "iCloud-DSID": owner.directoryServicesIdentifier,
-                "X-Apple-Store-Front": owner.storeFront ?? owner.store,
+                "X-Apple-Store-Front": storeFront,
                 "X-Token": owner.passwordToken,
                 "Accept": "*/*", "Accept-Language": "en-us",
                 "Client-Cloud-DAAP-Request-Reason": "5",
@@ -58,6 +62,7 @@ enum MirsaStorePurchaseHistory {
                 req.setValue(try await signer.sign(body).base64EncodedString(), forHTTPHeaderField: "X-Apple-ActionSignature")
             }
             let (data, response) = try await session.data(for: req)
+            try Task.checkCancellation()
             guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 32 * 1024 * 1024 else {
                 throw MirsaStoreError.serviceUnavailable
             }
