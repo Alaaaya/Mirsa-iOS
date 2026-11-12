@@ -17,16 +17,23 @@ public enum VersionLookup {
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
 
-        let dict = try await StoreDownloadEndpoint.fetchProductWithFallback(
-            client: client,
-            account: &account,
-            app: app,
-            deviceIdentifier: Configuration.deviceIdentifier,
-            externalVersionID: versionID,
-        )
+        let fetched: (response: [String: Any], endpoint: StoreDownloadTag.Endpoint)
+        do {
+            fetched = try await StoreDownloadEndpoint.fetchProductTracked(
+                client: client,
+                account: &account,
+                app: app,
+                deviceIdentifier: Configuration.deviceIdentifier,
+                externalVersionID: versionID,
+            )
+        } catch {
+            throw StoreDownloadFailure.map(error, .metadata)
+        }
+        let dict = fetched.response
 
         guard let items = dict["songList"] as? [[String: Any]], !items.isEmpty else {
-            try ensureFailed(Strings.noItemsInResponse)
+            let stop: StoreDownloadTag.Stop = dict["failureType"] == nil && (dict["customerMessage"] as? String ?? "").isEmpty ? .noItems : .failure
+            throw StoreDownloadFailure.answer(.metadata, fetched.endpoint, dict, stop, reason: Strings.noItemsInResponse)
         }
 
         let item = items[0]

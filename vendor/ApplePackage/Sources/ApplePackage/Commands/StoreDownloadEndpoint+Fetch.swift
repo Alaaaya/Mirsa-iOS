@@ -18,6 +18,29 @@ extension StoreDownloadEndpoint {
         externalVersionID: String,
         entityType: EntityType = .iPhone,
     ) async throws -> [String: Any] {
+        try await fetchProductTracked(client: client, account: &account, app: app, deviceIdentifier: deviceIdentifier,
+                                      externalVersionID: externalVersionID, entityType: entityType).response
+    }
+
+    /// The tag's endpoint for this case.
+    var tagEndpoint: StoreDownloadTag.Endpoint {
+        switch self {
+        case .volumeStore: .volume
+        case .redownload: .redownload
+        case .update: .update
+        }
+    }
+
+    /// Same chain as `fetchProductWithFallback`, also naming the endpoint whose answer is returned.
+    /// Failures inside the chain are thrown as `StoreDownloadFailure` (secret-free tag) or `StoreDownloadHTTPError`.
+    static func fetchProductTracked(
+        client: HTTPClient,
+        account: inout Account,
+        app: Software,
+        deviceIdentifier: String,
+        externalVersionID: String,
+        entityType: EntityType = .iPhone,
+    ) async throws -> (response: [String: Any], endpoint: StoreDownloadTag.Endpoint) {
         let dict = try await StoreDownloadEndpoint.volumeStore.fetchProduct(
             client: client,
             account: &account,
@@ -26,14 +49,21 @@ extension StoreDownloadEndpoint {
             externalVersionID: externalVersionID,
         )
 
-        guard requiresRedownload(dict) else { return dict }
+        guard requiresRedownload(dict) else { return (dict, .volume) }
         APLogger.debug("store: volumeStore returned no package, trying redownload")
         var version = externalVersionID
         if version.isEmpty {
             guard let country = Configuration.countryCode(for: account.store) else {
                 try ensureFailed(Strings.unsupportedStoreIdentifier(account.store))
             }
-            version = try await PlatformVersionLookup.lookup(appID: app.id, countryCode: country, entityType: entityType).externalVersionID
+            do {
+                version = try await PlatformVersionLookup.lookup(appID: app.id, countryCode: country, entityType: entityType).externalVersionID
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw StoreDownloadFailure(.init(endpoint: .volume, response: dict, httpStatus: 200, stop: .lookup),
+                                           reason: Strings.missingVersionIdentifiers)
+            }
         }
         let bag = try? await Bag.fetchBag()
         do {
@@ -45,7 +75,7 @@ extension StoreDownloadEndpoint {
                 externalVersionID: version,
                 endpointURL: bag?.redownloadEndpoint,
             )
-            return try validateRecoveryResponse(response, app: app, version: version)
+            return (try validateRecoveryResponse(response, app: app, version: version, endpoint: .redownload), .redownload)
         } catch let error as StoreDownloadHTTPError {
             guard error.statusCode == 500, error.emptyBody, !version.isEmpty,
                   let updateEndpoint = bag?.updateEndpoint
@@ -55,11 +85,12 @@ extension StoreDownloadEndpoint {
                 client: client, account: &account, app: app, deviceIdentifier: deviceIdentifier,
                 externalVersionID: version, endpointURL: updateEndpoint,
             )
-            return try validateRecoveryResponse(response, app: app, version: version)
+            return (try validateRecoveryResponse(response, app: app, version: version, endpoint: .update), .update)
         }
     }
 
-    static func validateRecoveryResponse(_ response: [String: Any], app: Software, version: String) throws -> [String: Any] {
+    static func validateRecoveryResponse(_ response: [String: Any], app: Software, version: String,
+                                         endpoint: StoreDownloadTag.Endpoint = .redownload) throws -> [String: Any] {
         if let failure = response["failureType"], !String(describing: failure).isEmpty {
             return response
         }
@@ -70,7 +101,12 @@ extension StoreDownloadEndpoint {
               metadata["itemId"].map({ String(describing: $0) }) == String(app.id),
               metadata["softwareVersionExternalIdentifier"].map({ String(describing: $0) }) == version,
               metadata["softwareVersionBundleId"] as? String == app.bundleID
-        else { try ensureFailed(Strings.invalidResponse) }
+        else {
+            let stop: StoreDownloadTag.Stop = (response["customerMessage"] as? String ?? "").isEmpty && response["dialog"] == nil
+                && response["action"] == nil ? .recovery : .failure
+            throw StoreDownloadFailure(.init(endpoint: endpoint, response: response, httpStatus: 200, stop: stop),
+                                       reason: Strings.invalidResponse)
+        }
         return response
     }
 
@@ -146,7 +182,8 @@ extension StoreDownloadEndpoint {
                       let newURL = URL(string: location, relativeTo: currentURL)?.absoluteURL,
                       redirectAttempt < maxRedirects
                 else {
-                    try ensureFailed(Strings.failedToRetrieveRedirect)
+                    throw StoreDownloadFailure(.init(endpoint: tagEndpoint, httpStatus: Int(response.status.code), stop: .redirect),
+                                               reason: Strings.failedToRetrieveRedirect)
                 }
                 currentURL = newURL
                 redirectAttempt += 1
@@ -158,7 +195,10 @@ extension StoreDownloadEndpoint {
         guard let finalResponse else { try ensureFailed(Strings.noResponseReceived) }
 
         guard finalResponse.status == .ok else {
-            throw StoreDownloadHTTPError(statusCode: finalResponse.status.code, emptyBody: (finalResponse.body?.readableBytes ?? 0) == 0)
+            let errorBody = finalResponse.body.map { Data($0.readableBytesView) } ?? Data()
+            throw StoreDownloadHTTPError(statusCode: finalResponse.status.code, emptyBody: errorBody.isEmpty,
+                                         tag: .init(endpoint: tagEndpoint, response: StoreAMDAction.fields(from: errorBody),
+                                                    httpStatus: Int(finalResponse.status.code), stop: .http))
         }
 
         guard var body = finalResponse.body,
@@ -167,18 +207,20 @@ extension StoreDownloadEndpoint {
             try ensureFailed(Strings.responseBodyEmpty)
         }
 
-        let plist = try PropertyListSerialization.propertyList(
+        let plist = try? PropertyListSerialization.propertyList(
             from: data,
             options: [],
             format: nil,
         ) as? [String: Any]
-        guard let dict = plist else { try ensureFailed(Strings.invalidResponse) }
+        guard let dict = plist else {
+            throw StoreDownloadFailure(.init(endpoint: tagEndpoint, httpStatus: 200, stop: .parse), reason: Strings.invalidResponse)
+        }
         if StoreAMDAction.isActionMessage(dict["customerMessage"] as? String) { throw StoreAMDError(.parse) }
 
         return dict
     }
 
-    private func makeRequest(
+    func makeRequest(
         account: Account,
         app: Software,
         url: URL,
@@ -205,6 +247,9 @@ extension StoreDownloadEndpoint {
             ("iCloud-DSID", account.directoryServicesIdentifier),
             ("X-Dsid", account.directoryServicesIdentifier),
         ]
+        // ipatool downloadProductRequest sends X-Apple-Store-Front and X-Token on volumeStore, redownload and
+        // updateProduct alike. Mirsa's working buyProduct already sends both in this exact form.
+        headers.append(contentsOf: try Self.sessionHeaders(account))
 
         for item in account.cookie.buildCookieHeader(url) {
             headers.append(item)
@@ -222,9 +267,30 @@ extension StoreDownloadEndpoint {
     }
 }
 
+extension StoreDownloadEndpoint {
+    /// `X-Apple-Store-Front: <store>-1` and `X-Token: <passwordToken>`, same values as Purchase.makeRequest.
+    /// Values with CR/LF/NUL are refused at byte level; an empty token or store is not sent.
+    static func sessionHeaders(_ account: Account) throws -> [(String, String)] {
+        var result: [(String, String)] = []
+        let store = account.store.trimmingCharacters(in: .whitespaces)
+        if !store.isEmpty, store.utf8.count <= 12, store.utf8.allSatisfy({ (48...57).contains($0) }) {
+            result.append(("X-Apple-Store-Front", "\(store)-1"))
+        }
+        let token = account.passwordToken
+        if !token.isEmpty {
+            try ensure(token.utf8.count <= 8192 && !token.utf8.contains(where: { $0 == 13 || $0 == 10 || $0 == 0 }),
+                       Strings.unableToReadPasswordToken)
+            result.append(("X-Token", token))
+        }
+        return result
+    }
+}
+
 struct StoreDownloadHTTPError: LocalizedError {
     let statusCode: UInt
     let emptyBody: Bool
+    /// Secret-free reason (endpoint, failureType, key-like message) of the non-200 answer.
+    var tag: StoreDownloadTag? = nil
 
     var errorDescription: String? {
         Strings.requestFailed(status: statusCode)
