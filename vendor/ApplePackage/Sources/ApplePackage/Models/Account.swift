@@ -93,7 +93,8 @@ public extension Account {
     /// Old cached sessions need a fresh login, never fabricate a storefront suffix.
     func commerceStoreFront() throws -> String {
         guard let storeFront, storeFront.utf8.count <= 256,
-              !storeFront.contains("\r"), !storeFront.contains("\n"),
+              // Scalar validation also rejects CRLF, a single Swift grapheme cluster.
+              storeFront.unicodeScalars.allSatisfy({ (0x20...0x7E).contains($0.value) }),
               storeFront.components(separatedBy: "-").first == store,
               storeFront.contains("-") else { throw StorefrontMetadataMissing() }
         return storeFront
