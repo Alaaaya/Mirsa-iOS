@@ -16,6 +16,10 @@ jobs:
           if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
           if [ -z "$XC" ]; then XC=$(xcode-select -p | sed 's#/Contents/Developer##'); fi
           sudo xcode-select -s "$XC"
+      - name: Synthetic purchase history parser and account-switch regression tests
+        run: |
+          python3 scripts/appstore/store-section-state-tests.py
+          python3 scripts/appstore/history-runtime-tests.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios

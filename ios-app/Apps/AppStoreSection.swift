@@ -56,7 +56,7 @@ final class AppStoreSectionModel: ObservableObject {
     }
     #endif
 
-    private var sessionRevision = 0
+    @Published private(set) var sessionRevision = 0
 
     func updateAccount(_ value: MirsaStoreAccount?) {
         sessionRevision += 1
@@ -73,7 +73,7 @@ final class AppStoreSectionModel: ObservableObject {
         do {
             let current = try await MirsaStoreOnDeviceClient.shared.currentAccount()
             guard revision == sessionRevision else { return }
-            account = current
+            if account != current { updateAccount(current) }
         } catch {
             // A temporary capability/network error is not a logout.
         }
@@ -604,12 +604,12 @@ struct AppStoreDownloadSettingsPage: View {
 
 // MARK: - Purchases
 
-/// IPAs in the library, grouped by who bought them. Apple's own purchase history is
-/// not requested here; only the purchaser recorded inside each IPA is shown.
+/// Read-only signed Apple purchase history. Hidden tabs do not fetch account data.
 struct AppStorePurchasesPage: View {
     @ObservedObject var store: EncryptedAppsStore
     @ObservedObject var model: AppStoreSectionModel
     let vm: AppViewModel
+    let isActive: Bool
     @State private var query = ""
     @State private var months = 0
     @State private var purchases: [MirsaStorePurchase] = []
@@ -617,6 +617,9 @@ struct AppStorePurchasesPage: View {
     @State private var loading = false
     @State private var error: String?
     @State private var downloading: Int64?
+    @State private var reloadID = UUID()
+    @State private var reloadTask: Task<Void, Never>?
+    private var loadIdentity: String { "\(model.sessionRevision)|\(model.account?.email ?? "")|\(isActive)" }
     private var visible: [MirsaStorePurchase] {
         let cutoff = Calendar.current.date(byAdding: .month, value: -months, to: Date()) ?? .distantPast
         return purchases.filter {
@@ -629,7 +632,8 @@ struct AppStorePurchasesPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
                 MirsaPageHeader(title: tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")) {
-                    Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading)
+                    Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading || !isActive)
+                        .accessibilityLabel(tr("Refresh purchases", "تحديث المشتريات", ckb: "نوێکردنەوەی کڕینەکان", kmr: "Kirînan nû bike"))
                 }
                 if let account = model.account {
                     Text(account.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
@@ -665,7 +669,7 @@ struct AppStorePurchasesPage: View {
                                 else {
                                     Button { Task { await download(item) } } label: {
                                         Image(systemName: "icloud.and.arrow.down").font(.title2).foregroundStyle(MirsaPalette.accentSoft).frame(width: 40, height: 40)
-                                    }.disabled(downloading != nil || store.busy != nil)
+                                    }.disabled(loading || downloading != nil || store.busy != nil)
                                     .accessibilityLabel(tr("Download", "تنزيل", ckb: "داگرتن", kmr: "Daxe"))
                                 }
                             }.padding(MirsaSpacing.card)
@@ -678,26 +682,46 @@ struct AppStorePurchasesPage: View {
             }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
         }
         .refreshable { await reload() }
-        .task(id: model.account?.email) { purchases = []; artwork = [:]; error = nil; await reload() }
+        .task(id: loadIdentity) {
+            reloadID = UUID(); reloadTask?.cancel()
+            purchases = []; artwork = [:]; error = nil; loading = false
+            if isActive { await reload() }
+        }
+        .onDisappear { reloadTask?.cancel() }
         .scrollDismissesKeyboard(.interactively)
         .background(AuroraBackground().ignoresSafeArea())
         .environment(\.layoutDirection, .leftToRight)
     }
     @MainActor private func reload() async {
-        guard let account = model.account else { return }
-        let email = account.email
-        guard !loading else { return }
-        loading = true; error = nil
-        defer { loading = false }
+        guard isActive, let account = model.account else { return }
+        let revision = model.sessionRevision
+        let previous = reloadTask
+        previous?.cancel()
+        let id = UUID()
+        reloadID = id; loading = true; error = nil
+        let task = Task { @MainActor in
+            defer { if reloadID == id { loading = false } }
+            // A cancelled account fetch must release its client reservation before a new one starts.
+            await previous?.value
+            guard !Task.isCancelled, reloadID == id, isActive,
+                  model.sessionRevision == revision, model.account == account else { return }
+            await loadHistory(account: account, revision: revision, id: id)
+        }
+        reloadTask = task
+        await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+    }
+    @MainActor private func loadHistory(account: MirsaStoreAccount, revision: Int, id: UUID) async {
+        func isCurrent() -> Bool {
+            !Task.isCancelled && reloadID == id && isActive &&
+            model.sessionRevision == revision && model.account == account
+        }
         do {
             let result = try await MirsaStoreOnDeviceClient.shared.purchaseHistory()
-            try Task.checkCancellation()
-            guard model.account?.email == email else { return }
+            guard isCurrent() else { return }
             purchases = result
             // Public metadata lookup in bounded chunks, not authenticated history replay.
             for start in stride(from: 0, to: result.count, by: 100) {
-                try Task.checkCancellation()
-                guard model.account?.email == email else { return }
+                guard isCurrent() else { return }
                 let ids = result[start..<min(start+100, result.count)].map { String($0.id) }.joined(separator: ",")
                 var url = URLComponents(string: "https://itunes.apple.com/lookup")!
                 url.queryItems = [URLQueryItem(name: "id", value: ids), URLQueryItem(name: "country", value: account.country)]
@@ -706,26 +730,37 @@ struct AppStorePurchasesPage: View {
                 struct Icon: Decodable { let trackId: Int64; let artworkUrl100: String? }
                 struct Reply: Decodable { let results: [Icon] }
                 if let reply = try? JSONDecoder().decode(Reply.self, from: data) {
-                    guard model.account?.email == email else { return }
+                    guard isCurrent() else { return }
                     for item in reply.results { artwork[item.trackId] = item.artworkUrl100 }
                 }
             }
         } catch is CancellationError {}
         catch {
-            guard model.account?.email == email else { return }
+            guard isCurrent() else { return }
             self.error = tr("Apple purchase history could not be loaded. Refresh to try again.", "ما قدرت حمّل سجل مشتريات Apple. جرّب التحديث.", ckb: "مێژووی کڕین بار نەکرا. نوێی بکەرەوە.", kmr: "Dîroka kirînê nehat barkirin. Nû bike.")
         }
     }
     @MainActor private func download(_ item: MirsaStorePurchase) async {
-        let email = model.account?.email
+        guard isActive, !loading, downloading == nil, let account = model.account else { return }
+        let revision = model.sessionRevision
         downloading = item.id; error = nil
         defer { downloading = nil }
         do {
             let url = try await MirsaStoreOnDeviceClient.shared.downloadOwnedApp(item.app)
-            guard model.account?.email == email else { return }
+            defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
+            try Task.checkCancellation()
+            guard model.sessionRevision == revision, model.account == account else { return }
             let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+            // adopt uses detached I/O. Discard its private copy if the account changed meanwhile.
+            guard !Task.isCancelled, model.sessionRevision == revision, model.account == account else {
+                try? FileManager.default.removeItem(at: EncryptedAppsStore.ipaURL(entry.id))
+                try? FileManager.default.removeItem(at: EncryptedAppsStore.iconURL(entry.id))
+                return
+            }
             store.add(entry)
-        } catch {
+        } catch is CancellationError {}
+        catch {
+            guard model.sessionRevision == revision, model.account == account else { return }
             self.error = tr("Download failed. Check your account and try again.", "التنزيل ما كمل. تأكد من حسابك وجرّب.", ckb: "داگرتن سەرکەوتوو نەبوو.", kmr: "Daxistin bi ser neket.")
         }
     }
