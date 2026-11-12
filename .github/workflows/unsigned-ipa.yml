@@ -35,9 +35,10 @@ jobs:
         run: bash scripts/appstore/package-tests.sh
 
       - name: Authentication diagnostics, redaction and exact signed-body offline tests
-        run: swift test --package-path vendor/ApplePackage --filter 'AuthenticationDiagnosticTests|SAPAuthenticationRequestTests'
+        run: swift test --package-path vendor/ApplePackage --filter 'AuthenticationDiagnosticTests|SAPAuthenticationRequestTests|StoreDownloadRecoveryTests'
 
       - name: Credential-free Apple SAP preflight
+        if: github.event_name == 'push'
         continue-on-error: true
         env:
           MIRSA_AUTH_PREFLIGHT: "1"

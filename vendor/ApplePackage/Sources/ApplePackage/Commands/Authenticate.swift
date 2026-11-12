@@ -24,6 +24,7 @@ public actor Authenticator {
     private var endpoint: URL
     private var cookies: [Cookie]
     private var storeFront = ""
+    private var fullStoreFront: String?
     private var pod: String?
     private var authenticating = false
     private var terminalRejection: AuthenticationServiceError?
@@ -243,6 +244,11 @@ public actor Authenticator {
         if let first = readStoreFrontValue.first {
             storeFront = first
         }
+        // Response metadata only. Authentication requests and 2FA remain unchanged.
+        if let value = response.headers.first(name: "x-set-apple-store-front"),
+           !value.isEmpty, value.utf8.count <= 256, !value.contains("\r"), !value.contains("\n") {
+            fullStoreFront = value
+        }
 
         if let podValue = response.headers.first(name: "pod"), !podValue.isEmpty {
             pod = podValue
@@ -295,7 +301,7 @@ public actor Authenticator {
             email: email, password: password, appleId: accountInfoDic["appleId"] as? String, store: storeFront,
             firstName: addressInfoDic["firstName"] as? String, lastName: addressInfoDic["lastName"] as? String,
             passwordToken: dic["passwordToken"] as? String, directoryServicesIdentifier: dic["dsPersonId"] as? String, cookie: cookies,
-            pod: pod,
+            pod: pod, storeFront: fullStoreFront,
         )
         return .success(account)
     }

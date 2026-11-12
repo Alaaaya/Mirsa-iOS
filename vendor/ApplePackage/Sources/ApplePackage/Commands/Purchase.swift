@@ -118,7 +118,7 @@ public enum Purchase {
         }
     }
 
-    private static func makeRequest(
+    static func makeRequest(
         account: Account,
         app: Software,
         guid: String,
@@ -147,18 +147,21 @@ public enum Purchase {
             ("User-Agent", Configuration.userAgent),
             ("iCloud-DSID", account.directoryServicesIdentifier),
             ("X-Dsid", account.directoryServicesIdentifier),
-            ("X-Apple-Store-Front", "\(account.store)-1"),
+            ("X-Apple-Store-Front", try account.commerceStoreFront()),
             ("X-Token", account.passwordToken),
         ]
 
         let host = Configuration.purchaseAPIHost(pod: account.pod)
         let urlString = "https://\(host)/WebObjects/MZFinance.woa/wa/buyProduct"
+        guard let url = URL(string: urlString), StoreAMDHeaderScope.permits(url) else {
+            try ensureFailed(Strings.failedToRetrieveRedirect)
+        }
 
-        for item in account.cookie.buildCookieHeader(URL(string: urlString)!) {
+        for item in account.cookie.buildCookieHeader(url) {
             headers.append(item)
         }
 
-        try StoreAMDHeaderScope.append(amdHeaders, to: &headers, url: URL(string: urlString)!)
+        try StoreAMDHeaderScope.append(amdHeaders, to: &headers, url: url)
         APLogger.logRequest(method: "POST", url: urlString, headers: headers)
 
         return try .init(

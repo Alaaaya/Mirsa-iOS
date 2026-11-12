@@ -10,6 +10,39 @@ import XCTest
 
 @MainActor
 final class SAPAuthenticationRequestTests: XCTestCase {
+    func testFullStorefrontIsResponseMetadataOnlyAndSurvivesCodeAndPodContinuation() async throws {
+        let full = "143480-7,29 t:fixture"
+        var redirect = try response(status: .found)
+        redirect.headers.remove(name: "x-set-apple-store-front")
+        redirect.headers.add(name: "Location", value: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/")
+        var challenge = try response(fields: ["failureType": "", "customerMessage": "MZFinance.BadLogin.Configurator_message"])
+        challenge.headers.replaceOrAdd(name: "x-set-apple-store-front", value: full)
+        challenge.headers.add(name: "pod", value: "25")
+        var success = try response(fields: successFields)
+        // Real servers need not repeat response metadata at the code step.
+        success.headers.remove(name: "x-set-apple-store-front")
+        let http = ScriptedHTTP([redirect, challenge, success])
+        let signer = RecordingSigner()
+        let auth = try session(http, proof: OfflineAMD(), signer: signer)
+        do { _ = try await auth.authenticate(email: "offline@example.invalid", password: "fixture"); XCTFail() }
+        catch AuthenticationError.verificationCodeRequired { }
+        let account = try await auth.authenticate(email: "offline@example.invalid", password: "fixture", code: "654321")
+        XCTAssertEqual(account.store, "143480")
+        XCTAssertEqual(account.storeFront, full)
+        XCTAssertEqual(try account.commerceStoreFront(), full)
+        XCTAssertEqual(account.pod, "25")
+        let requests = await http.recorded()
+        let bodies = try requests.map(bodyData)
+        let signed = await signer.recordedBodies()
+        XCTAssertEqual(bodies, signed)
+        XCTAssertEqual(bodies[0], bodies[1])
+        let initial = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[0], format: nil) as? [String: String])
+        let code = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[2], format: nil) as? [String: String])
+        XCTAssertEqual(initial, ["appleId": "offline@example.invalid", "attempt": "1", "guid": "001122334455", "password": "fixture", "rmp": "0", "why": "signIn"])
+        XCTAssertEqual(code, ["appleId": "offline@example.invalid", "attempt": "2", "guid": "001122334455", "password": "fixture654321", "rmp": "0", "why": "signIn"])
+        XCTAssertEqual(requests[1].url, requests[2].url)
+    }
+
     private actor RecordingSigner: SAPRequestSigning {
         private var bodies: [Data] = []
 
