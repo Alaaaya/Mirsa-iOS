@@ -9,13 +9,19 @@ def visible(s):
     return s[s.index('    private var visible: [MirsaStorePurchase]'):s.index('    var body: some View {', s.index('    private var visible: [MirsaStorePurchase]'))]
 assert visible(ui) == visible(base), "filter semantics changed"
 start = '    @MainActor private func reload() async {'
-assert ui[ui.index(start):] == base[base.index(start):], "history loading, paging, artwork or download changed"
+download_start = '    @MainActor private func download('
+assert ui[ui.index(start):ui.index(download_start)] == base[base.index(start):base.index(download_start)], "history loading, paging or artwork changed"
+# Authorized recovery modifies only the failed-download branch, not original import.
+old_download = base[base.index(download_start):].rsplit('\n}', 1)[0]
+new_download = ui[ui.index(download_start):ui.index('    @MainActor private func recoverDownload(')]
+assert old_download.split('        } catch is CancellationError {}')[0] in new_download
+assert 'store.add(entry)' in new_download
 for path in ['ios-app/AppStore/StorePurchaseHistory.swift', 'ios-app/AppStore/StoreSearchState.swift', 'ios-app/AppStore/StoreDiscovery.swift']:
     old = subprocess.check_output(['git', 'show', '193256bd89abb046ada6fe5fbdca64762929619e:'+path], cwd=r)
     assert old == (r/path).read_bytes(), path
 assert 'String(visible.count)' in ui and '1028' not in ui
 page = ui[ui.index('struct AppStorePurchasesPage:'):]
-assert ui[:ui.index('struct AppStorePurchasesPage:')] == base[:base.index('struct AppStorePurchasesPage:')], "Search or other tab changed"
+assert ui[:ui.index('struct AppStorePurchasesPage:')].replace("import ApplePackage\n", "") == base[:base.index('struct AppStorePurchasesPage:')].replace("import ApplePackage\n", ""), "Search or other tab changed"
 assert 'LazyVGrid(columns: purchaseColumns, alignment: .center, spacing: 12)' in page
 assert 'Array(repeating: GridItem(.flexible(minimum: 0), spacing: 12, alignment: .top), count: 3)' in page
 assert 'ForEach(visible) { item in\n                            purchaseTile(item)' in page
@@ -40,9 +46,17 @@ assert page.index('AppStoreSearchField(') < page.index('purchaseFilters\n') < pa
 # Everything other than the one Purchases view, its tests and workflow stays exact.
 import hashlib
 changed = subprocess.check_output(['git', 'diff', '--name-only', '193256b'], cwd=r, text=True).splitlines()
-allowed = {'ios-app/Apps/AppStoreSection.swift', 'scripts/appstore/purchases-group-tests.py', '.github/workflows/precise-build.yml'}
+allowed = {'ios-app/Apps/AppStoreSection.swift', 'scripts/appstore/purchases-group-tests.py', '.github/workflows/precise-build.yml',
+'ios-app/Apps/AppStoreAccountView.swift', 'ios-app/AppStore/StoreClient.swift',
+'ios-app/AppStore/StoreOnDeviceClient.swift', 'ios-app/AppStore/StoreFreeLicenseRecovery.swift',
+'vendor/ApplePackage/Sources/ApplePackage/Commands/Purchase.swift',
+'vendor/ApplePackage/Sources/ApplePackage/Commands/StoreDownloadEndpoint+Fetch.swift',
+'vendor/ApplePackage/Tests/ApplePackageTests/StoreOwnershipEvidenceTests.swift',
+'vendor/ApplePackage/Tests/ApplePackageTests/StoreDownloadRecoveryTests.swift',
+'scripts/appstore/free-recovery-tests.py', 'scripts/appstore/versions-list-tests.py',
+'scripts/tests/store_ownership_intent_test.py'}
 assert set(changed) <= allowed, changed
-print('PASS exact baseline Search, lifecycle, filters, account/download engine, three-column flat grid, no month/date headers, glass icon tiles, corner badge action, accessible labels and dynamic count')
+print('PASS exact baseline Search, lifecycle, filters, account history and original download success, three-column flat grid, no month/date headers, glass icon tiles, corner badge action, accessible labels and dynamic count')
 if '--source-only' in sys.argv:
     sys.exit(0)
 history = (r/'ios-app/AppStore/StorePurchaseHistory.swift').read_text()

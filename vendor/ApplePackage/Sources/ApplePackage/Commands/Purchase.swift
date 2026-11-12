@@ -21,10 +21,9 @@ public enum Purchase {
 
         do {
             try await purchaseWithParams(account: &account, app: app, guid: deviceIdentifier, pricingParameters: "STDQ")
-        } catch let error as NSError {
-            if error.localizedDescription.contains("failureType: 2059") ||
-                error.localizedDescription.contains(Strings.itemTemporarilyUnavailable)
-            {
+        } catch let error as StoreProductDiagnostic {
+            // Existing Arcade fallback only. 2059 never means already purchased.
+            if error.failureType == "2059" {
                 try await purchaseWithParams(account: &account, app: app, guid: deviceIdentifier, pricingParameters: "GAME")
             } else {
                 throw error
@@ -54,15 +53,27 @@ public enum Purchase {
         let amd = StoreAMDProof(deviceIdentifier: guid)
         var handshake = StoreAMDHandshake(provider: amd)
         var finalResponse: HTTPClient.Response?
+        var currentURL = try Self.purchaseURL(pod: account.pod)
+        var redirectCount = 0
         for _ in 0..<8 {
             let request = try makeRequest(
                 account: account, app: app, guid: guid, pricingParameters: pricingParameters,
-                amdHeaders: try await amd.headers()
+                amdHeaders: try await amd.headers(), endpointURL: currentURL
             )
             let response = try await client.execute(request: request,
                 delegate: ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)).futureResult.get()
             account.cookie.mergeCookies(response.cookies)
             if try await handshake.respond(to: response) { continue }
+            if [301, 302, 303, 307, 308].contains(response.status.code) {
+                guard redirectCount < 3, let location = response.headers.first(name: "location"),
+                      let target = URL(string: location, relativeTo: currentURL)?.absoluteURL else {
+                    throw StoreProductDiagnostic(stage: "licence/" + pricingParameters, status: response.status.code,
+                        fields: [:], account: account, app: app, requestURL: currentURL)
+                }
+                currentURL = try Self.validatedPurchaseURL(target)
+                redirectCount += 1
+                continue // Rebuild scoped cookies/proof and replay the original POST, never GET.
+            }
             finalResponse = response
             break
         }
@@ -76,57 +87,35 @@ public enum Purchase {
 
         account.cookie.mergeCookies(response.cookies)
 
-        try ensure(response.status == .ok, Strings.requestFailed(status: response.status.code))
+        let data = response.body.map { Data($0.readableBytesView) } ?? Data()
+        let fields = (try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+            ?? (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        let diagnostic = StoreProductDiagnostic(stage: "licence/" + pricingParameters,
+            status: response.status.code, fields: fields, account: account, emptyBody: data.isEmpty,
+            app: app, requestURL: currentURL, responseHeaders: response.headers.map { ($0.name, $0.value) })
+        // Only a successful transport plus Apple's explicit 5002 entitlement
+        // response is positive evidence. Neither HTTP 500 nor 2059 qualifies.
+        guard response.status == .ok else { throw diagnostic }
+        if Self.confirmsExistingLicense(fields) { return }
+        if Self.failureCode(fields) != nil || fields["action"] != nil ||
+            !(fields["customerMessage"] as? String ?? "").isEmpty { throw diagnostic }
+        guard fields["jingleDocType"] as? String == "purchaseSuccess",
+              (fields["status"] as? NSNumber)?.intValue == 0 else { throw diagnostic }
+    }
 
-        guard var body = response.body,
-              let data = body.readData(length: body.readableBytes)
-        else {
-            try ensureFailed(Strings.responseBodyEmpty)
-        }
+    static func purchaseURL(pod: String?) throws -> URL {
+        let host = Configuration.purchaseAPIHost(pod: pod)
+        let urlString = "https://\(host)/WebObjects/MZFinance.woa/wa/buyProduct"
+        guard let url = URL(string: urlString) else { try ensureFailed(Strings.failedToRetrieveRedirect) }
+        return try validatedPurchaseURL(url)
+    }
 
-        let plist = try PropertyListSerialization.propertyList(
-            from: data,
-            options: [],
-            format: nil,
-        ) as? [String: Any]
-        guard let dict = plist else { try ensureFailed(Strings.invalidResponse) }
-
-        // Check if Apple requires the user to accept terms in a browser
-        if let action = dict["action"] as? [String: Any],
-           let urlString = (action["url"] as? String) ?? (action["URL"] as? String),
-           urlString.hasSuffix("termsPage")
-        {
-            try ensureFailed(Strings.termsAcceptanceRequired(url: urlString))
-        }
-
-        if let failureType = Self.failureCode(dict) {
-            // The explicit free-acquisition endpoint confirms an existing licence.
-            // Do not retry or acquire anything else in response.
-            if Self.confirmsExistingLicense(dict) { return }
-            let customerMessage = dict["customerMessage"] as? String
-            switch failureType {
-            case "2034", "2042":
-                try ensureFailed(Strings.purchaseFailureMessage(failureType: failureType, customerMessage: customerMessage))
-            default:
-                if customerMessage == Strings.passwordChanged {
-                    try ensureFailed(Strings.passwordTokenExpired)
-                }
-                if let customerMessage {
-                    if customerMessage == "Subscription Required" {
-                        try ensureFailed(Strings.subscriptionRequired)
-                    }
-                }
-                try ensureFailed(Strings.purchaseFailureMessage(failureType: failureType, customerMessage: customerMessage))
-            }
-        }
-
-        if let jingleDocType = dict["jingleDocType"] as? String,
-           let status = dict["status"] as? Int
-        {
-            try ensure(jingleDocType == "purchaseSuccess" && status == 0, Strings.failedToPurchase)
-        } else {
-            try ensureFailed(Strings.invalidPurchaseResponse)
-        }
+    static func validatedPurchaseURL(_ url: URL) throws -> URL {
+        // The AMD scope is also the strict Apple host/path credential boundary.
+        try ensure(StoreAMDHeaderScope.permits(url) &&
+                   url.path == "/WebObjects/MZFinance.woa/wa/buyProduct",
+                   Strings.failedToRetrieveRedirect)
+        return url
     }
 
     static func makeRequest(
@@ -135,6 +124,7 @@ public enum Purchase {
         guid: String,
         pricingParameters: String,
         amdHeaders: [String: String] = [:],
+        endpointURL: URL? = nil,
     ) throws -> HTTPClient.Request {
         let payload: [String: Any] = [
             "appExtVrsId": "0",
@@ -162,11 +152,8 @@ public enum Purchase {
             ("X-Token", account.passwordToken),
         ]
 
-        let host = Configuration.purchaseAPIHost(pod: account.pod)
-        let urlString = "https://\(host)/WebObjects/MZFinance.woa/wa/buyProduct"
-        guard let url = URL(string: urlString), StoreAMDHeaderScope.permits(url) else {
-            try ensureFailed(Strings.failedToRetrieveRedirect)
-        }
+        let url = try Self.validatedPurchaseURL(endpointURL ?? Self.purchaseURL(pod: account.pod))
+        let urlString = url.absoluteString
 
         for item in account.cookie.buildCookieHeader(url) {
             headers.append(item)

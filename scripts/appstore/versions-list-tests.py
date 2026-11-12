@@ -23,7 +23,10 @@ assert 'let version = chosen[app.bundleID]' in d
 assert 'client.downloadOwnedApp(app, externalVersionID: version)' in d
 assert 'app.version' not in d and 'versionName' not in d and 'metadata[' not in d
 client=(r/'ios-app/AppStore/StoreClient.swift').read_text()
-assert client == subprocess.check_output(['git','show','2f15e57:ios-app/AppStore/StoreClient.swift'],cwd=r,text=True)
+original_client = subprocess.check_output(['git','show','2f15e57:ios-app/AppStore/StoreClient.swift'],cwd=r,text=True)
+extra_start = client.index('    /// Public fresh metadata')
+extra_end = client.index('    func availableVersions(', extra_start)
+assert client[:extra_start] + client[extra_end:] == original_client
 fetch=(r/'vendor/ApplePackage/Sources/ApplePackage/Commands/StoreDownloadEndpoint+Fetch.swift').read_text()
 assert '"salableAdamId": app.id' in fetch
 assert 'guard fresh.id == app.id' in client

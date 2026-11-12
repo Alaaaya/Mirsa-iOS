@@ -51,6 +51,7 @@ struct AppStoreAccountView: View {
 
     @State private var busy: String?
     @State private var work: Task<Void, Never>?
+    @State private var recovery: StoreFreeLicenseRecovery?
     @State private var notice: String?
     @State private var showSteps = false
     @State private var confirmSignOut = false
@@ -120,7 +121,7 @@ struct AppStoreAccountView: View {
         }
         .onChange(of: busy) { _, value in busySince = value == nil ? nil : (busySince ?? Date()) }
         .onChange(of: account) { _, value in
-            ownership = [:]; versionListAttempted = []; versions = [:]; chosen = [:]
+            recovery = nil; ownership = [:]; versionListAttempted = []; versions = [:]; chosen = [:]
             if value == nil { selected = nil }
         }
         .task(id: busy == nil ? selected?.id : nil) {
@@ -133,6 +134,18 @@ struct AppStoreAccountView: View {
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
         } message: { Text(notice ?? "") }
+        .confirmationDialog(t("Refresh free licence and retry?", "تحديث الترخيص المجاني وإعادة التنزيل؟", "مۆڵەتی بێبەرامبەر نوێ بکەوە؟", "Lîsansa belaş nû bike?"),
+                            isPresented: Binding(get: { recovery != nil }, set: { if !$0 { recovery = nil } }), titleVisibility: .visible) {
+            if let pending = recovery {
+                Button(t("Refresh free licence and retry once", "حدّث الترخيص المجاني وجرّب مرة", "نوێکردنەوە و هەوڵێکی تر", "Nû bike û carekê biceribîne")) { recoverDownload(pending) }
+            }
+            Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal"), role: .cancel) { recovery = nil }
+        } message: {
+            Text(t("Apple rejected the download, not necessarily ownership. This checks the current account store, refreshes only a verified free licence, then retries your exact selected version once. No paid purchase.",
+                   "Apple رفضت التنزيل، مو دليل إنك ما بتملك التطبيق. منتحقق من متجر حسابك، منحدّث الترخيص إذا مجاني، ومنعيد نفس النسخة المختارة مرة وحدة. ما في شراء مدفوع.",
+                   "ڕەتکردنەوە بەڵگەی نەبوونی خاوەندارێتی نییە. تەنها مۆڵەتی بێبەرامبەر نوێ دەکرێتەوە و هەمان وەشان جارێک داگیرێت.",
+                   "Redkirin nebûna xwedîtiyê îspat nake. Tenê lîsansa belaş nû dibe û heman guherto carekê tê ceribandin."))
+        }
         .confirmationDialog(t("Sign out of this Apple Account?", "تطلع من حساب Apple؟", "لە ئەکاونتی Apple بچیتە دەرەوە؟", "Ji hesabê Apple derkevî?"),
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button(t("Sign out", "تسجيل الخروج", "چوونە دەرەوە", "Derkeve"), role: .destructive) { signOut() }
@@ -878,7 +891,10 @@ struct AppStoreAccountView: View {
             let generation = operationGeneration
             let url: URL
             do { url = try await client.downloadOwnedApp(app, externalVersionID: version) }
-            catch { recordOwnershipFailure(error, app: app); throw error }
+            catch {
+                if await offerRecovery(error, app: app, version: version) { return }
+                recordOwnershipFailure(error, app: app); throw error
+            }
             ownership[app.id] = .owned
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try Task.checkCancellation()
@@ -886,6 +902,37 @@ struct AppStoreAccountView: View {
             try await onDownloaded(url)
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
                        "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
+        }
+    }
+
+    private func offerRecovery(_ error: Error, app: MirsaStoreApp, version: String?) async -> Bool {
+        guard let diagnostic = error as? StoreProductDiagnostic, diagnostic.httpStatus == 403 else { return false }
+        let revision = session.sessionRevision
+        guard let fresh = try? await client.freeAppForRecovery(app),
+              StoreFreeLicenseRecovery.canOffer(status: diagnostic.httpStatus, price: fresh.price),
+              revision == session.sessionRevision, !Task.isCancelled else { return false }
+        recovery = StoreFreeLicenseRecovery(app: fresh, externalVersionID: version, revision: revision)
+        return true
+    }
+
+    private func recoverDownload(_ pending: StoreFreeLicenseRecovery) {
+        recovery = nil
+        guard pending.revision == session.sessionRevision else { return }
+        run(t("Refreshing free licence and retrying…", "عم نحدّث الترخيص المجاني ونعيد المحاولة…", "نوێکردنەوەی مۆڵەت…", "Lîsans nû dibe…")) {
+            let url = try await StoreFreeLicenseRecovery.retryOnce(consent: true, acquire: {
+                guard pending.revision == session.sessionRevision else { throw CancellationError() }
+                try await client.acquireFreeApp(pending.app)
+            }, download: {
+                guard pending.revision == session.sessionRevision else { throw CancellationError() }
+                return try await client.downloadOwnedApp(pending.app, externalVersionID: pending.externalVersionID)
+            })
+            defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
+            guard pending.revision == session.sessionRevision else { throw CancellationError() }
+            try Task.checkCancellation()
+            try await onDownloaded(url)
+            ownership[pending.app.id] = .owned
+            notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.", "هەڵگیرا.", "Hat tomarkirin.")
+            // Failure goes directly to run's diagnostics. Never offer/acquire in a loop.
         }
     }
 
@@ -954,7 +1001,7 @@ struct AppStoreAccountView: View {
         if let diagnostic = error as? StoreProductDiagnostic {
             let explanation = diagnostic.requiresLicense
                 ? t("Apple says this account needs the app's license. For a free app, tap Get, then tap Download separately.", "Apple بتقول الحساب بحاجة لترخيص التطبيق. إذا مجاني، دوس احصل عليه وبعدين تنزيل لحاله.", "مۆڵەتی ئەپ پێویستە. وەریبگرە پاشان دایبگرە.", "Lîsans pêwîst e. Bigire, paşê Daxe bitikîne.")
-                : t("Apple rejected this request. This does not prove the app is missing from your purchases. Get is optional for free apps not yet owned; it never starts a download.", "Apple رفضت الطلب. هاد ما بيثبت إنو التطبيق مو بمشترياتك. احصل عليه اختياري للمجاني يلي ما بتملكه، وما بيبدأ تنزيل.", "Apple داواکاری ڕەتکردەوە؛ ئەمە بەڵگەی نەبوونی مۆڵەت نییە.", "Apple daxwaz red kir; ev nebûna lîsansê îspat nake.")
+                : t("Apple rejected the request. This does not mean you do not own the app. If a free licence refresh is available, it requires your explicit confirmation and retries the selected download once.", "Apple رفضت الطلب، مو دليل إنك ما بتملك التطبيق. إذا تحديث الترخيص المجاني متاح، بدّه موافقتك وبنعيد نفس النسخة مرة وحدة.", "Apple داواکاری ڕەتکردەوە؛ ئەمە بەڵگەی نەبوونی مۆڵەت نییە.", "Apple daxwaz red kir; ev nebûna lîsansê îspat nake.")
             return explanation + "\n\n" + diagnostic.localizedDescription
         }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic.localizedDescription }
