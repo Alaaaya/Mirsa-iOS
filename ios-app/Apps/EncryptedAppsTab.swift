@@ -307,17 +307,22 @@ private struct EncryptedEntryCard: View {
     let vm: AppViewModel
     let onDelete: () -> Void
 
+    @State private var installStart: Date?
+    @State private var showNotes = false
+
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
 
     var body: some View {
         let match = store.match(entry)
+        let notes = warnings(match)
+        let installing = store.installingID == entry.id
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
             HStack(spacing: MirsaSpacing.s) {
                 Group {
                     if let img = store.icon(entry) { Image(uiImage: img).resizable().scaledToFill() }
                     else { Image(systemName: "app.dashed").font(.title).foregroundStyle(MirsaPalette.textTertiary) }
                 }
-                .frame(width: 56, height: 56)
+                .frame(width: 60, height: 60)
                 .background(MirsaPalette.cardRaised)
                 .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
@@ -328,19 +333,33 @@ private struct EncryptedEntryCard: View {
                 }
                 Spacer(minLength: 0)
                 if entry.installedAt != nil {
-                    Image(systemName: "checkmark.seal.fill").foregroundStyle(MirsaPalette.success)
-                        .accessibilityLabel(t("Installed", "مثبّت", "دامەزراوە", "Sazkirî"))
+                    Label(t("Installed", "مثبّت", "دامەزراوە", "Sazkirî"), systemImage: "checkmark.seal.fill")
+                        .font(MirsaFont.badge).foregroundStyle(MirsaPalette.success)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(MirsaPalette.success.opacity(0.14), in: Capsule())
                 }
             }
             purchaserRow
-            ForEach(warnings(match), id: \.self) { w in
-                Label(w, systemImage: "exclamationmark.triangle.fill")
+            if !notes.isEmpty {
+                Button { withAnimation(.easeOut(duration: 0.2)) { showNotes.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(t("Notes: ", "ملاحظات: ", "تێبینی: ", "Not: ") + "\(notes.count)")
+                        Spacer()
+                        Image(systemName: showNotes ? "chevron.up" : "chevron.down")
+                    }
                     .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showNotes {
+                    ForEach(notes, id: \.self) { w in
+                        Text(w).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
-            if store.installingID == entry.id {
-                ProgressView(value: store.progress).tint(MirsaPalette.accentSoft)
-            }
+            if installing { installProgress }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { Task { await store.install(entry, vm: vm) } } label: {
                     Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app")
@@ -349,15 +368,37 @@ private struct EncryptedEntryCard: View {
                 .buttonStyle(.mirsaPrimary)
                 .disabled(store.busy != nil)
                 Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
+                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
+                        .foregroundStyle(MirsaPalette.danger)
                 }
                 .buttonStyle(.mirsaSecondary)
-                .disabled(store.installingID == entry.id)
-                .accessibilityLabel(t("Delete", "حذف", "سڕینەوە", "Jê bibe"))
+                .disabled(installing)
             }
         }
         .padding(MirsaSpacing.card)
         .mirsaCard()
+        .onChange(of: store.installingID) { _, id in installStart = id == entry.id ? Date() : nil }
+    }
+
+    /// Percentage from the existing install progress; speed estimated in the UI from
+    /// that fraction, the file size and the elapsed time.
+    private var installProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: min(max(store.progress, 0), 1)).tint(MirsaPalette.accentSoft)
+            TimelineView(.periodic(from: installStart ?? Date(), by: 1)) { ctx in
+                let fraction = min(max(store.progress, 0), 1)
+                let elapsed = installStart.map { ctx.date.timeIntervalSince($0) } ?? 0
+                let speed = elapsed > 1 && entry.sizeBytes > 0 ? Double(entry.sizeBytes) * fraction / elapsed : 0
+                HStack {
+                    Text("\(Int((fraction * 100).rounded()))%").monospacedDigit()
+                    Spacer()
+                    if speed > 0 {
+                        Text("≈ " + ByteCountFormatter.string(fromByteCount: Int64(speed), countStyle: .file) + "/s").monospacedDigit()
+                    }
+                }
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+            }
+        }
     }
 
     @ViewBuilder private var purchaserRow: some View {

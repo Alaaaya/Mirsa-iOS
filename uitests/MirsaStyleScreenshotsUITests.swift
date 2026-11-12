@@ -92,16 +92,17 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     /// App Store section: each page of its own tab bar, with a DEBUG-only fixture account (no Apple request).
     func testAppStoreSectionPages() {
         let pages: [(tab: String, route: String?, name: String)] = [
-            ("search", nil, "search"), ("downloads", nil, "downloads"), ("purchases", nil, "purchases"),
-            ("account", nil, "account"), ("account", "settings", "settings"),
+            ("search", nil, "search"), ("search", "detail", "detail"), ("downloads", nil, "downloads"),
+            ("purchases", nil, "purchases"), ("account", nil, "account"), ("account", "settings", "settings"),
         ]
         for lang in ["ar", "en"] {
             for page in pages {
                 var extra = ["-MirsaStoreFixtureAccount", "-MirsaStoreTab", page.tab]
-                if let route = page.route { extra += ["-MirsaStoreRoute", route] }
+                if page.route == "detail" { extra.append("-MirsaStoreFixtureDetail") }
+                else if let route = page.route { extra += ["-MirsaStoreRoute", route] }
                 let app = launch("encrypted", lang: lang, extra: extra)
                 shot(app, "\(lang)_store-\(page.name)")
-                if page.name == "settings" || page.name == "downloads" {
+                if page.name == "settings" || page.name == "downloads" || page.name == "detail" {
                     scrollToBottom(app)
                     shot(app, "\(lang)_store-\(page.name)-bottom")
                 }
