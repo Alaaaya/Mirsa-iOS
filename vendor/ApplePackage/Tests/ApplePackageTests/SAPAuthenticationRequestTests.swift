@@ -492,6 +492,9 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
             "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
             "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
+            "https://downloaddispatch.itunes.apple.com/r/redownload",
+            "https://downloaddispatch.itunes.apple.com/up/updateProduct",
         ] {
             var headers: [(String, String)] = []
             try StoreAMDHeaderScope.append(proof, to: &headers, url: XCTUnwrap(URL(string: endpoint)))
@@ -500,7 +503,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         for endpoint in [
             "https://auth.itunes.apple.com/auth/v1/otp/1.5/finish",
             "https://auth.itunes.apple.com/login",
-            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
+            "https://downloaddispatch.itunes.apple.com.evil.invalid/r/redownload",
             "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/extra",
             "https://cdn.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
             "https://p25-buy.itunes.apple.com.evil.invalid/WebObjects/MZFinance.woa/wa/authenticate",

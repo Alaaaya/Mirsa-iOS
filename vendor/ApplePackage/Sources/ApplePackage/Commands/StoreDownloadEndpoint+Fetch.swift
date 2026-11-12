@@ -118,6 +118,7 @@ extension StoreDownloadEndpoint {
                 url: currentURL,
                 guid: deviceIdentifier,
                 externalVersionID: externalVersionID,
+                amdHeaders: try await amd.headers(),
             )
             let response = try await client.execute(request: request,
                 delegate: ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)).futureResult.get()
@@ -176,6 +177,7 @@ extension StoreDownloadEndpoint {
         url: URL,
         guid: String,
         externalVersionID: String,
+        amdHeaders: [String: String] = [:],
     ) throws -> HTTPClient.Request {
         var payload: [String: Any] = [
             "creditDisplay": "",
@@ -195,11 +197,15 @@ extension StoreDownloadEndpoint {
             ("User-Agent", Configuration.userAgent),
             ("iCloud-DSID", account.directoryServicesIdentifier),
             ("X-Dsid", account.directoryServicesIdentifier),
+            ("X-Apple-Store-Front", "\(account.store)-1"),
+            ("X-Token", account.passwordToken),
         ]
 
         for item in account.cookie.buildCookieHeader(url) {
             headers.append(item)
         }
+
+        try StoreAMDHeaderScope.append(amdHeaders, to: &headers, url: url)
 
         APLogger.logRequest(method: "POST", url: url.absoluteString, headers: headers)
 
