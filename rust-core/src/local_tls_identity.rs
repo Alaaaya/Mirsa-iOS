@@ -51,7 +51,7 @@ fn generate_inner(output: &str) -> Result<(), Box<dyn std::error::Error>> {
         std::fs::remove_file(p).unwrap();
         let cert = x509_cert::Certificate::from_der(&STANDARD.decode(v["root"].as_str().unwrap()).unwrap()).unwrap();
         assert!(cert.tbs_certificate.subject.to_string().contains("Mirsa Local Install"));
-        let store = KeyStore::from_pkcs12(&STANDARD.decode(v["p12"].as_str().unwrap()).unwrap(), v["password"].as_str().unwrap(), isideload_p12_keystore::Pkcs12ImportPolicy::Raw).unwrap();
+        let store = KeyStore::from_pkcs12(&STANDARD.decode(v["p12"].as_str().unwrap()).unwrap(), v["password"].as_str().unwrap(), isideload_p12_keystore::Pkcs12ImportPolicy::Strict).unwrap();
         let (_, chain) = store.private_key_chain().unwrap();
         assert_eq!(chain.certs().len(), 2);
     }
