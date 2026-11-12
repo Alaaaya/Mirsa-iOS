@@ -18,7 +18,9 @@ preamble='''import Foundation
 import FoundationNetworking
 #endif
 struct MirsaStoreApp: Sendable { let id: Int64; let bundleID: String; let name: String; let version: String; let price: Double?; let artworkURL: String }
-enum MirsaStoreError: Error { case serviceUnavailable, busy, signedOut, operationCancelled }
+enum MirsaStoreError: Error { case serviceUnavailable, busy, signedOut, operationCancelled, keychain
+ var errorDescription: String? { "named local session error" }
+}
 struct MirsaStoreAccount: Equatable, Sendable { let email: String; let country: String; let name: String }
 struct Account: Sendable { let directoryServicesIdentifier: String }
 struct Cookie { let name: String; let value: String; let path: String; let domain: String?; let expiresAt: TimeInterval?; let httpOnly: Bool; let secure: Bool }
@@ -76,6 +78,8 @@ actor ClientHarness {
     }
     func signOut() { generation += 1; owner = nil }
     func isBusy() -> Bool { busy }
+    func occupy() { busy = true }
+    func release() { busy = false }
 '''
 tests=r'''
 @main struct Tests {
@@ -161,16 +165,38 @@ tests=r'''
         precondition(!view.loading && view.error == nil, "cancellation must release loading")
         print("PASS actual reload methods: hidden guard, serialized account switch, stale-result/defer isolation and cancellation")
 
+        let contention = ClientHarness()
+        await contention.occupy()
+        let delayed = Task { try await contention.purchaseHistory() }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let premature = await FetchStub.shared.waiting()
+        precondition(!premature, "history must wait before starting fetch")
+        await contention.release()
+        while !(await FetchStub.shared.waiting()) { await Task.yield() }
+        await FetchStub.shared.finish()
+        _ = try await delayed.value
+        let cancelling = ClientHarness()
+        await cancelling.occupy()
+        let cancelledWait = Task { try await cancelling.purchaseHistory() }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        cancelledWait.cancel()
+        do { _ = try await cancelledWait.value; fatalError("busy wait ignored cancellation") } catch {}
+        let stillReserved = await cancelling.isBusy()
+        precondition(stillReserved, "cancelled history must not release someone else's reservation")
+        await cancelling.release()
+        print("PASS actual busy setup waits for commerce reservation, resumes without reset, preserves foreign reservation on cancellation")
         let client = ClientHarness()
         let fetch = Task { try await client.purchaseHistory() }
         while !(await FetchStub.shared.waiting()) { await Task.yield() }
-        do { _ = try await client.purchaseHistory(); fatalError("history failed to reserve busy") } catch MirsaStoreError.busy {}
+        let queued = Task { try await client.purchaseHistory() }
+        for _ in 0..<20 { await Task.yield() }
         await client.signOut()
         await FetchStub.shared.finish()
         do { _ = try await fetch.value; fatalError("history survived logout") } catch MirsaStoreError.operationCancelled {}
+        do { _ = try await queued.value; fatalError("queued history survived logout") } catch MirsaStoreError.operationCancelled {}
         let busy = await client.isBusy(); precondition(!busy, "history must release busy after logout")
         let signedOut = ClientHarness(); await signedOut.signOut()
-        do { _ = try await signedOut.purchaseHistory(); fatalError("signed out request accepted") } catch MirsaStoreError.signedOut {}
+        do { _ = try await signedOut.purchaseHistory(); fatalError("signed out request accepted") } catch let error as PurchaseHistoryDiagnostic { precondition(error.localizedDescription.contains("missing account session")) }
         let signedOutBusy = await signedOut.isBusy(); precondition(!signedOutBusy)
         print("PASS actual purchaseHistory method: exclusive reservation, logout invalidation, release on success/error")
     }

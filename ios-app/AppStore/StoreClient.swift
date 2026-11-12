@@ -251,9 +251,36 @@ actor MirsaStoreClient {
     }
     func purchaseHistory() async throws -> [MirsaStorePurchase] {
         try Task.checkCancellation()
-        let run = try begin()
+        // Tabs remain mounted and metadata/search may still own the commerce
+        // reservation. History is read-only: wait without cancelling that work.
+        // Capture generation BEFORE suspending so logout cannot cross this wait.
+        let expectedGeneration = generation
+        let deadline = Date().addingTimeInterval(60)
+        while busy {
+            try check(expectedGeneration)
+            guard Date() < deadline else {
+                throw PurchaseHistoryDiagnostic(stage: .setup, detail: "waiting for active App Store operation timed out")
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        try check(expectedGeneration)
+        let run: UInt64
+        do { run = try begin() }
+        catch MirsaStoreError.keychain {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "account Keychain unavailable; unlock device")
+        } catch is DecodingError {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid saved account record")
+        }
         defer { busy = false }
-        let owner = try requiredAccount()
+        let owner: Account
+        do { owner = try requiredAccount() }
+        catch MirsaStoreError.signedOut {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "missing account session; sign in from Account tab")
+        } catch MirsaStoreError.keychain {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "account Keychain unavailable; unlock device")
+        } catch is DecodingError {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid saved account record")
+        }
         let result = try await MirsaStorePurchaseHistory.fetch(owner: owner)
         try check(run)
         guard try requiredAccount().directoryServicesIdentifier == owner.directoryServicesIdentifier else {

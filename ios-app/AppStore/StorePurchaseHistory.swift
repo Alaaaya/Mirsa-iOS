@@ -46,7 +46,27 @@ struct PurchaseHistoryDiagnostic: Error, LocalizedError, Sendable {
 enum MirsaStorePurchaseHistory {
     static func fetch(owner: Account) async throws -> [MirsaStorePurchase] {
         try Task.checkCancellation()
-        let storeFront = try owner.commerceStoreFront()
+        // Validate the exact shared session before attempting SAP/network work.
+        // Field names only, never account values or cookie contents.
+        guard !owner.directoryServicesIdentifier.isEmpty else {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "missing field dsid")
+        }
+        guard !owner.passwordToken.isEmpty else {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "missing field passwordToken")
+        }
+        let guid = Configuration.deviceIdentifier
+        guard guid.utf8.count == 12, guid.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) }) else {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid or missing field guid")
+        }
+        let storeFront: String
+        do { storeFront = try owner.commerceStoreFront() }
+        catch {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid or missing field fullStorefront; sign in again from Account tab")
+        }
+        var cookies = HistorySessionCookies.historyCookies(owner.cookie)
+        guard !cookies.isEmpty else {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "missing field Apple session cookies; sign in again from Account tab")
+        }
         let signer: SAPSigner
         do { signer = try await SAPSigner.connect() }
         catch {
@@ -58,7 +78,6 @@ enum MirsaStorePurchaseHistory {
                        + owner.cookie.map(\.value)
         // Keep the DAAP session cookies returned by login/update, scoped to their origin.
         // Do not change or persist the commerce/login engine's cookie state.
-        var cookies = HistorySessionCookies.historyCookies(owner.cookie)
         try Task.checkCancellation()
         let root = "https://pd.itunes.apple.com/WebObjects/MZPurchaseDaap.woa/purchase"
         let query = "('com.apple.itunes.extended\\-media\\-kind:131072')"

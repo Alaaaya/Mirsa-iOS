@@ -12,13 +12,17 @@ stubs = r'''
 import Foundation
 struct MirsaStoreApp { let id: Int64; let bundleID: String; let name: String; let version: String; let price: Double?; let artworkURL: String }
 enum MirsaStoreError: Error { case serviceUnavailable }
-enum Configuration { static let deviceIdentifier = "AABBCCDDEEFF" }
+enum Configuration { static var deviceIdentifier = "AABBCCDDEEFF" }
 struct Account {
     let email = "private@example.invalid", password = "private-password", appleId = "private-id"
-    let firstName = "PrivateFirst", lastName = "PrivateLast", passwordToken = "private-token"
-    let directoryServicesIdentifier = "12345678901"
+    let firstName = "PrivateFirst", lastName = "PrivateLast"
+    var passwordToken = "private-token"
+    var directoryServicesIdentifier = "12345678901"
+    var missingStorefront = false
     var cookie = [Cookie(name: "commerce", value: "private-cookie", path: "/WebObjects/MZFinance.woa", domain: "p25-buy.itunes.apple.com", expiresAt: nil, httpOnly: true, secure: true)]
-    func commerceStoreFront() throws -> String { "143480-1,29" }
+    func commerceStoreFront() throws -> String {
+        if missingStorefront { throw URLError(.badServerResponse) }; return "143480-1,29"
+    }
 }
 struct Cookie {
     let name: String; let value: String; let path: String; let domain: String?
@@ -111,6 +115,23 @@ final class FixtureProtocol: URLProtocol {
         precondition(String(decoding: items.prefix(4), as: UTF8.self) == "adsr")
         precondition(try HistoryTags.number("mlid", in: items) == 42)
         precondition(try HistoryTags.number("musr", in: items) == 7)
+        // Each missing field fails before signer creation or history traffic.
+        for field in ["dsid", "passwordToken", "guid", "fullStorefront", "Apple session cookies"] {
+            var missing = account
+            if field == "dsid" { missing.directoryServicesIdentifier = "" }
+            if field == "passwordToken" { missing.passwordToken = "" }
+            if field == "guid" { Configuration.deviceIdentifier = "" }
+            if field == "fullStorefront" { missing.missingStorefront = true }
+            if field == "Apple session cookies" { missing.cookie = [] }
+            let before = FixtureProtocol.requests.count
+            do { _ = try await MirsaStorePurchaseHistory.fetch(owner: missing); fatalError("accepted missing field") }
+            catch let diagnostic as PurchaseHistoryDiagnostic {
+                precondition(diagnostic.localizedDescription.contains(field))
+                precondition(!diagnostic.localizedDescription.contains(account.passwordToken))
+            }
+            Configuration.deviceIdentifier = "AABBCCDDEEFF"
+            precondition(FixtureProtocol.requests.count == before)
+        }
         FixtureProtocol.mode = "empty"
         precondition(try await MirsaStorePurchaseHistory.fetch(owner: account).isEmpty)
         for mode in ["plist", "malformed", "timeout", "setup", "signing"] {
