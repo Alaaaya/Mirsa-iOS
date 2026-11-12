@@ -37,10 +37,24 @@ final class AuthenticationDiagnosticTests: XCTestCase {
             XCTAssertEqual(error.responseMessage, expected)
             XCTAssertEqual(error.loginPhase, .verificationCode)
             XCTAssertEqual(error.failureState, .missing)
-            XCTAssertNil(error.message)
+            XCTAssertEqual(error.message, AuthenticationServiceError.redact(raw as? String, secrets: []))
             let wrapped = AuthenticationServiceError.wrapping(error, stage: .signing)
             XCTAssertEqual(wrapped.responseMessage, expected)
             XCTAssertEqual(wrapped.loginPhase, .verificationCode)
+        }
+    }
+
+    func testApple5020CustomerMessagePreservedWithSecretsRedacted() {
+        let error = Authenticator.rejection([
+            "failureType": "5020",
+            "customerMessage": "The password was entered incorrectly. owner@example.invalid secret-password 123456",
+            "passwordToken": "never-export"
+        ], status: 200, secrets: ["owner@example.invalid", "secret-password", "123456"], submittedCode: true)
+        XCTAssertEqual(error.appleCode, "5020")
+        XCTAssertEqual(error.loginPhase, .verificationCode)
+        XCTAssertTrue(error.message?.contains("The password was entered incorrectly.") == true)
+        for secret in ["owner@example.invalid", "secret-password", "123456", "never-export"] {
+            XCTAssertFalse(error.message?.contains(secret) == true)
         }
     }
 

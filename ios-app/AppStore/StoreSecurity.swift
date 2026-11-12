@@ -4,6 +4,7 @@ import ApplePackage
 
 enum MirsaStoreError: Error, Equatable, LocalizedError {
     case busy, signedOut, verificationRequired, invalidInput, freeAppsOnly
+    case invalidVerificationCode, duplicateVerificationCode, verificationPasswordChanged
     case keychain(Int32), invalidPackage, untrustedURL, serviceUnavailable
     case licenseRequired, operationCancelled
     var errorDescription: String? {
@@ -11,6 +12,9 @@ enum MirsaStoreError: Error, Equatable, LocalizedError {
         case .busy: return "Another App Store operation is still running."
         case .signedOut: return "Sign in to your Apple Account first."
         case .verificationRequired: return "Enter the six-digit verification code from Apple."
+        case .invalidVerificationCode: return "Enter a six-digit verification code. No request was sent to Apple."
+        case .duplicateVerificationCode: return "This code was already submitted. Enter a new code or cancel and start over. No request was sent to Apple."
+        case .verificationPasswordChanged: return "The password changed during verification. Cancel and sign in again. No request was sent to Apple."
         case .invalidInput: return "Check the email, country, app or version ID."
         case .freeAppsOnly: return "Only apps confirmed free in this account's store can be acquired."
         case .keychain: return "The device Keychain is unavailable. Unlock the device and try again."
