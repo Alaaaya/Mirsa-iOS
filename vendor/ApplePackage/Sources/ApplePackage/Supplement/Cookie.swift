@@ -141,7 +141,11 @@ public extension [Cookie] {
     }
 
     private func matchesDomain(cookieDomain: String, requestHost: String) -> Bool {
-        let normalizedCookieDomain = cookieDomain.lowercased()
+        // RFC 6265 5.2.3: a leading "." in Domain is ignored (Go's cookiejar, used by ipatool, does the same),
+        // so Apple's `Domain=.apple.com` cookies reach the pod host (pN-buy.itunes.apple.com) on a redirect.
+        var normalizedCookieDomain = cookieDomain.lowercased()
+        while normalizedCookieDomain.hasPrefix(".") { normalizedCookieDomain.removeFirst() }
+        guard !normalizedCookieDomain.isEmpty else { return false }
         let normalizedRequestHost = requestHost.lowercased()
 
         return false
