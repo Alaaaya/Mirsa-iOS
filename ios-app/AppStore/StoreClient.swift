@@ -138,7 +138,7 @@ actor MirsaStoreClient {
         defer { busy = false }
         var owner = try requiredAccount()
         do {
-            let versions = try await engine.versions(account: &owner, bundleID: app.bundleID)
+            let versions = try await engine.versions(account: &owner, app: app.software)
             try check(run)
             try persist(owner)
             return try versions.map {
