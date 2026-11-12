@@ -12,12 +12,16 @@ public enum AuthenticationError: LocalizedError, Equatable, Sendable {
     case codeRejected
     /// The code was not exactly six ASCII digits; nothing was sent.
     case invalidVerificationCode
+    /// Apple refused the credentials (secret-free code such as "5020", "-5000" or "BadLogin").
+    /// The request was sent exactly once and is never re-sent automatically.
+    case passwordRejected(String)
 
     public var errorDescription: String? {
         switch self {
         case .verificationCodeRequired: Strings.authRequiresVerificationCode
         case .codeRejected: "The verification code was rejected."
         case .invalidVerificationCode: "Enter exactly 6 digits."
+        case let .passwordRejected(code): "Apple rejected the sign-in (\(code)). It will not be retried automatically."
         }
     }
 }

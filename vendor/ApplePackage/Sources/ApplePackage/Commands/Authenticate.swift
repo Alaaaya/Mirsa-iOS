@@ -34,6 +34,10 @@ public actor Authenticator {
         case success(Account)
         case codeRequired
         case codeRejected
+        /// Apple rejected the credentials (5020, -5000, MZFinance.BadLogin). Terminal: never re-sent.
+        case passwordRejected(String)
+        /// Any other non-empty `failureType`. Terminal before AMD handling: the password is not re-sent.
+        case rejected(AuthenticationServiceError)
         case deviceRegistration
         case redirect(URL)
         case failure(AuthenticationServiceError)
@@ -43,6 +47,9 @@ public actor Authenticator {
     private let deviceIdentifier: String
     private let amd: any StoreAMDProviding
     private let transport: any StoreHTTPTransport
+    /// The bag-advertised route. Every `authenticate` call (password step and code step) starts here,
+    /// like ipatool's fresh login per step; redirects only apply within one call.
+    private let initialEndpoint: URL
     private var endpoint: URL
     private var cookies: [Cookie]
     private var storeFront = ""
@@ -60,6 +67,7 @@ public actor Authenticator {
         catch { throw AuthenticationServiceError.wrapping(error, stage: .bag) }
         try bag.requireSupportedAuthentication()
         endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
+        initialEndpoint = endpoint
         do { signer = try await SAPSigner.connect() }
         catch { throw AuthenticationServiceError.wrapping(error, stage: .sapValidation) }
         self.cookies = cookies
@@ -70,6 +78,7 @@ public actor Authenticator {
     init(endpoint: URL, deviceIdentifier: String, signer: any SAPRequestSigning, amd: any StoreAMDProviding,
          transport: any StoreHTTPTransport, cookies: [Cookie] = []) {
         self.endpoint = endpoint
+        initialEndpoint = endpoint
         self.deviceIdentifier = deviceIdentifier
         self.signer = signer
         self.amd = amd
@@ -82,13 +91,19 @@ public actor Authenticator {
         return try await session.authenticate(email: email, password: password, code: code)
     }
 
+    /// Upper bound on password re-sends caused by device-registration (AMD) actions in one call:
+    /// one after RP and one after SP, the same bound ipatool's native login has.
+    static let maximumAMDResends = 2
+
     public func authenticate(email: String, password: String, code: String = "") async throws -> Account {
         let code = try Self.validatedCode(code)
         guard !authenticating else { try ensureFailed("An authentication request is already in progress.") }
         authenticating = true
         defer { authenticating = false }
         var redirects = 0
+        var amdResends = 0
         var handshake = StoreAMDHandshake(provider: amd)
+        endpoint = initialEndpoint
         // Freeze the serialized password body for this attempt (including 2FA).
         // Every retry signs these exact bytes; only machine OTP headers refresh.
         let signedBody = try Self.authenticationBody(email: email, password: password, code: code, deviceIdentifier: deviceIdentifier)
@@ -104,8 +119,22 @@ public actor Authenticator {
             do { response = try await transport.execute(request, maxBodySize: 2 * 1024 * 1024) }
             catch { throw AuthenticationServiceError.wrapping(error, stage: .authentication, transport: true) }
             let result = try parseResponse(response, email: email, password: password, code: code)
+            // A credential or code rejection ends the call before any AMD handling, even when the
+            // same response carries X-Apple-AMD-Action: re-sending the password is what turns a
+            // single rejection into Apple's 5020 "entered incorrectly more than once" lock.
+            switch result {
+            case let .passwordRejected(appleCode): throw AuthenticationError.passwordRejected(appleCode)
+            case .codeRejected: throw AuthenticationError.codeRejected
+            case let .rejected(diagnostic): throw diagnostic
+            default: break
+            }
             // AMD actions can arrive with any HTTP status; the header alone is enough.
-            if try await handshake.respond(to: response) { continue }
+            // Past the re-send budget, stop before provisioning and before sending the password again.
+            if amdResends >= Self.maximumAMDResends, Self.carriesAMDAction(response) { throw StoreAMDError(.parse) }
+            if try await handshake.respond(to: response) {
+                amdResends += 1
+                continue
+            }
             switch result {
             case let .success(account): return account
             case let .redirect(url):
@@ -117,11 +146,19 @@ public actor Authenticator {
                 redirects += 1
             case .codeRequired: throw AuthenticationError.verificationCodeRequired
             case .codeRejected: throw AuthenticationError.codeRejected
+            case let .passwordRejected(appleCode): throw AuthenticationError.passwordRejected(appleCode)
+            case let .rejected(diagnostic): throw diagnostic
             case .deviceRegistration: throw StoreAMDError(.parse)
             case let .failure(diagnostic): throw diagnostic
             }
         }
         try ensureFailed("Authentication redirect limit exceeded.")
+    }
+
+    static func carriesAMDAction(_ response: HTTPClient.Response) -> Bool {
+        let body = response.body.map { Data($0.readableBytesView) } ?? Data()
+        return StoreAMDAction.actionName(fields: StoreAMDAction.fields(from: body),
+                                         actionHeader: response.headers.first(name: "X-Apple-AMD-Action")) != nil
     }
 
     public static func rotatePasswordToken(for account: inout Account) async throws {
@@ -136,20 +173,13 @@ public actor Authenticator {
     }
 
     static func createInitialRequestEndpoint(baseURL: URL, deviceIdentifier: String) throws -> URL {
-        guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: true) else {
+        guard URLComponents(url: baseURL, resolvingAgainstBaseURL: true) != nil else {
             try ensureFailed("\(Strings.invalidAuthEndpoint): \(baseURL)")
         }
-        // Native auth consumes GUID in the signed plist. Keep the advertised
-        // URL verbatim, including its query, just like the on-device protocol.
-        // Only the legacy MZFinance service needs the GUID query suffix.
-        if comps.host?.lowercased() == "auth.itunes.apple.com" {
-            return try approvedEndpoint(baseURL)
-        }
-        var query = comps.queryItems ?? []
-        query.removeAll { $0.name == "guid" }
-        query.append(URLQueryItem(name: "guid", value: deviceIdentifier))
-        comps.queryItems = query
-        return try approvedEndpoint(comps.url.get())
+        // The GUID travels only in the signed plist body. The advertised route
+        // is used verbatim (query included) for native and legacy services alike,
+        // as ipatool does; no `guid` query item is added to the auth URL.
+        return try approvedEndpoint(baseURL)
     }
 
     /// Empty for the password step; otherwise exactly six ASCII digits after trimming.
@@ -162,9 +192,12 @@ public actor Authenticator {
         return trimmed
     }
 
+    /// `attempt` counts credential requests within one login, not the 2FA step: the code step is a new
+    /// login and is attempt "1" too (ipatool only sends "2" when it re-sends after -5000, which Mirsa never does).
+    /// The password is used verbatim (no trimming, no Unicode normalization); the code is appended with no separator.
     static func authenticationBody(email: String, password: String, code: String, deviceIdentifier: String) throws -> Data {
         try PropertyListSerialization.data(fromPropertyList: [
-            "appleId": email, "attempt": code.isEmpty ? "1" : "2", "guid": deviceIdentifier,
+            "appleId": email, "attempt": "1", "guid": deviceIdentifier,
             "password": password + code, "rmp": "0", "why": "signIn",
         ], format: .xml, options: 0)
     }
@@ -198,6 +231,19 @@ public actor Authenticator {
         guard submittedCode else { return false }
         let failure = fields["failureType"].map { String(describing: $0) } ?? ""
         return (fields["customerMessage"] as? String) == "MZFinance.BadLogin.Configurator_message" || failure == "5005"
+    }
+
+    /// Apple codes that mean the Apple Account credentials were refused. Never retried.
+    static let passwordRejectionCodes: Set<String> = ["5020", "-5000"]
+
+    /// Secret-free code ("5020", "-5000" or "BadLogin") when Apple refused the credentials, else nil.
+    /// The Configurator 2FA prompt (failureType "" + Configurator_message) is not a rejection.
+    static func passwordRejection(_ fields: [String: Any]) -> String? {
+        let failure = fields["failureType"].map { String(describing: $0).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        if passwordRejectionCodes.contains(failure) { return failure }
+        let message = (fields["customerMessage"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.hasPrefix("MZFinance.BadLogin"), message != "MZFinance.BadLogin.Configurator_message" { return "BadLogin" }
+        return nil
     }
 
     /// Apple's raw `AMD-Action...` text is never shown; it means device registration did not finish.
@@ -245,7 +291,9 @@ public actor Authenticator {
         let fields = (try? PropertyListSerialization.propertyList(from: responseData, format: nil) as? [String: Any])
             ?? (try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]) ?? [:]
         let diagnostic = Self.rejection(fields, status: Int(response.status.code), secrets: [email, password + code, password, code])
+        if let appleCode = Self.passwordRejection(fields) { return .passwordRejected(appleCode) }
         if Self.rejectsVerificationCode(fields, submittedCode: !code.isEmpty) { return .codeRejected }
+        if let failure = fields["failureType"].map({ String(describing: $0) }), !failure.isEmpty { return .rejected(diagnostic) }
         if Self.isUnresolvedDeviceRegistration(fields) { return .deviceRegistration }
         guard response.status == .ok else { return .failure(diagnostic) }
         guard var body = response.body, body.readableBytes <= 2 * 1024 * 1024, let data = body.readData(length: body.readableBytes) else {
@@ -260,13 +308,7 @@ public actor Authenticator {
             return .codeRequired
         }
 
-        if let failureType = dic["failureType"] as? String, failureType == "-5000" {
-            return .failure(diagnostic)
-        }
-
-        if let failureType = dic["failureType"] as? String, failureType == "5005" {
-            return .failure(diagnostic)
-        }
+        // Non-empty failureType values (5020, -5000, 5005, ...) were already classified above.
 
         guard let accountInfoDic = dic["accountInfo"] as? [String: Any],
               let addressInfoDic = accountInfoDic["address"] as? [String: Any] else { return .failure(diagnostic) }

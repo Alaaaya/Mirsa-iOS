@@ -70,7 +70,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         let parameters = try XCTUnwrap(PropertyListSerialization.propertyList(from: sentBody, format: nil) as? [String: String])
         XCTAssertEqual(parameters["appleId"], "reader+ä@example.invalid")
         XCTAssertEqual(parameters["password"], "test<&password123456")
-        XCTAssertEqual(parameters["attempt"], "2")
+        XCTAssertEqual(parameters["attempt"], "1")
         XCTAssertEqual(parameters["guid"], "001122334455")
         XCTAssertEqual(parameters["rmp"], "0")
         XCTAssertEqual(parameters["why"], "signIn")
@@ -186,14 +186,15 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         XCTAssertTrue(Configuration.userAgent.hasPrefix("Configurator/2.21 "))
         XCTAssertEqual(request.headers.first(name: "Content-Type"), "application/x-apple-plist")
         let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(request), format: nil) as? [String: String])
-        XCTAssertEqual(fields, ["appleId": "reader+ä@example.invalid", "attempt": "2", "guid": "001122334455",
+        XCTAssertEqual(fields, ["appleId": "reader+ä@example.invalid", "attempt": "1", "guid": "001122334455",
                                "password": "test<&password123456", "rmp": "0", "why": "signIn"])
     }
 
-    func testInitialLegacyRequestRetainsGuidSuffixAndPod() throws {
+    func testInitialLegacyRequestKeepsAdvertisedRouteWithoutGuidQuery() throws {
         let base = try XCTUnwrap(Bag.normalizedAuthEndpoint(from: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate?Pod=25"))
         let endpoint = try Authenticator.createInitialRequestEndpoint(baseURL: base, deviceIdentifier: "001122334455")
-        XCTAssertEqual(endpoint.absoluteString, "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/?Pod=25&guid=001122334455")
+        // The GUID is carried only in the signed body, as ipatool does.
+        XCTAssertEqual(endpoint.absoluteString, "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/?Pod=25")
     }
 
     private actor OfflineAMD: StoreAMDProviding {
@@ -294,7 +295,8 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         let a = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(before), format: nil) as? [String: String])
         let b = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodyData(after), format: nil) as? [String: String])
         XCTAssertEqual(b["password"], a["password"]! + "654321")
-        XCTAssertEqual(b["attempt"], "2")
+        // Same as ipatool: the code step is a fresh credential request, attempt "1".
+        XCTAssertEqual(b["attempt"], "1")
     }
 
     func testNativeEngineRejectsMalformedChallengeWithoutNetwork() {
