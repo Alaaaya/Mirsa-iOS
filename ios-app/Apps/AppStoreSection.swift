@@ -56,13 +56,27 @@ final class AppStoreSectionModel: ObservableObject {
     }
     #endif
 
+    private var sessionRevision = 0
+
+    func updateAccount(_ value: MirsaStoreAccount?) {
+        sessionRevision += 1
+        account = value
+        loaded = true
+    }
+
     func refresh() async {
         #if DEBUG
         if let fixture = Self.fixtureAccount { account = fixture; loaded = true; return }
         if MirsaUITestHarness.active { account = nil; loaded = true; return }
         #endif
-        let current = try? await MirsaStoreOnDeviceClient.shared.currentAccount()
-        account = current
+        let revision = sessionRevision
+        do {
+            let current = try await MirsaStoreOnDeviceClient.shared.currentAccount()
+            guard revision == sessionRevision else { return }
+            account = current
+        } catch {
+            // A temporary capability/network error is not a logout.
+        }
         loaded = true
     }
 
@@ -72,7 +86,7 @@ final class AppStoreSectionModel: ObservableObject {
         if MirsaUITestHarness.active { account = nil; return }
         #endif
         try await MirsaStoreOnDeviceClient.shared.signOut()
-        account = nil
+        updateAccount(nil)
     }
 }
 
@@ -596,121 +610,123 @@ struct AppStorePurchasesPage: View {
     @ObservedObject var store: EncryptedAppsStore
     @ObservedObject var model: AppStoreSectionModel
     let vm: AppViewModel
-
-    enum Filter: String, CaseIterable, Identifiable {
-        case all, mine, others
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .all: return tr("All", "الكل", ckb: "هەموو", kmr: "Hemû")
-            case .mine: return tr("This account", "هالحساب", ckb: "ئەم ئەکاونتە", kmr: "Ev hesab")
-            case .others: return tr("Other accounts", "حسابات تانية", ckb: "ئەکاونتی تر", kmr: "Hesabên din")
-            }
-        }
-    }
-
     @State private var query = ""
-    @State private var filter: Filter = .all
-
-    private func mine(_ e: EncryptedIPAEntry) -> Bool {
-        guard let me = model.account?.email, let buyer = e.metadata?.purchaserAppleID else { return false }
-        return me.caseInsensitiveCompare(buyer) == .orderedSame
-    }
-
-    private var visible: [EncryptedIPAEntry] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return store.entries.filter { e in
-            switch filter {
-            case .all: break
-            case .mine: if !mine(e) { return false }
-            case .others: if mine(e) { return false }
-            }
-            guard !q.isEmpty else { return true }
-            return e.name.localizedCaseInsensitiveContains(q) || e.bundleID.localizedCaseInsensitiveContains(q)
-                || (e.metadata?.itemID.map { String($0).contains(q) } ?? false)
+    @State private var months = 0
+    @State private var purchases: [MirsaStorePurchase] = []
+    @State private var artwork: [Int64: String] = [:]
+    @State private var loading = false
+    @State private var error: String?
+    @State private var downloading: Int64?
+    private var visible: [MirsaStorePurchase] {
+        let cutoff = Calendar.current.date(byAdding: .month, value: -months, to: Date()) ?? .distantPast
+        return purchases.filter {
+            (months == 0 || ($0.date ?? .distantPast) >= cutoff) &&
+            (query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) ||
+             $0.bundleID.localizedCaseInsensitiveContains(query) || String($0.id).contains(query))
         }
     }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
-                MirsaPageHeader(title: tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")) { EmptyView() }
-                AppStoreSearchField(placeholder: tr("Search purchases or App ID", "البحث بالمشتريات أو App ID", ckb: "گەڕان لە کڕینەکان یان App ID", kmr: "Li kirînan an App ID bigere"),
-                                    text: $query)
-                Picker("", selection: $filter) {
-                    ForEach(Filter.allCases) { f in Text(f.title).tag(f) }
+                MirsaPageHeader(title: tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")) {
+                    Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading)
                 }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("store-purchases-filter")
-                if let email = model.account?.email {
-                    Text(tr("Account: ", "الحساب: ", ckb: "ئەکاونت: ", kmr: "Hesab: ") + email)
-                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1).truncationMode(.middle)
-                }
-                Text(tr("Items: ", "العناصر: ", ckb: "بڕگەکان: ", kmr: "Tişt: ") + "\(visible.count)")
-                    .font(MirsaFont.sectionTitle).foregroundStyle(.white)
-                if visible.isEmpty {
-                    Text(store.entries.isEmpty
-                         ? tr("No App Store IPAs in Mirsa yet.", "لسّا ما في IPA من App Store بمرسى.", ckb: "هێشتا هیچ IPAیەکی App Store لە Mirsa نییە.", kmr: "Hêj IPA ya App Store di Mirsa de tune.")
-                         : tr("Nothing matches.", "ما في شي مطابق.", ckb: "هیچ شتێک ناگونجێت.", kmr: "Tiştek li hev nayê."))
-                        .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-                        .padding(MirsaSpacing.card).frame(maxWidth: .infinity).mirsaCard()
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
-                            if index > 0 { AppStoreRowDivider(inset: 84) }
-                            row(entry)
-                        }
+                if let account = model.account {
+                    Text(account.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                    AppStoreSearchField(placeholder: tr("Search purchases or App ID", "البحث بالمشتريات أو App ID", ckb: "گەڕان لە کڕینەکان", kmr: "Li kirînan bigere"), text: $query)
+                    Picker("", selection: $months) {
+                        Text(tr("All", "الكل", ckb: "هەموو", kmr: "Hemû")).tag(0)
+                        Text(tr("1 month", "شهر", ckb: "مانگێک", kmr: "1 meh")).tag(1)
+                        Text(tr("6 months", "٦ أشهر", ckb: "٦ مانگ", kmr: "6 meh")).tag(6)
+                        Text(tr("12 months", "سنة", ckb: "ساڵێک", kmr: "12 meh")).tag(12)
+                    }.pickerStyle(.segmented)
+                    Text(tr("Items: ", "العناصر: ", ckb: "بڕگەکان: ", kmr: "Tişt: ") + String(visible.count)).font(MirsaFont.sectionTitle)
+                    if loading { ProgressView() }
+                    if let error {
+                        Text(error).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.warning)
+                    } else if !loading && visible.isEmpty {
+                        Text(tr("No matching purchases.", "ما في مشتريات مطابقة.", ckb: "هیچ کڕینێک ناگونجێت.", kmr: "Kirînek li hev nayê.")).foregroundStyle(MirsaPalette.textSecondary)
                     }
-                    .mirsaCard()
+                    LazyVStack(spacing: 0) {
+                        ForEach(visible) { item in
+                            HStack(spacing: MirsaSpacing.s) {
+                                AsyncImage(url: artwork[item.id].flatMap { URL(string: $0) }) { image in image.resizable().scaledToFill() }
+                                placeholder: { Image(systemName: "app.dashed").font(.title2) }
+                                .frame(width: 56, height: 56).background(MirsaPalette.cardRaised)
+                                .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.name.isEmpty ? item.bundleID : item.name).font(MirsaFont.cardTitle).lineLimit(2)
+                                    if let date = item.date {
+                                        Text(date.formatted(date: .numeric, time: .omitted)).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                                    }
+                                }
+                                Spacer()
+                                if downloading == item.id { ProgressView() }
+                                else {
+                                    Button { Task { await download(item) } } label: {
+                                        Image(systemName: "icloud.and.arrow.down").font(.title2).foregroundStyle(MirsaPalette.accentSoft).frame(width: 40, height: 40)
+                                    }.disabled(downloading != nil || store.busy != nil)
+                                    .accessibilityLabel(tr("Download", "تنزيل", ckb: "داگرتن", kmr: "Daxe"))
+                                }
+                            }.padding(MirsaSpacing.card)
+                            AppStoreRowDivider(inset: 84)
+                        }
+                    }.mirsaCard()
+                } else {
+                    Text(tr("Sign in from the Account tab to load your Apple purchases.", "سجّل دخول من تبويب الحساب لتشوف مشتريات Apple تبعك.", ckb: "بچۆ ژوورەوە بۆ بینینی کڕینەکان.", kmr: "Ji bo kirînan têkeve hesabê te.")).foregroundStyle(MirsaPalette.textSecondary)
                 }
-                Text(tr("Apple's purchase history is not loaded here. This list shows the App Store IPAs saved in Mirsa and the Apple Account that bought each one.",
-                        "سجل مشتريات Apple ما بينجاب هون. هالقائمة بتعرض ملفات IPA من App Store المحفوظة بمرسى وحساب Apple يلي اشترى كل واحد.",
-                        ckb: "مێژووی کڕینی Apple لێرە بار ناکرێت. ئەم لیستە IPAکانی App Store لە Mirsa و ئەو ئەکاونتەی کڕیویەتی نیشان دەدات.",
-                        kmr: "Dîroka kirînê ya Apple li vir nayê barkirin. Ev lîste IPAyên App Store yên di Mirsa de û hesabê ku her yek kirî nîşan dide."))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, MirsaSpacing.page)
-            .padding(.bottom, MirsaSpacing.xl)
+            }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
         }
+        .refreshable { await reload() }
+        .task(id: model.account?.email) { purchases = []; artwork = [:]; error = nil; await reload() }
         .scrollDismissesKeyboard(.interactively)
         .background(AuroraBackground().ignoresSafeArea())
         .environment(\.layoutDirection, .leftToRight)
     }
-
-    private func row(_ entry: EncryptedIPAEntry) -> some View {
-        HStack(spacing: MirsaSpacing.s) {
-            Group {
-                if let img = store.icon(entry) { Image(uiImage: img).resizable().scaledToFill() }
-                else { Image(systemName: "app.dashed").font(.title2).foregroundStyle(MirsaPalette.textTertiary) }
-            }
-            .frame(width: 56, height: 56)
-            .background(MirsaPalette.cardRaised)
-            .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
-                Text(tr("Bought by: ", "اشتراه: ", ckb: "کڕیار: ", kmr: "Kirrîyar: ")
-                     + (entry.metadata?.purchaserAppleID ?? tr("unknown", "غير معروف", ckb: "نەزانراو", kmr: "nenas")))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary).lineLimit(1).truncationMode(.middle)
-                Text(tr("Added ", "انضاف ", ckb: "زیادکرا ", kmr: "Hat zêdekirin ")
-                     + entry.addedAt.formatted(Date.FormatStyle(date: .numeric, time: .omitted).locale(AppLanguageStore.shared.current.locale)))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-            }
-            Spacer(minLength: MirsaSpacing.xs)
-            if store.installingID == entry.id {
-                ProgressView(value: store.progress).progressViewStyle(.circular).tint(.white)
-            } else {
-                Button { Task { await store.install(entry, vm: vm) } } label: {
-                    Image(systemName: entry.installedAt != nil ? "checkmark.icloud" : "icloud.and.arrow.down")
-                        .font(.system(size: 20, weight: .semibold)).foregroundStyle(MirsaPalette.accentSoft)
-                        .frame(width: 40, height: 40)
+    @MainActor private func reload() async {
+        guard let account = model.account else { return }
+        let email = account.email
+        guard !loading else { return }
+        loading = true; error = nil
+        defer { loading = false }
+        do {
+            let result = try await MirsaStoreOnDeviceClient.shared.purchaseHistory()
+            try Task.checkCancellation()
+            guard model.account?.email == email else { return }
+            purchases = result
+            // Public metadata lookup in bounded chunks, not authenticated history replay.
+            for start in stride(from: 0, to: result.count, by: 100) {
+                try Task.checkCancellation()
+                guard model.account?.email == email else { return }
+                let ids = result[start..<min(start+100, result.count)].map { String($0.id) }.joined(separator: ",")
+                var url = URLComponents(string: "https://itunes.apple.com/lookup")!
+                url.queryItems = [URLQueryItem(name: "id", value: ids), URLQueryItem(name: "country", value: account.country)]
+                var request = URLRequest(url: url.url!); request.timeoutInterval = 20
+                guard let (data, _) = try? await URLSession.shared.data(for: request) else { continue }
+                struct Icon: Decodable { let trackId: Int64; let artworkUrl100: String? }
+                struct Reply: Decodable { let results: [Icon] }
+                if let reply = try? JSONDecoder().decode(Reply.self, from: data) {
+                    guard model.account?.email == email else { return }
+                    for item in reply.results { artwork[item.trackId] = item.artworkUrl100 }
                 }
-                .buttonStyle(.plain)
-                .disabled(store.busy != nil)
-                .accessibilityLabel(tr("Install as-is", "ثبّت متل ما هو", ckb: "وەک خۆی دابمەزرێنە", kmr: "Wekî xwe saz bike"))
             }
+        } catch is CancellationError {}
+        catch {
+            guard model.account?.email == email else { return }
+            self.error = tr("Apple purchase history could not be loaded. Refresh to try again.", "ما قدرت حمّل سجل مشتريات Apple. جرّب التحديث.", ckb: "مێژووی کڕین بار نەکرا. نوێی بکەرەوە.", kmr: "Dîroka kirînê nehat barkirin. Nû bike.")
         }
-        .padding(.horizontal, MirsaSpacing.card)
-        .padding(.vertical, MirsaSpacing.s)
+    }
+    @MainActor private func download(_ item: MirsaStorePurchase) async {
+        let email = model.account?.email
+        downloading = item.id; error = nil
+        defer { downloading = nil }
+        do {
+            let url = try await MirsaStoreOnDeviceClient.shared.downloadOwnedApp(item.app)
+            guard model.account?.email == email else { return }
+            let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+            store.add(entry)
+        } catch {
+            self.error = tr("Download failed. Check your account and try again.", "التنزيل ما كمل. تأكد من حسابك وجرّب.", ckb: "داگرتن سەرکەوتوو نەبوو.", kmr: "Daxistin bi ser neket.")
+        }
     }
 }

@@ -249,6 +249,18 @@ actor MirsaStoreClient {
     private func check(_ run: UInt64) throws {
         guard run == generation, !Task.isCancelled else { throw MirsaStoreError.operationCancelled }
     }
+    func purchaseHistory() async throws -> [MirsaStorePurchase] {
+        try prepare()
+        let owner = try requiredAccount()
+        let run = generation
+        let result = try await MirsaStorePurchaseHistory.fetch(owner: owner)
+        try check(run)
+        guard try requiredAccount().directoryServicesIdentifier == owner.directoryServicesIdentifier else {
+            throw MirsaStoreError.operationCancelled
+        }
+        return result
+    }
+
     private func loadAccount() throws -> Account? {
         guard let data = try vault.read("account") else { return nil }
         return try JSONDecoder().decode(Account.self, from: data)
