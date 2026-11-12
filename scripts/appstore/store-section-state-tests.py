@@ -43,8 +43,8 @@ sheet=tabs[tabs.index('.sheet(isPresented: $showingAppStore'):tabs.index('.mirsa
 assert 'searchOnly: true' in search and 'searchOnly: true' not in sheet
 assert 'if !searchOnly {\n                        Text(t("My App Store"' in v
 signed=v[v.index('    @ViewBuilder private func signedInCards('):v.index('    // MARK: result row')]
-assert signed.index('if !searchOnly {') < signed.index('confirmSignOut = true') < signed.index('Text(t("Search"')
-assert '}\n\n        VStack(alignment: .leading' in signed
+assert signed.index('if !searchOnly {') < signed.index('confirmSignOut = true') < signed.index('searchControls(a)')
+assert 'searchControls(a)' in signed
 assert 'else if searchOnly {' in v and 'else if needsCode { verificationCard } else { signInCard }' in v
 assert 'private var infoCard:' in v and 'private var signInCard:' in v
 assert 'store-account-profile' in m and 'store-sign-out' in m
