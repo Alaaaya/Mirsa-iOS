@@ -4,7 +4,7 @@ from pathlib import Path
 import re, subprocess, tempfile
 r=Path(__file__).resolve().parents[2]
 s=(r/'ios-app/Apps/AppStoreAccountView.swift').read_text()
-f=s[s.index('    private func requestMetadata('):s.index('    private func codeReset()')].replace('private func','func')
+f=s[s.index('    private func requestMetadata('):s.index('    private func recordOwnershipFailure(')].replace('private func','func')
 stubs='''import Foundation
 struct MirsaStoreApp { let bundleID: String }
 enum MirsaStoreServerClient {
