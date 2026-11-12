@@ -31,8 +31,14 @@ extension Array where Element == Cookie {
     }
 }
 struct SAPSigner {
-    static func connect() async throws -> SAPSigner { SAPSigner() }
-    func sign(_ data: Data) async throws -> Data { data }
+    static func connect() async throws -> SAPSigner {
+        if FixtureProtocol.mode == "setup" { throw URLError(.cannotConnectToHost) }
+        return SAPSigner()
+    }
+    func sign(_ data: Data) async throws -> Data {
+        if FixtureProtocol.mode == "signing" { throw URLError(.cannotDecodeContentData) }
+        return data
+    }
 }
 final class FixtureProtocol: URLProtocol {
     static var mode = "success"
@@ -107,7 +113,7 @@ final class FixtureProtocol: URLProtocol {
         precondition(try HistoryTags.number("musr", in: items) == 7)
         FixtureProtocol.mode = "empty"
         precondition(try await MirsaStorePurchaseHistory.fetch(owner: account).isEmpty)
-        for mode in ["plist", "malformed", "timeout"] {
+        for mode in ["plist", "malformed", "timeout", "setup", "signing"] {
             FixtureProtocol.mode = mode
             do { _ = try await MirsaStorePurchaseHistory.fetch(owner: account); fatalError("accepted \(mode)") }
             catch let diagnostic as PurchaseHistoryDiagnostic {
@@ -115,6 +121,8 @@ final class FixtureProtocol: URLProtocol {
                 for secret in [account.email, account.password, account.passwordToken, "private-cookie"] { precondition(!text.contains(secret)) }
                 if mode == "plist" { precondition(text.contains("failureType 5020") && text.contains("HTTP 200")) }
                 if mode == "timeout" { precondition(text.contains("-1001")) }
+                if mode == "setup" { precondition(text.contains("setup") && text.contains("-1004")) }
+                if mode == "signing" { precondition(text.contains("update") && text.contains("-1016")) }
             }
         }
         let before = FixtureProtocol.requests.count
