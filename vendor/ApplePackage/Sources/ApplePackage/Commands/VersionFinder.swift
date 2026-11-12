@@ -61,7 +61,6 @@ public enum VersionFinder {
                         try ensureFailed("\(customerMessage) (failureType: \(failureType))")
                     }
                     try ensureFailed("Apple failureType: \(failureType)")
-                    try ensureFailed(Strings.noItemsInResponse)
                 }
             } else {
                 try ensureFailed(Strings.noItemsInResponse)
