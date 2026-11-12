@@ -1,4 +1,5 @@
 import SwiftUI
+import ApplePackage
 
 /// Own-account App Store downloads (no sharing, no decryption, no signing).
 /// Self-contained: the host passes `onDownloaded` which must import the file into the
@@ -456,6 +457,8 @@ struct AppStoreAccountView: View {
     private func codeReset() { code = "" }
 
     private func describe(_ error: Error) -> String {
+        if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic.localizedDescription }
+        if let diagnostic = error as? StoreProductDiagnostic { return diagnostic.localizedDescription }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic.localizedDescription }
         if let server = error as? MirsaStoreServerError {
             switch server {

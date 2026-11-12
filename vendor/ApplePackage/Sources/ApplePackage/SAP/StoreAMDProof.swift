@@ -314,7 +314,7 @@ struct StoreAMDHandshake: Sendable {
 // Proofs are never sent to arbitrary Apple routes, dispatch URLs, CDN or redirects.
 enum StoreAMDHeaderScope {
     static func permits(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil, url.fragment == nil,
               url.port == nil || url.port == 443, let host = url.host?.lowercased() else { return false }
         let path = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
         if host == "auth.itunes.apple.com" {

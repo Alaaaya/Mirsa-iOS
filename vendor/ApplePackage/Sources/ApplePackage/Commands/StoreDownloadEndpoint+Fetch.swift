@@ -46,8 +46,8 @@ extension StoreDownloadEndpoint {
                 endpointURL: bag?.redownloadEndpoint,
             )
             return try validateRecoveryResponse(response, app: app, version: version)
-        } catch let error as StoreDownloadHTTPError {
-            guard error.statusCode == 500, error.emptyBody, !version.isEmpty,
+        } catch let error as StoreProductDiagnostic {
+            guard error.httpStatus == 500, error.emptyBody, !version.isEmpty,
                   let updateEndpoint = bag?.updateEndpoint
             else { throw error }
             APLogger.debug("store: redownload returned an empty HTTP 500, trying updateProduct")
@@ -151,14 +151,27 @@ extension StoreDownloadEndpoint {
 
         guard let finalResponse else { throw StoreAMDError(.budget) }
 
-        guard finalResponse.status == .ok else {
-            throw StoreDownloadHTTPError(statusCode: finalResponse.status.code, emptyBody: (finalResponse.body?.readableBytes ?? 0) == 0)
+        let responseData = finalResponse.body.map { Data($0.readableBytesView) } ?? Data()
+        let responseFields = (try? PropertyListSerialization.propertyList(from: responseData, format: nil) as? [String: Any])
+            ?? (try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]) ?? [:]
+        let failure = responseFields["failureType"].map { String(describing: $0) } ?? ""
+        let message = responseFields["customerMessage"] as? String ?? ""
+        // Preserve the narrow empty-500 recovery path and licence acquisition.
+        if finalResponse.status != .ok {
+            if finalResponse.status.code == 500 && responseData.isEmpty {
+                throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true)
+            }
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account)
+        }
+        if (!failure.isEmpty && failure != Self.retryableFailureType && failure != "9610") ||
+            (failure.isEmpty && !message.isEmpty) {
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account)
         }
 
         guard var body = finalResponse.body,
               let data = body.readData(length: body.readableBytes)
         else {
-            try ensureFailed(Strings.responseBodyEmpty)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true)
         }
 
         let plist = try PropertyListSerialization.propertyList(
@@ -171,7 +184,7 @@ extension StoreDownloadEndpoint {
         return dict
     }
 
-    private func makeRequest(
+    func makeRequest(
         account: Account,
         app: Software,
         url: URL,
@@ -179,6 +192,8 @@ extension StoreDownloadEndpoint {
         externalVersionID: String,
         amdHeaders: [String: String] = [:],
     ) throws -> HTTPClient.Request {
+        // Validate before constructing any credential-bearing request, including test callers.
+        _ = try Self.validatedURL(url)
         var payload: [String: Any] = [
             "creditDisplay": "",
             "guid": guid,
@@ -197,7 +212,7 @@ extension StoreDownloadEndpoint {
             ("User-Agent", Configuration.userAgent),
             ("iCloud-DSID", account.directoryServicesIdentifier),
             ("X-Dsid", account.directoryServicesIdentifier),
-            ("X-Apple-Store-Front", "\(account.store)-1"),
+            ("X-Apple-Store-Front", try account.commerceStoreFront()),
             ("X-Token", account.passwordToken),
         ]
 
@@ -218,11 +233,33 @@ extension StoreDownloadEndpoint {
     }
 }
 
-struct StoreDownloadHTTPError: LocalizedError {
-    let statusCode: UInt
+/// Bounded response fields only. No headers, request, body, URL, or account dump.
+public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
+    public let stage: String
+    public let httpStatus: UInt
     let emptyBody: Bool
+    public let failureType: String?
+    public let customerMessage: String?
 
-    var errorDescription: String? {
-        Strings.requestFailed(status: statusCode)
+    init(endpoint: StoreDownloadEndpoint, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false) {
+        switch endpoint {
+        case .volumeStore: stage = "volumeStore"
+        case .redownload: stage = "redownload"
+        case .update: stage = "updateProduct"
+        }
+        httpStatus = status
+        self.emptyBody = emptyBody
+        let secrets = [account.email, account.password, account.appleId, account.passwordToken,
+                       account.directoryServicesIdentifier, account.firstName, account.lastName,
+                       Configuration.deviceIdentifier] + account.cookie.map(\.value)
+        let code = (fields["failureType"] as? String) ?? (fields["failureType"] as? NSNumber)?.stringValue
+        failureType = code.flatMap { $0.range(of: "^-?[0-9]{1,8}$", options: .regularExpression) != nil ? $0 : nil }
+        customerMessage = AuthenticationServiceError.redact(fields["customerMessage"] as? String, secrets: secrets)
+    }
+
+    public var errorDescription: String? {
+        var parts = ["Apple [" + stage + "]", "HTTP " + String(httpStatus), "failureType " + (failureType ?? "missing")]
+        if let customerMessage { parts.append("customerMessage " + customerMessage) }
+        return parts.joined(separator: " · ")
     }
 }

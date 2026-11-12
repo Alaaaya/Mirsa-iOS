@@ -21,6 +21,8 @@ public struct Account: Codable, Hashable, Equatable, Sendable, CustomStringConve
 
     public var appleId: String // /accountInfo/appleId
     public var store: String
+    /// Exact login response metadata, separate from the numeric lookup country ID.
+    public var storeFront: String?
     public var firstName: String // /accountInfo/address/firstName
     public var lastName: String // /accountInfo/address/lastName
     public var passwordToken: String // /passwordToken
@@ -39,6 +41,7 @@ public struct Account: Codable, Hashable, Equatable, Sendable, CustomStringConve
         directoryServicesIdentifier: String,
         cookie: [Cookie],
         pod: String? = nil,
+        storeFront: String? = nil,
     ) {
         self.email = email
         self.password = password
@@ -50,6 +53,7 @@ public struct Account: Codable, Hashable, Equatable, Sendable, CustomStringConve
         self.directoryServicesIdentifier = directoryServicesIdentifier
         self.cookie = cookie
         self.pod = pod
+        self.storeFront = storeFront
     }
 }
 
@@ -65,6 +69,7 @@ public extension Account {
         directoryServicesIdentifier: String?,
         cookie: [Cookie],
         pod: String? = nil,
+        storeFront: String? = nil,
     ) throws {
         try ensure(!email.isEmpty, Strings.emptyEmail)
         try ensure(!password.isEmpty, Strings.emptyPassword)
@@ -80,5 +85,23 @@ public extension Account {
         self.directoryServicesIdentifier = try directoryServicesIdentifier.get(Strings.unableToReadDsPersonId)
         self.cookie = cookie
         self.pod = pod
+        self.storeFront = storeFront
+    }
+}
+
+public extension Account {
+    /// Old cached sessions need a fresh login, never fabricate a storefront suffix.
+    func commerceStoreFront() throws -> String {
+        guard let storeFront, storeFront.utf8.count <= 256,
+              !storeFront.contains("\r"), !storeFront.contains("\n"),
+              storeFront.components(separatedBy: "-").first == store,
+              storeFront.contains("-") else { throw StorefrontMetadataMissing() }
+        return storeFront
+    }
+}
+
+public struct StorefrontMetadataMissing: Error, LocalizedError, Sendable {
+    public var errorDescription: String? {
+        "Sign out of the Apple account in Mirsa and sign in again to refresh the account storefront. سجّل خروج من حساب Apple بمرسى وادخل من جديد حتى تتحدّث بيانات متجر الحساب."
     }
 }
