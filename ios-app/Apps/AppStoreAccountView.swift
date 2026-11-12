@@ -638,30 +638,26 @@ struct AppStoreAccountView: View {
         metadataTasks[key]?.cancel()
         let generation = operationGeneration
         metadataTasks[key] = Task {
-            var remaining = ids
-            // At most six metadata requests for the visible batch, never all catalog versions.
-            for attempt in 0..<6 {
-                guard !Task.isCancelled, generation == operationGeneration, !remaining.isEmpty else { return }
+            // Publish each small batch as soon as it finishes. Previously all twenty
+            // sequential Apple manifests had to finish before the first name appeared.
+            // Keep requests serial: they share signer and account-cookie state.
+            for start in stride(from: 0, to: ids.count, by: 4) {
+                let batch = Array(ids[start..<min(start + 4, ids.count)])
+                guard !Task.isCancelled, generation == operationGeneration else { return }
                 do {
-                    let entries = try await client.versionMetadata(app, externalVersionIDs: remaining)
+                    let entries = try await client.versionMetadata(app, externalVersionIDs: batch)
                     guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for item in entries { metadata[key, default: [:]][item.externalVersionID] = item }
-                    for id in remaining where !entries.contains(where: { $0.externalVersionID == id }) {
-                        metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
+                    for id in batch {
+                        let item = entries.first { $0.externalVersionID == id }
+                        metadata[key, default: [:]][id] = item?.status == "ready" ? item :
+                            .init(externalVersionID: id, status: "unavailable", version: nil)
                     }
-                    remaining = remaining.filter { metadata[key]?[$0]?.status == "queued" }
-                    if !remaining.isEmpty && attempt < 5 { try await Task.sleep(nanoseconds: 3_000_000_000) }
                 } catch {
                     guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for id in remaining {
+                    for id in batch {
                         metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
                     }
-                    return
                 }
-            }
-            guard !Task.isCancelled, generation == operationGeneration else { return }
-            for id in remaining {
-                metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
             }
         }
     }

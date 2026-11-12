@@ -7,7 +7,10 @@ h=(r/'ios-app/AppStore/StorePurchaseHistory.swift').read_text()
 u=(r/'ios-app/Apps/AppStoreSection.swift').read_text()
 c=(r/'ios-app/AppStore/StoreClient.swift').read_text()
 purchase=h[h.index('struct MirsaStorePurchase:'):h.index('/// Read-only own-account')]
-parser=h[h.index('enum HistoryTags {'):]
+parser=h[h.index('struct PurchaseHistoryDiagnostic:'):h.index('enum MirsaStorePurchaseHistory {')]+h[h.index('enum HistorySessionCookies {'):]
+redactor=(r/'vendor/ApplePackage/Sources/ApplePackage/Supplement/AuthenticationServiceError.swift').read_text()
+redactor='enum AuthenticationServiceError {\n'+redactor[redactor.index('    public static func redact('):]
+parser=redactor+parser
 reload=u[u.index('    @MainActor private func reload() async {'):u.index('    @MainActor private func download(')].replace('private func','func')
 client=c[c.index('    func purchaseHistory() async throws'):c.index('    private func loadAccount()')]
 preamble='''import Foundation
@@ -18,6 +21,8 @@ struct MirsaStoreApp: Sendable { let id: Int64; let bundleID: String; let name: 
 enum MirsaStoreError: Error { case serviceUnavailable, busy, signedOut, operationCancelled }
 struct MirsaStoreAccount: Equatable, Sendable { let email: String; let country: String; let name: String }
 struct Account: Sendable { let directoryServicesIdentifier: String }
+struct Cookie { let name: String; let value: String; let path: String; let domain: String?; let expiresAt: TimeInterval?; let httpOnly: Bool; let secure: Bool }
+struct StorefrontMetadataMissing: Error, LocalizedError { var errorDescription: String? { "Storefront missing" } }
 func tr(_ en: String, _ ar: String, ckb: String, kmr: String) -> String { en }
 '''
 mocks='''
@@ -87,7 +92,7 @@ tests=r'''
         return HistoryTags.encode("mlit", bytes: body)
     }
     @MainActor static func main() async throws {
-        let rows = HistoryTags.encode("mlcl", bytes: item(2, 1_700_000_000) + item(2, 1_700_000_001) + item(3, 1_710_000_000, name: "") + item(4, nil) + item(0, 1))
+        let rows = HistoryTags.encode("mlcl", bytes: item(2, 1_700_000_000) + item(2, 1_700_000_001) + item(3, 1_710_000_000, name: "") + item(4, nil))
         let listing = HistoryTags.encode("adbs", bytes: HistoryTags.encode("mstt", integer: 200) + rows)
         let parsed = try HistoryTags.purchases(listing)
         precondition(parsed.map { $0.id } == [3, 2, 4], "sort/dedup/invalid ID")
@@ -96,7 +101,30 @@ tests=r'''
         precondition(try HistoryTags.number("mstt", in: listing) == 200)
         precondition(try HistoryTags.number("mlid", in: listing) == nil)
         precondition(try HistoryTags.integer(Data([0,0,0,1,0,0,0,0])) == 4_294_967_296)
-        precondition(try HistoryTags.purchases(Data()).isEmpty)
+        fails("empty response is not empty history") { _ = try HistoryTags.purchases(Data()) }
+        let empty = HistoryTags.encode("adbs", bytes: HistoryTags.encode("mstt", integer: 200) + HistoryTags.encode("mtco", integer: 0) + HistoryTags.encode("mrco", integer: 0) + HistoryTags.encode("mlcl", bytes: Data()))
+        precondition(try HistoryTags.purchases(empty).isEmpty)
+        fails("no recognized listing") { _ = try HistoryTags.purchases(HistoryTags.encode("mstt", integer: 200)) }
+        fails("claimed records missing") { _ = try HistoryTags.purchases(HistoryTags.encode("adbs", bytes: HistoryTags.encode("mstt", integer: 200) + HistoryTags.encode("mtco", integer: 1027) + HistoryTags.encode("mlcl", bytes: Data()))) }
+        fails("unrecognized record ID") { _ = try HistoryTags.purchases(HistoryTags.encode("adbs", bytes: HistoryTags.encode("mstt", integer: 200) + HistoryTags.encode("mlcl", bytes: item(0, 1)))) }
+        fails("partial listing") { _ = try HistoryTags.purchases(HistoryTags.encode("adbs", bytes: HistoryTags.encode("mstt", integer: 200) + HistoryTags.encode("mtco", integer: 1027) + rows)) }
+        fails("wrong returned count") { _ = try HistoryTags.purchases(HistoryTags.encode("adbs", bytes: HistoryTags.encode("mstt", integer: 200) + HistoryTags.encode("mrco", integer: 99) + rows)) }
+        let diag = PurchaseHistoryDiagnostic(stage: .items, httpStatus: 200, dmapStatus: 403, failureType: "5020", customerMessage: "Account a@example.invalid token=secretcookie TESTSECRET", detail: "rejected", secrets: ["TESTSECRET"])
+        let message = diag.localizedDescription
+        precondition(message.contains("HTTP 200") && message.contains("DMAP 403") && message.contains("failureType 5020"))
+        precondition(!message.contains("a@example.invalid") && !message.contains("secretcookie") && !message.contains("TESTSECRET"))
+        precondition(PurchaseHistoryDiagnostic(stage: .login, failureType: "token-secret", detail: "rejected").failureType == nil)
+        let saved = [Cookie(name: "session", value: "owned", path: "/WebObjects/MZFinance.woa", domain: "p25-buy.itunes.apple.com", expiresAt: nil, httpOnly: true, secure: true),
+                     Cookie(name: "foreign", value: "no", path: "/", domain: "evil.example", expiresAt: nil, httpOnly: true, secure: true),
+                     Cookie(name: "expired", value: "no", path: "/", domain: ".apple.com", expiresAt: 1, httpOnly: true, secure: true)]
+        let scoped = HistorySessionCookies.historyCookies(saved)
+        precondition(scoped.count == 1 && scoped[0].domain == "pd.itunes.apple.com" && scoped[0].path == "/" && scoped[0].secure)
+        let response = HTTPURLResponse(url: URL(string: "https://pd.itunes.apple.com/WebObjects/MZPurchaseDaap.woa/purchase/login")!, statusCode: 200, httpVersion: nil, headerFields: ["Set-Cookie": "history=new-session; Path=/; Secure; HttpOnly"])!
+        let merged = HistorySessionCookies.merging(scoped, response: response)
+        precondition(merged.count == 2 && merged.contains { $0.name == "history" && $0.value == "new-session" })
+        let deletion = HTTPURLResponse(url: response.url!, statusCode: 200, httpVersion: nil, headerFields: ["Set-Cookie": "history=; Path=/; Max-Age=0"])!
+        precondition(HistorySessionCookies.merging(merged, response: deletion).count == 1)
+        print("PASS honest empty vs missing/malformed/partial schema, Apple diagnostic redaction, commerce cookie isolation and history-session merge/deletion")
         for count in 1..<listing.count { fails("truncation \(count)") { _ = try HistoryTags.purchases(Data(listing.prefix(count))) } }
         fails("oversized length") { _ = try HistoryTags.purchases(Data("mlit".utf8) + Data([255,255,255,255])) }
         fails("invalid scalar size") { _ = try HistoryTags.number("mstt", in: HistoryTags.encode("mstt", bytes: Data([0,0,1]))) }
