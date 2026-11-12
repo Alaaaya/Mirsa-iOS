@@ -456,6 +456,7 @@ struct AppStoreDownloadSettingsPage: View {
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     @State private var tmpSize = "…"
     @State private var cleaning = false
+    @Environment(\.dismiss) private var dismiss
 
     private var librarySize: String {
         ByteCountFormatter.string(fromByteCount: library.entries.reduce(Int64(0)) { $0 + $1.sizeBytes }, countStyle: .file)
@@ -548,11 +549,22 @@ struct AppStoreDownloadSettingsPage: View {
             }
             .padding(.horizontal, MirsaSpacing.page)
             .padding(.top, MirsaSpacing.s)
-            .padding(.bottom, MirsaSpacing.xl)
+            // A pushed page does not inherit the section bar's inset; keep the last rows above both bars.
+            .padding(.bottom, MirsaSpacing.xl + 140)
         }
         .background(AuroraBackground().ignoresSafeArea())
         .navigationTitle(tr("Settings", "الإعدادات", ckb: "ڕێکخستنەکان", kmr: "Mîheng"))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                }
+                .accessibilityLabel(tr("Back", "رجوع", ckb: "گەڕانەوە", kmr: "Vegere"))
+                .accessibilityIdentifier("store-settings-back")
+            }
+        }
         .toolbar(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .environment(\.layoutDirection, .leftToRight)
