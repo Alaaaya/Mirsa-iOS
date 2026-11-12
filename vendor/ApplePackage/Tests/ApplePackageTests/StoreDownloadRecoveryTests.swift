@@ -2,6 +2,7 @@
 import Foundation
 import AsyncHTTPClient
 import Testing
+import CStoreAMD
 import NIOCore
 import NIOPosix
 import NIOConcurrencyHelpers
@@ -249,4 +250,79 @@ struct StoreDownloadRecoveryTests {
         }
     }
 
+}
+
+
+extension StoreDownloadRecoveryTests {
+    @Test func nativeKBSyncIsFreshAndFailClosedWithoutNetwork() throws {
+        let first = try StoreDownloadEndpoint.kbSync(dsid: "123456789", guid: "001122334455")
+        let second = try StoreDownloadEndpoint.kbSync(dsid: "123456789", guid: "001122334455")
+        let bytes = try #require(Data(base64Encoded: first))
+        #expect(bytes.count == 212)
+        #expect(Array(bytes.prefix(4)) == [0, 4, 0, 3])
+        #expect(first != second)
+        for dsid in ["", "0", "not-a-dsid", "-1"] {
+            #expect(throws: StoreAMDError.self) { try StoreDownloadEndpoint.kbSync(dsid: dsid, guid: "001122334455") }
+        }
+        for guid in ["", "00112233445", "00112233445566", "00112233445Z", "0011223344\n5"] {
+            #expect(throws: StoreAMDError.self) { try StoreDownloadEndpoint.kbSync(dsid: "123456789", guid: guid) }
+        }
+        var output = [UInt8](repeating: 0, count: 212)
+        var count = 0
+        let status = output.withUnsafeMutableBufferPointer { out in
+            mirsa_store_kbsync(123, nil, 6, out.baseAddress, out.count, &count)
+        }
+        #expect(status == 0)
+    }
+
+    @Test func entitlementProtocolPreservesTheAccountAndSelectedVersion() throws {
+        var owner = fixtureAccount
+        owner.storeFront = "143480-7,29 t:fixture"
+        owner.directoryServicesIdentifier = "123456789"
+        owner.cookie = [Cookie(name: "session", value: "fixture-cookie", path: "/", domain: ".itunes.apple.com", httpOnly: true, secure: true)]
+        let endpoint = StoreDownloadEndpoint.entitlement
+        let url = try endpoint.url(pod: "44", deviceIdentifier: "001122334455")
+        #expect(url.absoluteString == "https://downloaddispatch.itunes.apple.com/WebObjects/DownloadDispatch.woa/wa/ent/download?guid=001122334455")
+        let kb = try StoreDownloadEndpoint.kbSync(dsid: owner.directoryServicesIdentifier, guid: "001122334455")
+        for selected in ["", "894893172"] {
+            let request = try endpoint.makeRequest(account: owner, app: fixtureSoftware, url: url,
+                guid: "001122334455", externalVersionID: selected, amdHeaders: ["X-Apple-AMD": "fixture-proof"], kbSync: kb)
+            let body = try payload(request)
+            #expect(body["salableAdamId"] as? String == "123")
+            #expect(body["kbsync"] as? String == kb)
+            let serial = try #require(Data(base64Encoded: try #require(body["serialNumber"] as? String)))
+            #expect(Array(serial) == [0x54, 0xc8, 0xb0, 0xa9, 0x88, 0x22, 0x33, 0x44, 0x55])
+            #expect(body["guid"] as? String == "001122334455")
+            #expect(body["appExtVrsId"] == nil)
+            #expect(body["externalVersionId"] as? String == (selected.isEmpty ? nil : selected))
+            #expect(request.headers.first(name: "Content-Type") == "application/x-www-form-urlencoded; charset=utf-8")
+            #expect(request.headers.first(name: "X-Token") == owner.passwordToken)
+            #expect(request.headers.first(name: "X-Dsid") == owner.directoryServicesIdentifier)
+            #expect(request.headers.first(name: "X-Apple-Store-Front") == owner.storeFront)
+            #expect(request.headers.first(name: "X-Apple-AMD") == "fixture-proof")
+            #expect(request.headers.first(name: "Cookie") == "session=fixture-cookie")
+        }
+        #expect(throws: StoreAMDError.self) {
+            try endpoint.makeRequest(account: owner, app: fixtureSoftware, url: url, guid: "001122334455", externalVersionID: "894893172")
+        }
+        #expect(throws: (any Error).self) {
+            try endpoint.makeRequest(account: owner, app: fixtureSoftware,
+                url: #require(URL(string: "https://cdn.apple.com/WebObjects/DownloadDispatch.woa/wa/ent/download")),
+                guid: "001122334455", externalVersionID: "894893172", kbSync: kb)
+        }
+    }
+
+    @Test func commerceReauthenticationIsNotMissingOwnershipOrBlanket403() {
+        for code in ["2034", "2042"] {
+            let diagnostic = StoreProductDiagnostic(endpoint: .entitlement, status: 200,
+                fields: ["failureType": code], account: fixtureAccount)
+            #expect(diagnostic.requiresReauthentication)
+            #expect(!diagnostic.requiresLicense)
+        }
+        let message = StoreProductDiagnostic(endpoint: .redownload, status: 403,
+            fields: ["customerMessage": "Sign In to the iTunes Store"], account: fixtureAccount)
+        #expect(message.requiresReauthentication)
+        let forbidden = StoreProductDiagnostic(endpoint: .redownload, status: 403, fields: [:], account: fixtureAccount)
+        #expect(!forbidden.requiresReauthentication && !forbidden.requiresLicense)
+    }
 }

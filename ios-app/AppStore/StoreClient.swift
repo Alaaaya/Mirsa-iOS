@@ -187,6 +187,37 @@ actor MirsaStoreClient {
         return entries
     }
 
+    /// One explicit free Get action, one serial reservation and the SAME mutated account.
+    /// Never called by a background download or for a paid/unknown-price app.
+    func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
+        let run = try begin()
+        defer { busy = false }
+        var owner = try requiredAccount()
+        let version = try MirsaStorePolicy.version(externalVersionID)
+        var completed: URL?
+        do {
+            let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
+            try check(run)
+            guard fresh.id == app.id, fresh.bundleID == app.bundleID else { throw MirsaStoreError.invalidPackage }
+            try MirsaStorePolicy.requireFree(fresh.price)
+            try await engine.acquire(account: &owner, app: fresh)
+            try check(run)
+            // Retain refreshed buy-response cookies even when downloading later fails.
+            try persist(owner)
+            let output = try await engine.manifest(account: &owner, app: fresh, version: version)
+            try check(run)
+            try validate(output: output, app: app, version: version)
+            try persist(owner)
+            let url = try await packages.fetch(output: output, bundleID: app.bundleID)
+            completed = url
+            try check(run)
+            return url
+        } catch {
+            if let completed { MirsaManagedTmp.end(completed.deletingLastPathComponent()) }
+            throw safe(error)
+        }
+    }
+
     /// Returns a local encrypted IPA with the account's original SINF, not a decrypted/re-signed app.
     /// Caller may hand this URL to the local importer. No automatic install or sharing.
     func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {

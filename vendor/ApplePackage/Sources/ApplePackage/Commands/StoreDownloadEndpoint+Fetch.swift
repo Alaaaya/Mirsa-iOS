@@ -5,6 +5,7 @@
 //  Created on 2026/6/12.
 //
 
+import CStoreAMD
 import AsyncHTTPClient
 import Foundation
 
@@ -35,6 +36,21 @@ extension StoreDownloadEndpoint {
             }
             version = try await PlatformVersionLookup.lookup(appID: app.id, countryCode: country, entityType: entityType).externalVersionID
         }
+        // Use the account/device-bound dispatch protocol before the legacy redownload.
+        // The caller's exact selected ID is retained; latest lookup happens only when unpinned.
+        var entitlementError: StoreProductDiagnostic?
+        do {
+            let response = try await StoreDownloadEndpoint.entitlement.fetchProduct(
+                client: client, account: &account, app: app, deviceIdentifier: deviceIdentifier,
+                externalVersionID: version)
+            return try validateRecoveryResponse(response, app: app, version: version)
+        } catch let error as StoreProductDiagnostic {
+            // Explicit expired-session or licence responses must not trigger another action.
+            if error.requiresReauthentication || error.requiresLicense { throw error }
+            entitlementError = error
+        } catch {
+            // Local native generation/transport unavailability may use the original bounded chain.
+        }
         let bag = try? await Bag.fetchBag()
         do {
             let response = try await StoreDownloadEndpoint.redownload.fetchProduct(
@@ -49,7 +65,7 @@ extension StoreDownloadEndpoint {
         } catch let error as StoreProductDiagnostic {
             guard error.httpStatus == 500, error.emptyBody, !version.isEmpty,
                   let updateEndpoint = bag?.updateEndpoint
-            else { throw error }
+            else { throw entitlementError ?? error }
             APLogger.debug("store: redownload returned an empty HTTP 500, trying updateProduct")
             let response = try await StoreDownloadEndpoint.update.fetchProduct(
                 client: client, account: &account, app: app, deviceIdentifier: deviceIdentifier,
@@ -107,6 +123,7 @@ extension StoreDownloadEndpoint {
         var redirectAttempt = 0
         var finalResponse: HTTPClient.Response?
         let maxRedirects = 3
+        let kbSync = self == .entitlement ? try Self.kbSync(dsid: account.directoryServicesIdentifier, guid: deviceIdentifier) : nil
         let amd = StoreAMDProof(deviceIdentifier: deviceIdentifier)
         var handshake = StoreAMDHandshake(provider: amd)
 
@@ -119,6 +136,7 @@ extension StoreDownloadEndpoint {
                 guid: deviceIdentifier,
                 externalVersionID: externalVersionID,
                 amdHeaders: try await amd.headers(),
+                kbSync: kbSync,
             )
             let response = try await client.execute(request: request,
                 delegate: ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)).futureResult.get()
@@ -131,7 +149,7 @@ extension StoreDownloadEndpoint {
 
             account.cookie.mergeCookies(response.cookies)
 
-            // Dispatch handles challenges but deliberately sends NO AMD proof headers.
+            // Every retry uses the same account, device, version and fresh native kbSync packet.
             if try await handshake.respond(to: response) { continue }
 
             if [301, 302, 303, 307, 308].contains(response.status.code) {
@@ -189,6 +207,32 @@ extension StoreDownloadEndpoint {
         return dict
     }
 
+    static func hardware(_ guid: String) -> Data? {
+        guard guid.utf8.count == 12, guid.range(of: "^[0-9A-Fa-f]{12}$", options: .regularExpression) != nil else { return nil }
+        var result = Data()
+        var i = guid.startIndex
+        for _ in 0..<6 {
+            let end = guid.index(i, offsetBy: 2)
+            guard let value = UInt8(guid[i..<end], radix: 16) else { return nil }
+            result.append(value); i = end
+        }
+        return result
+    }
+
+    static func kbSync(dsid: String, guid: String) throws -> String {
+        guard let accountID = UInt64(dsid), accountID != 0, let hardware = hardware(guid) else { throw StoreAMDError(.device) }
+        let bytes = [UInt8](hardware)
+        var output = [UInt8](repeating: 0, count: 212)
+        var written = 0
+        let status = bytes.withUnsafeBufferPointer { buffer in
+            output.withUnsafeMutableBufferPointer { out in
+                mirsa_store_kbsync(accountID, buffer.baseAddress, buffer.count, out.baseAddress, out.count, &written)
+            }
+        }
+        guard status == 1, written == 212 else { throw StoreAMDError(.request) }
+        return Data(output).base64EncodedString()
+    }
+
     func makeRequest(
         account: Account,
         app: Software,
@@ -196,6 +240,7 @@ extension StoreDownloadEndpoint {
         guid: String,
         externalVersionID: String,
         amdHeaders: [String: String] = [:],
+        kbSync: String? = nil,
     ) throws -> HTTPClient.Request {
         // Validate before constructing any credential-bearing request, including test callers.
         _ = try Self.validatedURL(url)
@@ -206,6 +251,13 @@ extension StoreDownloadEndpoint {
             "serialNumber": "0",
         ]
 
+        if self == .entitlement {
+            guard let kbSync, let bytes = Data(base64Encoded: kbSync), bytes.count == 212,
+                  let hardware = Self.hardware(guid) else { throw StoreAMDError(.device) }
+            payload["kbsync"] = kbSync
+            payload["salableAdamId"] = String(app.id)
+            payload["serialNumber"] = (Data([0x54, 0xc8, 0xb0, 0xa9, 0x88]) + hardware.suffix(4)).base64EncodedString()
+        }
         if !externalVersionID.isEmpty {
             payload[externalVersionIDKey] = externalVersionID
         }
@@ -213,7 +265,7 @@ extension StoreDownloadEndpoint {
         let data = try PropertyListSerialization.data(fromPropertyList: payload, format: .xml, options: 0)
 
         var headers: [(String, String)] = [
-            ("Content-Type", "application/x-apple-plist"),
+            ("Content-Type", self == .entitlement ? "application/x-www-form-urlencoded; charset=utf-8" : "application/x-apple-plist"),
             ("User-Agent", Configuration.userAgent),
             ("iCloud-DSID", account.directoryServicesIdentifier),
             ("X-Dsid", account.directoryServicesIdentifier),
@@ -256,6 +308,7 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
     init(endpoint: StoreDownloadEndpoint, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false, app: Software? = nil, externalVersionID: String = "", requestURL: URL? = nil, responseHeaders: [(String, String)] = []) {
         let stage: String
         switch endpoint {
+        case .entitlement: stage = "ent/download"
         case .volumeStore: stage = "volumeStore"
         case .redownload: stage = "redownload"
         case .update: stage = "updateProduct"
@@ -282,7 +335,7 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
                           "/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
                           "/WebObjects/MZFinance.woa/wa/redownloadProduct",
                           "/WebObjects/MZFinance.woa/wa/updateProduct",
-                          "/r/redownload", "/up/updateProduct"]
+                          "/r/redownload", "/up/updateProduct", "/WebObjects/DownloadDispatch.woa/wa/ent/download"]
         if let url = requestURL, (StoreAMDHeaderScope.permits(url) || (try? StoreDownloadEndpoint.validatedURL(url)) != nil), knownPaths.contains(url.path) {
             requestHost = url.host?.lowercased()
             requestPath = url.path
@@ -307,6 +360,13 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
 
     /// Only Apple's explicit licence code is ownership evidence, never HTTP 403 alone.
     public var requiresLicense: Bool { failureType == "9610" }
+
+    /// A commerce token rejection asks for sign-in again without deleting the shared account.
+    /// A bare 403 is never proof that the session expired or the licence is missing.
+    public var requiresReauthentication: Bool {
+        failureType == "2034" || failureType == "2042" ||
+            customerMessage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "sign in to the itunes store"
+    }
 
     public var errorDescription: String? {
         var parts = ["Apple [" + stage + "]", "HTTP " + String(httpStatus), "failureType " + (failureType ?? "missing")]

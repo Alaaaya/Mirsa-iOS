@@ -863,11 +863,17 @@ struct AppStoreAccountView: View {
 
     private func acquire(_ app: MirsaStoreApp) {
         guard app.price == 0, (!otherStore || accountAvailable.contains(app.id)) else { return }
-        run(t("Getting free license…", "عم نجيب الترخيص المجاني…", "مۆڵەتی بێبەرامبەر وەردەگیرێت…", "Lîsansa belaş tê girtin…")) {
-            try await client.acquireFreeApp(app)
+        let version = chosen[app.bundleID]
+        run(t("Getting free license and downloading…", "عم نجيب الترخيص المجاني وننزّل…", "مۆڵەتی بێبەرامبەر وەردەگیرێت و دادەگیرێت…", "Lîsansa belaş tê girtin û tê daxistin…")) {
+            let generation = operationGeneration
+            let url = try await client.acquireFreeAppAndDownload(app, externalVersionID: version)
             ownership[app.id] = .owned
-            notice = t("Done. This account can now download \(app.name).", "تم. حسابك صار يقدر ينزّل \(app.name).",
-                       "تەواو. ئەکاونتەکەت ئێستا دەتوانێت \(app.name) دابگرێت.", "Temam. Hesabê te niha dikare \(app.name) daxe.")
+            defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
+            try Task.checkCancellation()
+            guard generation == operationGeneration else { throw CancellationError() }
+            try await onDownloaded(url)
+            notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
+                       "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
         }
     }
 
@@ -906,7 +912,7 @@ struct AppStoreAccountView: View {
     }
 
     private func offerRecovery(_ error: Error, app: MirsaStoreApp, version: String?) async -> Bool {
-        guard let diagnostic = error as? StoreProductDiagnostic, diagnostic.httpStatus == 403 else { return false }
+        guard let diagnostic = error as? StoreProductDiagnostic, diagnostic.httpStatus == 403, !diagnostic.requiresReauthentication else { return false }
         let revision = session.sessionRevision
         guard let fresh = try? await client.freeAppForRecovery(app),
               StoreFreeLicenseRecovery.canOffer(status: diagnostic.httpStatus, price: fresh.price),
@@ -999,8 +1005,14 @@ struct AppStoreAccountView: View {
     private func describe(_ error: Error) -> String {
         if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic.localizedDescription }
         if let diagnostic = error as? StoreProductDiagnostic {
+            if diagnostic.requiresReauthentication {
+                return t("Apple rejected this store session. Sign out from the Account tab, then sign in again and retry. Your saved apps are unchanged.",
+                         "Apple رفضت جلسة المتجر. من تبويب الحساب، سجّل خروج وبعدين دخول من جديد وجرّب. تطبيقاتك المحفوظة ما تغيّرت.",
+                         "Apple دانیشتنی ستۆری ڕەتکردەوە. لە بەشی ئەکاونت بچۆ دەرەوە و دووبارە بچۆ ژوورەوە، پاشان هەوڵ بدە. ئەپە هەڵگیراوەکانت نەگۆڕدراون.",
+                         "Apple danişîna firoşgehê red kir. Ji beşa Hesabê derkeve, dîsa têkeve û biceribîne. Sepanên te yên tomarkirî neguherîn.") + "\n\n" + diagnostic.localizedDescription
+            }
             let explanation = diagnostic.requiresLicense
-                ? t("Apple says this account needs the app's license. For a free app, tap Get, then tap Download separately.", "Apple بتقول الحساب بحاجة لترخيص التطبيق. إذا مجاني، دوس احصل عليه وبعدين تنزيل لحاله.", "مۆڵەتی ئەپ پێویستە. وەریبگرە پاشان دایبگرە.", "Lîsans pêwîst e. Bigire, paşê Daxe bitikîne.")
+                ? t("Apple says this account needs the app's license. For a free app, tap Get to acquire its free license and download in one action.", "Apple بتقول الحساب بحاجة لترخيص التطبيق. إذا مجاني، دوس احصل عليه لنجيب الترخيص المجاني وننزّل بضغطة وحدة.", "مۆڵەتی ئەپ پێویستە. وەریبگرە پاشان دایبگرە.", "Lîsans pêwîst e. Bigire, paşê Daxe bitikîne.")
                 : t("Apple rejected the request. This does not mean you do not own the app. If a free licence refresh is available, it requires your explicit confirmation and retries the selected download once.", "Apple رفضت الطلب، مو دليل إنك ما بتملك التطبيق. إذا تحديث الترخيص المجاني متاح، بدّه موافقتك وبنعيد نفس النسخة مرة وحدة.", "Apple داواکاری ڕەتکردەوە؛ ئەمە بەڵگەی نەبوونی مۆڵەت نییە.", "Apple daxwaz red kir; ev nebûna lîsansê îspat nake.")
             return explanation + "\n\n" + diagnostic.localizedDescription
         }

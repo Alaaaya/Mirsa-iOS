@@ -871,19 +871,27 @@ struct AppStorePurchasesPage: View {
         catch {
             guard model.sessionRevision == revision, model.account == account else { return }
             if let diagnostic = error as? StoreProductDiagnostic {
-                if diagnostic.httpStatus == 403,
+                if diagnostic.httpStatus == 403, !diagnostic.requiresReauthentication,
                    let fresh = try? await MirsaStoreOnDeviceClient.shared.freeAppForRecovery(item.app),
                    StoreFreeLicenseRecovery.canOffer(status: diagnostic.httpStatus, price: fresh.price),
                    model.sessionRevision == revision, model.account == account, !Task.isCancelled {
                     recovery = StoreFreeLicenseRecovery(app: fresh, externalVersionID: nil, revision: revision)
                     return
                 }
-                self.error = diagnostic.localizedDescription
+                self.error = commerceError(diagnostic)
             } else {
                 self.error = tr("Download failed. Try again.", "التنزيل ما كمل. جرّب مرة تانية.", ckb: "داگرتن سەرکەوتوو نەبوو.", kmr: "Daxistin bi ser neket.")
             }
         }
     }
+    private func commerceError(_ diagnostic: StoreProductDiagnostic) -> String {
+        guard diagnostic.requiresReauthentication else { return diagnostic.localizedDescription }
+        return tr("Apple rejected this store session. Sign out, sign in again, then retry. Your saved apps stay here.",
+                  "أبل رفضت جلسة المتجر. سجّل خروج وادخل من جديد، وبعدها جرّب. تطبيقاتك المحفوظة بتضل هون.",
+                  ckb: "ئەپل دانیشتنی فرۆشگاکەی ڕەت کردەوە. بچۆ دەرەوە و دووبارە بچۆ ژوورەوە، پاشان هەوڵ بدەرەوە. ئەپە پاشەکەوتکراوەکانت دەمێننەوە.",
+                  kmr: "Apple vê rûniştina firoşgehê red kir. Derkeve û dîsa têkeve, paşê dîsa biceribîne. Sepanên te yên tomarkirî dimînin.")
+    }
+
     @MainActor private func recoverDownload(_ pending: StoreFreeLicenseRecovery) async {
         guard isActive, !loading, downloading == nil, pending.revision == model.sessionRevision,
               let account = model.account else { return }
@@ -910,7 +918,7 @@ struct AppStorePurchasesPage: View {
         } catch is CancellationError {}
         catch {
             guard pending.revision == model.sessionRevision, model.account == account else { return }
-            self.error = (error as? StoreProductDiagnostic)?.localizedDescription
+            self.error = (error as? StoreProductDiagnostic).map { commerceError($0) }
                 ?? tr("Free licence refresh or retry failed. No further retry was made.", "تحديث الترخيص أو إعادة التنزيل ما كملت، وما عدنا المحاولة.", ckb: "هەوڵەکە سەرکەوتوو نەبوو.", kmr: "Ceribandin bi ser neket.")
         }
     }

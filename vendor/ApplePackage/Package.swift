@@ -27,7 +27,8 @@ let package = Package(
     targets: [
         .binaryTarget(name: "apple_auth", path: "Artifacts/apple_auth.xcframework"),
         .target(name: "CStoreAMD", dependencies: ["apple_auth"], publicHeadersPath: "include",
-                linkerSettings: [.linkedLibrary("c++"), .linkedFramework("CoreFoundation")]),
+                cxxSettings: [.headerSearchPath("Upstream")],
+                linkerSettings: [.linkedLibrary("c++"), .linkedFramework("CoreFoundation"), .linkedFramework("Security")]),
         .target(name: "CApplePackage", publicHeadersPath: "include"),
         .executableTarget(
             name: "ApplePackageTool",
