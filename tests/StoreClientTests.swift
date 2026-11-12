@@ -62,6 +62,7 @@ private final class StoreTestEngine: MirsaStoreEngine {
     var manifests = 0
     var seenVersion: String?
     var failManifest = false
+    var versionApps: [Software] = []
     var versionsResult = ["123", "456"]
     var output: DownloadOutput {
         get throws {
@@ -87,7 +88,7 @@ private final class StoreTestEngine: MirsaStoreEngine {
         if failManifest { throw ApplePackageError.licenseRequired }
         return try output
     }
-    func versions(account: inout Account, bundleID: String) async throws -> [String] { versionsResult }
+    func versions(account: inout Account, app: Software) async throws -> [String] { versionApps.append(app); return versionsResult }
 }
 private final class StoreTestPackages: MirsaStorePackages {
     var calls = 0
@@ -100,6 +101,21 @@ private final class StoreTestPackages: MirsaStorePackages {
 }
 
 final class MirsaStoreClientTests: XCTestCase {
+    func testVersionListUsesSelectedAppWithoutIPhoneLookupPrecheck() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let selected = MirsaStoreApp(testSoftware())
+        // A redundant lookup would return a different app and block this valid selection.
+        engine.app = testSoftware(id: 999)
+        let versions = try await client.availableVersions(selected)
+        XCTAssertEqual(versions, ["123", "456"])
+        XCTAssertTrue(engine.lookupCountries.isEmpty)
+        XCTAssertEqual(engine.versionApps.map(\.id), [selected.id])
+        XCTAssertEqual(engine.versionApps.map(\.bundleID), [selected.bundleID])
+        XCTAssertEqual(engine.acquisitions, 0)
+    }
+
     func testSafeAuthDiagnosticReachesUIAndClearsFailedChallenge() async throws {
         let vault = StoreTestVault(), engine = StoreTestEngine()
         engine.auth.diagnostic = MirsaStoreAuthDiagnostic(.init(stage: .authentication,
