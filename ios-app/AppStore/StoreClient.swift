@@ -14,6 +14,9 @@ actor MirsaStoreClient {
     private struct Challenge {
         let session: any MirsaStoreAuthentication
         let email: String
+        // Memory-only, discarded with this five-minute challenge. Never persisted.
+        let password: String
+        var submittedCodes: Set<String> = []
         let id: UUID
         let expires: Date
         var attempts: Int
@@ -56,13 +59,13 @@ actor MirsaStoreClient {
             let session = try await engine.authentication()
             try check(run)
             let id = UUID()
-            challenge = Challenge(session: session, email: email, id: id,
+            challenge = Challenge(session: session, email: email, password: password, id: id,
                                   expires: Date().addingTimeInterval(300), attempts: 0)
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 300_000_000_000)
                 await self?.expireChallenge(id)
             }
-            return try await authenticate(code: "", password: password, run: run)
+            return try await authenticate(code: "", run: run)
         } catch {
             try check(run)
             if let auth = error as? AuthenticationError, case .verificationCodeRequired = auth {
@@ -83,15 +86,18 @@ actor MirsaStoreClient {
             try vault.remove("challenge")
             throw MirsaStoreError.signedOut
         }
-        guard MirsaStoreCode.valid(code) != nil, !password.isEmpty, password.utf8.count <= 1024 else {
+        guard let code = MirsaStoreCode.valid(code), password == pending.password,
+              !pending.submittedCodes.contains(code) else {
             throw MirsaStoreError.invalidInput
         }
         pending.attempts += 1
+        pending.submittedCodes.insert(code)
         challenge = pending
-        do { return try await authenticate(code: MirsaStoreCode.valid(code)!, password: password, run: run) }
+        do { return try await authenticate(code: code, run: run) }
         catch {
             // Keep the same session for a corrected code, but never beyond three submissions.
-            if (challenge?.attempts ?? 3) >= 3 {
+            let diagnostic = safe(error) as? MirsaStoreAuthDiagnostic
+            if diagnostic?.appleCode == "5020" || (challenge?.attempts ?? 3) >= 3 {
                 challenge = nil
                 try? vault.remove("challenge")
             }
@@ -194,9 +200,9 @@ actor MirsaStoreClient {
         }
     }
 
-    private func authenticate(code: String, password: String, run: UInt64) async throws -> MirsaStoreLogin {
+    private func authenticate(code: String, run: UInt64) async throws -> MirsaStoreLogin {
         guard let pending = challenge else { throw MirsaStoreError.signedOut }
-        let owner = try await pending.session.authenticate(email: pending.email, password: password, code: code)
+        let owner = try await pending.session.authenticate(email: pending.email, password: pending.password, code: code)
         try check(run)
         guard challenge?.id == pending.id, pending.expires > Date() else {
             throw MirsaStoreError.operationCancelled

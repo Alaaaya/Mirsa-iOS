@@ -69,3 +69,27 @@ MIT apple-auth reference 98c862f7 confirms this flow; public ipatool issues
 No GPL reference source was copied. No account login was attempted during
 development. A successful archive proves compilation, not working owner login.
 The next device alert is needed to establish the actual rejection reason.
+
+## 5020 continuation safety
+Two device accounts returned 5020 during 2FA. This is not proof of a real account
+lock or of a particular serialization defect. The request format remains unchanged.
+No live authentication, account reset or credential export was performed.
+
+Source review found that the UI clears the initial password and asks for it again,
+while the client previously accepted any re-entered value for the same challenge.
+The challenge now binds the original password in memory for its existing five-minute
+lifetime and rejects a changed re-entry before touching the signer or network. It is
+never written to the vault and is discarded on success, expiry, sign-out or terminal
+failure. This fixes a real continuity gap, not a proven explanation of both reports.
+
+The client and Authenticator now reject duplicate normalized codes locally. Apple
+5020 permanently terminates that challenge/session; another code cannot trigger
+another HTTP request on it. Only an explicit new sign-in can create a new session.
+Other code corrections still have the existing three-submission bound.
+
+Offline regression coverage includes changed password, duplicate code, terminal
+5020, exact signed body bytes through pod redirect and two-step continuation,
+cookies, GUID, attempt, rmp and why=signIn. X-Dsid is not added speculatively:
+the inspected reference extracts dsPersonId for the resulting account, which is
+not evidence that an unknown pre-login DSID header should be synthesized.
+The owner still needs to validate login on-device after an actual CI archive.
