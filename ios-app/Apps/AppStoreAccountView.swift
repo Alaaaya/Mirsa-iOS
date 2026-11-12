@@ -29,36 +29,47 @@ struct AppStoreAccountView: View {
     @State private var showSteps = false
     @State private var confirmSignOut = false
     @State private var operationGeneration = UUID()
+    /// UI only: the app whose detail page is open, and when the current task started.
+    @State private var selected: MirsaStoreApp?
+    @State private var busySince: Date?
     @FocusState private var focus: Bool
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { tr(en, ar, ckb: ckb, kmr: kmr) }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
-                Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
-                    .font(MirsaFont.pageTitle).foregroundStyle(.white)
-                infoCard
-                if let account { signedInCards(account) } else if needsCode { verificationCard } else { signInCard }
-                if let busy {
-                    HStack(spacing: 10) {
-                        ProgressView().tint(.white)
-                        Text(busy).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-                        Spacer()
-                        Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal")) { work?.cancel() }
-                            .buttonStyle(.mirsaSecondary)
-                    }
-                    .padding(MirsaSpacing.card).mirsaCard()
+                Color.clear.frame(height: 0).id("store-top")
+                if let account, let app = selected {
+                    if busy != nil { busyCard }
+                    detailView(app, account: account)
+                } else {
+                    Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
+                        .font(MirsaFont.pageTitle).foregroundStyle(.white)
+                    infoCard
+                    if let account { signedInCards(account) } else if needsCode { verificationCard } else { signInCard }
+                    if busy != nil { busyCard }
                 }
             }
             .padding(.horizontal, MirsaSpacing.page)
             .padding(.bottom, MirsaSpacing.tabBarClearance)
         }
+        .onChange(of: selected?.id) { _, _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("store-top", anchor: .top) } }
+        }
         .scrollDismissesKeyboard(.interactively)
         .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
-        .task { account = try? await client.currentAccount() }
+        .task {
+            #if DEBUG
+            if let fixture = Self.uiTestFixture() { account = fixture.account; results = fixture.results; searched = true
+                versions = fixture.versions; metadata = fixture.metadata; metadataLimit = fixture.limits; selected = fixture.selected; return }
+            #endif
+            account = try? await client.currentAccount()
+        }
+        .onChange(of: busy) { _, value in busySince = value == nil ? nil : (busySince ?? Date()) }
+        .onChange(of: account) { _, value in if value == nil { selected = nil } }
         .onDisappear { password = ""; code = ""; work?.cancel(); cancelMetadata() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
@@ -85,11 +96,14 @@ struct AppStoreAccountView: View {
                     "Sepanên ku hesabê te yê Apple xwedî ye dakêşe. Mirsa şîfreya wan venake, îmze nake û parve nake."),
                   systemImage: "lock.shield.fill")
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-            Text(t("Your iPhone sends your email and password directly to Apple over HTTPS. The password is not saved. Apple may require a verification code.",
-                   "آيفونك بيبعت إيميلك وكلمة السر مباشرة لـApple عبر HTTPS. كلمة السر ما بتنحفظ وممكن Apple تطلب رمز تحقق.",
-                   "ئیمەیڵ و وشەی نهێنی بە HTTPS بۆ Apple دەنێردرێن بۆ Apple. وشەی نهێنی هەڵناگیرێت و Apple ڕەنگە کۆد بخوازێت.",
-                   "E-name û şîfreya te bi HTTPS ji Apple re ji bo Apple tên şandin. Şîfre nayê tomarkirin û dibe ku Apple kodê bixwaze."))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+            if account == nil {
+                Text(t("Sign-in goes directly to Apple; Mirsa doesn't store your password.",
+                       "تسجيل الدخول مباشر مع Apple، ومرسى ما بيحفظ كلمة السر",
+                       "چوونەژوورەوە ڕاستەوخۆ لەگەڵ Apple ـە، و Mirsa وشەی نهێنییەکەت هەڵناگرێت.",
+                       "Têketin rasterast bi Apple re ye; Mirsa şîfreya te tomar nake."))
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Button { withAnimation(.easeOut(duration: 0.2)) { showSteps.toggle() } } label: {
                 HStack {
                     Text(t("How it works and limits", "كيف بيشتغل والحدود", "چۆن کار دەکات و سنوورەکان", "Çawa dixebite û sînor"))
@@ -227,83 +241,226 @@ struct AppStoreAccountView: View {
             Text(t("No results in this country.", "ما في نتائج بهالدولة.", "لەم وڵاتەدا هیچ ئەنجامێک نییە.", "Li vî welatî encam tune."))
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
         }
-        ForEach(results) { app in resultCard(app) }
+        if !results.isEmpty {
+            Text(t("Results", "النتائج", "ئەنجامەکان", "Encam")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
+        }
+        ForEach(results) { app in resultRow(app) }
     }
 
-    private func resultCard(_ app: MirsaStoreApp) -> some View {
+    // MARK: result row, detail page, progress (UI only; same actions as before)
+
+    private func artwork(_ app: MirsaStoreApp, size: CGFloat) -> some View {
+        AsyncImage(url: URL(string: app.artworkURL)) { $0.resizable().scaledToFill() } placeholder: {
+            ZStack { MirsaPalette.cardRaised; Image(systemName: "app.dashed").font(.system(size: size * 0.35)).foregroundStyle(MirsaPalette.textTertiary) }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous).strokeBorder(MirsaPalette.stroke, lineWidth: 1))
+    }
+
+    private func priceBadge(_ app: MirsaStoreApp) -> some View {
         let free = app.price == 0
-        let key = app.bundleID
-        return VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            HStack(spacing: 12) {
-                AsyncImage(url: URL(string: app.artworkURL)) { $0.resizable().scaledToFill() } placeholder: { MirsaPalette.cardRaised }
-                    .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(app.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
-                    Text("\(app.bundleID) · \(app.version)").font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1)
-                    Text(free ? t("Free", "مجاني", "بێبەرامبەر", "Belaş")
-                              : t("Paid: cannot be bought here", "مدفوع: ما بينشترى هون", "پارەدار: لێرە ناکڕدرێت", "Bi pere: li vir nayê kirîn"))
-                        .font(MirsaFont.badge).foregroundStyle(free ? MirsaPalette.success : MirsaPalette.warning)
-                }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Button { acquire(app) } label: { Text(t("Get free license", "احصل على ترخيص مجاني", "مۆڵەتی بێبەرامبەر وەربگرە", "Lîsansa belaş bigire")).frame(maxWidth: .infinity) }
-                    .buttonStyle(.mirsaSecondary).disabled(!free || busy != nil)
-                Text(t("Only if this account never got the app. Adds it to your Apple Account; costs nothing.",
-                       "بس إذا حسابك ما حصل عالتطبيق قبل. بيضيفو لحساب Apple تبعك وبلا مصاري.",
-                       "تەنها ئەگەر ئەم ئەکاونتە پێشتر ئەپەکەی نەهێنابێت. دەیخاتە ئەکاونتی Apple ت بێ پارە.",
-                       "Tenê heke ev hesab berê sepan negirtibe. Li hesabê Apple zêde dike, bêpere."))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Button { loadVersions(app) } label: { Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).frame(maxWidth: .infinity) }
-                    .buttonStyle(.mirsaSecondary).disabled(busy != nil)
-                Text(t("Optional. Lists official Apple external version IDs, not human version names. The account must own the app. Leave empty for latest.",
-                       "اختياري. هاي أرقام نسخ Apple الرسمية مو أسماء النسخ. لازم حسابك يملك التطبيق. اتركو فاضي للأحدث.",
-                       "ئارەزوومەندانە. ناسنامە فەرمییەکانی وەشانی Apple نیشان دەدات نەک ناو. دەبێت خاوەنی ئەپەکە بیت. بەتاڵی بهێڵە بۆ نوێترین.",
-                       "Bijarte. ID-yên fermî yên Apple ne, ne navên guhertoyan. Divê hesab xwedî be. Ji bo herî nû vala bihêle."))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-                if let list = versions[key] {
-                    if list.isEmpty {
-                        Text(t("Apple returned no versions.", "Apple ما رجّعت نسخ.", "Apple هیچ وەشانێکی نەگەڕاندەوە.", "Apple guhertoyek neda."))
-                            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
-                    } else {
-                        let visible = Array(list.prefix(metadataLimit[key] ?? 20))
-                        Picker("", selection: Binding(get: { chosen[key] ?? "" }, set: { chosen[key] = $0.isEmpty ? nil : $0; manualID[key] = "" })) {
-                            Text(t("Latest", "الأحدث", "نوێترین", "Ya herî nû")).tag("")
-                            ForEach(visible, id: \.self) { id in Text(versionLabel(app, id)).tag(id) }
-                        }.pickerStyle(.menu).tint(MirsaPalette.accentSoft)
-                        if visible.count < list.count {
-                            Button(t("Show 20 more versions", "عرض 20 نسخة كمان", "٢٠ وەشانی تریش نیشان بدە", "20 guhertoyên din nîşan bide")) {
-                                let next = min(list.count, visible.count + 20)
-                                metadataLimit[key] = next
-                                requestMetadata(app, ids: Array(list.prefix(next).suffix(20)))
-                            }.buttonStyle(.mirsaSecondary)
-                        }
-                        Text(t("Version names come from Apple's official metadata. While loading or unavailable, External ID is shown. Downloads do not wait for names.",
-                               "أسماء النسخ من بيانات Apple الرسمية. إذا الاسم عم يتحمّل أو مو متاح بيظهر رقم النسخة الخارجي. التنزيل ما بينتظر الاسم.",
-                               "ناوی وەشان لە زانیارییە فەرمییەکانی Apple دێت. لە بارکردن یان نەبووندا ناسنامەی دەرەکی نیشان دەدرێت. داگرتن چاوەڕێی ناو ناکات.",
-                               "Navên guhertoyan ji metadata fermî ya Apple ne. Dema barkirinê an ne berdest be ID ya derveyî tê nîşandan. Daxistin li navan nasekine."))
-                            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+        return Text(free ? t("Free", "مجاني", "بێبەرامبەر", "Belaş")
+                         : t("Paid: cannot be bought here", "مدفوع: ما بينشترى هون", "پارەدار: لێرە ناکڕدرێت", "Bi pere: li vir nayê kirîn"))
+            .font(MirsaFont.badge).foregroundStyle(free ? MirsaPalette.success : MirsaPalette.warning)
+    }
+
+    private func resultRow(_ app: MirsaStoreApp) -> some View {
+        HStack(spacing: MirsaSpacing.s) {
+            Button { withAnimation(.easeOut(duration: 0.2)) { selected = app } } label: {
+                HStack(spacing: MirsaSpacing.s) {
+                    artwork(app, size: 64)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(app.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
+                        Text("\(app.version) · \(app.bundleID)").font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1)
+                        priceBadge(app)
                     }
+                    Spacer(minLength: 4)
                 }
-                TextField(t("Version ID (optional)", "رقم النسخة (اختياري)", "ناسنامەی وەشان (ئارەزوومەندانە)", "ID ya guhertoyê (bijarte)"),
-                          text: Binding(get: { manualID[key] ?? "" }, set: { v in
-                              let d = String(v.filter { $0.isASCII && $0.isNumber }.prefix(20)); manualID[key] = d; chosen[key] = d.isEmpty ? nil : d }))
-                    .keyboardType(.numberPad).focused($focus).fieldStyle()
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityHint(t("Opens the app page", "بيفتح صفحة التطبيق", "پەڕەی ئەپەکە دەکاتەوە", "Rûpela sepanê vedike"))
+            Button { download(app) } label: {
+                Text(t("Download", "تنزيل", "داگرتن", "Daxe"))
+                    .font(MirsaFont.button).foregroundStyle(.white)
+                    .padding(.horizontal, 16).frame(height: 34)
+                    .background(Capsule().fill(MirsaPalette.accentGradient))
+            }
+            .buttonStyle(.plain)
+            .disabled(busy != nil)
+            .opacity(busy != nil ? 0.5 : 1)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .mirsaCard()
+    }
+
+    private static func newestFirst(_ ids: [String]) -> [String] {
+        ids.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+    }
+
+    @ViewBuilder private func detailView(_ app: MirsaStoreApp, account a: MirsaStoreAccount) -> some View {
+        let key = app.bundleID
+        Button { withAnimation(.easeOut(duration: 0.2)) { selected = nil } } label: {
+            Label(t("Results", "النتائج", "ئەنجامەکان", "Encam"), systemImage: "chevron.left")
+                .font(MirsaFont.button).foregroundStyle(MirsaPalette.accentSoft)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("store-detail-back")
+        HStack(alignment: .top, spacing: MirsaSpacing.m) {
+            artwork(app, size: 96)
             VStack(alignment: .leading, spacing: 4) {
-                Button { download(app) } label: {
-                    HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }.frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.mirsaPrimary).disabled(busy != nil)
-                Text(t("Needs this account to own the app. Saved unchanged in the App Store tab.",
-                       "لازم الحساب يملك التطبيق. بينحفظ متل ما هو بتبويب متجر أبل.",
-                       "پێویستە ئەکاونتەکە خاوەنی ئەپەکە بێت. وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵدەگیرێت.",
-                       "Divê hesab xwediyê sepanê be. Wekî xwe li Firoşgeha Apple tê tomarkirin."))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                Text(app.name).font(.title2.weight(.bold)).foregroundStyle(.white).lineLimit(3)
+                Text(t("Version ", "الإصدار ", "وەشان ", "Guherto ") + app.version)
+                    .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                Text(app.bundleID).font(.caption2.monospaced()).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1)
+                priceBadge(app)
             }
+            Spacer(minLength: 0)
         }
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
+
+        VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+            Button { download(app) } label: {
+                HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }.frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.mirsaPrimary).disabled(busy != nil)
+            Text(t("Version: ", "النسخة: ", "وەشان: ", "Guherto: ") + chosenLabel(app))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+            Text(t("Needs this account to own the app. Saved unchanged in the App Store tab.",
+                   "لازم الحساب يملك التطبيق. بينحفظ متل ما هو بتبويب متجر أبل.",
+                   "پێویستە ئەکاونتەکە خاوەنی ئەپەکە بێت. وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵدەگیرێت.",
+                   "Divê hesab xwediyê sepanê be. Wekî xwe li Firoşgeha Apple tê tomarkirin."))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+            Divider().overlay(MirsaPalette.stroke)
+            Button { acquire(app) } label: { Text(t("Get free license", "احصل على ترخيص مجاني", "مۆڵەتی بێبەرامبەر وەربگرە", "Lîsansa belaş bigire")).frame(maxWidth: .infinity) }
+                .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil)
+            Text(t("Only if this account never got the app. Adds it to your Apple Account; costs nothing.",
+                   "بس إذا حسابك ما حصل عالتطبيق قبل. بيضيفو لحساب Apple تبعك وبلا مصاري.",
+                   "تەنها ئەگەر ئەم ئەکاونتە پێشتر ئەپەکەی نەهێنابێت. دەیخاتە ئەکاونتی Apple ت بێ پارە.",
+                   "Tenê heke ev hesab berê sepan negirtibe. Li hesabê Apple zêde dike, bêpere."))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+        }
+        .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
+
+        Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
+            .padding(.top, MirsaSpacing.xs)
+        VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+            if let list = versions[key] {
+                if list.isEmpty {
+                    Text(t("Apple returned no versions.", "Apple ما رجّعت نسخ.", "Apple هیچ وەشانێکی نەگەڕاندەوە.", "Apple guhertoyek neda."))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+                } else {
+                    let sorted = Self.newestFirst(list)
+                    let visible = Array(sorted.prefix(metadataLimit[key] ?? 20))
+                    VStack(spacing: 0) {
+                        versionRow(key: key, id: nil, title: t("Latest", "الأحدث", "نوێترین", "Ya herî nû"), subtitle: app.version)
+                        ForEach(visible, id: \.self) { id in
+                            Rectangle().fill(MirsaPalette.stroke).frame(height: 1)
+                            versionRow(key: key, id: id, title: versionName(app, id), subtitle: "ID \(id)")
+                        }
+                    }
+                    .background(MirsaPalette.cardRaised.opacity(0.5), in: RoundedRectangle(cornerRadius: MirsaRadius.m, style: .continuous))
+                    if visible.count < sorted.count {
+                        Button(t("Show 20 more versions", "عرض 20 نسخة كمان", "٢٠ وەشانی تریش نیشان بدە", "20 guhertoyên din nîşan bide")) {
+                            let next = min(sorted.count, visible.count + 20)
+                            metadataLimit[key] = next
+                            // Ask for every visible version still without a name, not only the new ones,
+                            // so a batch that was interrupted is picked up again.
+                            requestMetadata(app, ids: Array(sorted.prefix(next)))
+                        }.buttonStyle(.mirsaSecondary)
+                    }
+                    if visible.contains(where: { metadata[key]?[$0]?.status == "unavailable" }) {
+                        Button(t("Retry version names", "إعادة محاولة أسماء النسخ", "دووبارە هەوڵدانەوەی ناوی وەشانەکان", "Navên guhertoyan dîsa biceribîne")) {
+                            for id in visible where metadata[key]?[id]?.status == "unavailable" { metadata[key]?[id] = nil }
+                            requestMetadata(app, ids: visible)
+                        }
+                        .buttonStyle(.mirsaSecondary).disabled(busy != nil)
+                    }
+                    Text(t("Version names come from Apple's official metadata. While loading or unavailable, External ID is shown. Downloads do not wait for names.",
+                           "أسماء النسخ من بيانات Apple الرسمية. إذا الاسم عم يتحمّل أو مو متاح بيظهر رقم النسخة الخارجي. التنزيل ما بينتظر الاسم.",
+                           "ناوی وەشان لە زانیارییە فەرمییەکانی Apple دێت. لە بارکردن یان نەبووندا ناسنامەی دەرەکی نیشان دەدرێت. داگرتن چاوەڕێی ناو ناکات.",
+                           "Navên guhertoyan ji metadata fermî ya Apple ne. Dema barkirinê an ne berdest be ID ya derveyî tê nîşandan. Daxistin li navan nasekine."))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                }
+            } else {
+                Button { loadVersions(app) } label: { Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).frame(maxWidth: .infinity) }
+                    .buttonStyle(.mirsaSecondary).disabled(busy != nil)
+            }
+            Text(t("Optional. Lists official Apple external version IDs, not human version names. The account must own the app. Leave empty for latest.",
+                   "اختياري. هاي أرقام نسخ Apple الرسمية مو أسماء النسخ. لازم حسابك يملك التطبيق. اتركو فاضي للأحدث.",
+                   "ئارەزوومەندانە. ناسنامە فەرمییەکانی وەشانی Apple نیشان دەدات نەک ناو. دەبێت خاوەنی ئەپەکە بیت. بەتاڵی بهێڵە بۆ نوێترین.",
+                   "Bijarte. ID-yên fermî yên Apple ne, ne navên guhertoyan. Divê hesab xwedî be. Ji bo herî nû vala bihêle."))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+            TextField(t("Version ID (optional)", "رقم النسخة (اختياري)", "ناسنامەی وەشان (ئارەزوومەندانە)", "ID ya guhertoyê (bijarte)"),
+                      text: Binding(get: { manualID[key] ?? "" }, set: { v in
+                          let d = String(v.filter { $0.isASCII && $0.isNumber }.prefix(20)); manualID[key] = d; chosen[key] = d.isEmpty ? nil : d }))
+                .keyboardType(.numberPad).focused($focus).fieldStyle()
+        }
+        .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
+        Text(a.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1).truncationMode(.middle)
+    }
+
+    private func versionRow(key: String, id: String?, title: String, subtitle: String) -> some View {
+        let on = chosen[key] == id
+        return Button {
+            chosen[key] = id; manualID[key] = ""
+        } label: {
+            HStack(spacing: MirsaSpacing.s) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(MirsaFont.body).foregroundStyle(.white).lineLimit(1)
+                    Text(subtitle).font(.caption2.monospaced()).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if on { Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(MirsaPalette.accentSoft) }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(busy != nil)
+    }
+
+    private func versionName(_ app: MirsaStoreApp, _ id: String) -> String {
+        if let item = metadata[app.bundleID]?[id], item.status == "ready", let version = item.version { return version }
+        if metadata[app.bundleID]?[id]?.status == "unavailable" {
+            return t("Name unavailable", "الاسم مو متاح", "ناو بەردەست نییە", "Nav ne berdest e")
+        }
+        return t("Loading name…", "عم يتحمّل الاسم…", "ناو بار دەکرێت…", "Nav tê barkirin…")
+    }
+
+    private func chosenLabel(_ app: MirsaStoreApp) -> String {
+        guard let id = chosen[app.bundleID] else { return t("Latest", "الأحدث", "نوێترین", "Ya herî nû") + " · " + app.version }
+        if let item = metadata[app.bundleID]?[id], item.status == "ready", let version = item.version { return "\(version) · ID \(id)" }
+        return "ID \(id)"
+    }
+
+    private var busyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView().tint(.white)
+                Text(busy ?? "").font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                Spacer()
+                if let since = busySince {
+                    TimelineView(.periodic(from: since, by: 1)) { ctx in
+                        let s = max(0, Int(ctx.date.timeIntervalSince(since)))
+                        Text(String(format: "%d:%02d", s / 60, s % 60)).font(MirsaFont.caption.monospacedDigit()).foregroundStyle(MirsaPalette.textTertiary)
+                    }
+                }
+                Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal")) { work?.cancel() }
+                    .buttonStyle(.mirsaSecondary)
+            }
+            MirsaIndeterminateBar()
+            Text(t("Size and speed are not reported for this step yet, so only the elapsed time is shown.",
+                   "الحجم والسرعة مو متاحين لهالخطوة لسا، فبنعرض الوقت يلي مضى بس.",
+                   "قەبارە و خێرایی بۆ ئەم هەنگاوە هێشتا نانێردرێن، بۆیە تەنها کاتی تێپەڕیو نیشان دەدرێت.",
+                   "Mezinahî û lez ji bo vê gavê hêj nayên ragihandin, ji ber vê tenê dema derbasbûyî tê nîşandan."))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MirsaSpacing.card).mirsaCard()
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: actions
@@ -386,7 +543,7 @@ struct AppStoreAccountView: View {
             let ids = try await client.availableVersions(app)
             versions[app.bundleID] = ids
             metadataLimit[app.bundleID] = 20
-            requestMetadata(app, ids: Array(ids.prefix(20)))
+            requestMetadata(app, ids: Array(Self.newestFirst(ids).prefix(20)))
         }
     }
 
@@ -503,6 +660,60 @@ struct AppStoreAccountView: View {
         case .licenseRequired: return t("This Apple Account does not own this app. Tap Get free license first (free apps only).", "حسابك ما بيملك التطبيق. دوس احصل على ترخيص مجاني أول (للمجانية بس).", "ئەم ئەکاونتە خاوەنی ئەپەکە نییە. سەرەتا مۆڵەتی بێبەرامبەر وەربگرە (تەنها بێبەرامبەرەکان).", "Ev hesab xwediyê sepanê nîne. Pêşî lîsansa belaş bigire (tenê belaş).")
         case .operationCancelled: return t("Cancelled.", "انلغت.", "هەڵوەشێنرایەوە.", "Hat betalkirin.")
         }
+    }
+}
+
+#if DEBUG
+extension AppStoreAccountView {
+    struct UITestFixture {
+        var account: MirsaStoreAccount
+        var results: [MirsaStoreApp]
+        var versions: [String: [String]]
+        var metadata: [String: [String: MirsaStoreServerClient.VersionMetadata]]
+        var limits: [String: Int]
+        var selected: MirsaStoreApp?
+    }
+    /// UI-test screenshots only (`-MirsaUITestHarness -MirsaStoreFixtureAccount`). No Apple request.
+    static func uiTestFixture() -> UITestFixture? {
+        let args = ProcessInfo.processInfo.arguments
+        guard MirsaUITestHarness.active, args.contains("-MirsaStoreFixtureAccount") else { return nil }
+        let apps = [
+            MirsaStoreApp(id: 100001, bundleID: "com.example.notes", name: "Notes Pro", version: "5.2.1", price: 0, artworkURL: ""),
+            MirsaStoreApp(id: 100002, bundleID: "com.example.weather", name: "Weather Live", version: "2.0", price: 0, artworkURL: ""),
+            MirsaStoreApp(id: 100003, bundleID: "com.example.studio", name: "Music Studio", version: "3.4", price: 4.99, artworkURL: ""),
+        ]
+        let ids = ["880000001", "880000004", "880000002", "880000003"]
+        let meta: [String: MirsaStoreServerClient.VersionMetadata] = [
+            "880000004": .init(externalVersionID: "880000004", status: "ready", version: "5.2.0"),
+            "880000003": .init(externalVersionID: "880000003", status: "ready", version: "5.1.3"),
+            "880000002": .init(externalVersionID: "880000002", status: "unavailable", version: nil),
+        ]
+        let detail = args.contains("-MirsaStoreFixtureDetail")
+        return UITestFixture(account: MirsaStoreAccount(email: "sample.user@example.com", country: "tr", name: "Sample User"),
+                             results: apps, versions: detail ? [apps[0].bundleID: ids] : [:],
+                             metadata: detail ? [apps[0].bundleID: meta] : [:], limits: [apps[0].bundleID: 20],
+                             selected: detail ? apps[0] : nil)
+    }
+}
+#endif
+
+/// Indeterminate progress bar (UI only).
+struct MirsaIndeterminateBar: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            GeometryReader { g in
+                let phase = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.10))
+                    Capsule().fill(MirsaPalette.accentGradient)
+                        .frame(width: g.size.width * 0.3)
+                        .offset(x: g.size.width * 1.3 * phase - g.size.width * 0.3)
+                }
+                .clipShape(Capsule())
+            }
+        }
+        .frame(height: 6)
+        .accessibilityHidden(true)
     }
 }
 
