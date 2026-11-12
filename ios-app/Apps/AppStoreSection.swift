@@ -1,4 +1,5 @@
 import SwiftUI
+import ApplePackage
 
 // MARK: - App Store section shell (UI only)
 //
@@ -737,7 +738,13 @@ struct AppStorePurchasesPage: View {
         } catch is CancellationError {}
         catch {
             guard isCurrent() else { return }
+            if let diagnostic = error as? PurchaseHistoryDiagnostic {
+                self.error = diagnostic.localizedDescription
+            } else if let diagnostic = error as? StorefrontMetadataMissing {
+                self.error = diagnostic.localizedDescription
+            } else {
             self.error = tr("Apple purchase history could not be loaded. Refresh to try again.", "ما قدرت حمّل سجل مشتريات Apple. جرّب التحديث.", ckb: "مێژووی کڕین بار نەکرا. نوێی بکەرەوە.", kmr: "Dîroka kirînê nehat barkirin. Nû bike.")
+            }
         }
     }
     @MainActor private func download(_ item: MirsaStorePurchase) async {

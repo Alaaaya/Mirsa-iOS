@@ -28,7 +28,8 @@ for name in ['signIn', 'verify', 'signOut', 'downloadOwnedApp', 'acquireFreeApp'
 print('PASS shared session, refresh race/error guards, search-only storefront, fail-closed account availability and untouched auth/download methods')
 h=(r/'ios-app/AppStore/StorePurchaseHistory.swift').read_text()
 assert 'MZPurchaseDaap.woa/purchase' in h
-assert 'owner.cookie.buildCookieHeader(url)' in h
+assert 'cookies.buildCookieHeader(url)' in h
+assert 'HistorySessionCookies.historyCookies(owner.cookie)' in h
 assert 'completionHandler(nil)' in h
 assert 'X-Apple-ActionSignature' in h
 assert 'adsr' in h and 'asdp' in h
