@@ -75,6 +75,8 @@ private final class StoreTestEngine: MirsaStoreEngine {
     var seenVersion: String?
     var failManifest = false
     var versionsResult = ["123", "456"]
+    var manifestError: Error?
+    var versionsError: Error?
     var output: DownloadOutput {
         get throws {
             let metadata: [String: Any] = ["itemId": 42, "softwareVersionBundleId": "com.example.fixture",
@@ -97,9 +99,13 @@ private final class StoreTestEngine: MirsaStoreEngine {
     func manifest(account: inout Account, app: Software, version: String?) async throws -> DownloadOutput {
         manifests += 1; seenVersion = version
         if failManifest { throw ApplePackageError.licenseRequired }
+        if let manifestError { throw manifestError }
         return try output
     }
-    func versions(account: inout Account, bundleID: String) async throws -> [String] { versionsResult }
+    func versions(account: inout Account, bundleID: String) async throws -> [String] {
+        if let versionsError { throw versionsError }
+        return versionsResult
+    }
 }
 private final class StoreTestPackages: MirsaStorePackages {
     var calls = 0
@@ -109,6 +115,13 @@ private final class StoreTestPackages: MirsaStorePackages {
         calls += 1
         return URL(fileURLWithPath: "/tmp/MirsaStore-test/App.ipa")
     }
+}
+
+private final class StoreTestFailingPackages: MirsaStorePackages {
+    let error: Error
+    init(error: Error) { self.error = error }
+    func cancel() {}
+    func fetch(output: DownloadOutput, bundleID: String) async throws -> URL { throw error }
 }
 
 final class MirsaStoreClientTests: XCTestCase {
@@ -386,6 +399,63 @@ final class MirsaStoreClientTests: XCTestCase {
         do { _ = try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())); XCTFail("no license") }
         catch { XCTAssertEqual(error as? MirsaStoreError, .licenseRequired) }
         XCTAssertEqual(engine.acquisitions, 0)
+    }
+    func testDownloadFailureShowsGenericTextPlusSecretFreeAppleTag() async throws {
+        let engine = StoreTestEngine(), packages = StoreTestPackages()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: packages)
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        engine.manifestError = StoreDownloadFailure(
+            StoreDownloadTag(operation: .download, endpoint: .volume,
+                             response: ["failureType": "2042", "customerMessage": "Sign In to the iTunes Store"],
+                             httpStatus: 200, stop: .failure), reason: "Password token expired")
+        let tag = "[dl:download at=volume ft=2042 mc=none msg=sign-in http=200 dlg=0 items=0 stop=failure]"
+        do { _ = try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())); XCTFail("download accepted") }
+        catch {
+            let tagged = try XCTUnwrap(error as? MirsaStoreTaggedError)
+            XCTAssertEqual(tagged.base as? MirsaStoreError, .serviceUnavailable)
+            XCTAssertEqual(tagged.tag, tag)
+            XCTAssertTrue(error.localizedDescription.hasSuffix(tag))
+            XCTAssertFalse(error.localizedDescription.contains("owner@example.invalid"))
+        }
+        XCTAssertEqual(packages.calls, 0)
+        // A failure outside Apple's answer names Mirsa's own stage; URL errors only by their numeric code.
+        engine.manifestError = nil
+        let failingPackages = StoreTestFailingPackages(error: URLError(.networkConnectionLost))
+        let second = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: failingPackages)
+        _ = try await second.signIn(email: "owner@example.invalid", password: "fixture-password")
+        do { _ = try await second.downloadOwnedApp(MirsaStoreApp(testSoftware())); XCTFail("fetch accepted") }
+        catch { XCTAssertEqual((error as? MirsaStoreTaggedError)?.tag, "[dl:download stage=fetch err=url-1005]") }
+    }
+    func testDistinctDownloadErrorsStayUntagged() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        engine.manifestError = StoreAMDError(.parse)
+        do { _ = try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())); XCTFail("accepted") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .deviceRegistration("amd:parse")) }
+        engine.versionsError = ApplePackageError.licenseRequired
+        do { _ = try await client.availableVersions(MirsaStoreApp(testSoftware())); XCTFail("accepted") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .licenseRequired) }
+    }
+    func testVersionListFailureCarriesTag() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        engine.versionsError = StoreDownloadFailure(
+            StoreDownloadTag(operation: .versions, endpoint: .redownload, response: ["failureType": 1008],
+                             httpStatus: 200, stop: .failure), reason: "x")
+        do { _ = try await client.availableVersions(MirsaStoreApp(testSoftware())); XCTFail("accepted") }
+        catch {
+            let tagged = try XCTUnwrap(error as? MirsaStoreTaggedError)
+            XCTAssertEqual(tagged.base as? MirsaStoreError, .serviceUnavailable)
+            XCTAssertEqual(tagged.tag, "[dl:versions at=redownload ft=1008 mc=none msg=none http=200 dlg=0 items=0 stop=failure]")
+        }
+        engine.versionsError = NSError(domain: "x", code: 1, userInfo: [NSLocalizedDescriptionKey: "token SECRET owner@example.invalid"])
+        do { _ = try await client.availableVersions(MirsaStoreApp(testSoftware())); XCTFail("accepted") }
+        catch {
+            XCTAssertEqual((error as? MirsaStoreTaggedError)?.tag, "[dl:versions stage=versions err=other]")
+            XCTAssertFalse(error.localizedDescription.contains("SECRET"))
+        }
     }
     func testInvalidVersionDoesNotSendAnyDownload() async throws {
         let engine = StoreTestEngine()
