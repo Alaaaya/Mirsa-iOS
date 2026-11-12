@@ -18,51 +18,55 @@ public enum Download {
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
         defer { _ = client.shutdown() }
 
-        let dict = try await StoreDownloadEndpoint.fetchProductWithFallback(
-            client: client,
-            account: &account,
-            app: app,
-            deviceIdentifier: Configuration.deviceIdentifier,
-            externalVersionID: externalVersionID ?? "",
-            entityType: entityType,
-        )
+        let fetched: (response: [String: Any], endpoint: StoreDownloadTag.Endpoint)
+        do {
+            fetched = try await StoreDownloadEndpoint.fetchProductTracked(
+                client: client,
+                account: &account,
+                app: app,
+                deviceIdentifier: Configuration.deviceIdentifier,
+                externalVersionID: externalVersionID ?? "",
+                entityType: entityType,
+            )
+        } catch {
+            throw StoreDownloadFailure.map(error, .download)
+        }
+        let dict = fetched.response
+        let at = fetched.endpoint
 
-        if let failureType = dict["failureType"] as? String {
+        // Same order as ipatool Download: token/sign-in, license, then any failureType / customerMessage.
+        if let failure = dict["failureType"].map({ String(describing: $0) }), !failure.isEmpty {
             let customerMessage = dict["customerMessage"] as? String
-            switch failureType {
+            switch failure {
             case "2034", "2042":
-                try ensureFailed(Strings.passwordTokenExpired)
+                throw StoreDownloadFailure.answer(.download, at, dict, .failure, reason: Strings.passwordTokenExpired)
             case "9610":
                 throw ApplePackageError.licenseRequired
             default:
-                if customerMessage == Strings.passwordChanged {
-                    try ensureFailed(Strings.passwordTokenExpired)
-                }
-                if let customerMessage {
-                    try ensureFailed(customerMessage)
-                }
-                try ensureFailed("\(Strings.downloadFailed): \(failureType)")
+                let reason = customerMessage == Strings.passwordChanged ? Strings.passwordTokenExpired : "\(Strings.downloadFailed): \(failure)"
+                throw StoreDownloadFailure.answer(.download, at, dict, .failure, reason: reason)
             }
         }
 
         guard let items = dict["songList"] as? [[String: Any]], !items.isEmpty else {
-            try ensureFailed(Strings.noItemsInResponse)
+            let message = (dict["customerMessage"] as? String ?? "").isEmpty && dict["dialog"] == nil
+            throw StoreDownloadFailure.answer(.download, at, dict, message ? .noItems : .failure, reason: Strings.noItemsInResponse)
         }
 
         let item = items[0]
-        guard let url = item["URL"] as? String else {
-            try ensureFailed(Strings.missingDownloadURL)
+        guard let url = item["URL"] as? String, !url.isEmpty else {
+            throw StoreDownloadFailure.answer(.download, at, dict, .noURL, reason: Strings.missingDownloadURL)
         }
 
         guard var metadata = item["metadata"] as? [String: Any] else {
-            try ensureFailed(Strings.missingMetadata)
+            throw StoreDownloadFailure.answer(.download, at, dict, .noMetadata, reason: Strings.missingMetadata)
         }
 
         let version = (metadata["bundleShortVersionString"] as? String)
         let bundleVersion = metadata["bundleVersion"] as? String
 
         guard let version, let bundleVersion else {
-            try ensureFailed(Strings.missingRequiredInfo)
+            throw StoreDownloadFailure.answer(.download, at, dict, .noVersion, reason: Strings.missingRequiredInfo)
         }
 
         metadata["apple-id"] = account.email
@@ -82,11 +86,13 @@ public enum Download {
                 {
                     sinfs.append(Sinf(id: id, sinf: data))
                 } else {
-                    try ensureFailed(Strings.invalidSinfItem)
+                    throw StoreDownloadFailure.answer(.download, at, dict, .badSinf, reason: Strings.invalidSinfItem)
                 }
             }
         }
-        try ensure(!sinfs.isEmpty, Strings.noSinfFound)
+        guard !sinfs.isEmpty else {
+            throw StoreDownloadFailure.answer(.download, at, dict, .noSinf, reason: Strings.noSinfFound)
+        }
 
         return DownloadOutput(
             downloadURL: url,
