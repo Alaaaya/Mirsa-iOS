@@ -30,7 +30,7 @@ actor MirsaStoreOnDeviceClient {
         try await authorize()
         return try await local.signIn(email: email, password: password)
     }
-    func verify(code: String, password: String) async throws -> MirsaStoreLogin {
+    func verify(code: String, password: String? = nil) async throws -> MirsaStoreLogin {
         try await authorize()
         return try await local.verify(code: code, password: password)
     }

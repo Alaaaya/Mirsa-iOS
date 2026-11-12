@@ -217,8 +217,9 @@ public actor Authenticator {
         else if (code as? String) == "" { failure = .empty }
         else if safeCode != nil { failure = .numeric }
         else { failure = .unrecognized }
-        // Arbitrary dialog/customer text is deliberately NOT exported, even redacted.
+        // Display only the bounded, redacted customerMessage, never the body or dialog.
         return .init(stage: .authentication, httpStatus: status, appleCode: safeCode,
+                     message: rawMessage as? String, secrets: secrets,
                      loginPhase: submittedCode ? .verificationCode : .password,
                      responseMessage: message, failureState: failure)
     }

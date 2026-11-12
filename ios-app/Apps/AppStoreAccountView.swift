@@ -160,12 +160,12 @@ struct AppStoreAccountView: View {
             TextField(t("Code shown on your iPhone", "الرمز يلي وصل عآيفونك", "کۆدی سەر ئایفۆنەکەت", "Koda li iPhone ya te"), text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode).disabled(busy != nil)
                 .focused($focus).fieldStyle()
                 .onChange(of: code) { _, v in code = MirsaStoreCode.normalize(v) }
-            SecureField(t("Re-enter password for this verification", "اكتب كلمة السر من جديد للتحقق", "وشەی نهێنی بۆ پشتڕاستکردنەوە دووبارە بنووسە", "Ji bo piştrastkirinê şîfreyê dîsa binivîse"), text: $password)
-                .textContentType(.password).focused($focus).fieldStyle().disabled(busy != nil)
             Button { submitCode() } label: { Text(t("Verify code", "تحقق من الرمز", "کۆدەکە پشتڕاست بکەرەوە", "Kodê piştrast bike")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaPrimary).disabled(MirsaStoreCode.valid(code) == nil || password.isEmpty || busy != nil)
-            Text(t("Re-enter your password for this request. Three verification tries within five minutes, then start again. A challenge does not confirm that a code was delivered.", "اكتب كلمة السر من جديد لهالطلب. 3 محاولات خلال 5 دقايق وبعدين ابدأ من جديد. طلب الرمز مو تأكيد إنو وصلك.",
-                   "وشەی نهێنی بۆ ئەم داواکارییە دووبارە بنووسە. دوو هەوڵ لە پێنج خولەکدا، پاشان دووبارە دەست پێبکە. داوای کۆد گەیشتنی کۆد پشتڕاست ناکاتەوە.", "Ji bo vê daxwazê şîfreyê dîsa binivîse. Di pênc deqeyan de du hewil, paşê ji nû ve dest pê bike. Daxwaza kodê ne piştrastkirina gihîştina kodê ye."))
+                .buttonStyle(.mirsaPrimary).disabled(MirsaStoreCode.valid(code) == nil || busy != nil)
+            Text(t("Enter only the code. The original password stays in memory for up to five minutes, never on disk. Three verification tries, then start again.",
+                   "اكتب الرمز بس. كلمة السر الأصلية بتضل بالذاكرة لخمس دقايق كحد أقصى، مو محفوظة عالجهاز. عندك 3 محاولات وبعدين ابدأ من جديد.",
+                   "تەنها کۆدەکە بنووسە. وشەی نهێنی تەنها تا پێنج خولەک لە بیرگەدا دەمێنێتەوە. سێ هەوڵ، پاشان دووبارە دەست پێبکە.",
+                   "Tenê kodê binivîse. Şîfre tenê heta pênc deqeyan di bîrê de dimîne. Sê hewil, paşê ji nû ve dest pê bike."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button(t("Cancel and start over", "إلغاء والبدء من جديد", "هەڵوەشاندنەوە و دەستپێکردنەوە", "Betal bike û ji nû ve dest pê bike")) { cancelVerification() }
                 .buttonStyle(.mirsaSecondary).disabled(busy != nil)
@@ -336,10 +336,9 @@ struct AppStoreAccountView: View {
     private func submitCode() {
         guard busy == nil else { return }
         let c = code
-        let secret = password
         password = ""; code = ""
         run(t("Verifying…", "عم نتحقق…", "پشتڕاستکردنەوە…", "Piştrastkirin…")) {
-            switch try await client.verify(code: c, password: secret) {
+            switch try await client.verify(code: c) {
             case .signedIn(let a): account = a; needsCode = false; email = ""
             case .verificationRequired: notice = t("The code was not accepted. Try again.", "الرمز ما انقبل. جرّب مرة ثانية.", "کۆدەکە وەرنەگیرا. دووبارە هەوڵ بدەرەوە.", "Kod nehat pejirandin. Dîsa biceribîne.")
             }
@@ -489,6 +488,9 @@ struct AppStoreAccountView: View {
         case .busy: return t("Another App Store task is still running.", "في مهمة App Store ثانية لسا شغالة.", "کارێکی تری App Store هێشتا کار دەکات.", "Karekî din ê App Store hê dixebite.")
         case .signedOut: return t("Sign in first.", "سجّل دخول أول.", "سەرەتا بچۆ ژوورەوە.", "Pêşî têkeve.")
         case .verificationRequired: return t("Enter the 6-digit code from Apple.", "اكتب الرمز من 6 أرقام من Apple.", "کۆدی ٦ ژمارەیی Apple بنووسە.", "Koda 6 hejmarî ya Apple binivîse.")
+        case .invalidVerificationCode: return t("Enter six digits. Nothing was sent to Apple.", "اكتب رمز من 6 أرقام. ما بعتنا طلب لـApple.", "کۆدی شەش ژمارەیی بنووسە. هیچ نەنیردرا بۆ Apple.", "Koda şeş hejmarî binivîse. Tiştek ji Apple re nehat şandin.")
+        case .duplicateVerificationCode: return t("This code was already submitted. Use a new code or cancel and start over. Nothing was sent to Apple.", "هالرمز انبعت قبل. اكتب رمز جديد أو الغِ وابدأ من جديد. ما بعتنا طلب لـApple.", "ئەم کۆدە پێشتر نێردراوە. کۆدێکی نوێ بنووسە یان دووبارە دەست پێبکە.", "Ev kod berê hat şandin. Kodeke nû binivîse an ji nû ve dest pê bike.")
+        case .verificationPasswordChanged: return t("The password changed. Cancel and sign in again. Nothing was sent to Apple.", "كلمة السر تغيّرت. الغِ وارجع سجّل دخول. ما بعتنا طلب لـApple.", "وشەی نهێنی گۆڕاوە. دووبارە بچۆ ژوورەوە.", "Şîfre guherî. Ji nû ve têkeve.")
         case .invalidInput: return t("Check your email, password and verification code.", "تأكد من الإيميل وكلمة السر ورمز التحقق.", "ئیمەیڵ و وشەی نهێنی و کۆدی پشتڕاستکردنەوە بپشکنە.", "E-name, şîfre û koda piştrastkirinê kontrol bike.")
         case .freeAppsOnly: return t("Only apps that are free in this account's store can be acquired.", "بس التطبيقات المجانية بمتجر هالحساب بتنجاب.", "تەنها ئەپە بێبەرامبەرەکانی ستۆری ئەم ئەکاونتە دەهێنرێن.", "Tenê sepanên belaş ên stoya vî hesabî dikarin bên girtin.")
         case .keychain: return t("The device Keychain is unavailable. Unlock the iPhone and try again.", "سلسلة المفاتيح مو متاحة. افتح قفل الآيفون وجرّب.", "Keychain بەردەست نییە. ئایفۆنەکە بکەرەوە و دووبارە هەوڵ بدە.", "Keychain ne berdest e. iPhone vekin û dîsa biceribînin.")
