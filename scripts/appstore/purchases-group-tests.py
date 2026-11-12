@@ -55,7 +55,24 @@ allowed = {'ios-app/Apps/AppStoreSection.swift', 'scripts/appstore/purchases-gro
 'vendor/ApplePackage/Tests/ApplePackageTests/StoreDownloadRecoveryTests.swift',
 'scripts/appstore/free-recovery-tests.py', 'scripts/appstore/versions-list-tests.py',
 'scripts/tests/store_ownership_intent_test.py'}
-assert set(changed) <= allowed, changed
+# Later owner-authorized native dispatch is confined to these files and pinned MIT headers.
+allowed.update({
+    'scripts/appstore/commerce-session-tests.py', 'vendor/ApplePackage/Package.swift',
+    'vendor/ApplePackage/Sources/ApplePackage/Models/StoreDownloadEndpoint.swift',
+    'vendor/ApplePackage/Sources/ApplePackage/SAP/StoreAMDProof.swift',
+    'vendor/ApplePackage/Sources/CStoreAMD/StoreKBSync.cpp',
+    'vendor/ApplePackage/Sources/CStoreAMD/include/CStoreAMD.h',
+})
+upstream = set()
+for line in (r/'vendor/ApplePackage/Sources/CStoreAMD/Upstream/PROVENANCE.txt').read_text().splitlines():
+    if '  ' in line and len(line.split('  ')[0]) == 64:
+        digest, path = line.split('  ', 1)
+        full = 'vendor/ApplePackage/Sources/CStoreAMD/Upstream/' + path
+        assert hashlib.sha256((r/full).read_bytes()).hexdigest() == digest
+        upstream.add(full)
+upstream.update({'vendor/ApplePackage/Sources/CStoreAMD/Upstream/PROVENANCE.txt',
+                 'vendor/ApplePackage/Sources/CStoreAMD/Upstream/LICENSE'})
+assert set(changed) <= allowed | upstream, changed
 print('PASS exact baseline Search, lifecycle, filters, account history and original download success, three-column flat grid, no month/date headers, glass icon tiles, corner badge action, accessible labels and dynamic count')
 if '--source-only' in sys.argv:
     sys.exit(0)
