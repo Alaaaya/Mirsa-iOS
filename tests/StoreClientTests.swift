@@ -208,8 +208,12 @@ final class MirsaStoreClientTests: XCTestCase {
         let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
         XCTAssertEqual(first, .verificationRequired)
         XCTAssertNil(vault.data["challenge"])
-        let second = try await client.verify(code: "123456", password: "fixture-password")
+        do { _ = try await client.verify(code: "123"); XCTFail("Malformed code accepted") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidVerificationCode) }
+        XCTAssertEqual(engine.auth.calls, [""])
+        let second = try await client.verify(code: "123456")
         guard case .signedIn = second else { return XCTFail("verification missing") }
+        XCTAssertEqual(engine.auth.passwords, ["fixture-password", "fixture-password"])
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "123456"])
     }
@@ -220,11 +224,11 @@ final class MirsaStoreClientTests: XCTestCase {
         let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
         do { _ = try await client.verify(code: "123456", password: "changed-password"); XCTFail() }
-        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .verificationPasswordChanged) }
         XCTAssertEqual(engine.auth.calls, [""])
         do { _ = try await client.verify(code: "999999", password: "fixture-password"); XCTFail() } catch {}
         do { _ = try await client.verify(code: " 999999 ", password: "fixture-password"); XCTFail() }
-        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .duplicateVerificationCode) }
         XCTAssertEqual(engine.auth.calls, ["", "999999"])
         _ = try await client.verify(code: "123456", password: "fixture-password")
         XCTAssertEqual(engine.auth.passwords, Array(repeating: "fixture-password", count: 3))
@@ -269,10 +273,10 @@ final class MirsaStoreClientTests: XCTestCase {
         XCTAssertNil(vault.data["challenge"])
         do {
             _ = try await client.verify(code: "182737", password: "")
-            XCTFail("Missing verification password accepted")
-        } catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
-        // The fixture accepts 123456; a fresh password is passed directly without a saved secret.
-        let second = try await client.verify(code: "123456", password: "fixture-password")
+            XCTFail("Changed verification password accepted")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .verificationPasswordChanged) }
+        // The UI sends only the code; use the original memory-only challenge password.
+        let second = try await client.verify(code: "123456")
         guard case .signedIn = second else { return XCTFail("No local session") }
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "123456"])

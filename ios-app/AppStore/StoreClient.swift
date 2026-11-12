@@ -78,7 +78,7 @@ actor MirsaStoreClient {
     }
 
     /// Retains the *same* SAP signer, routing and cookies for a bounded 2FA continuation.
-    func verify(code: String, password: String) async throws -> MirsaStoreLogin {
+    func verify(code: String, password: String? = nil) async throws -> MirsaStoreLogin {
         let run = try begin()
         defer { busy = false }
         guard var pending = challenge, pending.expires > Date(), pending.attempts < 3 else {
@@ -86,10 +86,11 @@ actor MirsaStoreClient {
             try vault.remove("challenge")
             throw MirsaStoreError.signedOut
         }
-        guard let code = MirsaStoreCode.valid(code), password == pending.password,
-              !pending.submittedCodes.contains(code) else {
-            throw MirsaStoreError.invalidInput
-        }
+        guard let code = MirsaStoreCode.valid(code) else { throw MirsaStoreError.invalidVerificationCode }
+        // The UI submits only the code. The original password stays in this short-lived,
+        // memory-only challenge, never in another text field or persistent storage.
+        if let password, password != pending.password { throw MirsaStoreError.verificationPasswordChanged }
+        guard !pending.submittedCodes.contains(code) else { throw MirsaStoreError.duplicateVerificationCode }
         pending.attempts += 1
         pending.submittedCodes.insert(code)
         challenge = pending
