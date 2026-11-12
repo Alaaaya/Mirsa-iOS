@@ -117,6 +117,19 @@ final class MirsaStoreClientTests: XCTestCase {
         XCTAssertEqual(engine.auth.calls.count, 1)
     }
 
+    func testTwoFactorDiagnosticAlertKeepsSafeExactResponseFields() {
+        let error = MirsaStoreAuthDiagnostic(.init(stage: .authentication, httpStatus: 200,
+            loginPhase: .verificationCode, responseMessage: .configurator, failureState: .empty))
+        let text = error.localizedDescription
+        XCTAssertTrue(text.contains("[authentication]"))
+        XCTAssertTrue(text.contains("HTTP 200"))
+        XCTAssertTrue(text.contains("Phase 2FA"))
+        XCTAssertTrue(text.contains("failureType empty"))
+        XCTAssertTrue(text.contains("customerMessage MZFinance.BadLogin.Configurator_message"))
+        XCTAssertTrue(text.contains("latest code"))
+        XCTAssertFalse(text.contains("code was rejected"))
+    }
+
     func testSignoutAttemptsBothSecretsAndCancelsDownloadEvenOnKeychainFailure() async throws {
         let vault = StoreTestVault(), packages = StoreTestPackages()
         let client = MirsaStoreClient(vault: vault, engine: StoreTestEngine(), packages: packages)
