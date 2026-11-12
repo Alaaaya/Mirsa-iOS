@@ -324,7 +324,7 @@ enum StoreAMDHeaderScope {
             host.range(of: "^p[0-9]+-buy\\.itunes\\.apple\\.com$", options: .regularExpression) != nil
         // A pod redirect can challenge the legacy authentication endpoint too.
         // Keep proof scoped to these exact commerce paths, never all Apple URLs.
-        if host == "downloaddispatch.itunes.apple.com" { return ["/r/redownload", "/up/updateProduct"].contains(path) }
+        if host == "downloaddispatch.itunes.apple.com" { return ["/r/redownload", "/up/updateProduct", "/WebObjects/DownloadDispatch.woa/wa/ent/download"].contains(path) }
         return purchaseHost && ["/WebObjects/MZFinance.woa/wa/buyProduct",
                                 "/WebObjects/MZFinance.woa/wa/authenticate",
                                 "/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct"].contains(path)

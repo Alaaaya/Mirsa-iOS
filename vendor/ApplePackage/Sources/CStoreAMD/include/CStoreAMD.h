@@ -12,6 +12,7 @@ void mirsa_store_session_free(void *session);
 void *mirsa_store_import(const uint8_t *data, size_t count, const uint8_t *hardware);
 int mirsa_store_export(void *profile, const uint8_t *hardware, uint8_t *output, size_t capacity, size_t *written);
 int mirsa_store_headers(void *profile, uint32_t seconds, char *amd, size_t amd_capacity, char *machine, size_t machine_capacity);
+int mirsa_store_kbsync(uint64_t dsid, const uint8_t *hardware, size_t hardware_size, uint8_t *out, size_t capacity, size_t *written);
 void mirsa_store_profile_free(void *profile);
 #ifdef __cplusplus
 }

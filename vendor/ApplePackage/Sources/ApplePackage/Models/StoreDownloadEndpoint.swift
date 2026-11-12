@@ -10,6 +10,7 @@ import Foundation
 /// MZFinance product downloads use volumeStore first, then a version-pinned
 /// redownload. An empty HTTP 500 can recover through the bag's update endpoint.
 enum StoreDownloadEndpoint {
+    case entitlement
     case volumeStore
     case redownload
     case update
@@ -21,7 +22,7 @@ enum StoreDownloadEndpoint {
     /// The legacy dispatch endpoints use a different external version ID key.
     var externalVersionIDKey: String {
         switch self {
-        case .volumeStore:
+        case .entitlement, .volumeStore:
             "externalVersionId"
         case .redownload, .update:
             "appExtVrsId"
@@ -32,6 +33,9 @@ enum StoreDownloadEndpoint {
         var comps = URLComponents()
         comps.scheme = "https"
         switch self {
+        case .entitlement:
+            comps.host = "downloaddispatch.itunes.apple.com"
+            comps.path = "/WebObjects/DownloadDispatch.woa/wa/ent/download"
         case .volumeStore:
             comps.host = Configuration.storeAPIHost(pod: pod)
             comps.path = "/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct"
@@ -52,7 +56,7 @@ enum StoreDownloadEndpoint {
         let host = url.host?.lowercased() ?? ""
         let storeHost = host == "buy.itunes.apple.com" || host.range(of: #"^p[0-9]+-buy\.itunes\.apple\.com$"#, options: .regularExpression) != nil
         let storePath = ["/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct", "/WebObjects/MZFinance.woa/wa/redownloadProduct"].contains(url.path)
-        let dispatchPath = ["/r/redownload", "/up/updateProduct"].contains(url.path)
+        let dispatchPath = ["/r/redownload", "/up/updateProduct", "/WebObjects/DownloadDispatch.woa/wa/ent/download"].contains(url.path)
         try ensure(
             url.scheme == "https" && url.user == nil && url.password == nil && url.fragment == nil
                 && (url.port == nil || url.port == 443)

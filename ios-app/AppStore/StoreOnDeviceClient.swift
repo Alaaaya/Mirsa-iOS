@@ -111,6 +111,10 @@ actor MirsaStoreOnDeviceClient {
         try await authorize()
         try await local.acquireFreeApp(app)
     }
+    func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
+        try await authorize()
+        return try await local.acquireFreeAppAndDownload(app, externalVersionID: externalVersionID)
+    }
     func freeAppForRecovery(_ app: MirsaStoreApp) async throws -> MirsaStoreApp {
         try await authorize()
         return try await local.freeAppForRecovery(app)
