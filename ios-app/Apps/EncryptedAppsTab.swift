@@ -5,56 +5,67 @@ import UniformTypeIdentifiers
 struct EncryptedAppsTab: View {
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
+    @ObservedObject private var storeAccount = AppStoreSectionModel.shared
     @State private var picking = false
     @State private var storeLoginAvailable = false
     @State private var showingAppStore = false
     @State private var pendingDelete: EncryptedIPAEntry?
+    @State private var section: AppStoreSectionTab = AppStoreSectionTab.initial
+    /// Recreates the inline sign-in/search screen when the session changed elsewhere.
+    @State private var storeViewID = UUID()
+    @State private var libraryQuery = ""
+    @State private var showingAdd = false
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: MirsaSpacing.m) {
-                MirsaPageHeader(title: EncryptedText.tabTitle,
-                                subtitle: t("App Store apps", "تطبيقات App Store", "ئەپەکانی App Store", "Sepanên App Store")) {
-                    LanguageGlobeMenu(size: MirsaIconSize.button)
-                }
-                introCard
-                benefitsCard
-                importButton
-                appStoreButton
-                if store.entries.isEmpty {
-                    emptyCard
-                } else {
-                    Text(t("Imported IPAs", "الـIPA المستوردة", "IPA هاوردەکراوەکان", "IPA yên hatine anîn"))
-                        .font(MirsaFont.sectionTitle).foregroundStyle(.white)
-                        .padding(.top, MirsaSpacing.xs)
-                    ForEach(store.entries) { entry in
-                        EncryptedEntryCard(entry: entry, store: store, vm: vm) { pendingDelete = entry }
-                    }
-                }
+        // Every page stays alive while hidden, so switching tabs never cancels a
+        // running sign-in, search or download in the App Store screen.
+        ZStack {
+            AuroraBackground().ignoresSafeArea()
+            page(.search) { searchPage }
+            page(.downloads) { downloadsPage }
+            page(.purchases) { AppStorePurchasesPage(store: store, model: storeAccount, vm: vm) }
+            page(.account) {
+                AppStoreAccountPage(model: storeAccount, library: store, storeAvailable: storeLoginAvailable,
+                                    onAddAccount: { showingAppStore = true },
+                                    onOpen: { tab in withAnimation(MirsaMotion.select) { section = tab } },
+                                    onSignedOut: { storeViewID = UUID() })
             }
-            .padding(.horizontal, MirsaSpacing.page)
-            .padding(.bottom, MirsaSpacing.tabBarClearance)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { AppStoreSectionBar(selection: $section) }
         .task {
             storeLoginAvailable = false
             storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable()
+            #if DEBUG
+            if AppStoreSectionModel.fixtureAccount != nil { storeLoginAvailable = true }
+            #endif
+            await storeAccount.refresh()
         }
-        .sheet(isPresented: $showingAppStore) {
+        .onChange(of: section) { _, _ in Task { await storeAccount.refresh() } }
+        .sheet(isPresented: $showingAppStore, onDismiss: sessionMayHaveChanged) {
             AppStoreAccountView(onDownloaded: { url in
                 let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
                 store.add(entry)
             })
         }
         .mirsaStatusBarScrim()
-        .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
         .sheet(isPresented: $picking) {
             DocumentPickerView(allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { url in
                 Task { await store.importIPA(from: url) }
             }
+        }
+        .confirmationDialog(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"),
+                            isPresented: $showingAdd, titleVisibility: .visible) {
+            Button(t("Import IPA from Files", "استيراد IPA من الملفات", "هاوردەکردنی IPA لە Files", "IPA ji Files bîne")) { picking = true }
+            if storeLoginAvailable {
+                Button(t("Search the App Store", "البحث بالـApp Store", "گەڕان لە App Store", "Li App Store bigere")) {
+                    withAnimation(MirsaMotion.select) { section = .search }
+                }
+            }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {}
         }
         .alert(MirsaTr.lit("Notice"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button(MirsaTr.lit("OK")) { store.error = nil }
@@ -87,6 +98,100 @@ struct EncryptedAppsTab: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.toast)
+    }
+
+    private func page<Content: View>(_ tab: AppStoreSectionTab, @ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .opacity(section == tab ? 1 : 0)
+            .allowsHitTesting(section == tab)
+            .accessibilityHidden(section != tab)
+    }
+
+    /// The sign-in sheet may have signed in or out. Reload the inline screen only then.
+    private func sessionMayHaveChanged() {
+        let before = storeAccount.account
+        Task {
+            await storeAccount.refresh()
+            if storeAccount.account != before { storeViewID = UUID() }
+        }
+    }
+
+    // MARK: pages
+
+    @ViewBuilder private var searchPage: some View {
+        if storeLoginAvailable {
+            // The existing sign-in, search, versions and download flow, unchanged.
+            AppStoreAccountView(onDownloaded: { url in
+                let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+                store.add(entry)
+            })
+            .id(storeViewID)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: MirsaSpacing.m) {
+                    MirsaPageHeader(title: AppStoreSectionTab.search.title, subtitle: EncryptedText.tabTitle) {
+                        LanguageGlobeMenu(size: MirsaIconSize.button)
+                    }
+                    appStoreButton
+                    importButton
+                }
+                .padding(.horizontal, MirsaSpacing.page)
+                .padding(.bottom, MirsaSpacing.xl)
+            }
+        }
+    }
+
+    private var filteredEntries: [EncryptedIPAEntry] {
+        let q = libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return store.entries }
+        return store.entries.filter {
+            $0.name.localizedCaseInsensitiveContains(q) || $0.version.localizedCaseInsensitiveContains(q)
+                || $0.bundleID.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    private var downloadsPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MirsaSpacing.m) {
+                MirsaPageHeader(title: AppStoreSectionTab.downloads.title, subtitle: EncryptedText.tabTitle) {
+                    HStack(spacing: MirsaSpacing.xs) {
+                        Button { showingAdd = true } label: { MirsaIconButtonLabel(systemName: "plus") }
+                            .modifier(MirsaSolidCard(shape: Circle(), tint: nil, elevation: 1))
+                            .disabled(store.busy != nil)
+                            .accessibilityLabel(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"))
+                            .accessibilityIdentifier("store-add-download")
+                        LanguageGlobeMenu(size: MirsaIconSize.button)
+                    }
+                }
+                AppStoreSearchField(placeholder: t("Search by name, version or Bundle ID", "البحث بالاسم أو الإصدار أو Bundle ID",
+                                                   "گەڕان بە ناو، وەشان یان Bundle ID", "Bi nav, guherto an Bundle ID bigere"),
+                                    text: $libraryQuery)
+                if store.entries.isEmpty {
+                    emptyCard
+                    importButton
+                } else {
+                    Text(t("Items: ", "العناصر: ", "بڕگەکان: ", "Tişt: ") + "\(filteredEntries.count)")
+                        .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                        .padding(.top, MirsaSpacing.xs)
+                    if filteredEntries.isEmpty {
+                        Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                    }
+                    ForEach(filteredEntries) { entry in
+                        EncryptedEntryCard(entry: entry, store: store, vm: vm) { pendingDelete = entry }
+                    }
+                    importButton
+                }
+                Text(t("About App Store IPAs", "عن ملفات IPA من App Store", "دەربارەی IPAکانی App Store", "Derbarê IPAyên App Store"))
+                    .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                    .padding(.top, MirsaSpacing.s)
+                introCard
+                benefitsCard
+            }
+            .padding(.horizontal, MirsaSpacing.page)
+            .padding(.bottom, MirsaSpacing.xl)
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var introCard: some View {
