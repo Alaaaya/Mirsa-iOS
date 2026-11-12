@@ -201,7 +201,7 @@ public actor Authenticator {
         else if let text = rawMessage as? String {
             if text.isEmpty { message = .empty }
             else {
-                // No prefix/regex acceptance of arbitrary strings, PII or server prose.
+                // Metadata stays finite; the separately redacted display message is not metadata.
                 switch text.trimmingCharacters(in: .whitespacesAndNewlines) {
                 case "MZFinance.BadLogin.Configurator_message": message = .configurator
                 case "AMD-Action::SP": message = .amdSP
@@ -218,8 +218,13 @@ public actor Authenticator {
         else if safeCode != nil { failure = .numeric }
         else { failure = .unrecognized }
         // Display only the bounded, redacted customerMessage, never the body or dialog.
+        // Malformed device challenge payloads remain private rather than looking
+        // like a password/code error; the handshake reports its own safe step.
+        let displayMessage = (rawMessage as? String).flatMap { text -> String? in
+            text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("AMD-Action") ? nil : text
+        }
         return .init(stage: .authentication, httpStatus: status, appleCode: safeCode,
-                     message: rawMessage as? String, secrets: secrets,
+                     message: displayMessage, secrets: secrets,
                      loginPhase: submittedCode ? .verificationCode : .password,
                      responseMessage: message, failureState: failure)
     }
