@@ -457,6 +457,7 @@ struct AppStoreAccountView: View {
     private func codeReset() { code = "" }
 
     private func describe(_ error: Error) -> String {
+        if let tagged = error as? MirsaStoreTaggedError { return describe(tagged.base) + " " + tagged.tag }
         if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic.localizedDescription }
         if let diagnostic = error as? StoreProductDiagnostic { return diagnostic.localizedDescription }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic.localizedDescription }
