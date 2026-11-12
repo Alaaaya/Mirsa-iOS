@@ -46,3 +46,26 @@ MIRSA-PROVENANCE.txt is bundled with the existing MIT notices and lists each unm
 The owner reached Apple's six-digit challenge on 4.86.1. The screenshot alone does not distinguish an expired/rejected code, changed re-entered password or a lost session. The existing client uses the same Authenticator, endpoint, SAP signer, merged response cookies and password-plus-trimmed-code attempt 2, matching the inspected protocol reference. No separate code-verification endpoint is indicated by that protocol.
 
 A concrete cookie defect was found locally: Domain=.itunes.apple.com was compared including its leading dot, so it failed even for auth.itunes.apple.com and never reached the continuation. RFC 6265 domain matching ignores that leading dot. The correction retains HTTPS, path, expiry and hostname-boundary checks. Offline coverage now drives a real two-step Authenticator sequence with a dotted-domain Set-Cookie and asserts that attempt 2 carries the cookie and exact signed password-plus-code payload. A device confirmation is still needed; this source defect is not proof it caused this particular Apple rejection. No credentials or live authentication were used.
+
+
+## 2FA rejection diagnostics after device build 4.89.1
+The device still rejected verification after the cookie-domain correction. No
+root cause can be determined from the old generic “code rejected” alert.
+Inspection proves that two response branches discarded Apple's diagnostic and
+classified unrelated failures as a bad code. They now preserve HTTP status,
+password/2FA phase, bounded numeric failureType, and finite customerMessage
+identifiers. Missing, empty and unrecognized fields are distinguished. Arbitrary
+dialog text, names, headers, cookies, tokens and response bodies are never exported.
+The alert does not assert an incorrect OTP when Apple only reports incomplete
+verification.
+
+The existing protocol is unchanged: first POST password with attempt=1; second
+POST password+six-digit-code with attempt=2 on the same Authenticator, GUID,
+signer and cookie jar, refreshing machine OTP headers. Offline regressions cover
+a failed second POST and successful corrected-code retry on that same session,
+plus exact signed bytes, fresh OTP/stable machine ID, and non-200 rejections.
+MIT apple-auth reference 98c862f7 confirms this flow; public ipatool issues
+485 and 442 provide mixed anecdotal corroboration, not device proof.
+No GPL reference source was copied. No account login was attempted during
+development. A successful archive proves compilation, not working owner login.
+The next device alert is needed to establish the actual rejection reason.

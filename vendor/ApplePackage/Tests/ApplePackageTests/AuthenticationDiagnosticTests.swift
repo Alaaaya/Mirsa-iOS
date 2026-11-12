@@ -12,7 +12,52 @@ final class AuthenticationDiagnosticTests: XCTestCase {
         XCTAssertEqual(error.stage, .authentication)
         XCTAssertEqual(error.httpStatus, 403)
         XCTAssertEqual(error.appleCode, "-5000")
-        XCTAssertEqual(error.message, "Apple rejected [redacted] [redacted] [redacted]")
+        XCTAssertNil(error.message)
+        XCTAssertEqual(error.responseMessage, .missing)
+        XCTAssertEqual(error.failureState, .numeric)
+        XCTAssertEqual(error.loginPhase, .password)
+    }
+
+    func testResponseMetadataIsFiniteAllowlistNotArbitraryAppleText() {
+        let cases: [(Any?, AuthenticationServiceError.ResponseMessage)] = [
+            (nil, .missing), ("", .empty),
+            ("MZFinance.BadLogin.Configurator_message", .configurator),
+            (" AMD-Action::SP\n", .amdSP), ("AMD-Action::RP", .amdRP),
+            ("MZFinance.BadLogin.Configurator_message owner", .unrecognized),
+            ("AMD-Action::SP secret", .unrecognized),
+            ("Alaa Nasser", .unrecognized), ("MH-AA 1909", .unrecognized),
+            ("password=hidden cookie=hidden", .unrecognized),
+            ("<script>secret</script>", .unrecognized), (["token": "secret"], .unrecognized),
+            (String(repeating: "x", count: 5000), .unrecognized)
+        ]
+        for (raw, expected) in cases {
+            var fields: [String: Any] = ["dialog": ["explanation": "Private name and address"]]
+            fields["customerMessage"] = raw
+            let error = Authenticator.rejection(fields, status: 403, secrets: [], submittedCode: true)
+            XCTAssertEqual(error.responseMessage, expected)
+            XCTAssertEqual(error.loginPhase, .verificationCode)
+            XCTAssertEqual(error.failureState, .missing)
+            XCTAssertNil(error.message)
+            let wrapped = AuthenticationServiceError.wrapping(error, stage: .signing)
+            XCTAssertEqual(wrapped.responseMessage, expected)
+            XCTAssertEqual(wrapped.loginPhase, .verificationCode)
+        }
+    }
+
+    func testFailureStateDistinguishesAbsentEmptyNumericAndUntrustedValues() {
+        let cases: [(Any?, AuthenticationServiceError.FailureState, String?)] = [
+            (nil, .missing, nil), ("", .empty, nil), ("-5000", .numeric, "-5000"),
+            (NSNumber(value: 5005), .numeric, "5005"), ("token=private", .unrecognized, nil),
+            ("123456789", .unrecognized, nil), (["secret": "x"], .unrecognized, nil)
+        ]
+        for (raw, state, code) in cases {
+            var fields: [String: Any] = [:]; fields["failureType"] = raw
+            let error = Authenticator.rejection(fields, status: 429, secrets: [], submittedCode: true)
+            XCTAssertEqual(error.failureState, state)
+            XCTAssertEqual(error.appleCode, code)
+            XCTAssertEqual(error.httpStatus, 429)
+            XCTAssertNil(error.message)
+        }
     }
 
     func testUntrustedCodeAndPayloadAreNeverDiagnosticCode() {
