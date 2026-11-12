@@ -43,8 +43,15 @@ private final class StoreTestAuth: MirsaStoreAuthentication {
     var pause = false
     var rejectWrongCode = false
     var amdFailure: StoreAMDError?
+    var passwords: [String] = []
+    /// Apple's credential rejection (e.g. 5020) on the password step ("") or the code step ("code").
+    var passwordRejection: (step: String, code: String)?
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
+        passwords.append(password)
+        if let rejection = passwordRejection, (rejection.step == "code") == !code.isEmpty {
+            throw AuthenticationError.passwordRejected(rejection.code)
+        }
         if let diagnostic { throw diagnostic }
         if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
         if let amdFailure { throw amdFailure }
@@ -217,6 +224,42 @@ final class MirsaStoreClientTests: XCTestCase {
         guard case .signedIn = second else { return XCTFail("verification missing") }
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "000000", "123456"])
+    }
+    func testPassword5020OnSignInIsDistinctSentOnceAndLeavesNoChallenge() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        engine.auth.passwordRejection = ("", "5020")
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let password = " pässwörd\u{0301} \n"
+        do { _ = try await client.signIn(email: "owner@example.invalid", password: password); XCTFail("5020 accepted") }
+        catch {
+            XCTAssertEqual(error as? MirsaStoreError, .passwordRejected("5020"))
+            XCTAssertNotEqual(error as? MirsaStoreError, .codeRejected)
+            XCTAssertTrue(error.localizedDescription.contains("5020"))
+            XCTAssertFalse(error.localizedDescription.contains("pässwörd"))
+        }
+        XCTAssertEqual(engine.auth.calls, [""])
+        // The password reaches the engine byte for byte: no trimming, no normalization.
+        XCTAssertEqual(engine.auth.passwords.map { Array($0.utf8) }, [Array(password.utf8)])
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertNil(vault.data["account"])
+        // Nothing resumes the rejected sign-in on its own.
+        do { _ = try await client.verify(code: "123456", password: password); XCTFail("rejected sign-in continued") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .signedOut) }
+        XCTAssertEqual(engine.auth.calls, [""])
+    }
+    func testPasswordRejectionOnCodeStepEndsChallengeImmediately() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        engine.auth.passwordRejection = ("code", "-5000")
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        XCTAssertEqual(first, .verificationRequired)
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("rejection accepted") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .passwordRejected("-5000")) }
+        // No second and third try on the same challenge after a credential rejection.
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("challenge kept") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .signedOut) }
+        XCTAssertEqual(engine.auth.calls, ["", "123456"])
     }
     func testDeviceRegistrationFailureShowsStageNotAppleText() async throws {
         let engine = StoreTestEngine()

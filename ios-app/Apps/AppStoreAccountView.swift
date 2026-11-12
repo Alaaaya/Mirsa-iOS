@@ -499,6 +499,10 @@ struct AppStoreAccountView: View {
         case .operationCancelled: return t("Cancelled.", "انلغت.", "هەڵوەشێنرایەوە.", "Hat betalkirin.")
         case .codeRejected: return t("The code was rejected. Check the newest code from Apple and try again.", "الرمز مرفوض. شوف آخر رمز من Apple وجرّب مرة ثانية.", "کۆدەکە ڕەتکرایەوە. نوێترین کۆدی Apple ببینە و دووبارە هەوڵ بدەرەوە.", "Kod hat redkirin. Koda herî nû ya Apple kontrol bike û dîsa biceribîne.")
         case .invalidCode: return t("Enter exactly 6 digits.", "اكتب 6 أرقام بالضبط.", "تەنها ٦ ژمارە بنووسە.", "Tam 6 hejmaran binivîse.")
+        case .passwordRejected(let appleCode):
+            // Back to the sign-in card; nothing is re-sent until the user signs in again by hand.
+            needsCode = false; password = ""; code = ""
+            return t("Apple rejected the sign-in (" + appleCode + "). Mirsa will not retry automatically. Check the password, wait a while, then sign in again yourself.", "Apple رفضت الدخول (" + appleCode + "). ما رح نعيد المحاولة تلقائياً. تأكد من كلمة السر، استنى شوي، وبعدين سجّل دخول بنفسك.", "Apple چوونەژوورەوەکەی ڕەتکردەوە (" + appleCode + "). بە شێوەی خۆکار هەوڵ نادەینەوە. وشەی نهێنی بپشکنە، کەمێک چاوەڕێ بکە، پاشان خۆت دووبارە بچۆ ژوورەوە.", "Apple têketin red kir (" + appleCode + "). Em bixweber dîsa naceribînin. Şîfreyê kontrol bike, hinekî bisekine, paşê bi xwe dîsa têkeve.")
         case .deviceRegistration(let stage): return t("Device registration didn't finish. Try signing in again.", "تسجيل الجهاز ما كمل. جرّب تسجّل دخول مرة ثانية.", "تۆمارکردنی ئامێر تەواو نەبوو. دووبارە بچۆ ژوورەوە.", "Tomarkirina amûrê neqediya. Dîsa têkeve.") + " [" + stage + "]"
         }
     }

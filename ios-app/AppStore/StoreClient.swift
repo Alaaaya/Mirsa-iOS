@@ -93,7 +93,8 @@ actor MirsaStoreClient {
         do { return try await authenticate(code: MirsaStoreCode.valid(code)!, password: password, run: run) }
         catch {
             // Keep the same session for a corrected code, but never beyond three submissions.
-            if (challenge?.attempts ?? 3) >= 3 {
+            // A credential rejection ends the challenge at once: a new sign-in must be started by hand.
+            if (challenge?.attempts ?? 3) >= 3 || Self.isPasswordRejection(error) {
                 challenge = nil
                 try? vault.remove("challenge")
             }
@@ -210,6 +211,11 @@ actor MirsaStoreClient {
         return .signedIn(result)
     }
 
+    private static func isPasswordRejection(_ error: Error) -> Bool {
+        if case .passwordRejected = error as? AuthenticationError { return true }
+        return false
+    }
+
     private func expireChallenge(_ id: UUID) {
         guard challenge?.id == id else { return }
         challenge = nil
@@ -287,6 +293,7 @@ actor MirsaStoreClient {
             case .verificationCodeRequired: return MirsaStoreError.verificationRequired
             case .codeRejected: return MirsaStoreError.codeRejected
             case .invalidVerificationCode: return MirsaStoreError.invalidCode
+            case let .passwordRejected(code): return MirsaStoreError.passwordRejected(code)
             }
         }
         // Never Apple's raw "AMD-Action" text; only the secret-free stage.

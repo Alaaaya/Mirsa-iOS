@@ -12,8 +12,11 @@ enum MirsaStoreError: Error, Equatable, LocalizedError {
     case invalidCode
     /// Device registration (AMD) did not finish; carries a secret-free stage code such as `amd:http-503`.
     case deviceRegistration(String)
+    /// Apple refused the credentials (secret-free code such as `5020`, `-5000`, `BadLogin`). Sent once, never re-sent.
+    case passwordRejected(String)
     var errorDescription: String? {
         switch self {
+        case let .passwordRejected(code): return tr("Apple rejected the sign-in (" + code + "). Mirsa will not retry automatically. Check the password, wait a while, then sign in again yourself.", "Apple رفضت الدخول (" + code + "). ما رح نعيد المحاولة تلقائياً. تأكد من كلمة السر، استنى شوي، وبعدين سجّل دخول بنفسك.", ckb: "Apple چوونەژوورەوەکەی ڕەتکردەوە (" + code + "). بە شێوەی خۆکار هەوڵ نادەینەوە. وشەی نهێنی بپشکنە، کەمێک چاوەڕێ بکە، پاشان خۆت دووبارە بچۆ ژوورەوە.", kmr: "Apple têketin red kir (" + code + "). Em bixweber dîsa naceribînin. Şîfreyê kontrol bike, hinekî bisekine, paşê bi xwe dîsa têkeve.")
         case .codeRejected: return tr("The code was rejected. Check the newest code from Apple and try again.", "الرمز مرفوض. شوف آخر رمز من Apple وجرّب مرة ثانية.", ckb: "کۆدەکە ڕەتکرایەوە. نوێترین کۆدی Apple ببینە و دووبارە هەوڵ بدەرەوە.", kmr: "Kod hat redkirin. Koda herî nû ya Apple kontrol bike û dîsa biceribîne.")
         case .invalidCode: return tr("Enter exactly 6 digits.", "اكتب 6 أرقام بالضبط.", ckb: "تەنها ٦ ژمارە بنووسە.", kmr: "Tam 6 hejmaran binivîse.")
         case let .deviceRegistration(stage): return tr("Device registration didn't finish. Try signing in again.", "تسجيل الجهاز ما كمل. جرّب تسجّل دخول مرة ثانية.", ckb: "تۆمارکردنی ئامێر تەواو نەبوو. دووبارە بچۆ ژوورەوە.", kmr: "Tomarkirina amûrê neqediya. Dîsa têkeve.") + " [" + stage + "]"
