@@ -21,6 +21,7 @@ jobs:
           python3 scripts/appstore/store-section-state-tests.py
           python3 scripts/appstore/history-runtime-tests.py
           python3 scripts/appstore/history-protocol-tests.py
+          python3 scripts/appstore/history-local-tests.py
           python3 scripts/appstore/version-name-tests.py
       - uses: dtolnay/rust-toolchain@stable
         with:

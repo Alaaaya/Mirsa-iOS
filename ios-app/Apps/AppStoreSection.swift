@@ -743,9 +743,15 @@ struct AppStorePurchasesPage: View {
             } else if let diagnostic = error as? StorefrontMetadataMissing {
                 self.error = diagnostic.localizedDescription
             } else {
-                // Never display an opaque zero or swallow diagnostics. Unknown errors
-                // expose only a numeric code, never raw NSError descriptions/userInfo.
-                self.error = "Apple history · local preparation · error \((error as NSError).code)"
+                // Known local states must not collapse into bridged enum error 0.
+                // Never display arbitrary descriptions/userInfo containing session values.
+                if let local = error as? MirsaStoreError {
+                    self.error = "Apple history · local session · " + (local.errorDescription ?? "session unavailable")
+                } else if error is DecodingError {
+                    self.error = "Apple history · setup · invalid saved account record"
+                } else {
+                    self.error = "Apple history · setup · unexpected local session failure; no history result loaded"
+                }
             }
         }
     }

@@ -59,7 +59,14 @@ actor MirsaStoreOnDeviceClient {
     }
 
     func purchaseHistory() async throws -> [MirsaStorePurchase] {
-        try await authorize()
+        do { try await authorize() }
+        catch let error as MirsaStoreServerError {
+            // This is Mirsa's device gate, not an Apple/SAP failure.
+            if case let .code(code) = error {
+                throw PurchaseHistoryDiagnostic(stage: .setup, detail: "device authorization unavailable (" + code + ")")
+            }
+            throw error
+        }
         return try await local.purchaseHistory()
     }
 
