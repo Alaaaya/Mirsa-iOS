@@ -32,7 +32,7 @@ fn generate_inner(output: &str) -> Result<(), Box<dyn std::error::Error>> {
         vec![Certificate::from_der(&leaf_der)?, Certificate::from_der(&root_der)?])));
     // Password protects the temporary import container; the container is placed in
     // ThisDeviceOnly keychain by Swift. Neither identity nor key is ever HTTP-served.
-    let password = uuid::Uuid::new_v4().to_string();
+    let password = random_hex();
     let p12 = store.writer(&password).write()?;
     let data = serde_json::to_vec(&serde_json::json!({
         "p12": STANDARD.encode(p12), "password": password, "root": STANDARD.encode(root_der),
@@ -45,7 +45,7 @@ fn generate_inner(output: &str) -> Result<(), Box<dyn std::error::Error>> {
     use super::*;
     #[test] fn isolated_valid_identity() {
         use x509_cert::der::Decode;
-        let p = std::env::temp_dir().join(format!("mirsa-tls-{}.json", uuid::Uuid::new_v4()));
+        let p = std::env::temp_dir().join(format!("mirsa-tls-{}.json", random_hex()));
         generate(p.to_str().unwrap()).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
         std::fs::remove_file(p).unwrap();
@@ -55,4 +55,12 @@ fn generate_inner(output: &str) -> Result<(), Box<dyn std::error::Error>> {
         let (_, chain) = store.private_key_chain().unwrap();
         assert_eq!(chain.certs().len(), 2);
     }
+}
+
+
+fn random_hex() -> String {
+    use rsa::rand_core::{OsRng, RngCore};
+    let mut b = [0u8; 16];
+    OsRng.fill_bytes(&mut b);
+    b.iter().map(|x| format!("{:02x}", x)).collect()
 }
