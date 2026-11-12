@@ -45,7 +45,9 @@ struct StoreDownloadRecoveryTests {
         let legacy = try JSONDecoder().decode(Account.self, from: JSONSerialization.data(withJSONObject: old))
         #expect(legacy.storeFront == nil)
         #expect(throws: StorefrontMetadataMissing.self) { try legacy.commerceStoreFront() }
-        for bad in ["TR", "143441-1", "143480-1\r\nX-Token: secret"] {
+        for bad in ["TR", "143441-1", "143480-1\r\nX-Token: secret",
+                    "143480-1\rInjected", "143480-1\nInjected", "143480-1\u{0}Injected",
+                    "143480-1\tInjected", "143480-1\u{2028}Injected"] {
             var invalid = account; invalid.storeFront = bad
             #expect(throws: StorefrontMetadataMissing.self) { try invalid.commerceStoreFront() }
         }
