@@ -124,7 +124,9 @@ struct EncryptedAppsTab: View {
             AppStoreAccountView(onDownloaded: { url in
                 let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
                 store.add(entry)
-            }, searchOnly: true)
+            }, searchOnly: true, onOpenAccount: {
+                withAnimation(MirsaMotion.select) { section = .account }
+            })
             .id(storeViewID)
         } else {
             ScrollView {

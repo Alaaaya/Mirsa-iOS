@@ -8,6 +8,8 @@ import ApplePackage
 struct AppStoreAccountView: View {
     var onDownloaded: (URL) async throws -> Void
     var searchOnly = false
+    var onOpenAccount: () -> Void = {}
+    @AppStorage("mirsa.store.recentSearches.v1") private var recentSearchData = Data()
 
     private let client = MirsaStoreOnDeviceClient.shared
     @ObservedObject private var session = AppStoreSectionModel.shared
@@ -58,6 +60,7 @@ struct AppStoreAccountView: View {
                     if busy != nil { busyCard }
                     detailView(app, account: account)
                 } else {
+                    if searchOnly { searchHeader }
                     if !searchOnly {
                         Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
                             .font(MirsaFont.pageTitle).foregroundStyle(.white)
@@ -261,30 +264,8 @@ struct AppStoreAccountView: View {
 
         }
 
-        VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            Text(t("Search", "بحث", "گەڕان", "Lêgerîn")).font(MirsaFont.cardTitle).foregroundStyle(.white)
-            HStack {
-                TextField(t("App name", "اسم التطبيق", "ناوی ئەپ", "Navê sepanê"), text: $term)
-                    .submitLabel(.search).onSubmit { search() }.focused($focus).fieldStyle()
-            }
-            Button { showCountries = true } label: {
-                Label(AppStoreCountry.label(effectiveCountry), systemImage: "globe")
-            }.buttonStyle(.mirsaSecondary).disabled(busy != nil)
-            if otherStore {
-                Text(t("Search in \(AppStoreCountry.label(effectiveCountry)) only. Downloads use your account storefront (\(AppStoreCountry.label(a.country))).",
-                       "البحث بمتجر \(AppStoreCountry.label(effectiveCountry)) بس، التنزيل بيصير من متجر حسابك (\(AppStoreCountry.label(a.country)))",
-                       "گەڕان تەنها لەم ستۆرەیە؛ داگرتن لە ستۆری ئەکاونتەکەتە.",
-                       "Lêgerîn tenê li vê stoyê ye; daxistin ji stoya hesabê te ye."))
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
-            }
-            Text(t("Search defaults to your Apple Account storefront.", "البحث افتراضياً بمتجر حساب Apple تبعك.",
-                   "گەڕان لە ستۆری ئەکاونتی Apple ت دەکرێت.", "Lêgerîn li stoya hesabê Apple ye."))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-            Button { search() } label: { Text(t("Search", "بحث", "گەڕان", "Lêgerîn")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaPrimary)
-                .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty || busy != nil)
-        }
-        .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
+        searchControls(a)
+
 
         if searched && results.isEmpty && busy == nil {
             Text(t("No results in this country.", "ما في نتائج بهالدولة.", "لەم وڵاتەدا هیچ ئەنجامێک نییە.", "Li vî welatî encam tune."))
@@ -294,6 +275,91 @@ struct AppStoreAccountView: View {
             Text(t("Results", "النتائج", "ئەنجامەکان", "Encam")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
         }
         ForEach(results) { app in resultRow(app) }
+    }
+
+    private var searchHeader: some View {
+        HStack(alignment: .center) {
+            Text(t("Search", "بحث", "گەڕان", "Lêgerîn"))
+                .font(MirsaFont.pageTitle).foregroundStyle(.white)
+            Spacer()
+            Button(action: onOpenAccount) {
+                AppStoreAvatar(text: account?.name ?? "", size: 38)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(t("Account", "الحساب", "ئەکاونت", "Hesab"))
+            .accessibilityIdentifier("store-search-account")
+        }
+        .padding(.top, MirsaSpacing.m)
+        .environment(\.layoutDirection, (AppLanguageStore.shared.current == .arabic || AppLanguageStore.shared.current == .sorani) ? .rightToLeft : .leftToRight)
+    }
+
+    private func searchControls(_ a: MirsaStoreAccount) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(MirsaPalette.textTertiary)
+                TextField(t("App name, App ID or link", "اسم التطبيق أو App ID أو الرابط", "ناوی ئەپ، App ID یان بەستەر", "Navê sepanê, App ID an girêdan"), text: $term)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .submitLabel(.search).onSubmit { search() }.focused($focus)
+                    .disabled(busy != nil).foregroundStyle(.white)
+                    .accessibilityIdentifier("store-search-input")
+                if !term.isEmpty {
+                    Button { term = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .foregroundStyle(MirsaPalette.textTertiary)
+                        .accessibilityLabel(t("Clear", "مسح", "سڕینەوە", "Paqij bike"))
+                }
+            }
+            .font(MirsaFont.body).padding(.horizontal, 16).frame(minHeight: 50)
+            .background(MirsaPalette.cardRaised, in: RoundedRectangle(cornerRadius: MirsaRadius.m))
+            .overlay(RoundedRectangle(cornerRadius: MirsaRadius.m).strokeBorder(MirsaPalette.stroke, lineWidth: 1))
+
+            HStack(spacing: 10) {
+                Button { showCountries = true } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "globe")
+                        Text(AppStoreCountry.label(effectiveCountry)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                    }
+                    .padding(.horizontal, 13).frame(minHeight: 38)
+                    .background(MirsaPalette.cardRaised, in: Capsule())
+                }.buttonStyle(.plain).disabled(busy != nil)
+                Label("iOS", systemImage: "iphone")
+                    .padding(.horizontal, 13).frame(minHeight: 38)
+                    .background(MirsaPalette.cardRaised, in: Capsule())
+                    .accessibilityLabel(t("Platform: iOS", "المنصة iOS", "پلاتفۆرم iOS", "Platform iOS"))
+                Spacer(minLength: 0)
+            }.font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+
+            if otherStore {
+                Text(t("Downloads use your account storefront (\(AppStoreCountry.label(a.country))).",
+                       "التنزيل من متجر حسابك (\(AppStoreCountry.label(a.country))).",
+                       "داگرتن لە ستۆری ئەکاونتەکەتە.", "Daxistin ji stoya hesabê te ye."))
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+            }
+            if !StoreRecentSearches.read(recentSearchData).isEmpty {
+                VStack(spacing: 12) {
+                    HStack {
+                        Text(t("Recent searches", "عمليات البحث الأخيرة", "گەڕانەکانی ئەم دواییە", "Lêgerînên dawî"))
+                            .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                        Spacer()
+                        Button(t("Clear", "مسح", "سڕینەوە", "Paqij bike")) { recentSearchData = Data() }
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.accentSoft)
+                            .accessibilityIdentifier("store-clear-recent")
+                    }
+                    ForEach(StoreRecentSearches.read(recentSearchData), id: \.self) { recent in
+                        Button { term = recent; search() } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "magnifyingglass").foregroundStyle(MirsaPalette.textTertiary)
+                                Text(recent).foregroundStyle(MirsaPalette.textSecondary).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .font(MirsaFont.body).padding(.horizontal, 16).frame(minHeight: 48)
+                            .background(MirsaPalette.cardRaised.opacity(0.7), in: RoundedRectangle(cornerRadius: MirsaRadius.m))
+                        }.buttonStyle(.plain).disabled(busy != nil)
+                    }
+                }.padding(.top, MirsaSpacing.m)
+            }
+        }
+        .environment(\.layoutDirection, (AppLanguageStore.shared.current == .arabic || AppLanguageStore.shared.current == .sorani) ? .rightToLeft : .leftToRight)
     }
 
     // MARK: result row, detail page, progress (UI only; same actions as before)
@@ -578,11 +644,14 @@ struct AppStoreAccountView: View {
         guard busy == nil else { return }
         searchCountry = country; showCountries = false
         results = []; selected = nil; searched = false; accountAvailable = []
-        if !term.trimmingCharacters(in: .whitespaces).isEmpty { search() }
+        // Changing the catalogue filter does not submit a search.
     }
 
     private func search() {
-        let q = term.trimmingCharacters(in: .whitespaces)
+        guard busy == nil else { return }
+        let q: String
+        do { q = try StoreSearchQuery.parse(term).term }
+        catch { notice = t("Enter an app name, numeric App ID or an Apple App Store link.", "اكتب اسم تطبيق أو App ID رقمي أو رابط من متجر Apple.", "ناو یان ناسنامە یان بەستەری Apple بنووسە.", "Nav, App ID an girêdana Apple binivîse."); return }
         run(t("Searching…", "عم نبحث…", "گەڕان…", "Lêgerîn…")) {
             let country = effectiveCountry
             let found = try await client.search(term: q, country: country, limit: 25)
@@ -593,6 +662,7 @@ struct AppStoreAccountView: View {
             try Task.checkCancellation()
             guard country == effectiveCountry else { return }
             results = found; accountAvailable = available; searched = true
+            recentSearchData = StoreRecentSearches.adding(q, to: recentSearchData)
         }
     }
 
