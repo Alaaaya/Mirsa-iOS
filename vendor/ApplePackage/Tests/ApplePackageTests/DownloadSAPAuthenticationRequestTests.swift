@@ -23,10 +23,10 @@ final class DownloadSAPAuthenticationRequestTests: XCTestCase {
                 pod: "25")
     }
 
-    private static let app = Software(id: 1_234_567_890, bundleID: "example.app", name: "Fixture", version: "1.0",
+    private static var app: Software { Software(id: 1_234_567_890, bundleID: "example.app", name: "Fixture", version: "1.0",
                                       artistName: "", sellerName: "", description: "", averageUserRating: 0,
                                       userRatingCount: 0, artworkUrl: "", screenshotUrls: [], minimumOsVersion: "15.0",
-                                      releaseDate: "", primaryGenreName: "")
+                                      releaseDate: "", primaryGenreName: "") }
 
     private static func bodyData(_ request: HTTPClient.Request) throws -> Data {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -92,7 +92,8 @@ final class DownloadSAPAuthenticationRequestTests: XCTestCase {
         XCTAssertTrue(String(decoding: unpinned, as: UTF8.self).contains("<key>salableAdamId</key>\n\t<integer>1234567890</integer>"))
 
         // Pinned: volumeStore uses externalVersionId, dispatch endpoints use appExtVrsId (string), as ipatool.
-        for (endpoint, key) in [(StoreDownloadEndpoint.volumeStore, "externalVersionId"), (.redownload, "appExtVrsId"), (.update, "appExtVrsId")] {
+        let pins: [(StoreDownloadEndpoint, String)] = [(.volumeStore, "externalVersionId"), (.redownload, "appExtVrsId"), (.update, "appExtVrsId")]
+        for (endpoint, key) in pins {
             let data = try Self.bodyData(request(endpoint, version: "870000001"))
             var expected = expectedUnpinned
             expected[key] = "870000001"
@@ -104,9 +105,9 @@ final class DownloadSAPAuthenticationRequestTests: XCTestCase {
         XCTAssertThrowsError(try StoreDownloadEndpoint.sessionHeaders(Self.account(token: "abc\r\nX-Evil: 1")))
         XCTAssertThrowsError(try StoreDownloadEndpoint.sessionHeaders(Self.account(token: "abc\u{0}")))
         let empty = try StoreDownloadEndpoint.sessionHeaders(Self.account(token: ""))
-        XCTAssertEqual(empty.map(\.0), ["X-Apple-Store-Front"])
+        XCTAssertEqual(empty.map { $0.0 }, ["X-Apple-Store-Front"])
         let badStore = try StoreDownloadEndpoint.sessionHeaders(Self.account(store: "143441\r\nX: y"))
-        XCTAssertEqual(badStore.map(\.0), ["X-Token"])
+        XCTAssertEqual(badStore.map { $0.0 }, ["X-Token"])
         // Same value form as the working buyProduct request.
         XCTAssertEqual(try StoreDownloadEndpoint.sessionHeaders(Self.account()).first?.1, "143441-1")
     }
@@ -117,7 +118,7 @@ final class DownloadSAPAuthenticationRequestTests: XCTestCase {
         let response: [String: Any] = [
             "failureType": "2042",
             "customerMessage": "Hello owner@example.invalid, dsid \(Self.dsid) token \(Self.token)",
-            "metrics": ["messageCode": 2042, "dsid": Self.dsid],
+            "metrics": ["messageCode": 2042, "dsid": Self.dsid] as [String: Any],
             "dialog": ["message": "x", "explanation": "y"],
         ]
         let tag = StoreDownloadTag(operation: .download, endpoint: .volume, response: response, httpStatus: 200, stop: .failure)
@@ -170,8 +171,8 @@ final class DownloadSAPAuthenticationRequestTests: XCTestCase {
     }
 
     func testRecoveryMismatchIsTaggedWithEndpoint() {
-        let response: [String: Any] = ["songList": [["metadata": ["itemId": 1, "softwareVersionExternalIdentifier": 2,
-                                                                  "softwareVersionBundleId": "other.app"]]]]
+        let metadata: [String: Any] = ["itemId": 1, "softwareVersionExternalIdentifier": 2, "softwareVersionBundleId": "other.app"]
+        let response: [String: Any] = ["songList": [["metadata": metadata]]]
         XCTAssertThrowsError(try StoreDownloadEndpoint.validateRecoveryResponse(response, app: Self.app, version: "2", endpoint: .update)) { error in
             XCTAssertEqual((error as? StoreDownloadFailure)?.tag.text,
                            "[dl:download at=update ft=none mc=none msg=none http=200 dlg=0 items=1 stop=recovery]")
