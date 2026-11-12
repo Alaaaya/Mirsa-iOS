@@ -246,7 +246,7 @@ public actor Authenticator {
         }
         // Response metadata only. Authentication requests and 2FA remain unchanged.
         if let value = response.headers.first(name: "x-set-apple-store-front"),
-           !value.isEmpty, value.utf8.count <= 256, !value.contains("\r"), !value.contains("\n") {
+           !value.isEmpty, value.utf8.count <= 256, !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
             fullStoreFront = value
         }
 
