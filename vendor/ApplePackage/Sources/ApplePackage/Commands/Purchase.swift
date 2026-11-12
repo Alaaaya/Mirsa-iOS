@@ -15,7 +15,7 @@ public enum Purchase {
     ) async throws {
         let deviceIdentifier = Configuration.deviceIdentifier
 
-        if (app.price ?? 0) > 0 {
+        if app.price != 0 {
             try ensureFailed(Strings.paidAppsNotSupported)
         }
 
@@ -30,6 +30,14 @@ public enum Purchase {
                 throw error
             }
         }
+    }
+
+    static func failureCode(_ fields: [String: Any]) -> String? {
+        (fields["failureType"] as? String) ?? (fields["failureType"] as? NSNumber)?.stringValue
+    }
+
+    static func confirmsExistingLicense(_ fields: [String: Any]) -> Bool {
+        failureCode(fields) == "5002"
     }
 
     private static func purchaseWithParams(
@@ -91,7 +99,10 @@ public enum Purchase {
             try ensureFailed(Strings.termsAcceptanceRequired(url: urlString))
         }
 
-        if let failureType = dict["failureType"] as? String {
+        if let failureType = Self.failureCode(dict) {
+            // The explicit free-acquisition endpoint confirms an existing licence.
+            // Do not retry or acquire anything else in response.
+            if Self.confirmsExistingLicense(dict) { return }
             let customerMessage = dict["customerMessage"] as? String
             switch failureType {
             case "2034", "2042":

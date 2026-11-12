@@ -25,6 +25,7 @@ jobs:
           python3 scripts/appstore/history-gate-tests.py
           python3 scripts/appstore/search-state-tests.py
           python3 scripts/appstore/discovery-tests.py
+          python3 scripts/appstore/purchases-group-tests.py
           python3 scripts/appstore/version-name-tests.py
       - uses: dtolnay/rust-toolchain@stable
         with:
