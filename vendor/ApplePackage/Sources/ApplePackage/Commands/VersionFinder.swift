@@ -58,8 +58,9 @@ public enum VersionFinder {
                         try ensureFailed(Strings.passwordTokenExpired)
                     }
                     if let customerMessage {
-                        try ensureFailed(customerMessage)
+                        try ensureFailed("\(customerMessage) (failureType: \(failureType))")
                     }
+                    try ensureFailed("Apple failureType: \(failureType)")
                     try ensureFailed(Strings.noItemsInResponse)
                 }
             } else {
