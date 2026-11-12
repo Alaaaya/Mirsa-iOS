@@ -125,3 +125,10 @@ five-minute memory-only challenge. Distinct local validation messages say no
 Apple request was made. Explicit Apple's failureType and bounded/redacted
 customerMessage are retained on actual rejection. Malformed AMD messages remain
 private and use safe device-challenge diagnostics instead.
+
+The combined pod/SP regression exposed a real proof-header scope gap: after
+provisioning on the legacy commerce authenticate endpoint, the retry omitted
+AMD headers. The allowlist now includes only that exact path on buy.itunes.apple.com
+and numeric pNN-buy pods, alongside the existing native and purchase paths.
+Negative tests retain HTTP, lookalike host, other Apple host and extra-path denial.
+This fixes an offline-observed protocol gap, not a verified on-device login.

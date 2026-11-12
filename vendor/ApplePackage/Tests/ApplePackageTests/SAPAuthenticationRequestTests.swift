@@ -483,13 +483,15 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         XCTAssertEqual(after, [1, 1])
     }
 
-    func testAMDHeadersAreScopedToNativeAndPurchaseOnly() async throws {
+    func testAMDHeadersAreScopedToNativeCommerceAuthenticationAndPurchaseOnly() async throws {
         let proof = ["X-Apple-AMD": "otp", "X-Apple-AMD-M": "machine"]
         for endpoint in [
             "https://auth.itunes.apple.com/auth/v1/native",
             "https://auth.itunes.apple.com/auth/v1/native/fast/",
             "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
             "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
+            "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/",
         ] {
             var headers: [(String, String)] = []
             try StoreAMDHeaderScope.append(proof, to: &headers, url: XCTUnwrap(URL(string: endpoint)))
@@ -499,7 +501,10 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             "https://auth.itunes.apple.com/auth/v1/otp/1.5/finish",
             "https://auth.itunes.apple.com/login",
             "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
-            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/extra",
+            "https://cdn.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "https://p25-buy.itunes.apple.com.evil.invalid/WebObjects/MZFinance.woa/wa/authenticate",
+            "http://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
             "https://cdn.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
             "https://p25-buy.itunes.apple.com.evil.invalid/auth/v1/native",
             "http://auth.itunes.apple.com/auth/v1/native",
@@ -792,6 +797,7 @@ final class SAPAuthenticationRequestTests: XCTestCase {
         XCTAssertEqual(requests[2].headers.first(name: "Cookie"), "session=pod-first")
         XCTAssertEqual(requests[3].headers.first(name: "Cookie"), "session=pod-amd")
         XCTAssertEqual(requests[3].headers.first(name: "X-Apple-AMD"), "otp-1")
+        XCTAssertEqual(requests[3].headers.first(name: "X-Apple-AMD-M"), "machine-1")
         let fields = try XCTUnwrap(PropertyListSerialization.propertyList(from: bodies[3], format: nil) as? [String: String])
         XCTAssertEqual(fields["password"], "fixture654321")
         XCTAssertEqual(fields["guid"], "001122334455")
