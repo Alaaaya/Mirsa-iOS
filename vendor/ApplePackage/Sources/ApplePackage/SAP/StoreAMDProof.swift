@@ -322,7 +322,10 @@ enum StoreAMDHeaderScope {
         }
         let purchaseHost = host == "buy.itunes.apple.com" ||
             host.range(of: "^p[0-9]+-buy\\.itunes\\.apple\\.com$", options: .regularExpression) != nil
-        return purchaseHost && path == "/WebObjects/MZFinance.woa/wa/buyProduct"
+        // A pod redirect can challenge the legacy authentication endpoint too.
+        // Keep proof scoped to these exact commerce paths, never all Apple URLs.
+        return purchaseHost && ["/WebObjects/MZFinance.woa/wa/buyProduct",
+                                "/WebObjects/MZFinance.woa/wa/authenticate"].contains(path)
     }
 
     static func append(_ proof: [String: String], to headers: inout [(String, String)], url: URL) throws {
