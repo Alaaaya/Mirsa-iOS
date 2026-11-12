@@ -743,7 +743,9 @@ struct AppStorePurchasesPage: View {
             } else if let diagnostic = error as? StorefrontMetadataMissing {
                 self.error = diagnostic.localizedDescription
             } else {
-            self.error = tr("Apple purchase history could not be loaded. Refresh to try again.", "ما قدرت حمّل سجل مشتريات Apple. جرّب التحديث.", ckb: "مێژووی کڕین بار نەکرا. نوێی بکەرەوە.", kmr: "Dîroka kirînê nehat barkirin. Nû bike.")
+                // Never display an opaque zero or swallow diagnostics. Unknown errors
+                // expose only a numeric code, never raw NSError descriptions/userInfo.
+                self.error = "Apple history · local preparation · error \((error as NSError).code)"
             }
         }
     }

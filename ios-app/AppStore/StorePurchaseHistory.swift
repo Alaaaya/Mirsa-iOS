@@ -15,7 +15,7 @@ struct MirsaStorePurchase: Identifiable, Sendable {
 
 /// Read-only own-account DAAP history. Does not acquire licenses or change login state.
 struct PurchaseHistoryDiagnostic: Error, LocalizedError, Sendable {
-    enum Stage: String, Sendable { case login, update, items }
+    enum Stage: String, Sendable { case setup, login, update, items }
     let stage: Stage
     let httpStatus: Int?
     let dmapStatus: UInt32?
@@ -47,7 +47,12 @@ enum MirsaStorePurchaseHistory {
     static func fetch(owner: Account) async throws -> [MirsaStorePurchase] {
         try Task.checkCancellation()
         let storeFront = try owner.commerceStoreFront()
-        let signer = try await SAPSigner.connect()
+        let signer: SAPSigner
+        do { signer = try await SAPSigner.connect() }
+        catch {
+            try Task.checkCancellation()
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "signer setup error \((error as NSError).code)")
+        }
         let secrets = [owner.email, owner.password, owner.appleId, owner.firstName, owner.lastName,
                        owner.passwordToken, owner.directoryServicesIdentifier, Configuration.deviceIdentifier]
                        + owner.cookie.map(\.value)
@@ -95,7 +100,11 @@ enum MirsaStorePurchaseHistory {
             for (key, value) in headers { req.setValue(value, forHTTPHeaderField: key) }
             for (key, value) in cookies.buildCookieHeader(url) { req.setValue(value, forHTTPHeaderField: key) }
             if let body {
-                req.setValue(try await signer.sign(body).base64EncodedString(), forHTTPHeaderField: "X-Apple-ActionSignature")
+                do { req.setValue(try await signer.sign(body).base64EncodedString(), forHTTPHeaderField: "X-Apple-ActionSignature") }
+                catch {
+                    try Task.checkCancellation()
+                    throw PurchaseHistoryDiagnostic(stage: stage, detail: "request signing error \((error as NSError).code)")
+                }
             }
             let data: Data
             let response: URLResponse
