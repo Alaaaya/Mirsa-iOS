@@ -34,11 +34,35 @@ actor MirsaStoreOnDeviceClient {
         try await authorize()
         return try await local.verify(code: code, password: password)
     }
-    func search(term: String, limit: Int = 25) async throws -> [MirsaStoreApp] {
+    func search(term: String, country: String? = nil, limit: Int = 25) async throws -> [MirsaStoreApp] {
         try await authorize()
         guard let account = try await local.currentAccount() else { throw MirsaStoreError.signedOut }
-        return try await local.search(term: term, country: account.country, limit: limit)
+        return try await local.search(term: term, country: country ?? account.country, limit: limit)
     }
+    /// Public lookup only. Never changes the commerce/account storefront.
+    func availableInStore(_ apps: [MirsaStoreApp], country: String) async throws -> Set<Int64> {
+        try await authorize()
+        guard !apps.isEmpty else { return [] }
+        var url = URLComponents(string: "https://itunes.apple.com/lookup")!
+        url.queryItems = [
+            URLQueryItem(name: "id", value: apps.map { String($0.id) }.joined(separator: ",")),
+            URLQueryItem(name: "country", value: country),
+            URLQueryItem(name: "entity", value: "software")
+        ]
+        var request = URLRequest(url: url.url!)
+        request.timeoutInterval = 30
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw MirsaStoreError.invalidInput }
+        struct Item: Decodable { let trackId: Int64 }
+        struct Reply: Decodable { let results: [Item] }
+        return Set(try JSONDecoder().decode(Reply.self, from: data).results.map { $0.trackId })
+    }
+
+    func purchaseHistory() async throws -> [MirsaStorePurchase] {
+        try await authorize()
+        return try await local.purchaseHistory()
+    }
+
     func acquireFreeApp(_ app: MirsaStoreApp) async throws {
         try await authorize()
         try await local.acquireFreeApp(app)

@@ -9,7 +9,19 @@ struct AppStoreAccountView: View {
     var onDownloaded: (URL) async throws -> Void
 
     private let client = MirsaStoreOnDeviceClient.shared
-    @State private var account: MirsaStoreAccount?
+    @ObservedObject private var session = AppStoreSectionModel.shared
+    private var account: MirsaStoreAccount? {
+        get { session.account }
+        nonmutating set { session.updateAccount(newValue) }
+    }
+    @State private var searchCountry: String?
+    @State private var showCountries = false
+    @State private var countryQuery = ""
+    @State private var accountAvailable: Set<Int64> = []
+    private var effectiveCountry: String { searchCountry ?? account?.country ?? "tr" }
+    private var otherStore: Bool { effectiveCountry.lowercased() != account?.country.lowercased() }
+    private func canDownload(_ app: MirsaStoreApp) -> Bool { !otherStore || accountAvailable.contains(app.id) }
+
     @State private var email = ""
     @State private var password = ""
     @State private var code = ""
@@ -48,7 +60,7 @@ struct AppStoreAccountView: View {
                     Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
                         .font(MirsaFont.pageTitle).foregroundStyle(.white)
                     infoCard
-                    if let account { signedInCards(account) } else if needsCode { verificationCard } else { signInCard }
+                    if let account { signedInCards(account) } else if !session.loaded { ProgressView() } else if needsCode { verificationCard } else { signInCard }
                     if busy != nil { busyCard }
                 }
             }
@@ -66,7 +78,23 @@ struct AppStoreAccountView: View {
             if let fixture = Self.uiTestFixture() { account = fixture.account; results = fixture.results; searched = true
                 versions = fixture.versions; metadata = fixture.metadata; metadataLimit = fixture.limits; selected = fixture.selected; return }
             #endif
-            account = try? await client.currentAccount()
+            await session.refresh()
+        }
+        .sheet(isPresented: $showCountries) {
+            NavigationStack {
+                List {
+                    Button(t("Account storefront", "متجر حسابي", "ستۆری ئەکاونت", "Stoya hesabê min")) { selectCountry(nil) }
+                    ForEach(Locale.isoRegionCodes.filter {
+                        $0.count == 2 && (countryQuery.isEmpty || AppStoreCountry.label($0).localizedCaseInsensitiveContains(countryQuery))
+                    }.sorted { AppStoreCountry.label($0) < AppStoreCountry.label($1) }, id: \.self) { country in
+                        Button(AppStoreCountry.label(country)) { selectCountry(country.lowercased()) }
+                    }
+                }
+                .searchable(text: $countryQuery)
+                .navigationTitle(t("Search storefront", "متجر البحث", "ستۆری گەڕان", "Stoya lêgerînê"))
+                .toolbar { Button(t("Done", "تمام", "تەواو", "Temam")) { showCountries = false } }
+            }
+            .preferredColorScheme(.dark)
         }
         .onChange(of: busy) { _, value in busySince = value == nil ? nil : (busySince ?? Date()) }
         .onChange(of: account) { _, value in if value == nil { selected = nil } }
@@ -228,7 +256,17 @@ struct AppStoreAccountView: View {
                 TextField(t("App name", "اسم التطبيق", "ناوی ئەپ", "Navê sepanê"), text: $term)
                     .submitLabel(.search).onSubmit { search() }.focused($focus).fieldStyle()
             }
-            Text(t("Search uses your Apple Account storefront.", "البحث بمتجر حساب Apple تبعك.",
+            Button { showCountries = true } label: {
+                Label(AppStoreCountry.label(effectiveCountry), systemImage: "globe")
+            }.buttonStyle(.mirsaSecondary).disabled(busy != nil)
+            if otherStore {
+                Text(t("Search in \(AppStoreCountry.label(effectiveCountry)) only. Downloads use your account storefront (\(AppStoreCountry.label(a.country))).",
+                       "البحث بمتجر \(AppStoreCountry.label(effectiveCountry)) بس، التنزيل بيصير من متجر حسابك (\(AppStoreCountry.label(a.country)))",
+                       "گەڕان تەنها لەم ستۆرەیە؛ داگرتن لە ستۆری ئەکاونتەکەتە.",
+                       "Lêgerîn tenê li vê stoyê ye; daxistin ji stoya hesabê te ye."))
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+            }
+            Text(t("Search defaults to your Apple Account storefront.", "البحث افتراضياً بمتجر حساب Apple تبعك.",
                    "گەڕان لە ستۆری ئەکاونتی Apple ت دەکرێت.", "Lêgerîn li stoya hesabê Apple ye."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Button { search() } label: { Text(t("Search", "بحث", "گەڕان", "Lêgerîn")).frame(maxWidth: .infinity) }
@@ -282,14 +320,14 @@ struct AppStoreAccountView: View {
             .buttonStyle(.plain)
             .accessibilityHint(t("Opens the app page", "بيفتح صفحة التطبيق", "پەڕەی ئەپەکە دەکاتەوە", "Rûpela sepanê vedike"))
             Button { download(app) } label: {
-                Text(t("Download", "تنزيل", "داگرتن", "Daxe"))
+                Text(canDownload(app) ? t("Download", "تنزيل", "داگرتن", "Daxe") : t("Not in account store", "مو بمتجر حسابك", "لە ستۆرەکەت نییە", "Ne li stoya te ye"))
                     .font(MirsaFont.button).foregroundStyle(.white)
                     .padding(.horizontal, 16).frame(height: 34)
                     .background(Capsule().fill(MirsaPalette.accentGradient))
             }
             .buttonStyle(.plain)
-            .disabled(busy != nil)
-            .opacity(busy != nil ? 0.5 : 1)
+            .disabled(busy != nil || !canDownload(app))
+            .opacity(busy != nil || !canDownload(app) ? 0.5 : 1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -325,7 +363,10 @@ struct AppStoreAccountView: View {
             Button { download(app) } label: {
                 HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }.frame(maxWidth: .infinity)
             }
-            .buttonStyle(.mirsaPrimary).disabled(busy != nil)
+            .buttonStyle(.mirsaPrimary).disabled(busy != nil || !canDownload(app))
+            if !canDownload(app) {
+                Text(t("Not available in your account storefront. Download is disabled.", "مو متاح بمتجر حسابك، التنزيل موقف.", "لە ستۆری ئەکاونتەکەت بەردەست نییە.", "Li stoya hesabê te ne berdest e.")).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+            }
             Text(t("Version: ", "النسخة: ", "وەشان: ", "Guherto: ") + chosenLabel(app))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
             Text(t("Needs this account to own the app. Saved unchanged in the App Store tab.",
@@ -335,7 +376,7 @@ struct AppStoreAccountView: View {
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Divider().overlay(MirsaPalette.stroke)
             Button { acquire(app) } label: { Text(t("Get free license", "احصل على ترخيص مجاني", "مۆڵەتی بێبەرامبەر وەربگرە", "Lîsansa belaş bigire")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil)
+                .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || !canDownload(app))
             Text(t("Only if this account never got the app. Adds it to your Apple Account; costs nothing.",
                    "بس إذا حسابك ما حصل عالتطبيق قبل. بيضيفو لحساب Apple تبعك وبلا مصاري.",
                    "تەنها ئەگەر ئەم ئەکاونتە پێشتر ئەپەکەی نەهێنابێت. دەیخاتە ئەکاونتی Apple ت بێ پارە.",
@@ -522,11 +563,25 @@ struct AppStoreAccountView: View {
         }
     }
 
+    private func selectCountry(_ country: String?) {
+        guard busy == nil else { return }
+        searchCountry = country; showCountries = false
+        results = []; selected = nil; searched = false; accountAvailable = []
+        if !term.trimmingCharacters(in: .whitespaces).isEmpty { search() }
+    }
+
     private func search() {
         let q = term.trimmingCharacters(in: .whitespaces)
         run(t("Searching…", "عم نبحث…", "گەڕان…", "Lêgerîn…")) {
-            let found = try await client.search(term: q, limit: 25)
-            results = found; searched = true
+            let country = effectiveCountry
+            let found = try await client.search(term: q, country: country, limit: 25)
+            var available: Set<Int64> = []
+            if otherStore, let accountCountry = account?.country {
+                available = try await client.availableInStore(found, country: accountCountry)
+            }
+            try Task.checkCancellation()
+            guard country == effectiveCountry else { return }
+            results = found; accountAvailable = available; searched = true
         }
     }
 
