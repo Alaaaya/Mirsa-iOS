@@ -238,14 +238,19 @@ final class StoreAMDSAPAuthenticationRequestTests: XCTestCase {
             "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/buyProduct",
             "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct?guid=1",
             "https://downloaddispatch.itunes.apple.com/r/redownload", "https://downloaddispatch.itunes.apple.com/up/updateProduct",
+            // Pod authenticate redirect: ipatool re-sends the identical request, AMD headers included.
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/",
+            "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
         ] {
             let url = try XCTUnwrap(URL(string: allowed))
             XCTAssertTrue(StoreAMDHeaderPolicy.allows(url), allowed)
             XCTAssertEqual(try StoreAMDHeaderPolicy.headers(amd, for: url).map { $0.0 }, ["X-Apple-AMD", "X-Apple-AMD-M"])
         }
         for denied in [
-            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/",
-            "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticateX",
+            "https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/other",
+            "https://pfoo-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate",
+            "https://p25-buy.itunes.apple.com.example.invalid/WebObjects/MZFinance.woa/wa/authenticate",
             "https://auth.itunes.apple.com/auth/v1/other", "https://auth.itunes.apple.com/auth/v1/native/fastx",
             "http://auth.itunes.apple.com/auth/v1/native", "https://evil.example/auth/v1/native",
             "https://auth.itunes.apple.com:8443/auth/v1/native", "https://init.itunes.apple.com/bag.xml",
@@ -257,15 +262,21 @@ final class StoreAMDSAPAuthenticationRequestTests: XCTestCase {
         XCTAssertThrowsError(try StoreAMDHeaderPolicy.headers(["X-Apple-AMD": "a\r\nb"], for: Self.endpoint))
     }
 
-    func testLegacyRedirectStripsAMDHeaders() async throws {
+    func testPodAuthenticateRedirectKeepsAMDHeadersLikeIpatool() async throws {
         let signer = CountingSigner()
         let request = try await Authenticator.makeRequest(
-            endpoint: XCTUnwrap(URL(string: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate/")),
+            endpoint: XCTUnwrap(URL(string: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate")),
             email: "offline@example.invalid", password: "fixture", code: "", cookies: [], deviceIdentifier: Self.device,
             sapSigner: signer, amdHeaders: ["X-Apple-AMD": "otp", "X-Apple-AMD-M": "machine"])
-        XCTAssertNil(request.headers.first(name: "X-Apple-AMD"))
-        XCTAssertNil(request.headers.first(name: "X-Apple-AMD-M"))
+        XCTAssertEqual(request.headers.first(name: "X-Apple-AMD"), "otp")
+        XCTAssertEqual(request.headers.first(name: "X-Apple-AMD-M"), "machine")
         XCTAssertNotNil(request.headers.first(name: "X-Apple-ActionSignature"))
+        let other = try await Authenticator.makeRequest(
+            endpoint: XCTUnwrap(URL(string: "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/other")),
+            email: "offline@example.invalid", password: "fixture", code: "", cookies: [], deviceIdentifier: Self.device,
+            sapSigner: signer, amdHeaders: ["X-Apple-AMD": "otp", "X-Apple-AMD-M": "machine"])
+        XCTAssertNil(other.headers.first(name: "X-Apple-AMD"))
+        XCTAssertNil(other.headers.first(name: "X-Apple-AMD-M"))
     }
 
     // Clock skew

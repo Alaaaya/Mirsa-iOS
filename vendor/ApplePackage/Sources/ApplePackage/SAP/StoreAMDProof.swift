@@ -143,12 +143,16 @@ enum StoreAMDClock {
     }
 }
 
-/// Requests that may carry the machine OTP headers. Everything else
-/// (including redirects to legacy MZFinance authenticate) gets them stripped.
+/// Requests that may carry the machine OTP headers. Everything else gets them stripped.
+/// The pod authenticate route (`p<N>-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate`)
+/// is included: Apple redirects native sign-in there and ipatool re-sends the identical request,
+/// AMD headers included, when only the destination changes.
 enum StoreAMDHeaderPolicy {
     static let names = ["X-Apple-AMD", "X-Apple-AMD-M"]
     private static let nativeAuthPaths: Set = ["/auth/v1/native", "/auth/v1/native/", "/auth/v1/native/fast", "/auth/v1/native/fast/"]
     private static let storePaths: Set = [
+        "/WebObjects/MZFinance.woa/wa/authenticate",
+        "/WebObjects/MZFinance.woa/wa/authenticate/",
         "/WebObjects/MZFinance.woa/wa/buyProduct",
         "/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct",
         "/WebObjects/MZFinance.woa/wa/redownloadProduct",
@@ -310,12 +314,13 @@ actor StoreAMDProof: StoreAMDProviding {
         loaded = true
     }
 
+    /// RP: drop the provisioned profile only. The machine identity (hardware bytes, and the guid it is
+    /// bound to) stays the same, as in ipatool, which re-provisions after RP with the unchanged hardware ID.
     func reset() throws {
         try checkDevice()
         _ = SecItemDelete(keyQuery as CFDictionary)
         profile = nil
-        // New salt, so Apple provisions a fresh machine identity.
-        _ = try rotateSalt()
+        _ = try hardwareID()
         loaded = true
     }
 
