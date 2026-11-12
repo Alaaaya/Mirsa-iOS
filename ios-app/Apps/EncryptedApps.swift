@@ -82,6 +82,7 @@ struct EncryptedIPAEntry: Codable, Identifiable, Equatable {
     var metadata: EncryptedIPAMetadata?
     var addedAt: Date
     var installedAt: Date?
+    var buildVersion: String? = nil
 }
 
 enum EncryptedIPAError: LocalizedError {
@@ -140,7 +141,8 @@ enum EncryptedIPAInspector {
         let size = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? data.count)
         let entry = EncryptedIPAEntry(id: UUID(), name: display, bundleID: bid, version: version, sizeBytes: size,
                                       hasSinf: sinf, hasMetadata: meta != nil, encryptedBinary: encrypted,
-                                      metadata: meta, addedAt: Date(), installedAt: nil)
+                                      metadata: meta, addedAt: Date(), installedAt: nil,
+                                      buildVersion: info["CFBundleVersion"] as? String)
         return Result(entry: entry, icon: icon(zip: zip, base: base, info: info))
     }
 
@@ -214,6 +216,7 @@ final class EncryptedAppsStore: ObservableObject {
     /// Apple IDs the user signed in to Mirsa with: the sideloader login and the App Store login.
     nonisolated static func signedInAppleIDs() -> [String] {
         var out: [String] = []
+        if let email = MirsaStoreNativeVault.accountEmail() { out.append(email) }
         if let d = Keychain.get("appleid.email"), !out.contains(where: { $0.caseInsensitiveCompare(d) == .orderedSame }) { out.append(d) }
         return out
     }

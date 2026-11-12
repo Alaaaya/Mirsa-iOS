@@ -2,6 +2,24 @@ import XCTest
 @testable import Mirsa
 
 final class LocalOTATests: XCTestCase {
+
+    func testStaticResourcesAreTokenScopedAndPreserveIPA() async throws {
+        let f = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("original-package".utf8).write(to: f)
+        defer { try? FileManager.default.removeItem(at: f) }
+        let s = try LocalOTAServer(file: f)
+        s.setResources(["/\(s.token)/manifest.plist": .init(data: Data("<plist/>".utf8), contentType: "application/xml")])
+        let port = try await s.start(lifetime: 30)
+        defer { s.stop() }
+        let base = "http://127.0.0.1:\(port)"
+        let (data, response) = try await URLSession.shared.data(from: URL(string: base + "/\(s.token)/manifest.plist")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(data, Data("<plist/>".utf8))
+        let (_, rejected) = try await URLSession.shared.data(from: URL(string: base + "/wrong/manifest.plist")!)
+        XCTAssertEqual((rejected as? HTTPURLResponse)?.statusCode, 404)
+        let (ipa, _) = try await URLSession.shared.data(from: URL(string: base + "/\(s.token)/Mirsa.ipa")!)
+        XCTAssertEqual(ipa, try Data(contentsOf: f))
+    }
     func testRouteSelection() {
         XCTAssertEqual(OTARouteSelector.select(fileReadable: true, enabled: true), .local)
         XCTAssertEqual(OTARouteSelector.select(fileReadable: true, enabled: false), .upload(reason: .disabledByUser))

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct EncryptedAppsTab: View {
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
+    @ObservedObject private var localOTA = EncryptedLocalOTA.shared
     @State private var picking = false
     @State private var storeLoginAvailable = false
     @State private var showingAppStore = false
@@ -47,6 +48,7 @@ struct EncryptedAppsTab: View {
                 store.add(entry)
             })
         }
+        .sheet(isPresented: $localOTA.shown) { EncryptedLocalOTAView() }
         .mirsaStatusBarScrim()
         .background(AuroraBackground().ignoresSafeArea())
         .preferredColorScheme(.dark)
@@ -237,7 +239,7 @@ private struct EncryptedEntryCard: View {
                 ProgressView(value: store.progress).tint(MirsaPalette.accentSoft)
             }
             HStack(spacing: MirsaSpacing.xs) {
-                Button { Task { await store.install(entry, vm: vm) } } label: {
+                Button { Task { await EncryptedLocalOTA.shared.prepare(entry) } } label: {
                     Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app")
                         .frame(maxWidth: .infinity)
                 }
@@ -250,6 +252,12 @@ private struct EncryptedEntryCard: View {
                 .disabled(store.installingID == entry.id)
                 .accessibilityLabel(t("Delete", "حذف", "سڕینەوە", "Jê bibe"))
             }
+            Button { Task { await store.install(entry, vm: vm) } } label: {
+                Label(t("Native install (Wi-Fi + LocalDevVPN)", "تثبيت مباشر اختياري (Wi-Fi + LocalDevVPN)",
+                        "دامەزراندنی ڕاستەوخۆ (Wi-Fi + LocalDevVPN)", "Sazkirina rasterast (Wi-Fi + LocalDevVPN)"), systemImage: "network")
+                    .font(MirsaFont.caption).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.mirsaSecondary).disabled(store.busy != nil)
         }
         .padding(MirsaSpacing.card)
         .mirsaCard()

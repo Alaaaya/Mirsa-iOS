@@ -9,6 +9,28 @@ import AsyncHTTPClient
 import Foundation
 
 public enum VersionLookup {
+    /// A version label does not require releaseDate. Some official responses omit it.
+    public static func getVersionDisplayName(account: inout Account, app: Software, versionID: String) async throws -> String {
+        let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
+        defer { _ = client.shutdown() }
+        let dict = try await StoreDownloadEndpoint.fetchProductWithFallback(client: client, account: &account,
+            app: app, deviceIdentifier: Configuration.deviceIdentifier, externalVersionID: versionID)
+        return try displayName(dict, app: app, versionID: versionID)
+    }
+
+    static func displayName(_ dict: [String: Any], app: Software, versionID: String) throws -> String {
+        guard let items = dict["songList"] as? [[String: Any]], items.count == 1,
+              let metadata = items.first?["metadata"] as? [String: Any],
+              metadata["itemId"].map({ String(describing: $0) }) == String(app.id),
+              metadata["softwareVersionBundleId"] as? String == app.bundleID,
+              metadata["softwareVersionExternalIdentifier"].map({ String(describing: $0) }) == versionID,
+              let name = metadata["bundleShortVersionString"] as? String,
+              !name.isEmpty, name.utf8.count <= 128,
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { try ensureFailed(Strings.invalidResponse) }
+        return name
+    }
+
     public static func getVersionMetadata(
         account: inout Account,
         app: Software,
