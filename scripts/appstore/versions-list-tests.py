@@ -30,6 +30,18 @@ canonical = client[:extra_start] + client[extra_end:]
 # The approved one-tap free Get transaction is additive; versions and legacy engines stay exact.
 atomic_start = canonical.index('    /// One explicit free Get action')
 atomic_end = canonical.index('    /// Returns a local encrypted IPA', atomic_start)
+OLD = "        if let diagnostic = error as? StoreProductDiagnostic { return diagnostic }"
+NEW = """        if let diagnostic = error as? StoreProductDiagnostic {
+            if diagnostic.requiresReauthentication {
+                // Explicit owner policy: drop only the rejected Apple store session.
+                // Preserve stable machine identity, saved apps, signing accounts and all files.
+                do { try signOut() } catch { return MirsaStoreError.serviceUnavailable }
+            }
+            return diagnostic
+        }"""
+canonical = canonical.replace(NEW, OLD)
+atomic_start = canonical.index('    /// One explicit free Get action')
+atomic_end = canonical.index('    /// Returns a local encrypted IPA', atomic_start)
 assert canonical[:atomic_start] + canonical[atomic_end:] == original_client
 fetch=(r/'vendor/ApplePackage/Sources/ApplePackage/Commands/StoreDownloadEndpoint+Fetch.swift').read_text()
 assert '"salableAdamId": app.id' in fetch

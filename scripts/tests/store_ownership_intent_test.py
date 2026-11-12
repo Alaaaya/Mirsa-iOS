@@ -70,6 +70,9 @@ class OwnershipIntent(unittest.TestCase):
                 a = current.index('    func acquireFreeAppAndDownload(')
                 b = current.index('    func availableVersions(', a)
                 current = current[:a] + current[b:]
+            OLD = "        if let diagnostic = error as? StoreProductDiagnostic { return diagnostic }"
+            NEW = '        if let diagnostic = error as? StoreProductDiagnostic {\n            if diagnostic.requiresReauthentication {\n                // Explicit owner policy: drop only the rejected Apple store session.\n                // Preserve stable machine identity, saved apps, signing accounts and all files.\n                do { try signOut() } catch { return MirsaStoreError.serviceUnavailable }\n            }\n            return diagnostic\n        }'
+            current = current.replace(NEW, OLD)
             self.assertEqual(current, base, path)
         self.assertIn("client.availableVersions(app)", action("loadVersions"))
         self.assertIn("client.downloadOwnedApp(app, externalVersionID: version)", action("download"))

@@ -367,7 +367,14 @@ actor MirsaStoreClient {
     }
     private func safe(_ error: Error) -> Error {
         if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic }
-        if let diagnostic = error as? StoreProductDiagnostic { return diagnostic }
+        if let diagnostic = error as? StoreProductDiagnostic {
+            if diagnostic.requiresReauthentication {
+                // Explicit owner policy: drop only the rejected Apple store session.
+                // Preserve stable machine identity, saved apps, signing accounts and all files.
+                do { try signOut() } catch { return MirsaStoreError.serviceUnavailable }
+            }
+            return diagnostic
+        }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic }
         if let diagnostic = error as? AuthenticationServiceError { return MirsaStoreAuthDiagnostic(diagnostic) }
         if let error = error as? MirsaStoreError { return error }
