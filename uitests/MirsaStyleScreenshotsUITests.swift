@@ -17,12 +17,12 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
 
     override func setUpWithError() throws { continueAfterFailure = true }
 
-    private func launch(_ page: String, lang: String) -> XCUIApplication {
+    private func launch(_ page: String, lang: String, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", page,
                                "-mirsa.appLanguage", lang,
                                "-AppleLanguages", lang == "en" ? "(en)" : "(ar)",
-                               "-AppleLocale", lang == "en" ? "en_US" : "ar"]
+                               "-AppleLocale", lang == "en" ? "en_US" : "ar"] + extra
         app.launch()
         Thread.sleep(forTimeInterval: 2.0)
         // First launch asks for notification permission; the system alert would hide the page.
@@ -84,6 +84,27 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 if tap(a, ["Translation", "الترجمة"]) { shot(a, "\(lang)_tools-translate") }
                 a.terminate()
             default:
+                app.terminate()
+            }
+        }
+    }
+
+    /// App Store section: each page of its own tab bar, with a DEBUG-only fixture account (no Apple request).
+    func testAppStoreSectionPages() {
+        let pages: [(tab: String, route: String?, name: String)] = [
+            ("search", nil, "search"), ("downloads", nil, "downloads"), ("purchases", nil, "purchases"),
+            ("account", nil, "account"), ("account", "settings", "settings"),
+        ]
+        for lang in ["ar", "en"] {
+            for page in pages {
+                var extra = ["-MirsaStoreFixtureAccount", "-MirsaStoreTab", page.tab]
+                if let route = page.route { extra += ["-MirsaStoreRoute", route] }
+                let app = launch("encrypted", lang: lang, extra: extra)
+                shot(app, "\(lang)_store-\(page.name)")
+                if page.name == "settings" || page.name == "downloads" {
+                    scrollToBottom(app)
+                    shot(app, "\(lang)_store-\(page.name)-bottom")
+                }
                 app.terminate()
             }
         }
