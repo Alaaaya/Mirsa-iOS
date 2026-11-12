@@ -463,7 +463,9 @@ final class SAPAuthenticationRequestTests: XCTestCase {
             }
         }
         let diagnostic = Authenticator.rejection(["customerMessage": "AMD-Action::private"], status: 200, secrets: [])
-        XCTAssertEqual(diagnostic.message, "تسجيل الجهاز ما كمل")
+        // Unknown server message suffixes must not become user-visible text.
+        XCTAssertNil(diagnostic.message)
+        XCTAssertEqual(diagnostic.responseMessage, .unrecognized)
     }
 
     func testRPWithoutProfileDoesNotResetOrConsumeBudget() async throws {
