@@ -106,6 +106,34 @@ actor MirsaStoreClient {
         }
     }
 
+    /// Secret-free reason a download / version list stopped. Apple's answer carries ApplePackage's
+    /// `[dl:... at= ft= mc= msg= http= dlg= items= stop=]`; any other failure gets Mirsa's own stage
+    /// `[dl:<op> stage=lookup|manifest|validate|persist|fetch|versions err=<kind>]`. Never a DSID, token,
+    /// cookie, email, guid, URL or free text.
+    static func downloadTag(_ error: Error, operation: String, stage: String) -> String? {
+        if let failure = error as? StoreDownloadFailure { return failure.tag.text }
+        if error is CancellationError || (error as? MirsaStoreError) == .operationCancelled { return nil }
+        let kind: String
+        switch error {
+        case let store as MirsaStoreError:
+            switch store {
+            case .invalidPackage: kind = "invalid-package"
+            case .untrustedURL: kind = "untrusted-url"
+            case .licenseRequired: kind = "license"
+            case .invalidInput: kind = "input"
+            case .keychain(let status): kind = "keychain-\(max(-99999, min(Int(status), 99999)))"
+            case .deviceRegistration: kind = "amd"
+            default: kind = "store"
+            }
+        case let amd as StoreAMDError: kind = amd.diagnostic.replacingOccurrences(of: ":", with: "-")
+        case ApplePackageError.licenseRequired: kind = "license"
+        default:
+            let ns = error as NSError
+            kind = ns.domain == NSURLErrorDomain ? "url\(max(-9999, min(ns.code, 9999)))" : "other"
+        }
+        return "[dl:\(operation) stage=\(stage) err=\(kind)]"
+    }
+
     /// Appends Apple's secret-free reason tag to the localized error. Cancellation stays untagged.
     static func tagged(_ error: Error, _ tag: String?) -> Error {
         guard let tag, !tag.isEmpty, !(error is MirsaStoreTaggedError),
@@ -144,15 +172,18 @@ actor MirsaStoreClient {
         let run = try begin()
         defer { busy = false }
         var owner = try requiredAccount()
+        var stage = "versions"
         do {
             let versions = try await engine.versions(account: &owner, bundleID: app.bundleID)
             try check(run)
+            stage = "persist"
             try persist(owner)
+            stage = "validate"
             return try versions.map {
                 guard let version = try MirsaStorePolicy.version($0) else { throw MirsaStoreError.invalidPackage }
                 return version
             }
-        } catch { throw safe(error) }
+        } catch { throw downloadFailure(error, operation: "versions", stage: stage) }
     }
 
     func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
@@ -190,21 +221,26 @@ actor MirsaStoreClient {
         var owner = try requiredAccount()
         let version = try MirsaStorePolicy.version(externalVersionID)
         var completed: URL?
+        var stage = "lookup"
         do {
             let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
             try check(run)
             guard fresh.id == app.id else { throw MirsaStoreError.invalidPackage }
+            stage = "manifest"
             let output = try await engine.manifest(account: &owner, app: fresh, version: version)
             try check(run)
+            stage = "validate"
             try validate(output: output, app: app, version: version)
+            stage = "persist"
             try persist(owner)
+            stage = "fetch"
             let url = try await packages.fetch(output: output, bundleID: app.bundleID)
             completed = url
             try check(run)
             return url
         } catch {
             if let completed { MirsaManagedTmp.end(completed.deletingLastPathComponent()) }
-            throw safe(error)
+            throw downloadFailure(error, operation: "download", stage: stage)
         }
     }
 
@@ -294,6 +330,13 @@ actor MirsaStoreClient {
             throw MirsaStoreError.invalidPackage
         }
     }
+    /// Only the generic "Apple could not complete" outcome gets the reason tag; distinct errors stay as they are.
+    private func downloadFailure(_ error: Error, operation: String, stage: String) -> Error {
+        let mapped = safe(error)
+        guard (mapped as? MirsaStoreError) == .serviceUnavailable else { return mapped }
+        return Self.tagged(mapped, Self.downloadTag(error, operation: operation, stage: stage))
+    }
+
     private func safe(_ error: Error) -> Error {
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic }
         if let diagnostic = error as? AuthenticationServiceError { return MirsaStoreAuthDiagnostic(diagnostic) }
