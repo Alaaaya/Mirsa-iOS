@@ -116,6 +116,17 @@ enum MirsaStorePolicy {
 }
 
 /// Safe structured diagnostics from the authentication boundary only.
+/// A localized sign-in error plus Apple's secret-free reason tag, e.g.
+/// `[auth:code ft=5005 msg=MZFinance.BadLogin.Configurator_message http=200 amd=none step=2 stop=classify]`.
+/// The message stays localized (tr, 4 languages); the tag is a stable machine string for owner reports.
+struct MirsaStoreTaggedError: Error, LocalizedError {
+    let base: Error
+    let tag: String
+    var errorDescription: String? {
+        ((base as? LocalizedError)?.errorDescription ?? base.localizedDescription) + " " + tag
+    }
+}
+
 struct MirsaStoreAuthDiagnostic: Error, LocalizedError, Sendable {
     let stage: AuthenticationServiceError.Stage
     let transport: Bool

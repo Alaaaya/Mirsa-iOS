@@ -52,8 +52,10 @@ actor MirsaStoreClient {
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard email.contains("@"), email.utf8.count <= 254, !password.isEmpty,
               password.utf8.count <= 1024 else { throw MirsaStoreError.invalidInput }
+        var started: (any MirsaStoreAuthentication)?
         do {
             let session = try await engine.authentication()
+            started = session
             try check(run)
             let id = UUID()
             challenge = Challenge(session: session, email: email, id: id,
@@ -70,7 +72,8 @@ actor MirsaStoreClient {
             }
             challenge = nil
             try? vault.remove("challenge")
-            throw safe(error)
+            let tag = await started?.failureTag()
+            throw Self.tagged(safe(error), tag)
         }
     }
 
@@ -92,14 +95,22 @@ actor MirsaStoreClient {
         challenge = pending
         do { return try await authenticate(code: MirsaStoreCode.valid(code)!, password: password, run: run) }
         catch {
+            let tag = await pending.session.failureTag()
             // Keep the same session for a corrected code, but never beyond three submissions.
             // A credential rejection ends the challenge at once: a new sign-in must be started by hand.
             if (challenge?.attempts ?? 3) >= 3 || Self.isPasswordRejection(error) {
                 challenge = nil
                 try? vault.remove("challenge")
             }
-            throw safe(error)
+            throw Self.tagged(safe(error), tag)
         }
+    }
+
+    /// Appends Apple's secret-free reason tag to the localized error. Cancellation stays untagged.
+    static func tagged(_ error: Error, _ tag: String?) -> Error {
+        guard let tag, !tag.isEmpty, !(error is MirsaStoreTaggedError),
+              (error as? MirsaStoreError) != .operationCancelled else { return error }
+        return MirsaStoreTaggedError(base: error, tag: tag)
     }
 
     func signOut() throws {

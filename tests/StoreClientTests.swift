@@ -46,6 +46,9 @@ private final class StoreTestAuth: MirsaStoreAuthentication {
     var passwords: [String] = []
     /// Apple's credential rejection (e.g. 5020) on the password step ("") or the code step ("code").
     var passwordRejection: (step: String, code: String)?
+    /// Secret-free reason tag the real Authenticator would report after a failure.
+    var tag: String?
+    func failureTag() async -> String? { tag }
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
         passwords.append(password)
@@ -224,6 +227,46 @@ final class MirsaStoreClientTests: XCTestCase {
         guard case .signedIn = second else { return XCTFail("verification missing") }
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "000000", "123456"])
+    }
+    func testRejectedCodeShowsLocalizedTextPlusSecretFreeTag() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        engine.auth.rejectWrongCode = true
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let tag = "[auth:code ft=none msg=MZFinance.BadLogin.Configurator_message http=200 amd=none step=2 stop=classify]"
+        engine.auth.tag = tag
+        do { _ = try await client.verify(code: "000000", password: "fixture-password"); XCTFail("wrong code accepted") }
+        catch {
+            let tagged = try XCTUnwrap(error as? MirsaStoreTaggedError)
+            XCTAssertEqual(tagged.base as? MirsaStoreError, .codeRejected)
+            XCTAssertEqual(tagged.tag, tag)
+            let text = error.localizedDescription
+            XCTAssertTrue(text.hasPrefix(MirsaStoreError.codeRejected.errorDescription ?? "-"), text)
+            XCTAssertTrue(text.hasSuffix(tag), text)
+            XCTAssertFalse(text.contains("fixture-password"))
+            XCTAssertFalse(text.contains("000000"))
+            XCTAssertFalse(text.contains("owner@example.invalid"))
+        }
+        // The same challenge is still usable: the tag never resends or ends it.
+        engine.auth.tag = nil
+        let second = try await client.verify(code: "123456", password: "fixture-password")
+        guard case .signedIn = second else { return XCTFail("verification missing") }
+        XCTAssertEqual(engine.auth.calls, ["", "000000", "123456"])
+    }
+    func testPasswordRejectionOnSignInCarriesTagAndEndsChallenge() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        engine.auth.passwordRejection = ("", "5020")
+        engine.auth.tag = "[auth:password ft=5020 msg=none http=200 amd=none step=1 stop=classify]"
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        do { _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password"); XCTFail("accepted") }
+        catch {
+            let tagged = try XCTUnwrap(error as? MirsaStoreTaggedError)
+            XCTAssertEqual(tagged.base as? MirsaStoreError, .passwordRejected("5020"))
+            XCTAssertTrue(error.localizedDescription.contains("ft=5020"))
+        }
+        XCTAssertEqual(engine.auth.calls, [""])
+        XCTAssertNil(vault.data["challenge"])
     }
     func testPassword5020OnSignInIsDistinctSentOnceAndLeavesNoChallenge() async throws {
         let engine = StoreTestEngine(), vault = StoreTestVault()

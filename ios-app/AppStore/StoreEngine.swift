@@ -32,6 +32,12 @@ enum MirsaStoreLogin: Sendable, Equatable {
 
 protocol MirsaStoreAuthentication {
     func authenticate(email: String, password: String, code: String) async throws -> Account
+    /// Secret-free reason the last attempt stopped (failureType, key-like message, HTTP, AMD, step, stop), or nil.
+    func failureTag() async -> String?
+}
+
+extension MirsaStoreAuthentication {
+    func failureTag() async -> String? { nil }
 }
 
 private struct AppleStoreAuthentication: MirsaStoreAuthentication {
@@ -41,6 +47,10 @@ private struct AppleStoreAuthentication: MirsaStoreAuthentication {
         catch let error as AuthenticationError { throw error }
         catch let error as StoreAMDError { throw error }
         catch { throw MirsaStoreAuthDiagnostic(.wrapping(error, stage: .authentication)) }
+    }
+    func failureTag() async -> String? {
+        let tag = await authenticator.lastFailureTag
+        return tag?.text
     }
 }
 
