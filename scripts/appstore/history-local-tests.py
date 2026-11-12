@@ -23,7 +23,7 @@ actor Harness {
  let local = Local()
  var allowed = false
  func setAllowed() { allowed = true }
- func authorize() async throws {
+ func historyGate() async throws {
   guard allowed else { throw MirsaStoreServerError(code: "staging_denied") }
  }
 '''
