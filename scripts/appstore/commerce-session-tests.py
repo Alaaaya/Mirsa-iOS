@@ -21,6 +21,11 @@ reauth=ui.split('if diagnostic.requiresReauthentication {',1)[1].split('let expl
 for text in ['Sign out', 'سجّل خروج', 'بچۆ دەرەوە', 'derkeve']:
     assert text in reauth
 assert 'vault.remove' not in reauth and 'signOut()' not in reauth
+safe = client.split('    private func safe(', 1)[1]
+assert 'if diagnostic.requiresReauthentication {' in safe
+assert 'do { try signOut() }' in safe
+logout = client.split('    func signOut()', 1)[1].split('    func acquireFreeApp(', 1)[0]
+assert 'vault.remove("account")' in logout and 'vault.remove("machine")' not in logout
 up=r/'vendor/ApplePackage/Sources/CStoreAMD/Upstream'
 for line in (up/'PROVENANCE.txt').read_text().splitlines():
     if '  ' in line and len(line.split('  ')[0])==64:
