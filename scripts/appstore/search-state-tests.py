@@ -24,6 +24,10 @@ enum MirsaStoreError: Error { case invalidInput }
   data=StoreRecentSearches.adding("https://apps.apple.com/tr/app/name/id123?token=secret",to:data)
   precondition(!String(decoding:data,as:UTF8.self).contains("secret"))
   precondition(StoreRecentSearches.read(data).first=="123")
+  let removed=StoreRecentSearches.removing("123",from:data)
+  precondition(StoreRecentSearches.read(removed)==["PARKINGPRO"])
+  precondition(StoreRecentSearches.removing("absent",from:removed)==removed)
+  precondition(StoreRecentSearches.read(StoreRecentSearches.encode([])).isEmpty)
   for i in 1...30 { data=StoreRecentSearches.adding("app \(i)",to:data) }
   precondition(StoreRecentSearches.read(data).count==12)
   precondition(StoreRecentSearches.read(data).first=="app 30")
@@ -51,7 +55,7 @@ v=(r/'ios-app/Apps/AppStoreAccountView.swift').read_text()
 controls=v[v.index('    private func searchControls('):v.index('    // MARK: result row')]
 assert '.onSubmit { search() }' in controls and '.mirsaPrimary' not in controls
 assert 'store-search-account' in v and 'Button(action: onOpenAccount)' in v
-assert 'recentSearchData = Data()' in controls
+assert 'recentSearchData = Data()' in v
 select=v[v.index('    private func selectCountry('):v.index('    private func search()')]
 assert 'search()' not in select
 with tempfile.TemporaryDirectory(prefix='search-state-') as d:

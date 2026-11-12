@@ -38,6 +38,14 @@ struct AppStoreAccountView: View {
     @State private var term = ""
     @State private var results: [MirsaStoreApp] = []
     @State private var searched = false
+    @State private var discoveryGenre: Int?
+    @State private var chartApps: [StoreChartApp] = []
+    @State private var chartLoadedKey = ""
+    @State private var chartLoading = false
+    @State private var chartFailed = false
+    @State private var chartRetry = 0
+    private var discoveryKey: String { "\(effectiveCountry.lowercased())|\(discoveryGenre ?? 0)|\(chartRetry)" }
+
     @State private var busy: String?
     @State private var work: Task<Void, Never>?
     @State private var notice: String?
@@ -267,6 +275,7 @@ struct AppStoreAccountView: View {
         searchControls(a)
 
 
+        if !searchOnly || !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         if searched && results.isEmpty && busy == nil {
             Text(t("No results in this country.", "ما في نتائج بهالدولة.", "لەم وڵاتەدا هیچ ئەنجامێک نییە.", "Li vî welatî encam tune."))
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
@@ -275,6 +284,7 @@ struct AppStoreAccountView: View {
             Text(t("Results", "النتائج", "ئەنجامەکان", "Encam")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
         }
         ForEach(results) { app in resultRow(app) }
+        }
     }
 
     private var searchHeader: some View {
@@ -303,7 +313,7 @@ struct AppStoreAccountView: View {
                     .disabled(busy != nil).foregroundStyle(.white)
                     .accessibilityIdentifier("store-search-input")
                 if !term.isEmpty {
-                    Button { term = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    Button { term = ""; results = []; searched = false; discoveryGenre = nil } label: { Image(systemName: "xmark.circle.fill") }
                         .foregroundStyle(MirsaPalette.textTertiary)
                         .accessibilityLabel(t("Clear", "مسح", "سڕینەوە", "Paqij bike"))
                 }
@@ -335,31 +345,190 @@ struct AppStoreAccountView: View {
                        "داگرتن لە ستۆری ئەکاونتەکەتە.", "Daxistin ji stoya hesabê te ye."))
                     .font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             }
-            if !StoreRecentSearches.read(recentSearchData).isEmpty {
-                VStack(spacing: 12) {
-                    HStack {
-                        Text(t("Recent searches", "عمليات البحث الأخيرة", "گەڕانەکانی ئەم دواییە", "Lêgerînên dawî"))
-                            .font(MirsaFont.sectionTitle).foregroundStyle(.white)
-                        Spacer()
-                        Button(t("Clear", "مسح", "سڕینەوە", "Paqij bike")) { recentSearchData = Data() }
-                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.accentSoft)
-                            .accessibilityIdentifier("store-clear-recent")
-                    }
-                    ForEach(StoreRecentSearches.read(recentSearchData), id: \.self) { recent in
-                        Button { term = recent; search() } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "magnifyingglass").foregroundStyle(MirsaPalette.textTertiary)
-                                Text(recent).foregroundStyle(MirsaPalette.textSecondary).lineLimit(1)
-                                Spacer(minLength: 0)
-                            }
-                            .font(MirsaFont.body).padding(.horizontal, 16).frame(minHeight: 48)
-                            .background(MirsaPalette.cardRaised.opacity(0.7), in: RoundedRectangle(cornerRadius: MirsaRadius.m))
-                        }.buttonStyle(.plain).disabled(busy != nil)
-                    }
-                }.padding(.top, MirsaSpacing.m)
+            if term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recentSearches
+                if searchOnly { discoveryContent }
             }
+
         }
         .environment(\.layoutDirection, (AppLanguageStore.shared.current == .arabic || AppLanguageStore.shared.current == .sorani) ? .rightToLeft : .leftToRight)
+    }
+
+
+    private var recentSearches: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(t("Recent searches", "عمليات البحث الأخيرة", "گەڕانەکانی ئەم دواییە", "Lêgerînên dawî"))
+                    .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                Spacer()
+                if !StoreRecentSearches.read(recentSearchData).isEmpty {
+                    Button(t("Clear", "مسح", "سڕینەوە", "Paqij bike")) { recentSearchData = Data() }
+                        .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.accentSoft)
+                        .accessibilityIdentifier("store-clear-recent")
+                }
+            }.padding(.bottom, 12)
+            if StoreRecentSearches.read(recentSearchData).isEmpty {
+                Text(t("Your searches will appear here.", "عمليات بحثك بتظهر هون.", "گەڕانەکانت لێرە دەردەکەون.", "Lêgerînên te li vir xuya dibin."))
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+            }
+            ForEach(StoreRecentSearches.read(recentSearchData), id: \.self) { recent in
+                HStack(spacing: 12) {
+                    Button { term = recent; search() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(MirsaPalette.textTertiary)
+                            Text(recent).foregroundStyle(MirsaPalette.textSecondary).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }.frame(minHeight: 48).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(busy != nil)
+                    Button { recentSearchData = StoreRecentSearches.removing(recent, from: recentSearchData) } label: {
+                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MirsaPalette.textTertiary).frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    .accessibilityLabel(t("Remove search \(recent)", "حذف البحث \(recent)", "سڕینەوەی \(recent)", "Lêgerîna \(recent) jê bibe"))
+                    .accessibilityIdentifier("store-remove-recent")
+                }.font(MirsaFont.body)
+                Rectangle().fill(MirsaPalette.stroke).frame(height: 0.5)
+            }
+        }.padding(.top, 12)
+    }
+
+    private var discoveryContent: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(discoveryGenreTitle).font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                        Text(AppStoreCountry.label(effectiveCountry) + " · " + t("Top free · Apple", "الأكثر تنزيلاً مجاناً · Apple", "بێبەرامبەر · Apple", "Belaş · Apple"))
+                            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                    }
+                    Spacer(minLength: 0)
+                    if discoveryGenre != nil {
+                        Button(t("All", "الكل", "هەموو", "Hemû")) { discoveryGenre = nil }
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.accentSoft)
+                    }
+                }
+                if chartLoading || chartLoadedKey != discoveryKey {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(t("Loading Apple's charts…", "عم نحمّل ترتيب Apple…", "بارکردنی لیستی Apple…", "Lîsteya Apple tê barkirin…"))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                    }.frame(maxWidth: .infinity, minHeight: 120)
+                } else if chartFailed {
+                    VStack(spacing: 10) {
+                        Text(t("Apple's chart couldn't load.", "ما قدرنا نحمّل ترتيب Apple.", "لیستی Apple بار نەبوو.", "Lîsteya Apple nehat barkirin."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                        Button(t("Try again", "جرّب مرة تانية", "دووبارە", "Dîsa biceribîne")) { chartRetry += 1 }
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.accentSoft)
+                    }.frame(maxWidth: .infinity, minHeight: 120)
+                } else if chartApps.isEmpty {
+                    Text(t("No chart available for this selection.", "ما في ترتيب متاح لهالاختيار.", "لیست بەردەست نییە.", "Ji bo vê hilbijartinê lîste tune."))
+                        .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 18) {
+                            ForEach(chartApps) { app in
+                                Button { openChartApp(app) } label: {
+                                    VStack(alignment: .leading, spacing: 9) {
+                                        AsyncImage(url: app.artworkURL) { image in
+                                            image.resizable().scaledToFill()
+                                        } placeholder: {
+                                            ZStack { MirsaPalette.cardRaised; Image(systemName: "app").foregroundStyle(MirsaPalette.textTertiary) }
+                                        }
+                                        .frame(width: 92, height: 92)
+                                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.white.opacity(0.1), lineWidth: 0.5))
+                                        Text(app.name).font(MirsaFont.secondary).foregroundStyle(.white)
+                                            .lineLimit(2).multilineTextAlignment(.leading).frame(width: 92, alignment: .leading)
+                                    }.contentShape(Rectangle())
+                                }.buttonStyle(.plain).disabled(busy != nil)
+                                .accessibilityIdentifier("store-chart-app-\(app.id)")
+                            }
+                        }.padding(.vertical, 2)
+                    }
+                }
+            }.accessibilityIdentifier("store-top-free")
+            VStack(alignment: .leading, spacing: 14) {
+                Text(t("Browse by category", "تصفح حسب الفئة", "بەپێی پۆل بگەڕێ", "Li gorî kategoriyê bigere"))
+                    .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    categoryTile(6014, title: t("Games", "الألعاب", "یاری", "Lîstik"), icon: "gamecontroller.fill", colors: [Color(red: 0.42, green: 0.30, blue: 0.88), Color(red: 0.24, green: 0.17, blue: 0.52)])
+                    categoryTile(6007, title: t("Productivity", "الإنتاجية", "بەرهەمهێنان", "Berhemdarî"), icon: "checkmark.seal.fill", colors: [Color(red: 0.13, green: 0.53, blue: 0.94), Color(red: 0.10, green: 0.28, blue: 0.64)])
+                    categoryTile(6017, title: t("Education", "التعليم", "پەروەردە", "Perwerde"), icon: "graduationcap.fill", colors: [Color(red: 0.04, green: 0.66, blue: 0.56), Color(red: 0.03, green: 0.35, blue: 0.37)])
+                    categoryTile(6011, title: t("Music", "الموسيقى", "مۆسیقا", "Muzîk"), icon: "music.note", colors: [Color(red: 0.92, green: 0.27, blue: 0.48), Color(red: 0.59, green: 0.12, blue: 0.36)])
+                    categoryTile(6016, title: t("Entertainment", "الترفيه", "کات بەسەربردن", "Şahî"), icon: "play.tv.fill", colors: [Color(red: 0.95, green: 0.53, blue: 0.19), Color(red: 0.64, green: 0.27, blue: 0.10)])
+                    categoryTile(6013, title: t("Health & Fitness", "الصحة واللياقة", "تەندروستی", "Tenduristî"), icon: "heart.fill", colors: [Color(red: 0.89, green: 0.25, blue: 0.30), Color(red: 0.53, green: 0.13, blue: 0.27)])
+                }
+            }
+        }
+        .padding(.top, 14)
+        .task(id: discoveryKey) { await loadChart() }
+    }
+
+    private var discoveryGenreTitle: String {
+        switch discoveryGenre {
+        case 6014: return t("Games", "الألعاب", "یاری", "Lîstik")
+        case 6007: return t("Productivity", "الإنتاجية", "بەرهەمهێنان", "Berhemdarî")
+        case 6017: return t("Education", "التعليم", "پەروەردە", "Perwerde")
+        case 6011: return t("Music", "الموسيقى", "مۆسیقا", "Muzîk")
+        case 6016: return t("Entertainment", "الترفيه", "کات بەسەربردن", "Şahî")
+        case 6013: return t("Health & Fitness", "الصحة واللياقة", "تەندروستی", "Tenduristî")
+        default: return t("Trending apps", "أكثر التطبيقات رواجاً", "ئەپی بەناوبانگ", "Sepanên populer")
+        }
+    }
+
+    private func categoryTile(_ genre: Int, title: String, icon: String, colors: [Color]) -> some View {
+        Button {
+            chartApps = []; chartLoading = true; discoveryGenre = genre
+        } label: {
+            HStack(alignment: .bottom, spacing: 4) {
+                Text(title).font(.system(size: 16, weight: .bold)).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: icon).font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82)).rotationEffect(.degrees(-10))
+            }
+            .foregroundStyle(.white).padding(16).frame(maxWidth: .infinity, minHeight: 104, alignment: .bottomLeading)
+            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(discoveryGenre == genre ? 0.8 : 0.12), lineWidth: discoveryGenre == genre ? 2 : 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+        }.buttonStyle(.plain).disabled(busy != nil || discoveryGenre == genre)
+        .accessibilityIdentifier("store-genre-\(genre)")
+        .accessibilityAddTraits(discoveryGenre == genre ? .isSelected : [])
+    }
+
+    @MainActor private func loadChart() async {
+        let key = discoveryKey, country = effectiveCountry.lowercased(), genre = discoveryGenre
+        chartApps = []; chartFailed = false; chartLoading = true; chartLoadedKey = key
+        do {
+            let apps = try await StoreDiscovery.load(country: country, genre: genre)
+            try Task.checkCancellation()
+            guard key == discoveryKey else { return }
+            chartApps = apps; chartLoading = false
+        } catch {
+            guard !Task.isCancelled, key == discoveryKey else { return }
+            chartApps = []; chartLoading = false; chartFailed = true
+        }
+    }
+
+    private func openChartApp(_ chart: StoreChartApp) {
+        guard busy == nil else { return }
+        run(t("Loading app…", "عم نحمّل التطبيق…", "بارکردنی ئەپ…", "Sepan tê barkirin…")) {
+            let country = effectiveCountry
+            let found = try await client.search(term: String(chart.id), country: country, limit: 1)
+            guard let app = found.first(where: { $0.id == chart.id }) else {
+                throw StoreDiscovery.Failure.invalidFeed
+            }
+            var available: Set<Int64> = []
+            if otherStore, let accountCountry = account?.country {
+                available = try await client.availableInStore([app], country: accountCountry)
+            }
+            try Task.checkCancellation()
+            guard country == effectiveCountry else { return }
+            accountAvailable.formUnion(available)
+            selected = app
+        }
     }
 
     // MARK: result row, detail page, progress (UI only; same actions as before)
