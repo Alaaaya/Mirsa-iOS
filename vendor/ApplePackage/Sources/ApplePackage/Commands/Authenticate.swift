@@ -26,6 +26,8 @@ public actor Authenticator {
     private var storeFront = ""
     private var pod: String?
     private var authenticating = false
+    private var terminalRejection: AuthenticationServiceError?
+    private var submittedCodes: Set<String> = []
 
     /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
     public init(cookies: [Cookie] = []) async throws {
@@ -60,7 +62,11 @@ public actor Authenticator {
 
     public func authenticate(email: String, password: String, code: String = "") async throws -> Account {
         let code = try Self.normalizedVerificationCode(code)
+        if let terminalRejection { throw terminalRejection }
         guard !authenticating else { try ensureFailed("An authentication request is already in progress.") }
+        if !code.isEmpty {
+            guard submittedCodes.insert(code).inserted else { throw AuthenticationError.verificationCodeRejected }
+        }
         authenticating = true
         defer { authenticating = false }
         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
@@ -109,7 +115,11 @@ public actor Authenticator {
                 endpoint = try Self.approvedEndpoint(Bag.normalizedAuthEndpoint(from: resolved.absoluteString) ?? resolved)
                 redirects += 1
             case .codeRequired: throw AuthenticationError.verificationCodeRequired
-            case let .failure(diagnostic): throw diagnostic
+            case let .failure(diagnostic):
+                // Never retry this session after Apple's repeated-password rejection.
+                // Preserve the diagnostic without asserting that the account is locked.
+                if diagnostic.appleCode == "5020" { terminalRejection = diagnostic }
+                throw diagnostic
             }
         }
         try ensureFailed("Authentication redirect limit exceeded.")

@@ -37,12 +37,14 @@ private func testSoftware(price: Double? = 0, id: Int64 = 42) -> Software {
 }
 private final class StoreTestAuth: MirsaStoreAuthentication {
     var calls: [String] = []
+    var passwords: [String] = []
     var twoFactor = false
     var diagnostic: MirsaStoreAuthDiagnostic?
     var paused: CheckedContinuation<Account, Error>?
     var pause = false
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
+        passwords.append(password)
         if let diagnostic { throw diagnostic }
         if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
         if twoFactor && code != "123456" { throw AuthenticationError.verificationCodeRequired }
@@ -211,6 +213,41 @@ final class MirsaStoreClientTests: XCTestCase {
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "123456"])
     }
+    func testChangedPasswordAndDuplicateCodeNeverReachSession() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        let vault = StoreTestVault()
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        do { _ = try await client.verify(code: "123456", password: "changed-password"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        XCTAssertEqual(engine.auth.calls, [""])
+        do { _ = try await client.verify(code: "999999", password: "fixture-password"); XCTFail() } catch {}
+        do { _ = try await client.verify(code: " 999999 ", password: "fixture-password"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidInput) }
+        XCTAssertEqual(engine.auth.calls, ["", "999999"])
+        _ = try await client.verify(code: "123456", password: "fixture-password")
+        XCTAssertEqual(engine.auth.passwords, Array(repeating: "fixture-password", count: 3))
+        XCTAssertNil(vault.data["challenge"])
+    }
+
+    func test5020TerminatesChallengeWithoutAnotherAppleRequest() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        engine.auth.twoFactor = true
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        engine.auth.diagnostic = MirsaStoreAuthDiagnostic(.init(stage: .authentication,
+            httpStatus: 200, appleCode: "5020", loginPhase: .verificationCode))
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail() }
+        catch let error as MirsaStoreAuthDiagnostic { XCTAssertEqual(error.appleCode, "5020") }
+        engine.auth.diagnostic = nil
+        do { _ = try await client.verify(code: "654321", password: "fixture-password"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .signedOut) }
+        XCTAssertEqual(engine.auth.calls, ["", "123456"])
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertNil(vault.data["account"])
+    }
+
     func testNativeOwnerGateDeniesBeforeAppleAuthentication() async throws {
         let engine = StoreTestEngine(), vault = StoreTestVault()
         let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
@@ -248,8 +285,8 @@ final class MirsaStoreClientTests: XCTestCase {
         engine.auth.twoFactor = true
         let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
         _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
-        for _ in 0..<3 {
-            do { _ = try await client.verify(code: "999999", password: "fixture-password"); XCTFail("wrong code accepted") } catch {}
+        for code in ["999999", "888888", "777777"] {
+            do { _ = try await client.verify(code: code, password: "fixture-password"); XCTFail("wrong code accepted") } catch {}
         }
         do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("expired challenge accepted") } catch {}
         XCTAssertEqual(engine.auth.calls.count, 4)
