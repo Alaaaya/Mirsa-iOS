@@ -18,6 +18,30 @@ extension StoreDownloadEndpoint {
         externalVersionID: String,
         entityType: EntityType = .iPhone,
     ) async throws -> [String: Any] {
+        try await fetchProductTracked(client: client, account: &account, app: app, deviceIdentifier: deviceIdentifier,
+                                      externalVersionID: externalVersionID, entityType: entityType).response
+    }
+
+    /// The tag's endpoint for this case.
+    var tagEndpoint: StoreDownloadTag.Endpoint {
+        switch self {
+        case .volumeStore: .volume
+        case .redownload: .redownload
+        case .update: .update
+        }
+    }
+
+    /// Same chain as `fetchProductWithFallback`, also naming the endpoint whose answer is returned.
+    /// Apple's non-200 / failureType answers stay `StoreProductDiagnostic`; the other chain stops
+    /// (redirect, parse, recovery mismatch, catalog lookup) are `StoreDownloadFailure` with a secret-free tag.
+    static func fetchProductTracked(
+        client: HTTPClient,
+        account: inout Account,
+        app: Software,
+        deviceIdentifier: String,
+        externalVersionID: String,
+        entityType: EntityType = .iPhone,
+    ) async throws -> (response: [String: Any], endpoint: StoreDownloadTag.Endpoint) {
         let dict = try await StoreDownloadEndpoint.volumeStore.fetchProduct(
             client: client,
             account: &account,
@@ -26,14 +50,21 @@ extension StoreDownloadEndpoint {
             externalVersionID: externalVersionID,
         )
 
-        guard requiresRedownload(dict) else { return dict }
+        guard requiresRedownload(dict) else { return (dict, .volume) }
         APLogger.debug("store: volumeStore returned no package, trying redownload")
         var version = externalVersionID
         if version.isEmpty {
             guard let country = Configuration.countryCode(for: account.store) else {
                 try ensureFailed(Strings.unsupportedStoreIdentifier(account.store))
             }
-            version = try await PlatformVersionLookup.lookup(appID: app.id, countryCode: country, entityType: entityType).externalVersionID
+            do {
+                version = try await PlatformVersionLookup.lookup(appID: app.id, countryCode: country, entityType: entityType).externalVersionID
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw StoreDownloadFailure(.init(endpoint: .volume, response: dict, httpStatus: 200, stop: .lookup),
+                                           reason: Strings.missingVersionIdentifiers)
+            }
         }
         let bag = try? await Bag.fetchBag()
         do {
@@ -45,7 +76,7 @@ extension StoreDownloadEndpoint {
                 externalVersionID: version,
                 endpointURL: bag?.redownloadEndpoint,
             )
-            return try validateRecoveryResponse(response, app: app, version: version)
+            return (try validateRecoveryResponse(response, app: app, version: version, endpoint: .redownload), .redownload)
         } catch let error as StoreProductDiagnostic {
             guard error.httpStatus == 500, error.emptyBody, !version.isEmpty,
                   let updateEndpoint = bag?.updateEndpoint
@@ -55,11 +86,12 @@ extension StoreDownloadEndpoint {
                 client: client, account: &account, app: app, deviceIdentifier: deviceIdentifier,
                 externalVersionID: version, endpointURL: updateEndpoint,
             )
-            return try validateRecoveryResponse(response, app: app, version: version)
+            return (try validateRecoveryResponse(response, app: app, version: version, endpoint: .update), .update)
         }
     }
 
-    static func validateRecoveryResponse(_ response: [String: Any], app: Software, version: String) throws -> [String: Any] {
+    static func validateRecoveryResponse(_ response: [String: Any], app: Software, version: String,
+                                         endpoint: StoreDownloadTag.Endpoint = .redownload) throws -> [String: Any] {
         if let failure = response["failureType"], !String(describing: failure).isEmpty {
             return response
         }
@@ -70,7 +102,12 @@ extension StoreDownloadEndpoint {
               metadata["itemId"].map({ String(describing: $0) }) == String(app.id),
               metadata["softwareVersionExternalIdentifier"].map({ String(describing: $0) }) == version,
               metadata["softwareVersionBundleId"] as? String == app.bundleID
-        else { try ensureFailed(Strings.invalidResponse) }
+        else {
+            let stop: StoreDownloadTag.Stop = (response["customerMessage"] as? String ?? "").isEmpty && response["dialog"] == nil
+                && response["action"] == nil ? .recovery : .failure
+            throw StoreDownloadFailure(.init(endpoint: endpoint, response: response, httpStatus: 200, stop: stop),
+                                       reason: Strings.invalidResponse)
+        }
         return response
     }
 
@@ -139,7 +176,8 @@ extension StoreDownloadEndpoint {
                       let newURL = URL(string: location, relativeTo: currentURL)?.absoluteURL,
                       redirectAttempt < maxRedirects
                 else {
-                    try ensureFailed(Strings.failedToRetrieveRedirect)
+                    throw StoreDownloadFailure(.init(endpoint: tagEndpoint, httpStatus: Int(response.status.code), stop: .redirect),
+                                               reason: Strings.failedToRetrieveRedirect)
                 }
                 currentURL = newURL
                 redirectAttempt += 1
@@ -174,12 +212,14 @@ extension StoreDownloadEndpoint {
             throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true)
         }
 
-        let plist = try PropertyListSerialization.propertyList(
+        let plist = try? PropertyListSerialization.propertyList(
             from: data,
             options: [],
             format: nil,
         ) as? [String: Any]
-        guard let dict = plist else { try ensureFailed(Strings.invalidResponse) }
+        guard let dict = plist else {
+            throw StoreDownloadFailure(.init(endpoint: tagEndpoint, httpStatus: 200, stop: .parse), reason: Strings.invalidResponse)
+        }
 
         return dict
     }
@@ -212,8 +252,8 @@ extension StoreDownloadEndpoint {
             ("User-Agent", Configuration.userAgent),
             ("iCloud-DSID", account.directoryServicesIdentifier),
             ("X-Dsid", account.directoryServicesIdentifier),
-            ("X-Apple-Store-Front", try account.commerceStoreFront()),
-            ("X-Token", account.passwordToken),
+            ("X-Apple-Store-Front", try Self.headerValue(account.commerceStoreFront(), "invalid X-Apple-Store-Front value")),
+            ("X-Token", try Self.headerValue(account.passwordToken, Strings.unableToReadPasswordToken)),
         ]
 
         for item in account.cookie.buildCookieHeader(url) {
@@ -230,6 +270,16 @@ extension StoreDownloadEndpoint {
             headers: .init(headers),
             body: .data(data),
         )
+    }
+}
+
+extension StoreDownloadEndpoint {
+    /// X-Token / X-Apple-Store-Front value guard: CR, LF and NUL are refused at byte level (no header injection),
+    /// as are empty or oversized values. The value itself never reaches an error or log.
+    static func headerValue(_ value: String, _ reason: String) throws -> String {
+        try ensure(!value.isEmpty && value.utf8.count <= 8192 && !value.utf8.contains(where: { $0 == 13 || $0 == 10 || $0 == 0 }),
+                   reason)
+        return value
     }
 }
 
