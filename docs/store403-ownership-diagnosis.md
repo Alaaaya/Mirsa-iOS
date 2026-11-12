@@ -39,3 +39,9 @@ python3 scripts/tests/store_ownership_intent_test.py
 python3 scripts/appstore/store-section-state-tests.py
 cd vendor/ApplePackage && swift test --filter StoreOwnershipEvidenceTests
 Existing StoreDownloadRecoveryTests must also run using the caller's established macOS package test setup.
+
+Canonical list follow-up, same diagnostic build
+
+Exact 2f15e57 already included the list, the Older versions fetch button and optional manual field. Latest and rows appeared only after a successful nonempty version response. This is a demonstrated presentation dependency, not proof of a commerce regression: a 403 leaves the pre-load UI visible. Old versionRow appearance and official metadata name lookup are preserved. Manual version input is now removed, Latest is always visible, and opening details attempts the official list once per app/account. A failed load remains explicit with a user-triggered retry, not an endless retry loop. Account change clears cached versions and choices.
+
+Actual row action assigns the external ID from the returned list; the human version string is display-only. Latest removes that choice and uses the unchanged nil/latest engine path. New offline source and executed Swift row-action regression tests cover both apps, selection isolation, and unchanged account-bound request engine. Numeric salableAdamId remains Software.id from the selected item, not any task/thread identifier. Actual failing runtime payload has NOT been observed; owned YouTube/WhatsApp403 remains unresolved. No claim that restoring the presentation fixes Apple's rejection.
