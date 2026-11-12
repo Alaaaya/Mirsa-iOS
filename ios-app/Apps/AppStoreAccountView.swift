@@ -21,9 +21,12 @@ struct AppStoreAccountView: View {
     @State private var showCountries = false
     @State private var countryQuery = ""
     @State private var accountAvailable: Set<Int64> = []
+    private enum Ownership { case owned, licenseRequired }
+    // Session-local positive evidence only. No entry means unknown, not unowned.
+    @State private var ownership: [Int64: Ownership] = [:]
     private var effectiveCountry: String { searchCountry ?? account?.country ?? "tr" }
     private var otherStore: Bool { effectiveCountry.lowercased() != account?.country.lowercased() }
-    private func canDownload(_ app: MirsaStoreApp) -> Bool { !otherStore || accountAvailable.contains(app.id) }
+    private func canDownload(_ app: MirsaStoreApp) -> Bool { (ownership[app.id] != .licenseRequired) && (!otherStore || accountAvailable.contains(app.id)) }
 
     @State private var email = ""
     @State private var password = ""
@@ -116,7 +119,7 @@ struct AppStoreAccountView: View {
             .preferredColorScheme(.dark)
         }
         .onChange(of: busy) { _, value in busySince = value == nil ? nil : (busySince ?? Date()) }
-        .onChange(of: account) { _, value in if value == nil { selected = nil } }
+        .onChange(of: account) { _, value in ownership = [:]; if value == nil { selected = nil } }
         .onDisappear { password = ""; code = ""; work?.cancel(); cancelMetadata() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
@@ -610,7 +613,7 @@ struct AppStoreAccountView: View {
                 HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }.frame(maxWidth: .infinity)
             }
             .buttonStyle(.mirsaPrimary).disabled(busy != nil || !canDownload(app))
-            if !canDownload(app) {
+            if otherStore && !accountAvailable.contains(app.id) {
                 Text(t("Not available in your account storefront. Download is disabled.", "مو متاح بمتجر حسابك، التنزيل موقف.", "لە ستۆری ئەکاونتەکەت بەردەست نییە.", "Li stoya hesabê te ne berdest e.")).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             }
             Text(t("Version: ", "النسخة: ", "وەشان: ", "Guherto: ") + chosenLabel(app))
@@ -621,13 +624,22 @@ struct AppStoreAccountView: View {
                    "Divê hesab xwediyê sepanê be. Wekî xwe li Firoşgeha Apple tê tomarkirin."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Divider().overlay(MirsaPalette.stroke)
-            Button { acquire(app) } label: { Text(t("Get free license", "احصل على ترخيص مجاني", "مۆڵەتی بێبەرامبەر وەربگرە", "Lîsansa belaş bigire")).frame(maxWidth: .infinity) }
-                .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || !canDownload(app))
+            if app.price == 0 && ownership[app.id] != .owned {
+                Button { acquire(app) } label: { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")).frame(maxWidth: .infinity) }
+                    .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || (otherStore && !accountAvailable.contains(app.id)))
+                    .accessibilityIdentifier("store-detail-get")
+            }
+            if ownership[app.id] == .owned {
+                Text(t("Owned by this account. Tap Download separately for the selected version.", "هالحساب بيملك التطبيق. دوس تنزيل لحاله للنسخة المختارة.", "ئەم ئەکاونتە خاوەنی ئەپەکەیە. داگرتن جیا بکە.", "Ev hesab xwedî ye. Ji bo guhertoya hilbijartî Daxe bitikîne."))
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
+            }
+            if app.price == 0 && ownership[app.id] != .owned {
             Text(t("Only if this account never got the app. Adds it to your Apple Account; costs nothing.",
                    "بس إذا حسابك ما حصل عالتطبيق قبل. بيضيفو لحساب Apple تبعك وبلا مصاري.",
                    "تەنها ئەگەر ئەم ئەکاونتە پێشتر ئەپەکەی نەهێنابێت. دەیخاتە ئەکاونتی Apple ت بێ پارە.",
                    "Tenê heke ev hesab berê sepan negirtibe. Li hesabê Apple zêde dike, bêpere."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+            }
         }
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
 
@@ -673,7 +685,7 @@ struct AppStoreAccountView: View {
                 }
             } else {
                 Button { loadVersions(app) } label: { Text(t("Older versions", "نسخ أقدم", "وەشانە کۆنەکان", "Guhertoyên kevn")).frame(maxWidth: .infinity) }
-                    .buttonStyle(.mirsaSecondary).disabled(busy != nil)
+                    .buttonStyle(.mirsaSecondary).disabled(busy != nil || ownership[app.id] == .licenseRequired)
             }
             Text(t("Optional. Lists official Apple external version IDs, not human version names. The account must own the app. Leave empty for latest.",
                    "اختياري. هاي أرقام نسخ Apple الرسمية مو أسماء النسخ. لازم حسابك يملك التطبيق. اتركو فاضي للأحدث.",
@@ -836,16 +848,22 @@ struct AppStoreAccountView: View {
     }
 
     private func acquire(_ app: MirsaStoreApp) {
+        guard app.price == 0, (!otherStore || accountAvailable.contains(app.id)) else { return }
         run(t("Getting free license…", "عم نجيب الترخيص المجاني…", "مۆڵەتی بێبەرامبەر وەردەگیرێت…", "Lîsansa belaş tê girtin…")) {
             try await client.acquireFreeApp(app)
+            ownership[app.id] = .owned
             notice = t("Done. This account can now download \(app.name).", "تم. حسابك صار يقدر ينزّل \(app.name).",
                        "تەواو. ئەکاونتەکەت ئێستا دەتوانێت \(app.name) دابگرێت.", "Temam. Hesabê te niha dikare \(app.name) daxe.")
         }
     }
 
     private func loadVersions(_ app: MirsaStoreApp) {
+        guard ownership[app.id] != .licenseRequired else { selected = app; return }
         run(t("Asking Apple for versions…", "عم نسأل Apple عن النسخ…", "پرسیار لە Apple دەکرێت…", "Ji Apple guhertoyan dipirsin…")) {
-            let ids = try await client.availableVersions(app)
+            let ids: [String]
+            do { ids = try await client.availableVersions(app) }
+            catch { recordOwnershipFailure(error, app: app); throw error }
+            ownership[app.id] = .owned
             versions[app.bundleID] = ids
             metadataLimit[app.bundleID] = 20
             requestMetadata(app, ids: Array(Self.newestFirst(ids).prefix(20)))
@@ -853,10 +871,14 @@ struct AppStoreAccountView: View {
     }
 
     private func download(_ app: MirsaStoreApp) {
+        guard canDownload(app) else { selected = app; return }
         let version = chosen[app.bundleID]
         run(t("Preparing and downloading…", "عم جهّز ونزّل…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
             let generation = operationGeneration
-            let url = try await client.downloadOwnedApp(app, externalVersionID: version)
+            let url: URL
+            do { url = try await client.downloadOwnedApp(app, externalVersionID: version) }
+            catch { recordOwnershipFailure(error, app: app); throw error }
+            ownership[app.id] = .owned
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try Task.checkCancellation()
             guard generation == operationGeneration else { throw CancellationError() }
@@ -912,11 +934,28 @@ struct AppStoreAccountView: View {
         }
     }
 
+    private func recordOwnershipFailure(_ error: Error, app: MirsaStoreApp) {
+        let explicitLicense: Bool
+        if let diagnostic = error as? StoreProductDiagnostic {
+            explicitLicense = diagnostic.requiresLicense
+        } else if let local = error as? MirsaStoreError, case .licenseRequired = local {
+            explicitLicense = true
+        } else { explicitLicense = false }
+        if explicitLicense { ownership[app.id] = .licenseRequired }
+        // Route a failed row action to details so Get is an explicit separate action.
+        selected = app
+    }
+
     private func codeReset() { code = "" }
 
     private func describe(_ error: Error) -> String {
         if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic.localizedDescription }
-        if let diagnostic = error as? StoreProductDiagnostic { return diagnostic.localizedDescription }
+        if let diagnostic = error as? StoreProductDiagnostic {
+            let explanation = diagnostic.requiresLicense
+                ? t("Apple says this account needs the app's license. For a free app, tap Get, then tap Download separately.", "Apple بتقول الحساب بحاجة لترخيص التطبيق. إذا مجاني، دوس احصل عليه وبعدين تنزيل لحاله.", "مۆڵەتی ئەپ پێویستە. وەریبگرە پاشان دایبگرە.", "Lîsans pêwîst e. Bigire, paşê Daxe bitikîne.")
+                : t("Apple rejected this request. This does not prove the app is missing from your purchases. Get is optional for free apps not yet owned; it never starts a download.", "Apple رفضت الطلب. هاد ما بيثبت إنو التطبيق مو بمشترياتك. احصل عليه اختياري للمجاني يلي ما بتملكه، وما بيبدأ تنزيل.", "Apple داواکاری ڕەتکردەوە؛ ئەمە بەڵگەی نەبوونی مۆڵەت نییە.", "Apple daxwaz red kir; ev nebûna lîsansê îspat nake.")
+            return explanation + "\n\n" + diagnostic.localizedDescription
+        }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic.localizedDescription }
         if let server = error as? MirsaStoreServerError {
             switch server {

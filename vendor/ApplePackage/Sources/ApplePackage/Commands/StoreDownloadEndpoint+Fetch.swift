@@ -159,19 +159,19 @@ extension StoreDownloadEndpoint {
         // Preserve the narrow empty-500 recovery path and licence acquisition.
         if finalResponse.status != .ok {
             if finalResponse.status.code == 500 && responseData.isEmpty {
-                throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true)
+                throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true, app: app, externalVersionID: externalVersionID)
             }
-            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, app: app, externalVersionID: externalVersionID)
         }
         if (!failure.isEmpty && failure != Self.retryableFailureType && failure != "9610") ||
             (failure.isEmpty && !message.isEmpty) {
-            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, app: app, externalVersionID: externalVersionID)
         }
 
         guard var body = finalResponse.body,
               let data = body.readData(length: body.readableBytes)
         else {
-            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true)
+            throw StoreProductDiagnostic(endpoint: self, status: finalResponse.status.code, fields: responseFields, account: account, emptyBody: true, app: app, externalVersionID: externalVersionID)
         }
 
         let plist = try PropertyListSerialization.propertyList(
@@ -179,8 +179,13 @@ extension StoreDownloadEndpoint {
             options: [],
             format: nil,
         ) as? [String: Any]
-        guard let dict = plist else { try ensureFailed(Strings.invalidResponse) }
+        guard var dict = plist else { try ensureFailed(Strings.invalidResponse) }
 
+        // Apple may encode the same failure code as an integer or string.
+        // Downstream Download/VersionFinder use the documented string codes.
+        if let code = dict["failureType"] as? NSNumber {
+            dict["failureType"] = code.stringValue
+        }
         return dict
     }
 
@@ -240,13 +245,24 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
     let emptyBody: Bool
     public let failureType: String?
     public let customerMessage: String?
+    public let requestedAppID: Int?
+    public let requestedBundleID: String?
+    public let requestedVersionID: String?
+    public let accountStore: String?
 
-    init(endpoint: StoreDownloadEndpoint, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false) {
+    init(endpoint: StoreDownloadEndpoint, status: UInt, fields: [String: Any], account: Account, emptyBody: Bool = false, app: Software? = nil, externalVersionID: String = "") {
         switch endpoint {
         case .volumeStore: stage = "volumeStore"
         case .redownload: stage = "redownload"
         case .update: stage = "updateProduct"
         }
+        requestedAppID = app.map { Int($0.id) }
+        requestedBundleID = (app?.bundleID).flatMap {
+            $0.count <= 255 && $0.range(of: "^[A-Za-z0-9.-]+$", options: .regularExpression) != nil ? $0 : nil
+        }
+        requestedVersionID = externalVersionID.isEmpty ? "latest" :
+            (externalVersionID.range(of: "^[0-9]{1,20}$", options: .regularExpression) != nil ? externalVersionID : nil)
+        accountStore = account.store.range(of: "^[0-9]{6}$", options: .regularExpression) != nil ? account.store : nil
         httpStatus = status
         self.emptyBody = emptyBody
         let secrets = [account.email, account.password, account.appleId, account.passwordToken,
@@ -257,8 +273,15 @@ public struct StoreProductDiagnostic: Error, LocalizedError, Sendable {
         customerMessage = AuthenticationServiceError.redact(fields["customerMessage"] as? String, secrets: secrets)
     }
 
+    /// Only Apple's explicit licence code is ownership evidence, never HTTP 403 alone.
+    public var requiresLicense: Bool { failureType == "9610" }
+
     public var errorDescription: String? {
         var parts = ["Apple [" + stage + "]", "HTTP " + String(httpStatus), "failureType " + (failureType ?? "missing")]
+        if let requestedAppID { parts.append("appID " + String(requestedAppID)) }
+        if let requestedBundleID { parts.append("bundle " + requestedBundleID) }
+        if let accountStore { parts.append("accountStore " + accountStore) }
+        if let requestedVersionID { parts.append("versionID " + requestedVersionID) }
         if let customerMessage { parts.append("customerMessage " + customerMessage) }
         return parts.joined(separator: " · ")
     }
