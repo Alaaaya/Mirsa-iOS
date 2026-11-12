@@ -124,7 +124,7 @@ struct EncryptedAppsTab: View {
             AppStoreAccountView(onDownloaded: { url in
                 let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
                 store.add(entry)
-            })
+            }, searchOnly: true)
             .id(storeViewID)
         } else {
             ScrollView {

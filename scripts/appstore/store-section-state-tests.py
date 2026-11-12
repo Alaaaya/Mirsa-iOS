@@ -35,3 +35,17 @@ assert 'X-Apple-ActionSignature' in h
 assert 'adsr' in h and 'asdp' in h
 assert 'EncryptedIPAEntry' not in m[m.index('struct AppStorePurchasesPage'):]
 print('PASS history uses signed Apple DAAP, blocks credential redirects, replaces local-file fake purchases')
+
+# Search presentation hides account-only content without replacing the session/login flow.
+tabs=(r/'ios-app/Apps/EncryptedAppsTab.swift').read_text()
+search=tabs[tabs.index('    @ViewBuilder private var searchPage:'):tabs.index('    private var filteredEntries:')]
+sheet=tabs[tabs.index('.sheet(isPresented: $showingAppStore'):tabs.index('.mirsaStatusBarScrim()')]
+assert 'searchOnly: true' in search and 'searchOnly: true' not in sheet
+assert 'if !searchOnly {\n                        Text(t("My App Store"' in v
+signed=v[v.index('    @ViewBuilder private func signedInCards('):v.index('    // MARK: result row')]
+assert signed.index('if !searchOnly {') < signed.index('confirmSignOut = true') < signed.index('Text(t("Search"')
+assert '}\n\n        VStack(alignment: .leading' in signed
+assert 'else if searchOnly {' in v and 'else if needsCode { verificationCard } else { signInCard }' in v
+assert 'private var infoCard:' in v and 'private var signInCard:' in v
+assert 'store-account-profile' in m and 'store-sign-out' in m
+print('PASS Search hides header, explainer, profile/logout and login form; Account and its login sheet retain account controls and shared session')
