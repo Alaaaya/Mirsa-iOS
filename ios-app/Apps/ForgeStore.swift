@@ -339,7 +339,7 @@ extension ForgeStore {
         guard let p = project(id), let local, let expectedVersion else { throw ForgeClient.Failure.message("No version") }
         _ = try await ForgeClient.json(try Self.updatePayload(project: p, local: local, entry: entry, changelog: changelog, expectedVersion: expectedVersion))
     }
-    /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
+    /// Temporarily swaps in the tap inspector (two-finger double-tap in the app to copy a capture), injects, then restores the user's version.
     func injectInspector(_ id: UUID) async throws -> URL {
         guard let p = project(id) else { throw ForgeClient.Failure.message("No project") }
         let prev = p.current; let pv = p.currentVersion
