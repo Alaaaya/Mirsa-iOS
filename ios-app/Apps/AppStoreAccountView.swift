@@ -922,9 +922,11 @@ struct AppStoreAccountView: View {
                         Text(String(format: "%d:%02d", s / 60, s % 60)).font(MirsaFont.caption.monospacedDigit()).foregroundStyle(MirsaPalette.textTertiary)
                     }
                 }
-                Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal")) { work?.cancel() }
+                StorePauseButton()
+                Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal")) { StoreTransferControl.shared.discardCurrent(); work?.cancel() }
                     .buttonStyle(.mirsaSecondary)
             }
+            StorePauseStatus()
             if let transfer {
                 if let fraction = transfer.fraction {
                     ProgressView(value: fraction, total: 1).tint(StoreLuxe.cyan)
