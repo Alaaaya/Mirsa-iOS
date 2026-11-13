@@ -36,11 +36,11 @@ tests='''
             let h = Harness(); h.client.mode = mode
             h.requestMetadata(app, ids: (1...20).map(String.init))
             await h.metadataTasks[app.bundleID]?.value
-            precondition(h.client.calls == 5)
+            precondition(h.client.calls == 4)
             precondition(h.metadata[app.bundleID]?.count == 20)
             precondition(h.metadata[app.bundleID]?.values.allSatisfy { $0.status == (mode == "success" ? "ready" : "unavailable") } == true)
             h.requestMetadata(app, ids: (1...20).map(String.init))
-            precondition(h.client.calls == 5, "known names/errors should not be repeatedly requested")
+            precondition(h.client.calls == 4, "known names/errors should not be repeatedly requested")
         }
         let h = Harness(); h.client.mode = "cancel"
         h.requestMetadata(app, ids: ["885245059", "883790661"])
