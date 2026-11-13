@@ -10,6 +10,7 @@ struct StoreDownloadProgress: Sendable {
         var received: Int64 = 0
         var expected: Int64 = 0
         var time: Double = ProcessInfo.processInfo.systemUptime
+        var restarted = false
     }
     @TaskLocal static var report: (@Sendable (Event) -> Void)?
     var phase = Phase.preparing
@@ -25,6 +26,7 @@ struct StoreDownloadProgress: Sendable {
         phase = event.phase
         if phase == .failed { terminal = true; fraction = nil; speed = 0; return }
         if phase == .downloading {
+            if event.restarted { received = 0; lastBytes = 0; lastTime = nil; speed = 0; fraction = 0 }
             let bytes = max(received, max(0, event.received))
             if let lastTime, event.time > lastTime {
                 speed = max(0, Double(bytes - lastBytes) / (event.time - lastTime))
@@ -60,17 +62,14 @@ protocol MirsaStorePackages {
 /// A private, transient download. No Authorization/Cookie headers are forwarded to the CDN.
 final class AppleStorePackages: MirsaStorePackages {
     private let lock = NSLock()
-    private var download: StoreCDNDownload?
+    private var activeRun: StoreTransferRun?
     func cancel() {
-        lock.lock()
-        let download = self.download
-        lock.unlock()
-        download?.cancel()
+        // Client lifecycle cancellation is terminal, unlike leaving a screen.
+        lock.lock(); let run = activeRun; lock.unlock()
+        run?.requestDiscard()
     }
-    private func register(_ download: StoreCDNDownload?) {
-        lock.lock()
-        self.download = download
-        lock.unlock()
+    private func setRun(_ run: StoreTransferRun?) {
+        lock.lock(); activeRun = run; lock.unlock()
     }
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
@@ -84,10 +83,26 @@ final class AppleStorePackages: MirsaStorePackages {
         do {
             let report = StoreDownloadProgress.report
             report?(.init(phase: .downloading))
-            let download = StoreCDNDownload(report: report)
-            register(download)
-            defer { register(nil) }
-            try await download.download(url, to: destination)
+            let account = StoreResumeContext.account
+            let folder = account.map { StoreResumeStore.folder(account: $0, bundleID: bundleID, version: output.bundleVersion) }
+                ?? directory.appendingPathComponent("partial")
+            let control = StoreTransferControl.shared
+            let run = control.begin()
+            setRun(run)
+            defer { setRun(nil); control.end(run) }
+            let download = StoreResumableDownload(folder: folder, validate: { try MirsaStorePolicy.downloadURL($0) },
+                phase: { control.setPhase(run, $0) },
+                report: { r, e, restarted in
+                    control.progress(run, r, e)
+                    report?(.init(phase: .downloading, received: r, expected: e, restarted: restarted))
+                })
+            do { try await download.download(url, to: destination, run: run) }
+            catch {
+                if run.discardRequested || account == nil || (!(error is CancellationError) && !(error is URLError)) {
+                    StoreResumeStore.clear(folder)
+                }
+                throw error
+            }
             try Task.checkCancellation()
             report?(.init(phase: .packaging))
             try Self.assemble(destination, output: output, bundleID: bundleID)
@@ -191,108 +206,5 @@ final class AppleStorePackages: MirsaStorePackages {
             }
             return data.subdata(in: start..<(start + size))
         }
-    }
-}
-
-private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Error>?
-    private var destination: URL?
-    private var failure: Error?
-    private var redirects = 0
-    private var moved = false
-    private var task: URLSessionDownloadTask?
-    private var cancelled = false
-    private let report: (@Sendable (StoreDownloadProgress.Event) -> Void)?
-    init(report: (@Sendable (StoreDownloadProgress.Event) -> Void)? = nil) {
-        self.report = report
-        super.init()
-    }
-    private let maxBytes: Int64 = 4 * 1024 * 1024 * 1024
-
-    func cancel() {
-        lock.lock()
-        cancelled = true
-        let task = self.task
-        lock.unlock()
-        task?.cancel()
-    }
-
-    func download(_ url: URL, to destination: URL) async throws {
-        try MirsaStorePolicy.downloadURL(url)
-        let config = URLSessionConfiguration.ephemeral
-        config.httpShouldSetCookies = false
-        config.httpCookieStorage = nil
-        config.urlCredentialStorage = nil
-        config.urlCache = nil
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 1800
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-        try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                lock.lock()
-                self.destination = destination
-                self.continuation = continuation
-                let task = session.downloadTask(with: url)
-                self.task = task
-                let cancel = cancelled
-                lock.unlock()
-                if cancel { task.cancel() }
-                task.resume()
-            }
-        }, onCancel: {
-            self.cancel()
-        })
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask,
-                    willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        do {
-            guard let url = request.url, redirects < 5 else { throw MirsaStoreError.untrustedURL }
-            try MirsaStorePolicy.downloadURL(url)
-            redirects += 1
-            // Reconstruct to avoid forwarding server-provided credentials or cookies.
-            completionHandler(URLRequest(url: url))
-        } catch { failure = error; completionHandler(nil); task.cancel() }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
-        lock.lock(); let live = continuation != nil && !cancelled; lock.unlock()
-        if live { report?(.init(phase: .downloading, received: totalBytesWritten, expected: totalBytesExpectedToWrite)) }
-        if totalBytesWritten > maxBytes || totalBytesExpectedToWrite > maxBytes {
-            failure = MirsaStoreError.invalidPackage
-            downloadTask.cancel()
-        }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
-        do {
-            guard let response = downloadTask.response as? HTTPURLResponse, response.statusCode == 200,
-                  let url = response.url, let destination,
-                  let size = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                  size > 0, Int64(size) <= maxBytes else { throw MirsaStoreError.invalidPackage }
-            try MirsaStorePolicy.downloadURL(url)
-            try FileManager.default.moveItem(at: location, to: destination)
-            moved = true
-            lock.lock(); let live = continuation != nil && !cancelled; lock.unlock()
-            if live { report?(.init(phase: .downloading, received: Int64(size),
-                                   expected: response.expectedContentLength)) }
-        } catch { failure = error }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        lock.lock()
-        let continuation = self.continuation
-        self.continuation = nil
-        self.task = nil
-        lock.unlock()
-        if let error = failure ?? error { continuation?.resume(throwing: error) }
-        else if !moved { continuation?.resume(throwing: MirsaStoreError.invalidPackage) }
-        else { continuation?.resume() }
     }
 }

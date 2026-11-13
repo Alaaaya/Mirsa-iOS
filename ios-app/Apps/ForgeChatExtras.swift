@@ -4,12 +4,12 @@ import UIKit
 // Mirsa 2.2 chat extras: swipe-to-reply with quote, iMessage-style long-press menu with reactions,
 // edit / delete for the user's own messages, and unread badges. Aurora look, LTR, 4 languages.
 
-/// Server-side parts are proposals for Kat and stay OFF until Kat confirms the contract.
+/// Integrated contracts stay OFF until authenticated end-to-end acceptance is recorded.
 /// Off: quotes and reactions live on this device only; Edit/Delete are hidden (they need the server).
 enum ForgeChatFeatures {
-    /// chat-send `replyToMessageID` + chat-react. PROPOSED, not confirmed by Kat.
+    /// chat-send `replyToMessageID` + chat-react. Acceptance pending.
     static let serverReplyAndReactions = false
-    /// chat-edit + chat-delete-message. PROPOSED, not confirmed by Kat.
+    /// chat-edit + chat-delete-message. Acceptance pending.
     static let serverEditDelete = false
 }
 
@@ -113,39 +113,72 @@ extension ForgeChatStore {
         switch status { case 200: return .ok; case 409: return .conflict; case 404: return .gone; case 422: return .invalid; default: return .unavailable }
     }
 
-    /// PROPOSED chat-edit {threadID, messageID, text}. Only reachable when ForgeChatFeatures.serverEditDelete.
+    /// Do not fabricate a successful edit from submitted text: the server may still be reprocessing it.
     func editMessage(threadID: UUID, messageID: UUID, text: String) async -> MessageActionResult {
+        guard ForgeChatFeatures.serverEditDelete || Self.fixture else { return .unavailable }
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { return .invalid }
         if Self.fixture { replaceText(threadID: threadID, messageID: messageID, text: t); return .ok }
-        let (status, _) = await precise(["action": "chat-edit", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "text": t])
-        if status == 200 { replaceText(threadID: threadID, messageID: messageID, text: t) }
-        return Self.map(status)
+        let (status, data) = await precise(["action": "chat-edit", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "text": t])
+        if status == 409 { _ = await reconcileMessageMutation(threadID); return .conflict }
+        guard status == 200 else { return Self.map(status) }
+        guard let data, let ack = try? JSONDecoder().decode(ForgeChatEditAck.self, from: data),
+              ack.ok, ack.edited, ack.messageID == messageID else { return .unavailable }
+        guard await reconcileMessageMutation(threadID),
+              messages[threadID]?.contains(where: { $0.id == messageID && $0.text == t && $0.editedAt != nil }) == true else { return .unavailable }
+        return .ok
     }
     private func replaceText(threadID: UUID, messageID: UUID, text: String) {
         guard var list = messages[threadID], let i = list.firstIndex(where: { $0.id == messageID }) else { return }
         let m = list[i]
-        list[i] = ForgeChatMessage(id: m.id, threadID: m.threadID, role: m.role, text: text, createdAt: m.createdAt, hasImage: m.hasImage, result: m.result, attachments: m.attachments)
+        var replacement = ForgeChatMessage(id: m.id, threadID: m.threadID, role: m.role, text: text, createdAt: m.createdAt, hasImage: m.hasImage, result: m.result, attachments: m.attachments)
+        replacement.replyToMessageID = m.replyToMessageID
+        replacement.replyQuoteText = m.replyQuoteText; replacement.replyQuoteRole = m.replyQuoteRole
+        replacement.reaction = m.reaction; replacement.editedAt = m.editedAt
+        list[i] = replacement
         var all = messages; all[threadID] = list; messages = all
     }
 
-    /// PROPOSED chat-delete-message {threadID, messageID}. Local copy goes only after the server confirms.
+    /// Keep the ordinary partial-read merge, but take every returned field from the server.
+    private func reconcileMessageMutation(_ threadID: UUID) async -> Bool {
+        let (status, data) = await precise(["action": "chat-read", "threadID": threadID.uuidString.lowercased()])
+        guard status == 200, let data,
+              let snapshot = try? JSONDecoder().decode(ForgeChatReadSnapshot.self, from: data),
+              snapshot.messages.allSatisfy({ $0.threadID == threadID }) else { return false }
+        var all = messages
+        all[threadID] = ForgeChatTimeline.mergeConfirmed(previous: messages[threadID] ?? [], incoming: snapshot.messages)
+        messages = all
+        await refreshThreads()
+        return true
+    }
+
+    /// A local row goes only after confirmed deletion; conflicts reload canonical state.
     func deleteMessage(threadID: UUID, messageID: UUID) async -> MessageActionResult {
+        guard ForgeChatFeatures.serverEditDelete || Self.fixture else { return .unavailable }
         var status = 200
         if !Self.fixture {
             status = await precise(["action": "chat-delete-message", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased()]).0
         }
+        if status == 409 { _ = await reconcileMessageMutation(threadID); return .conflict }
         if status == 200 || status == 404 {
             var all = messages; all[threadID]?.removeAll { $0.id == messageID }; messages = all
             ForgeChatLocal.shared.forget(messageID)
+            if !Self.fixture { _ = await reconcileMessageMutation(threadID) }
         }
         return status == 404 ? .ok : Self.map(status)
     }
 
-    /// PROPOSED chat-react {threadID, messageID, reaction|null}. Fire and forget; the local reaction is the source on this device.
-    func sendReaction(threadID: UUID, messageID: UUID, reaction: String?) {
-        guard ForgeChatFeatures.serverReplyAndReactions, !Self.fixture else { return }
-        Task { _ = await precise(["action": "chat-react", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "reaction": reaction ?? NSNull()]) }
+    /// No optimistic local reaction when the server feature is enabled.
+    func sendReaction(threadID: UUID, messageID: UUID, reaction: String?) async -> MessageActionResult {
+        guard ForgeChatFeatures.serverReplyAndReactions, ForgeChatMutationPolicy.accepts(reaction), !Self.fixture else { return .unavailable }
+        let value: Any = reaction.map { $0 as Any } ?? NSNull()
+        let (status, _) = await precise(["action": "chat-react", "threadID": threadID.uuidString.lowercased(), "messageID": messageID.uuidString.lowercased(), "reaction": value])
+        if status == 409 { _ = await reconcileMessageMutation(threadID); return .conflict }
+        guard status == 200 else { return Self.map(status) }
+        guard await reconcileMessageMutation(threadID),
+              let canonical = messages[threadID]?.first(where: { $0.id == messageID }),
+              canonical.reaction == reaction else { return .unavailable }
+        return .ok
     }
 }
 
