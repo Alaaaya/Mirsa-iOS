@@ -23,6 +23,8 @@ assert 'let version = chosen[app.bundleID]' in d
 assert 'client.downloadOwnedApp(app, externalVersionID: version)' in d
 assert 'app.version' not in d and 'versionName' not in d and 'metadata[' not in d
 client=(r/'ios-app/AppStore/StoreClient.swift').read_text()
+from commerce_lock_scope import legacy_reservations
+client=legacy_reservations(client)
 original_client = subprocess.check_output(['git','show','2f15e57:ios-app/AppStore/StoreClient.swift'],cwd=r,text=True)
 extra_start = client.index('    /// Public fresh metadata')
 extra_end = client.index('    func availableVersions(', extra_start)
