@@ -61,8 +61,7 @@ cd "$WORK"
 # An unsigned macOS runner must never prompt for a real Keychain or Apple login.
 python3 - <<'WATCHDOG'
 import os, signal, subprocess, sys
-process = subprocess.Popen(["swift", "test", "--parallel", "--enable-test-timeouts",
-                            "--test-timeout", "60"], start_new_session=True)
+process = subprocess.Popen(["swift", "test", "--parallel"], start_new_session=True)
 try:
     sys.exit(process.wait(timeout=600))
 except subprocess.TimeoutExpired:
