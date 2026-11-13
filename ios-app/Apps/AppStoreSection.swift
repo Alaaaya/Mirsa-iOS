@@ -16,10 +16,10 @@ enum AppStoreSectionTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .search: return tr("Search", "بحث", ckb: "گەڕان", kmr: "Lêgerîn")
-        case .downloads: return tr("Downloads", "التنزيلات", ckb: "داگرتنەکان", kmr: "Daxistin")
-        case .purchases: return tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")
-        case .account: return tr("Account", "الحساب", ckb: "ئەکاونت", kmr: "Hesab")
+        case .search: return storeText("Search", "بحث", de: "Suche", ckb: "گەڕان", kmr: "Lêgerîn")
+        case .downloads: return storeText("Downloads", "التنزيلات", de: "Downloads", ckb: "داگرتنەکان", kmr: "Daxistin")
+        case .purchases: return storeText("Purchases", "المشتريات", de: "Käufe", ckb: "کڕینەکان", kmr: "Kirîn")
+        case .account: return storeText("Account", "الحساب", de: "Konto", ckb: "ئەکاونت", kmr: "Hesab")
         }
     }
 
@@ -162,21 +162,27 @@ enum AppStoreCountry {
 
 // MARK: - Bottom tab bar
 
+/// Floating glass bar with an animated indicator that glides between the sections.
 struct AppStoreSectionBar: View {
     @Binding var selection: AppStoreSectionTab
     @Namespace private var ns
+    @State private var bounce = 0
 
     var body: some View {
-        HStack(spacing: MirsaSpacing.xxs) {
+        HStack(spacing: 2) {
             ForEach(AppStoreSectionTab.allCases) { tab in
                 let on = selection == tab
                 Button {
-                    withAnimation(MirsaMotion.select) { selection = tab }
+                    guard selection != tab else { return }
+                    StoreHaptics.select()
+                    bounce += 1
+                    withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) { selection = tab }
                 } label: {
-                    VStack(spacing: 2) {
+                    VStack(spacing: 3) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 17, weight: on ? .semibold : .regular))
-                            .frame(height: 20)
+                            .font(.system(size: 18, weight: on ? .bold : .regular))
+                            .symbolEffect(.bounce, value: on ? bounce : 0)
+                            .frame(height: 21)
                         Text(tab.title).font(MirsaFont.tabLabel).lineLimit(1)
                             .minimumScaleFactor(0.7).allowsTightening(true)
                     }
@@ -184,9 +190,13 @@ struct AppStoreSectionBar: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background {
                         if on {
-                            Capsule().fill(Color.white.opacity(0.14))
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                                .matchedGeometryEffect(id: "store-tab", in: ns)
+                            ZStack {
+                                Capsule().fill(StoreLuxe.identity).opacity(0.85)
+                                Capsule().fill(LinearGradient(colors: [Color.white.opacity(0.30), .clear], startPoint: .top, endPoint: .center))
+                                Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.8)
+                            }
+                            .shadow(color: StoreLuxe.accent.opacity(0.55), radius: 12, y: 4)
+                            .matchedGeometryEffect(id: "store-tab", in: ns)
                         }
                     }
                     .contentShape(Capsule())
@@ -196,9 +206,9 @@ struct AppStoreSectionBar: View {
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(5)
-        .frame(height: 56)
-        .modifier(MirsaSolidCard(shape: Capsule(), tint: nil, elevation: 1))
+        .padding(6)
+        .frame(height: 62)
+        .storeGlassCapsule(elevation: 1.2)
         .padding(.horizontal, MirsaSpacing.page + MirsaSpacing.xs)
         .padding(.top, MirsaSpacing.xxs)
         .padding(.bottom, MirsaSpacing.xs)
@@ -214,7 +224,7 @@ struct AppStoreSearchField: View {
 
     var body: some View {
         HStack(spacing: MirsaSpacing.xs) {
-            Image(systemName: "magnifyingglass").foregroundStyle(MirsaPalette.textTertiary)
+            Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .semibold)).foregroundStyle(StoreLuxe.accentSoft)
             TextField(placeholder, text: $text)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .foregroundStyle(.white)
@@ -226,10 +236,9 @@ struct AppStoreSearchField: View {
             }
         }
         .font(MirsaFont.body)
-        .padding(.horizontal, 14)
-        .frame(height: 44)
-        .background(MirsaPalette.cardRaised.opacity(0.85), in: Capsule())
-        .overlay(Capsule().strokeBorder(MirsaPalette.stroke, lineWidth: 1))
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .storeGlassCapsule(elevation: 0.5)
     }
 }
 
@@ -242,12 +251,12 @@ struct AppStoreGroup<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MirsaSpacing.xs) {
             if let title {
-                Text(title).font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                StoreSectionTitle(title: title)
                     .padding(.horizontal, MirsaSpacing.xxs)
             }
             VStack(spacing: 0) { content() }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .mirsaCard()
+                .storeGlass(radius: 22, sheen: false, elevation: 0.6)
             if let footer {
                 Text(footer).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -258,9 +267,9 @@ struct AppStoreGroup<Content: View>: View {
 }
 
 struct AppStoreRowDivider: View {
-    var inset: CGFloat = 52
+    var inset: CGFloat = 58
     var body: some View {
-        Rectangle().fill(MirsaPalette.stroke).frame(height: 1).padding(.leading, inset)
+        Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.7).padding(.leading, inset)
     }
 }
 
@@ -274,9 +283,11 @@ struct AppStoreRow<Trailing: View>: View {
     var body: some View {
         HStack(spacing: MirsaSpacing.s) {
             Image(systemName: icon)
-                .font(.system(size: MirsaIconSize.m, weight: .semibold))
-                .foregroundStyle(tint == .white ? MirsaPalette.accentSoft : tint)
-                .frame(width: 28)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint == .white ? Color.white : tint)
+                .frame(width: 30, height: 30)
+                .background((tint == .white ? StoreLuxe.identitySoft : LinearGradient(colors: [tint.opacity(0.22)], startPoint: .top, endPoint: .bottom)),
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(MirsaFont.body).foregroundStyle(tint).lineLimit(2)
                 if let subtitle {
@@ -339,17 +350,24 @@ struct AppStoreAccountPage: View {
     let onAddAccount: () -> Void
     let onOpen: (AppStoreSectionTab) -> Void
     let onSignedOut: () -> Void
+    /// Same refresh the library tools sheet runs after an account switch.
+    var onAccountSwitched: () -> Void = {}
+    /// Opens the existing library tools sheet (updates, wishlist, pins).
+    var onOpenTools: (() -> Void)? = nil
 
+    @ObservedObject private var wishes = StoreLibraryModel.shared
     @State private var path: [AppStoreAccountRoute] = AppStoreAccountRoute.initialPath
     @State private var confirmSignOut = false
     @State private var signingOut = false
     @State private var error: String?
+    @State private var showSwitcher = false
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: MirsaSpacing.l) {
-                    MirsaPageHeader(title: tr("Account", "الحساب", ckb: "ئەکاونت", kmr: "Hesab")) { EmptyView() }
+                    StorePageHeader(title: storeText("Account", "الحساب", de: "Konto", ckb: "ئەکاونت", kmr: "Hesab"),
+                                    subtitle: EncryptedText.tabTitle) { EmptyView() }
                     profileCard
                     accountsGroup
                     linksGroup
@@ -358,7 +376,8 @@ struct AppStoreAccountPage: View {
                 .padding(.horizontal, MirsaSpacing.page)
                 .padding(.bottom, MirsaSpacing.xl)
             }
-            .background(AuroraBackground().ignoresSafeArea())
+            .refreshable { await model.refresh() }
+            .background(StoreLuxeBackground())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: AppStoreAccountRoute.self) { route in
                 switch route {
@@ -367,6 +386,10 @@ struct AppStoreAccountPage: View {
             }
         }
         .environment(\.layoutDirection, .leftToRight)
+        .sheet(isPresented: $showSwitcher) {
+            StoreAccountSwitcherSheet(current: model.account, storeAvailable: storeAvailable,
+                                      onSwitched: onAccountSwitched, onAddAccount: onAddAccount)
+        }
         .confirmationDialog(tr("Sign out of this Apple Account?", "تطلع من حساب Apple؟", ckb: "لە ئەکاونتی Apple بچیتە دەرەوە؟", kmr: "Ji hesabê Apple derkevî?"),
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button(tr("Sign out", "تسجيل الخروج", ckb: "چوونە دەرەوە", kmr: "Derkeve"), role: .destructive) { signOut() }
@@ -382,25 +405,57 @@ struct AppStoreAccountPage: View {
         } message: { Text(error ?? "") }
     }
 
+    /// Premium identity card: monogram, name, email and storefront flag.
     @ViewBuilder private var profileCard: some View {
         if let a = model.account {
-            HStack(spacing: MirsaSpacing.m) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(a.name.isEmpty ? a.email : a.name)
-                        .font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(a.email).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    Label(tr("Storefront: ", "واجهة المتجر: ", ckb: "ستۆر: ", kmr: "Store: ") + AppStoreCountry.label(a.country),
-                          systemImage: "globe")
-                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+            VStack(alignment: .leading, spacing: MirsaSpacing.m) {
+                HStack(alignment: .top) {
+                    StoreMonogram(name: a.name, email: a.email, size: 64)
+                    Spacer(minLength: 0)
+                    HStack(spacing: 6) {
+                        Text(StoreIdentity.flag(a.country)).font(.system(size: 18))
+                        Text(a.country.uppercased()).font(MirsaFont.caption.weight(.bold)).foregroundStyle(.white).monospaced()
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .storeGlassCapsule(elevation: 0.3)
+                    .accessibilityLabel(storeText("Storefront ", "واجهة المتجر ", de: "Store ", ckb: "ستۆر ", kmr: "Store ") + AppStoreCountry.label(a.country))
                 }
-                Spacer(minLength: 0)
-                AppStoreAvatar(text: a.name.isEmpty ? a.email : a.name)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(a.name.isEmpty ? a.email : a.name)
+                        .font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(a.email).font(MirsaFont.secondary).foregroundStyle(Color.white.opacity(0.78))
+                        .lineLimit(1).truncationMode(.middle)
+                    Label(storeText("Storefront: ", "واجهة المتجر: ", de: "Store: ", ckb: "ستۆر: ", kmr: "Store: ") + AppStoreCountry.label(a.country),
+                          systemImage: "globe")
+                        .font(MirsaFont.caption).foregroundStyle(Color.white.opacity(0.62))
+                }
+                HStack(spacing: MirsaSpacing.xs) {
+                    Button { StoreHaptics.select(); showSwitcher = true } label: {
+                        Label(storeText("Switch account", "تبديل الحساب", de: "Konto wechseln", ckb: "گۆڕینی ئەکاونت", kmr: "Hesab biguherîne"),
+                              systemImage: "arrow.left.arrow.right.circle.fill")
+                            .font(MirsaFont.button).foregroundStyle(.white)
+                            .padding(.horizontal, 14).frame(height: 38)
+                            .storeGlassCapsule(elevation: 0.4)
+                    }
+                    .buttonStyle(.mirsaPress)
+                    .accessibilityIdentifier("store-switch-account")
+                    Spacer(minLength: 0)
+                    Label("Apple Account", systemImage: "apple.logo")
+                        .font(MirsaFont.badge).foregroundStyle(Color.white.opacity(0.7))
+                }
             }
-            .padding(MirsaSpacing.card)
+            .padding(MirsaSpacing.l)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .mirsaCard()
-            .accessibilityElement(children: .combine)
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 30, style: .continuous).fill(StoreLuxe.identity).opacity(0.62)
+                    Circle().fill(StoreLuxe.cyan.opacity(0.35)).frame(width: 220).blur(radius: 40).offset(x: 140, y: -70)
+                    Circle().fill(StoreLuxe.accent.opacity(0.45)).frame(width: 180).blur(radius: 46).offset(x: -120, y: 80)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            }
+            .storeGlass(radius: 30, tint: StoreLuxe.accent, elevation: 1.3)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("store-account-profile")
         } else {
             HStack(spacing: MirsaSpacing.m) {
@@ -420,35 +475,29 @@ struct AppStoreAccountPage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
-                AppStoreAvatar(text: "")
+                StoreMonogram(name: "", email: "", size: 56)
             }
-            .padding(MirsaSpacing.card)
+            .padding(MirsaSpacing.l)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .mirsaCard()
+            .storeGlass(radius: 30)
             .accessibilityIdentifier("store-account-profile")
         }
     }
 
     private var accountsGroup: some View {
-        AppStoreGroup(title: tr("Accounts", "الحسابات", ckb: "ئەکاونتەکان", kmr: "Hesab"),
-                      footer: tr("Mirsa keeps one Apple Account signed in at a time. To use another one, sign out, then add it.",
-                                 "مرسى بيخلّي حساب Apple واحد مسجّل بنفس الوقت. لتستخدم حساب تاني، اطلع من الحالي وبعدين ضيفو.",
-                                 ckb: "Mirsa لە یەک کاتدا تەنها یەک ئەکاونتی Apple دەهێڵێتەوە. بۆ بەکارهێنانی یەکێکی تر، بچۆ دەرەوە و پاشان زیادی بکە.",
-                                 kmr: "Mirsa di carekê de tenê hesabekî Apple têketî dihêle. Ji bo yekî din, derkeve û paşê wî zêde bike.")) {
-            if let a = model.account {
-                HStack(spacing: MirsaSpacing.s) {
-                    AppStoreAvatar(text: a.name.isEmpty ? a.email : a.name, size: 34)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(a.name.isEmpty ? a.email : a.name).font(MirsaFont.body).foregroundStyle(.white).lineLimit(1)
-                        Text(a.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-                            .lineLimit(1).truncationMode(.middle)
+        AppStoreGroup(title: storeText("Accounts", "الحسابات", de: "Konten", ckb: "ئەکاونتەکان", kmr: "Hesab"),
+                      footer: storeText("Switch between the Apple Accounts saved in Mirsa. Search and downloads use the selected account's storefront.",
+                                        "بدّل بين حسابات Apple المحفوظة بمرسى. البحث والتنزيل بيستخدموا متجر الحساب المختار.",
+                                        de: "Wechsle zwischen den in Mirsa gespeicherten Apple-Konten. Suche und Downloads nutzen den Store des gewählten Kontos.",
+                                        ckb: "لە نێوان ئەکاونتە Apple ـە پاشەکەوتکراوەکانی Mirsa بگۆڕە. گەڕان و داگرتن ستۆری ئەکاونتی هەڵبژێردراو بەکاردەهێنن.",
+                                        kmr: "Di navbera hesabên Apple yên di Mirsa de tomarkirî biguherîne. Lêgerîn û daxistin store ya hesabê hilbijartî bi kar tînin.")) {
+            if model.account != nil {
+                Button { StoreHaptics.select(); showSwitcher = true } label: {
+                    AppStoreRow(icon: "person.2.fill", title: storeText("Saved accounts", "الحسابات المحفوظة", de: "Gespeicherte Konten", ckb: "ئەکاونتە پاشەکەوتکراوەکان", kmr: "Hesabên tomarkirî")) {
+                        AppStoreChevron()
                     }
-                    Spacer(minLength: MirsaSpacing.xs)
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(MirsaPalette.accentSoft)
-                        .accessibilityLabel(tr("Active", "الحالي", ckb: "چالاک", kmr: "Çalak"))
                 }
-                .padding(.horizontal, MirsaSpacing.card).padding(.vertical, 11)
-                .accessibilityElement(children: .combine)
+                .buttonStyle(.plain)
                 AppStoreRowDivider()
             }
             Button { onAddAccount() } label: {
@@ -465,22 +514,34 @@ struct AppStoreAccountPage: View {
     }
 
     private var linksGroup: some View {
-        AppStoreGroup {
+        AppStoreGroup(title: storeText("Library", "المكتبة", de: "Bibliothek", ckb: "کتێبخانە", kmr: "Pirtûkxane")) {
             Button { onOpen(.purchases) } label: {
-                AppStoreRow(icon: "bag", title: tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")) { AppStoreChevron() }
+                AppStoreRow(icon: "bag.fill", title: storeText("Purchases", "المشتريات", de: "Käufe", ckb: "کڕینەکان", kmr: "Kirîn")) { AppStoreChevron() }
             }
             .buttonStyle(.plain)
             AppStoreRowDivider()
             Button { onOpen(.downloads) } label: {
-                AppStoreRow(icon: "arrow.down.circle", title: tr("Downloads and installs", "التنزيلات والتثبيت", ckb: "داگرتن و دامەزراندن", kmr: "Daxistin û sazkirin")) {
+                AppStoreRow(icon: "arrow.down.circle.fill", title: storeText("Downloads and installs", "التنزيلات والتثبيت", de: "Downloads und Installationen", ckb: "داگرتن و دامەزراندن", kmr: "Daxistin û sazkirin")) {
                     Text("\(library.entries.count)").font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textTertiary).monospacedDigit()
                     AppStoreChevron()
                 }
             }
             .buttonStyle(.plain)
+            if let onOpenTools {
+                AppStoreRowDivider()
+                Button { onOpenTools() } label: {
+                    AppStoreRow(icon: "star.fill", title: StoreFeatureText.wishlist,
+                                subtitle: StoreFeatureText.tools) {
+                        Text("\(wishes.wishlist.count)").font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textTertiary).monospacedDigit()
+                        AppStoreChevron()
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("store-open-wishlist")
+            }
             AppStoreRowDivider()
             Button { path.append(.settings) } label: {
-                AppStoreRow(icon: "gearshape", title: tr("Settings", "الإعدادات", ckb: "ڕێکخستنەکان", kmr: "Mîheng")) { AppStoreChevron() }
+                AppStoreRow(icon: "gearshape.fill", title: storeText("Settings", "الإعدادات", de: "Einstellungen", ckb: "ڕێکخستنەکان", kmr: "Mîheng")) { AppStoreChevron() }
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("store-open-settings")
@@ -489,14 +550,15 @@ struct AppStoreAccountPage: View {
 
     private var signOutButton: some View {
         Button { confirmSignOut = true } label: {
-            HStack {
+            HStack(spacing: 8) {
                 if signingOut { ProgressView().tint(MirsaPalette.danger) }
+                else { Image(systemName: "rectangle.portrait.and.arrow.right") }
                 Text(tr("Sign out", "تسجيل الخروج", ckb: "چوونە دەرەوە", kmr: "Derkeve"))
             }
             .font(MirsaFont.button)
             .foregroundStyle(MirsaPalette.danger)
             .frame(maxWidth: .infinity, minHeight: 50)
-            .mirsaCard()
+            .storeGlass(radius: 22, tint: MirsaPalette.danger, sheen: false, elevation: 0.4)
         }
         .buttonStyle(.plain)
         .disabled(signingOut)
@@ -513,6 +575,124 @@ struct AppStoreAccountPage: View {
             } catch {
                 self.error = error.localizedDescription
                 await model.refresh()
+            }
+        }
+    }
+}
+
+// MARK: - Account switcher
+
+/// Sheet over the existing saved-accounts registry: list, select, add. No sign-in here.
+struct StoreAccountSwitcherSheet: View {
+    let current: MirsaStoreAccount?
+    let storeAvailable: Bool
+    let onSwitched: () -> Void
+    let onAddAccount: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var accounts: [MirsaStoreOnDeviceClient.SavedAccount] = []
+    @State private var selectedID: String?
+    @State private var loading = true
+    @State private var switching: String?
+    @State private var error: String?
+
+    private struct Row: Identifiable { let id: String; let account: MirsaStoreAccount; let selected: Bool }
+    private var rows: [Row] {
+        if accounts.isEmpty, let current { return [Row(id: "current", account: current, selected: true)] }
+        return accounts.map { Row(id: $0.id, account: $0.account, selected: $0.id == selectedID) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+                    if loading && rows.isEmpty {
+                        StoreSkeletonCard(iconSize: 44)
+                        StoreSkeletonCard(iconSize: 44)
+                    }
+                    ForEach(rows) { row in
+                        Button { select(row) } label: {
+                            HStack(spacing: MirsaSpacing.s) {
+                                StoreMonogram(name: row.account.name, email: row.account.email, size: 44)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.account.name.isEmpty ? row.account.email : row.account.name)
+                                        .font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(1)
+                                    Text(row.account.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer(minLength: MirsaSpacing.xs)
+                                Text(StoreIdentity.flag(row.account.country) + " " + row.account.country.uppercased())
+                                    .font(MirsaFont.caption.weight(.semibold)).foregroundStyle(MirsaPalette.textSecondary)
+                                if switching == row.id { ProgressView().tint(.white) }
+                                else if row.selected {
+                                    Image(systemName: "checkmark.circle.fill").font(.system(size: 20)).foregroundStyle(StoreLuxe.identity)
+                                        .accessibilityLabel(tr("Active", "الحالي", ckb: "چالاک", kmr: "Çalak"))
+                                }
+                            }
+                            .padding(MirsaSpacing.s)
+                            .storeGlass(radius: 20, tint: row.selected ? StoreLuxe.accent : nil, sheen: row.selected, elevation: 0.5)
+                        }
+                        .buttonStyle(.mirsaPress)
+                        .disabled(switching != nil || row.selected)
+                        .accessibilityElement(children: .combine)
+                    }
+                    Button {
+                        dismiss()
+                        // Let this sheet finish closing before the sign-in sheet opens.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { onAddAccount() }
+                    } label: {
+                        Label(tr("Add account", "إضافة حساب", ckb: "زیادکردنی ئەکاونت", kmr: "Hesab zêde bike"), systemImage: "plus.circle.fill")
+                            .font(MirsaFont.button).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.mirsaPress)
+                    .disabled(!storeAvailable || switching != nil)
+                    .opacity(storeAvailable ? 1 : 0.55)
+                    .padding(.top, MirsaSpacing.xs)
+                    if let error {
+                        Text(error).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
+                    }
+                }
+                .padding(MirsaSpacing.page)
+            }
+            .background(StoreLuxeBackground())
+            .navigationTitle(storeText("Apple Accounts", "حسابات Apple", de: "Apple-Konten", ckb: "ئەکاونتەکانی Apple", kmr: "Hesabên Apple"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(storeText("Done", "تمام", de: "Fertig", ckb: "تەواو", kmr: "Temam")) { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(.ultraThinMaterial)
+        .preferredColorScheme(.dark)
+        .environment(\.layoutDirection, .leftToRight)
+        .task { await load() }
+    }
+
+    private func load() async {
+        #if DEBUG
+        if MirsaUITestHarness.active { loading = false; return }
+        #endif
+        defer { loading = false }
+        accounts = (try? await MirsaStoreOnDeviceClient.shared.listAccounts()) ?? []
+        selectedID = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID()
+    }
+
+    private func select(_ row: Row) {
+        guard !row.selected, switching == nil, accounts.contains(where: { $0.id == row.id }) else { return }
+        switching = row.id; error = nil
+        Task {
+            defer { switching = nil }
+            do {
+                try await MirsaStoreOnDeviceClient.shared.selectAccount(id: row.id)
+                selectedID = row.id
+                StoreHaptics.select()
+                onSwitched()
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
             }
         }
     }
@@ -630,7 +810,7 @@ struct AppStoreDownloadSettingsPage: View {
             // A pushed page does not inherit the section bar's inset; keep the last rows above both bars.
             .padding(.bottom, MirsaSpacing.xl + 140)
         }
-        .background(AuroraBackground().ignoresSafeArea())
+        .background(StoreLuxeBackground())
         .navigationTitle(tr("Settings", "الإعدادات", ckb: "ڕێکخستنەکان", kmr: "Mîheng"))
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -703,6 +883,7 @@ struct AppStorePurchasesPage: View {
     @State private var downloading: Int64?
     @State private var reloadID = UUID()
     @State private var reloadTask: Task<Void, Never>?
+    @ObservedObject private var tints = StoreArtworkTint.shared
     private var loadIdentity: String { "\(model.sessionRevision)|\(model.account?.email ?? "")|\(isActive)" }
     private var visible: [MirsaStorePurchase] {
         let cutoff = Calendar.current.date(byAdding: .month, value: -months, to: Date()) ?? .distantPast
@@ -715,40 +896,71 @@ struct AppStorePurchasesPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
-                MirsaPageHeader(title: tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")) {
-                    Button { Task { _ = try? await model.purchases(force: true); await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading || !isActive)
-                        .accessibilityLabel(tr("Refresh purchases", "تحديث المشتريات", ckb: "نوێکردنەوەی کڕینەکان", kmr: "Kirînan nû bike"))
+                StorePageHeader(title: storeText("Purchases", "المشتريات", de: "Käufe", ckb: "کڕینەکان", kmr: "Kirîn"),
+                                subtitle: EncryptedText.tabTitle) {
+                    Button { Task { _ = try? await model.purchases(force: true); await reload() } } label: {
+                        MirsaIconButtonLabel(systemName: "arrow.clockwise")
+                    }
+                    .storeGlassCapsule()
+                    .disabled(loading || !isActive)
+                    .accessibilityLabel(tr("Refresh purchases", "تحديث المشتريات", ckb: "نوێکردنەوەی کڕینەکان", kmr: "Kirînan nû bike"))
                 }
                 if let account = model.account {
-                    Text(account.email).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
-                    AppStoreSearchField(placeholder: tr("Search purchases or App ID", "البحث بالمشتريات أو App ID", ckb: "گەڕان لە کڕینەکان", kmr: "Li kirînan bigere"), text: $query)
+                    HStack(spacing: 8) {
+                        Text(StoreIdentity.flag(account.country))
+                        Text(account.email).lineLimit(1).truncationMode(.middle)
+                    }
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                    AppStoreSearchField(placeholder: storeText("Search purchases or App ID", "البحث بالمشتريات أو App ID", de: "Käufe oder App-ID suchen", ckb: "گەڕان لە کڕینەکان", kmr: "Li kirînan bigere"), text: $query)
                     purchaseFilters
-                    HStack {
-                        Text((purchases.isEmpty && (loading || model.refreshingPurchases) ? "…" : String(visible.count)) + tr(" items", " عنصراً", ckb: " بڕگە", kmr: " tişt"))
+                    HStack(spacing: MirsaSpacing.xs) {
+                        Text((purchases.isEmpty && (loading || model.refreshingPurchases) ? "…" : String(visible.count)) + storeText(" items", " عنصراً", de: " Einträge", ckb: " بڕگە", kmr: " tişt"))
                             .font(MirsaFont.caption.weight(.semibold))
-                            .foregroundStyle(MirsaPalette.accentSoft)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(MirsaPalette.accentSoft.opacity(0.10), in: Capsule())
-                            .overlay(Capsule().strokeBorder(MirsaPalette.accentSoft.opacity(0.18), lineWidth: 1))
+                            .background(Capsule().fill(StoreLuxe.identity).opacity(0.55))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
                             .accessibilityIdentifier("store-purchases-count")
+                        if loading || model.refreshingPurchases { ProgressView().controlSize(.small).tint(.white) }
                         Spacer()
                     }
-                    if loading || model.refreshingPurchases {
-                        HStack { Spacer(); ProgressView().controlSize(.small) }
-                    }
                     if let error {
-                        Text(error).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.warning)
+                        VStack(alignment: .leading, spacing: MirsaSpacing.xs) {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.warning)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button(storeText("Try again", "جرّب مرة تانية", de: "Erneut versuchen", ckb: "دووبارە هەوڵ بدەرەوە", kmr: "Dîsa biceribîne")) {
+                                Task { _ = try? await model.purchases(force: true); await reload() }
+                            }
+                            .font(MirsaFont.button).foregroundStyle(StoreLuxe.accentSoft)
+                            .disabled(loading || !isActive)
+                        }
+                        .padding(MirsaSpacing.card)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .storeGlass(radius: 20, tint: MirsaPalette.warning, sheen: false, elevation: 0.4)
+                    } else if purchases.isEmpty && (loading || model.refreshingPurchases) {
+                        ForEach(0..<4, id: \.self) { _ in StoreSkeletonCard(iconSize: 52) }
                     } else if !loading && !model.refreshingPurchases && visible.isEmpty {
-                        Text(tr("No matching purchases.", "ما في مشتريات مطابقة.", ckb: "هیچ کڕینێک ناگونجێت.", kmr: "Kirînek li hev nayê.")).foregroundStyle(MirsaPalette.textSecondary)
+                        StoreEmptyState(icon: query.isEmpty ? "bag" : "magnifyingglass",
+                                        title: query.isEmpty
+                                            ? storeText("No purchases here yet", "ما في مشتريات لسا", de: "Noch keine Käufe", ckb: "هێشتا هیچ کڕینێک نییە", kmr: "Hêj kirîn tune")
+                                            : tr("No matching purchases.", "ما في مشتريات مطابقة.", ckb: "هیچ کڕینێک ناگونجێت.", kmr: "Kirînek li hev nayê."),
+                                        message: storeText("Apps this Apple Account got or bought appear here, grouped by month.",
+                                                           "التطبيقات يلي حصل عليها أو اشتراها حساب Apple بتظهر هون، مرتبة حسب الشهر.",
+                                                           de: "Apps, die dieses Apple-Konto geladen oder gekauft hat, erscheinen hier nach Monat sortiert.",
+                                                           ckb: "ئەو ئەپانەی ئەم ئەکاونتە وەریگرتوون یان کڕیونی لێرە بە پێی مانگ دەردەکەون.",
+                                                           kmr: "Sepanên ku vî hesabî girtine an kirîne li vir li gorî mehê xuya dibin."))
                     }
-                    LazyVStack(alignment: .leading, spacing: MirsaSpacing.l) {
+                    LazyVStack(alignment: .leading, spacing: MirsaSpacing.m, pinnedViews: [.sectionHeaders]) {
                         ForEach(StorePurchaseGroups.make(visible)) { group in
                             purchaseGroup(group)
                         }
                     }
                     .accessibilityIdentifier("store-purchases-month-list")
                 } else {
-                    Text(tr("Sign in from the Account tab to load your Apple purchases.", "سجّل دخول من تبويب الحساب لتشوف مشتريات Apple تبعك.", ckb: "بچۆ ژوورەوە بۆ بینینی کڕینەکان.", kmr: "Ji bo kirînan têkeve hesabê te.")).foregroundStyle(MirsaPalette.textSecondary)
+                    StoreEmptyState(icon: "person.crop.circle.badge.questionmark",
+                                    title: tr("Not signed in", "مو مسجّل دخول", ckb: "نەچوویتە ژوورەوە", kmr: "Te têneketiye"),
+                                    message: tr("Sign in from the Account tab to load your Apple purchases.", "سجّل دخول من تبويب الحساب لتشوف مشتريات Apple تبعك.", ckb: "بچۆ ژوورەوە بۆ بینینی کڕینەکان.", kmr: "Ji bo kirînan têkeve hesabê te."))
                 }
             }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
         }
@@ -756,6 +968,9 @@ struct AppStorePurchasesPage: View {
         .task(id: loadIdentity) {
             reloadID = UUID(); reloadTask?.cancel()
             recovery = nil; purchases = model.cachedPurchases; error = nil; loading = false
+            #if DEBUG
+            if AppStoreSectionModel.fixtureAccount != nil { purchases = StoreRedesignFixtures.purchases; return }
+            #endif
             if isActive { await reload() }
         }
         .confirmationDialog(tr("Refresh free licence and retry?", "تحديث الترخيص المجاني وإعادة التنزيل؟", ckb: "مۆڵەتی بێبەرامبەر نوێ بکەوە؟", kmr: "Lîsansa belaş nû bike?"),
@@ -778,101 +993,130 @@ struct AppStorePurchasesPage: View {
         }
         .onDisappear { reloadTask?.cancel() }
         .scrollDismissesKeyboard(.interactively)
-        .background(AuroraBackground().ignoresSafeArea())
+        .background(StoreLuxeBackground())
         .environment(\.layoutDirection, .leftToRight)
     }
     private var purchaseFilters: some View {
         HStack(spacing: 6) {
-            purchaseFilter(0, title: tr("All", "الكل", ckb: "هەموو", kmr: "Hemû"))
-            purchaseFilter(1, title: tr("1 month", "شهر", ckb: "مانگێک", kmr: "1 meh"))
-            purchaseFilter(6, title: tr("6 months", "٦ أشهر", ckb: "٦ مانگ", kmr: "6 meh"))
-            purchaseFilter(12, title: tr("12 months", "سنة", ckb: "ساڵێک", kmr: "12 meh"))
+            purchaseFilter(0, title: storeText("All", "الكل", de: "Alle", ckb: "هەموو", kmr: "Hemû"))
+            purchaseFilter(1, title: storeText("1 month", "شهر", de: "1 Monat", ckb: "مانگێک", kmr: "1 meh"))
+            purchaseFilter(6, title: storeText("6 months", "٦ أشهر", de: "6 Monate", ckb: "٦ مانگ", kmr: "6 meh"))
+            purchaseFilter(12, title: storeText("12 months", "سنة", de: "12 Monate", ckb: "ساڵێک", kmr: "12 meh"))
         }
     }
 
     private func purchaseFilter(_ value: Int, title: String) -> some View {
-        Button { withAnimation(MirsaMotion.select) { months = value } } label: {
+        Button { StoreHaptics.select(); withAnimation(MirsaMotion.select) { months = value } } label: {
             Text(title).font(MirsaFont.caption.weight(.semibold))
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .foregroundStyle(months == value ? Color.white : MirsaPalette.textSecondary)
                 .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .background(months == value ? Color.white.opacity(0.14) : Color.white.opacity(0.035), in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(months == value ? 0.22 : 0.07), lineWidth: 1))
+                .background {
+                    if months == value {
+                        Capsule().fill(StoreLuxe.identity).opacity(0.8)
+                            .shadow(color: StoreLuxe.accent.opacity(0.45), radius: 8, y: 3)
+                    }
+                }
+                .storeGlassCapsule(elevation: 0.2)
         }
         .buttonStyle(.mirsaPress)
         .accessibilityAddTraits(months == value ? .isSelected : [])
         .accessibilityIdentifier("store-purchases-filter-\(value)")
     }
 
+    /// One month of the timeline: a sticky glass header, then the rows along a glowing rail.
     private func purchaseGroup(_ group: StorePurchaseGroups.Group) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-            Spacer(minLength: 0)
-            Text(String(group.items.count)).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-            Text(group.month.map { StorePurchaseGroups.title($0, locale: AppLanguageStore.shared.current.locale) }
-                 ?? tr("Date unavailable", "التاريخ مو متوفر", ckb: "بەروار بەردەست نییە", kmr: "Dîrok ne berdest e"))
-                .font(MirsaFont.sectionTitle).foregroundStyle(MirsaPalette.textSecondary)
-                .padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
-            }
-            LazyVStack(spacing: 0) {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(group.items) { item in
-                    purchaseRow(item)
-                    if item.id != group.items.last?.id {
-                        Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
-                            .padding(.horizontal, MirsaSpacing.card)
+                    HStack(alignment: .center, spacing: 10) {
+                        ZStack {
+                            Rectangle().fill(StoreLuxe.identity).opacity(0.35).frame(width: 2)
+                            Circle().fill(StoreLuxe.accentSoft).frame(width: 8, height: 8)
+                                .shadow(color: StoreLuxe.accent, radius: 4)
+                        }
+                        .frame(width: 14)
+                        purchaseRow(item)
                     }
                 }
             }
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .background(MirsaPalette.accentSoft.opacity(0.035), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        } header: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar").font(.system(size: 12, weight: .bold)).foregroundStyle(StoreLuxe.accentSoft)
+                Text(group.month.map { StorePurchaseGroups.title($0, locale: AppLanguageStore.shared.current.locale) }
+                     ?? storeText("Date unavailable", "التاريخ مو متوفر", de: "Datum nicht verfügbar", ckb: "بەروار بەردەست نییە", kmr: "Dîrok ne berdest e"))
+                    .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                Text(String(group.items.count)).font(MirsaFont.caption.weight(.bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(StoreLuxe.accent.opacity(0.45), in: Capsule())
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .storeGlassCapsule(elevation: 0.5)
+            .padding(.vertical, 4)
         }
     }
 
     private func purchaseRow(_ item: MirsaStorePurchase) -> some View {
-        HStack(spacing: MirsaSpacing.s) {
-            // Physical LTR is app-wide. Put the real download action on the left.
+        let art = artwork[item.id] ?? ""
+        let tint = tints.tint(art, seed: item.bundleID)
+        // Arabic and Sorani keep the mirrored look of the existing rows (icon on the right).
+        let mirrored = AppLanguageStore.shared.current == .arabic || AppLanguageStore.shared.current == .sorani
+        return HStack(spacing: MirsaSpacing.s) {
+            StoreArtwork(url: art, seed: item.bundleID, name: item.name.isEmpty ? item.bundleID : item.name, size: 52)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.name.isEmpty ? item.bundleID : item.name)
+                    .font(MirsaFont.cardTitle).foregroundStyle(.white)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    if let date = StorePurchaseGroups.validDate(item.date) {
+                        Text(date.formatted(.dateTime.day().month(.abbreviated).year()
+                            .locale(AppLanguageStore.shared.current.locale)))
+                    }
+                    if !item.version.isEmpty { Text("· " + item.version).lineLimit(1) }
+                }
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                // History has no reliable size field. Do not invent one or fetch a package here.
+            }
+            Spacer(minLength: 0)
             Group {
-                if downloading == item.id { ProgressView() }
+                if downloading == item.id { ProgressView().tint(.white) }
                 else {
-                    Button { Task { await download(item) } } label: {
+                    Button { StoreHaptics.get(); Task { await download(item) } } label: {
                         Image(systemName: "icloud.and.arrow.down")
-                            .font(.system(size: 21, weight: .medium))
-                            .foregroundStyle(MirsaPalette.accentSoft)
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
-                            .background(MirsaPalette.accentSoft.opacity(0.08), in: Circle())
+                            .background(StoreLuxe.identity, in: Circle())
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8))
+                            .shadow(color: StoreLuxe.accent.opacity(0.5), radius: 8, y: 3)
                     }
                     .buttonStyle(.mirsaPress)
                     .disabled(loading || downloading != nil || store.busy != nil)
+                    .opacity(loading || downloading != nil || store.busy != nil ? 0.5 : 1)
                     .accessibilityLabel(tr("Download", "تنزيل", ckb: "داگرتن", kmr: "Daxe") + " " + item.name)
                     .accessibilityIdentifier("store-purchase-download-\(item.id)")
                 }
             }.frame(width: 44, height: 44)
-            Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(item.name.isEmpty ? item.bundleID : item.name)
-                    .font(MirsaFont.cardTitle).foregroundStyle(.white)
-                    .lineLimit(2).multilineTextAlignment(.trailing)
-                if let date = StorePurchaseGroups.validDate(item.date) {
-                    Text(date.formatted(.dateTime.day().month(.abbreviated).year()
-                        .locale(AppLanguageStore.shared.current.locale)))
-                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
-                }
-                // History has no reliable size field. Do not invent one or fetch a package here.
-            }
-            AsyncImage(url: artwork[item.id].flatMap { URL(string: $0) }) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Image(systemName: "app.dashed").font(.title2).foregroundStyle(MirsaPalette.textTertiary)
-            }
-            .frame(width: 52, height: 52).background(MirsaPalette.cardRaised)
-            .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon, style: .continuous))
-            .accessibilityHidden(true)
         }
-        .padding(.horizontal, MirsaSpacing.card).padding(.vertical, 14)
+        .padding(.horizontal, MirsaSpacing.s).padding(.vertical, 10)
+        .environment(\.layoutDirection, mirrored ? .rightToLeft : .leftToRight)
+        .storeGlass(radius: 22, tint: tint, sheen: true, elevation: 0.5)
+        .contextMenu {
+            Button { StoreLinks.copy(item.bundleID) } label: {
+                Label(storeText("Copy Bundle ID", "نسخ Bundle ID", de: "Bundle-ID kopieren", ckb: "کۆپی Bundle ID", kmr: "Bundle ID kopî bike"), systemImage: "doc.on.doc")
+            }
+            if let link = StoreLinks.appPage(id: item.id, country: model.account?.country ?? "us") {
+                ShareLink(item: link) {
+                    Label(storeText("Share", "مشاركة", de: "Teilen", ckb: "هاوبەشکردن", kmr: "Parve bike"), systemImage: "square.and.arrow.up")
+                }
+            }
+            Button { StoreHaptics.get(); Task { await download(item) } } label: {
+                Label(tr("Download", "تنزيل", ckb: "داگرتن", kmr: "Daxe"), systemImage: "icloud.and.arrow.down")
+            }
+            .disabled(loading || downloading != nil || store.busy != nil)
+        }
     }
 
     @MainActor private func reload() async {
