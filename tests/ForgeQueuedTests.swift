@@ -119,6 +119,12 @@ final class ForgeQueuedTests: XCTestCase {
         XCTAssertEqual(snapshot(store.project(p.id)!), before)
         XCTAssertNotNil(store.queuedNotice)
     }
+    func testAttachNeverTouchesVisiblePrompt() {
+        XCTAssertEqual(ForgeCaptureContext.composed(prompt: "", classes: []), "")
+        XCTAssertEqual(ForgeCaptureContext.composed(prompt: "my own text", classes: []), "my own text")
+        XCTAssertTrue(ForgeCaptureContext.composed(prompt: "x", classes: ["A"]).hasPrefix("x"))
+        XCTAssertFalse(ForgeCaptureContext.chipText(2).contains("User-reviewed"))
+    }
     func testStoreReadyCodeStillAddsVersion() async throws {
         let store = ForgeStore.shared; let saved = store.projects; defer { store.projects = saved }
         let p = project(); store.projects = [p]
