@@ -3,10 +3,11 @@ import XCTest
 
 @MainActor
 final class SourceDeletionTests: XCTestCase {
-    private var suite = "SourceDeletionTests"
+    private var suite = ""
     private var defaults: UserDefaults!
     override func setUp() {
-        UserDefaults().removePersistentDomain(forName: suite)
+        // Each invocation owns its persistent domain, including parallel XCTest workers.
+        suite = "SourceDeletionTests." + UUID().uuidString
         defaults = UserDefaults(suiteName: suite)
     }
     override func tearDown() { UserDefaults().removePersistentDomain(forName: suite) }

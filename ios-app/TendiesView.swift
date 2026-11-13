@@ -139,7 +139,7 @@ struct TendiesView: View {
                             "خلفية فيديو لشاشة القفل: اختار فيديو من الاستوديو أو الملفات. بنستخدم أول ١٠ ثواني ونقصّها حسب شاشتك. لما يجهز اضغط تطبيق تحت. هي خلفية للنظام مو بس خلفية للتطبيق.",
                             de: "Video-Hintergrund für den Sperrbildschirm: Wähle ein Video aus Fotos oder Dateien. Es werden die ersten 10 Sekunden verwendet und passend zum Bildschirm zugeschnitten. Wenn es bereit ist, wende es unten an. Das ist ein System-Hintergrund, nicht nur ein App-Hintergrund.",
                             ckb: "ڤیدیۆی پاشبنەما بۆ شاشەی قوفڵ: ڤیدیۆیەک لە وێنەکان یان فایلەکان هەڵبژێرە. یەکەم ١٠ چرکە بەکاردێت و لەگەڵ شاشەکەت دەگونجێت. کاتێک ئامادە بوو لە خوارەوە جێبەجێی بکە.",
-                            kmr: "Wêneya vîdyoyê ji bo ekrana qefilandinê: vîdyoyekê ji Wêneyan an Pelan hilbijêre. 10 çirkeyên pêşîn tên bikaranîn û li gorî ekranê tên birîn. Gava amade bû li jêr bi cih bîne.")
+                            kmr: "Wêneya vîdyoyê ji bo ekrana qefilandinê: vîdyoyekê ji Wêneyan an Pelan hilbijêre. 10 çirkeyên pêşîn tên bikaranîn û li gorî ekranê tên birîn. Gava amade bû li jêr bi cih bîne."))
                         .font(.caption).foregroundStyle(.secondary)
                     Text(wtr("Experimental. The apply method is patched on iOS 27.2 beta 3 and later.",
                             "ميزة تجريبية. طريقة التطبيق مسدودة على iOS 27.2 beta 3 والأحدث.",
