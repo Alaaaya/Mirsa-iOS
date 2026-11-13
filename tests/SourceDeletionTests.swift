@@ -3,9 +3,10 @@ import XCTest
 
 @MainActor
 final class SourceDeletionTests: XCTestCase {
-    private var suite = "SourceDeletionTests"
+    private var suite = ""
     private var defaults: UserDefaults!
     override func setUp() {
+        suite = "SourceDeletionTests." + UUID().uuidString
         UserDefaults().removePersistentDomain(forName: suite)
         defaults = UserDefaults(suiteName: suite)
     }
