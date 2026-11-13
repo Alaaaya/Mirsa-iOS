@@ -72,9 +72,10 @@ struct ForgeProject: Codable, Identifiable {
         if mach.encrypted {
             throw ForgeClient.Failure.message(tr("This app is encrypted (App Store build). Import a decrypted IPA to build tweaks for it.", "هالتطبيق مشفّر (نسخة App Store). استورد نسخة IPA مفكوكة التشفير لتبني تويكس إله.", ckb: "ئەم ئەپە ڕەمزکراوە (وەشانی App Store). IPAیەکی ڕەمزنەکراو هاوردە بکە بۆ دروستکردنی تویک.", kmr: "Ev app şîfrekirî ye (guhertoya App Store). IPAyeke bê şîfre têxe da ku tweak çêbikî."))
         }
-        guard !mach.classes.isEmpty else { throw ForgeClient.Failure.message(tr("No Objective-C classes found in this app (Swift-only apps are not supported yet).", "ما لقيت كلاسات Objective-C بهالتطبيق (تطبيقات Swift فقط مو مدعومة بعد).", ckb: "هیچ کلاسێکی Objective-C نەدۆزرایەوە (ئەپی Swift تەنها هێشتا پشتگیری ناکرێت).", kmr: "Di vê appê de klasên Objective-C nehatin dîtin (appên Swift-only hê nayên piştgirîkirin).")) }
+        let allClasses = Array(Set(mach.classes).union(ForgeFrameworkClasses.classes(ipa: ipa))).sorted()
+        guard !allClasses.isEmpty else { throw ForgeClient.Failure.message(tr("No Objective-C classes found in this app (Swift-only apps are not supported yet).", "ما لقيت كلاسات Objective-C بهالتطبيق (تطبيقات Swift فقط مو مدعومة بعد).", ckb: "هیچ کلاسێکی Objective-C نەدۆزرایەوە (ئەپی Swift تەنها هێشتا پشتگیری ناکرێت).", kmr: "Di vê appê de klasên Objective-C nehatin dîtin (appên Swift-only hê nayên piştgirîkirin).")) }
         let name = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? id
-        return TargetInfo(name: name, bundleID: id, appName: name, version: (info["CFBundleShortVersionString"] as? String) ?? "?", executable: exe, classes: mach.classes)
+        return TargetInfo(name: name, bundleID: id, appName: name, version: (info["CFBundleShortVersionString"] as? String) ?? "?", executable: exe, classes: allClasses)
     }
 
     func create(ipa: URL, info: TargetInfo) throws -> UUID {
