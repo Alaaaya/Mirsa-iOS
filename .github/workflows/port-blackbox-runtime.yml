@@ -1,0 +1,62 @@
+name: Port blackbox Apple runtime validation
+on:
+  push:
+    branches: [mirsa/port-blackbox-runtime-ci]
+    paths:
+      - backend/port-blackbox-runtime/**
+      - .github/workflows/port-blackbox-runtime.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apple-runtime:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Native fatal signal and thread attribution tests
+        working-directory: backend/port-blackbox-runtime
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          clang -std=c11 -Wall -Wextra -Werror -pthread runtime.c breadcrumb.c test_runtime.c -o runtime-test
+          ./runtime-test | tee native-test.txt
+      - name: Fetch Theos Logos preprocessor
+        run: |
+          git clone --depth 1 https://github.com/theos/logos.git "$RUNNER_TEMP/logos"
+          git -C "$RUNNER_TEMP/logos" rev-parse HEAD
+      - name: Compile trusted reporter and instrumented Logos using real iOS SDK
+        working-directory: backend/port-blackbox-runtime
+        run: |
+          set -euo pipefail
+          node ci-prepare.mjs > prepare.json
+          cd build-ci
+          perl "$RUNNER_TEMP/logos/bin/logos.pl" -c generator=internal Instrumented.xm > Instrumented.mm
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          for ARCH in arm64 arm64e; do
+            mkdir -p "$ARCH"
+            xcrun --sdk iphoneos clang -arch "$ARCH" -isysroot "$SDK" -miphoneos-version-min=14.0 -std=c11 -Wall -Wextra -Werror -c runtime.c -o "$ARCH/runtime.o"
+            xcrun --sdk iphoneos clang -arch "$ARCH" -isysroot "$SDK" -miphoneos-version-min=14.0 -std=c11 -Wall -Wextra -Werror -c breadcrumb.c -o "$ARCH/breadcrumb.o"
+            xcrun --sdk iphoneos clang -arch "$ARCH" -isysroot "$SDK" -miphoneos-version-min=14.0 -fobjc-arc -Wall -Wextra -Werror -c BlackboxUploader.m -o "$ARCH/uploader.o"
+            xcrun --sdk iphoneos clang++ -arch "$ARCH" -isysroot "$SDK" -miphoneos-version-min=14.0 -fobjc-arc -fobjc-exceptions -I. -include Foundation/Foundation.h -c Instrumented.mm -o "$ARCH/tweak.o"
+            xcrun --sdk iphoneos clang++ -arch "$ARCH" -isysroot "$SDK" -miphoneos-version-min=14.0 -dynamiclib -framework Foundation "$ARCH/"*.o -o "$ARCH/MirsaReporter.dylib"
+          done
+          xcrun lipo -create arm64/MirsaReporter.dylib arm64e/MirsaReporter.dylib -output MirsaReporter.dylib
+          xcrun lipo -info MirsaReporter.dylib
+          shasum -a 256 MirsaReporter.dylib HookManifest.json Tweak.xm Instrumented.xm > hashes.txt
+          test -s MirsaReporter.dylib
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: port-blackbox-apple-evidence
+          path: |
+            backend/port-blackbox-runtime/native-test.txt
+            backend/port-blackbox-runtime/prepare.json
+            backend/port-blackbox-runtime/build-ci/MirsaReporter.dylib
+            backend/port-blackbox-runtime/build-ci/HookManifest.json
+            backend/port-blackbox-runtime/build-ci/Tweak.xm
+            backend/port-blackbox-runtime/build-ci/Instrumented.xm
+            backend/port-blackbox-runtime/build-ci/hashes.txt
