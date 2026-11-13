@@ -388,7 +388,7 @@ final class MirsaStoreClientTests: XCTestCase {
     func testNativeOwnerGateDeniesBeforeAppleAuthentication() async throws {
         let engine = StoreTestEngine(), vault = StoreTestVault()
         let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
-        let client = MirsaStoreOnDeviceClient(local: local, gate: { false })
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { false }, vault: vault)
         do {
             _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
             XCTFail("Owner restriction bypassed")
@@ -400,7 +400,7 @@ final class MirsaStoreClientTests: XCTestCase {
         let engine = StoreTestEngine(), vault = StoreTestVault()
         engine.auth.twoFactor = true
         let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
-        let client = MirsaStoreOnDeviceClient(local: local, gate: { true })
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { true }, vault: vault)
         let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
         XCTAssertEqual(first, .verificationRequired)
         XCTAssertNil(vault.data["challenge"])
