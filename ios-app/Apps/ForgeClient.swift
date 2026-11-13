@@ -56,18 +56,25 @@ enum ForgeClient {
         }
     }
 
-    static func post(_ body: [String: Any], timeout: TimeInterval = 120) async throws -> Data {
+    static func post(_ body: [String: Any], timeout: TimeInterval = 120, retryBind: Bool = true) async throws -> Data {
         var req = URLRequest(url: endpoint, timeoutInterval: timeout)
         req.httpMethod = "POST"
-        req.setValue("Bearer " + (try await token()), forHTTPHeaderField: "Authorization")
+        // Build/inject calls need the same registered device credentials as chat (x-mirsa-device-token); the server auth is unchanged.
+        let creds = try await fixToken(forceRefresh: !retryBind)
+        req.setValue("Bearer " + creds.accessToken, forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(deviceID(), forHTTPHeaderField: "x-mirsa-device")
+        req.setValue(creds.deviceID, forHTTPHeaderField: "x-mirsa-device")
+        req.setValue(creds.deviceToken, forHTTPHeaderField: "x-mirsa-device-token")
         req.httpBody = try JSONSerialization.data(withJSONObject: withDeviceLink(body))
         let cfg = URLSessionConfiguration.ephemeral; cfg.httpCookieStorage = nil
         let session = URLSession(configuration: cfg, delegate: OTANoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 403, retryBind, ["device_not_bound", "device_auth_required"].contains((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "") {
+            _ = try? await get(["action": "gallery"])
+            return try await post(body, timeout: timeout, retryBind: false)
+        }
         guard status == 200 else { throw failure(status, data) }
         return data
     }
