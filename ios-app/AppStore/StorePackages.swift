@@ -61,9 +61,15 @@ protocol MirsaStorePackages {
 
 /// A private, transient download. No Authorization/Cookie headers are forwarded to the CDN.
 final class AppleStorePackages: MirsaStorePackages {
+    private let lock = NSLock()
+    private var activeRun: StoreTransferRun?
     func cancel() {
-        // Keeps the partial file; only an explicit Cancel (discardCurrent) deletes it.
-        StoreTransferControl.shared.cancelCurrent()
+        // Client lifecycle cancellation is terminal, unlike leaving a screen.
+        lock.lock(); let run = activeRun; lock.unlock()
+        run?.requestDiscard()
+    }
+    private func setRun(_ run: StoreTransferRun?) {
+        lock.lock(); activeRun = run; lock.unlock()
     }
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
@@ -82,7 +88,8 @@ final class AppleStorePackages: MirsaStorePackages {
                 ?? directory.appendingPathComponent("partial")
             let control = StoreTransferControl.shared
             let run = control.begin()
-            defer { control.end(run) }
+            setRun(run)
+            defer { setRun(nil); control.end(run) }
             let download = StoreResumableDownload(folder: folder, validate: { try MirsaStorePolicy.downloadURL($0) },
                 phase: { control.setPhase(run, $0) },
                 report: { r, e, restarted in

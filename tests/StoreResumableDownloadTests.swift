@@ -10,6 +10,13 @@ private final class MockCDN: URLProtocol {
     struct Reply { var status: Int; var headers: [String: String]; var body: Data; var cutAfter: Int? = nil }
     nonisolated(unsafe) static var handler: ((URLRequest) -> Reply)?
     nonisolated(unsafe) static var requests: [URLRequest] = []
+    private static let lock = NSLock()
+    private static var bodyFailure: (() -> Void)?
+    static func acknowledgeBody(_ bytes: Int64) {
+        guard bytes > 0 else { return }
+        lock.lock(); let fail = bodyFailure; bodyFailure = nil; lock.unlock()
+        fail?()
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -18,8 +25,16 @@ private final class MockCDN: URLProtocol {
         let resp = HTTPURLResponse(url: request.url!, statusCode: r.status, httpVersion: "HTTP/1.1", headerFields: r.headers)!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
         if let cut = r.cutAfter {
-            client?.urlProtocol(self, didLoad: r.body.prefix(cut))
-            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            if cut == 0 {
+                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            } else {
+                // Fail only after the delegate has written the chunk. Foundation may drop
+                // queued didLoad callbacks if URLProtocol reports failure in the same turn.
+                Self.lock.lock()
+                Self.bodyFailure = { [self] in client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost)) }
+                Self.lock.unlock()
+                client?.urlProtocol(self, didLoad: r.body.prefix(cut))
+            }
         } else {
             client?.urlProtocol(self, didLoad: r.body)
             client?.urlProtocolDidFinishLoading(self)
@@ -40,7 +55,7 @@ final class StoreResumableDownloadTests: XCTestCase {
 
     private func make(max: Int64 = 1000, wait: @escaping StoreResumableDownload.NetworkWait = { .becameOnline }) -> StoreResumableDownload {
         StoreResumableDownload(folder: dir.appendingPathComponent("f"), maxBytes: max, protocolClasses: [MockCDN.self],
-                               validate: { try MirsaStorePolicy.downloadURL($0) }, networkWait: wait)
+                               validate: { try MirsaStorePolicy.downloadURL($0) }, networkWait: wait, report: { bytes, _, _ in MockCDN.acknowledgeBody(bytes) })
     }
     private func serve(etag: String = "\"v1\"", cutFirst: Int? = nil) {
         var first = true
@@ -126,5 +141,30 @@ final class StoreResumableDownloadTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
         run.requestDiscard()
         do { try await t.value; XCTFail() } catch { XCTAssertTrue(error is CancellationError) }
+    }
+}
+
+final class StoreTransferLifecycleTests: XCTestCase {
+    func testOldEndCannotOverwriteNewRunEvenWhenIdlePublishArrivesLast() {
+        var pending: [() -> Void] = []
+        let control = StoreTransferControl(enqueue: { pending.append($0) })
+        let a = control.begin()
+        pending.removeFirst()()
+        control.end(a)
+        let b = control.begin()
+        // Model end(A) unlocking, begin(B) publishing, then A's idle publication.
+        let idleA = pending.removeFirst()
+        pending.removeFirst()()
+        XCTAssertEqual(control.phase, .running)
+        idleA()
+        XCTAssertEqual(control.phase, .running)
+        control.pause()
+        pending.removeFirst()()
+        XCTAssertEqual(control.phase, .paused)
+        control.end(a)
+        XCTAssertTrue(pending.isEmpty)
+        control.end(b)
+        pending.removeFirst()()
+        XCTAssertEqual(control.phase, .idle)
     }
 }

@@ -39,6 +39,7 @@ actor MirsaStoreOnDeviceClient {
     private let factory: (String) -> MirsaStoreClient
     private var clients: [String: MirsaStoreClient] = [:]
     private var registry: Registry?
+    private var switching = false
     init(local: MirsaStoreClient? = nil, gate: @escaping Gate,
          historyGate: (() async throws -> Void)? = nil,
          vault: any MirsaStoreVault = MirsaStoreKeychain(),
@@ -79,6 +80,7 @@ actor MirsaStoreOnDeviceClient {
         registry = value
     }
     private func selectedClient(expectedAccountID: String? = nil) throws -> MirsaStoreClient {
+        guard !switching else { throw MirsaStoreError.busy }
         let id = try loadRegistry().selected
         guard expectedAccountID == nil || expectedAccountID == id else {
             throw MirsaStoreError.operationCancelled
@@ -103,15 +105,24 @@ actor MirsaStoreOnDeviceClient {
         }
         return result
     }
-    func selectAccount(id: String) throws {
+    func selectAccount(id: String) async throws {
+        guard !switching else { throw MirsaStoreError.busy }
         var value = try loadRegistry()
         guard value.ids.contains(id) else { throw MirsaStoreError.invalidInput }
+        guard value.selected != id else { return }
+        switching = true
+        defer { switching = false }
+        try await client(value.selected).stopDownloadsAndPurge()
         value.selected = id
         try saveRegistry(value)
     }
     @discardableResult
-    func beginAddAccount() throws -> String {
+    func beginAddAccount() async throws -> String {
+        guard !switching else { throw MirsaStoreError.busy }
         var value = try loadRegistry()
+        switching = true
+        defer { switching = false }
+        try await client(value.selected).stopDownloadsAndPurge()
         let id = UUID().uuidString
         value.ids.append(id)
         value.selected = id
@@ -215,6 +226,9 @@ actor MirsaStoreOnDeviceClient {
     func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil, expectedAccountID: String? = nil) async throws -> URL {
         let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
+        guard try selectedClient(expectedAccountID: expectedAccountID) === local else {
+            throw MirsaStoreError.operationCancelled
+        }
         return try await local.acquireFreeAppAndDownload(app, externalVersionID: externalVersionID)
     }
     func freeAppForRecovery(_ app: MirsaStoreApp, expectedAccountID: String? = nil) async throws -> MirsaStoreApp {
@@ -235,6 +249,9 @@ actor MirsaStoreOnDeviceClient {
     func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil, expectedAccountID: String? = nil) async throws -> URL {
         let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
+        guard try selectedClient(expectedAccountID: expectedAccountID) === local else {
+            throw MirsaStoreError.operationCancelled
+        }
         return try await local.downloadOwnedApp(app, externalVersionID: externalVersionID)
     }
     func signOut() async throws {
