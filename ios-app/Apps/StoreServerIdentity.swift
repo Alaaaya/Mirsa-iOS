@@ -61,4 +61,23 @@ enum MirsaStoreIdentityLoader {
             }
         }
     }
+
+    /// First action after a cold start can race the identity check. Only the definitive-not-ready signal
+    /// (staging_denied) is retried, bounded and cancellable; every other error, and a denial that outlasts
+    /// the bound, is returned as-is. The operation re-evaluates the gate on each attempt (never cached).
+    static func retryWhileNotReady<T>(attempts: Int = 40, delayNanoseconds: UInt64 = 500_000_000,
+                                      sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+                                      operation: () async throws -> T) async throws -> T {
+        var tried = 0
+        while true {
+            try Task.checkCancellation()
+            do { return try await operation() }
+            catch let error as MirsaStoreServerError {
+                guard case .code(let code) = error, code == "staging_denied" else { throw error }
+                tried += 1
+                if tried >= max(1, attempts) { throw error }
+                try await sleep(delayNanoseconds)
+            }
+        }
+    }
 }
