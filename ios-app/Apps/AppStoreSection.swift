@@ -163,13 +163,42 @@ enum AppStoreCountry {
 // MARK: - Bottom tab bar
 
 /// Floating glass bar with an animated indicator that glides between the sections.
+/// It is the only bottom bar while the App Store tab is open: its leading Mirsa button
+/// opens a menu of the app's other tabs, so the main dock never stacks on top of it.
 struct AppStoreSectionBar: View {
     @Binding var selection: AppStoreSectionTab
+    /// Leaves the App Store tab for one of the app's main tabs.
+    var onLeave: ((AppTab) -> Void)? = nil
     @Namespace private var ns
     @State private var bounce = 0
 
+    private var mirsaTitle: String { storeText("Mirsa", "مرسى", de: "Mirsa", ckb: "مرسى", kmr: "Mirsa") }
+
+    @ViewBuilder private var mirsaMenu: some View {
+        if let onLeave {
+            Menu {
+                ForEach(LiquidTabItem.mainTabs.filter { $0.tab != .encrypted }) { item in
+                    Button { StoreHaptics.select(); onLeave(item.tab) } label: { Label(item.title, systemImage: item.icon) }
+                }
+            } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .regular)).frame(height: 21)
+                    Text(mirsaTitle).font(MirsaFont.tabLabel).lineLimit(1)
+                        .minimumScaleFactor(0.7).allowsTightening(true)
+                }
+                .foregroundStyle(MirsaPalette.textTertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Capsule())
+            }
+            .menuIndicator(.hidden)
+            .accessibilityIdentifier("store-tab-mirsa")
+            .accessibilityLabel(mirsaTitle)
+        }
+    }
+
     var body: some View {
         HStack(spacing: 2) {
+            mirsaMenu
             ForEach(AppStoreSectionTab.allCases) { tab in
                 let on = selection == tab
                 Button {
@@ -807,7 +836,7 @@ struct AppStoreDownloadSettingsPage: View {
             }
             .padding(.horizontal, MirsaSpacing.page)
             .padding(.top, MirsaSpacing.s)
-            // A pushed page does not inherit the section bar's inset; keep the last rows above both bars.
+            // A pushed page does not inherit the section bar's inset; keep the last rows above the bar.
             .padding(.bottom, MirsaSpacing.xl + 140)
         }
         .background(StoreLuxeBackground())
