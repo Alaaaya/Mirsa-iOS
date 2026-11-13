@@ -195,7 +195,7 @@ final class StoreIdentityRaceTests: XCTestCase {
             let creds = try await reg.credentials(user: user) {
                 try await Task.sleep(nanoseconds: 150_000_000)
                 registered.set()
-                return ForgeFixCredentials(accessToken: jwt, deviceID: "D", deviceToken: String(repeating: "a", count: 64))
+                return ForgeFixCredentials(accessToken: jwt, deviceID: "91f71c66-b727-450e-8de2-244a1cf85915", deviceToken: String(repeating: "a", count: 64))
             }
             return MirsaStoreServerIdentity(bearer: creds.accessToken, userID: user, forgeDeviceID: creds.deviceID, forgeDeviceToken: creds.deviceToken)
         }, http: { req in
