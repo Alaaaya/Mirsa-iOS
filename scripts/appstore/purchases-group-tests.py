@@ -22,27 +22,17 @@ for path in ['ios-app/AppStore/StorePurchaseHistory.swift', 'ios-app/AppStore/St
 assert 'String(visible.count)' in ui and '1028' not in ui
 page = ui[ui.index('struct AppStorePurchasesPage:'):]
 assert ui[:ui.index('struct AppStorePurchasesPage:')].replace("import ApplePackage\n", "") == base[:base.index('struct AppStorePurchasesPage:')].replace("import ApplePackage\n", ""), "Search or other tab changed"
-assert 'LazyVGrid(columns: purchaseColumns, alignment: .center, spacing: 12)' in page
-assert 'Array(repeating: GridItem(.flexible(minimum: 0), spacing: 12, alignment: .top), count: 3)' in page
-assert 'ForEach(visible) { item in\n                            purchaseTile(item)' in page
-for removed in ['StorePurchaseGroups', 'purchaseGroup(', 'purchaseRow(', '.isHeader', 'group.items', '.dateTime']:
-    assert removed not in page, removed
+
+assert 'LazyVGrid' not in page and 'purchaseTile(' not in page
+assert 'ForEach(StorePurchaseGroups.make(visible))' in page
+assert 'ForEach(group.items)' in page and 'purchaseRow(item)' in page
+assert 'String(group.items.count)' in page and '.isHeader' in page
+assert 'StorePurchaseGroups.title' in page and '.ultraThinMaterial' in page
+assert 'account.email' in page and 'String(visible.count)' in page
 filters = '    private var purchaseFilters: some View'
-assert page[page.index(filters):page.index('    // Equal flexible columns')] == base[base.index(filters):base.index('    private func purchaseGroup(')]
-tile = page[page.index('    private func purchaseTile('):page.index(start)]
-assert tile.index('AsyncImage(') < tile.index('Text(item.name')
-for required in ['.aspectRatio(1, contentMode: .fit)', '.overlay(alignment: .bottomTrailing)', 'purchaseDownloadBadge(item)',
-                 '.background(.ultraThinMaterial', '.multilineTextAlignment(.center)', '.lineLimit(2)',
-                 'store-purchase-tile-\\(item.id)', 'store-purchase-download-\\(item.id)',
-                 '.frame(width: 44, height: 44)', 'await download(item)',
-                 '.disabled(loading || downloading != nil || store.busy != nil)',
-                 '.accessibilityLabel(tr("Download"', '+ " " + item.name']:
-    assert required in tile, required
-assert tile.count('await download(item)') == 1
-assert 'Button { Task { await download(item) } }' in tile
-assert '.environment(\\.layoutDirection, .leftToRight)' in page  # existing physical layout; centered names support both scripts
-assert 'account.email' in page and 'value: -months' in page and 'String(visible.count)' in page
-assert page.index('AppStoreSearchField(') < page.index('purchaseFilters\n') < page.index('String(visible.count)') < page.index('LazyVGrid(')
+assert page[page.index(filters):page.index('    private func purchaseGroup(')] == base[base.index(filters):base.index('    private func purchaseGroup(')]
+row = page[page.index('    private func purchaseRow('):page.index(start)]
+assert row == base[base.index('    private func purchaseRow('):base.index(start)]
 # Everything other than the one Purchases view, its tests and workflow stays exact.
 import hashlib
 changed = subprocess.check_output(['git', 'diff', '--name-only', '193256b'], cwd=r, text=True).splitlines()
@@ -74,64 +64,34 @@ for line in (r/'vendor/ApplePackage/Sources/CStoreAMD/Upstream/PROVENANCE.txt').
 upstream.update({'vendor/ApplePackage/Sources/CStoreAMD/Upstream/PROVENANCE.txt',
                  'vendor/ApplePackage/Sources/CStoreAMD/Upstream/LICENSE'})
 assert set(changed) <= allowed | upstream, changed
-print('PASS exact baseline Search, lifecycle, filters, account history and original download success, three-column flat grid, no month/date headers, glass icon tiles, corner badge action, accessible labels and dynamic count')
-if '--source-only' in sys.argv:
-    sys.exit(0)
+print('PASS exact Search, filters, account history, original icon/name/date/cloud rows and download path; rounded glass month list, localized headers, month and total counts')
+if '--source-only' in sys.argv: sys.exit(0)
+# Execute the unmodified production grouping helper and original filters.
 history = (r/'ios-app/AppStore/StorePurchaseHistory.swift').read_text()
 purchase = history[history.index('struct MirsaStorePurchase:'):history.index('/// Read-only own-account')]
-columns = ui[ui.index('    private var purchaseColumns:'):ui.index('    private func purchaseTile(')]
-harness = """
+groups = (r/'ios-app/Apps/StorePurchaseGroups.swift').read_text()
+source = """import Foundation
 struct MirsaStoreApp { let id: Int64; let bundleID: String; let name: String; let version: String; let price: Double?; let artworkURL: String }
-struct GridItem {
- enum Size { case flexible(minimum: Double) }
- enum Alignment { case top }
- let size: Size; let spacing: Double; let alignment: Alignment
- init(_ size: Size, spacing: Double, alignment: Alignment) {
-  self.size=size; self.spacing=spacing; self.alignment=alignment
- }
-}
-struct FilterHarness {
- var purchases: [MirsaStorePurchase]; var months: Int; var query: String
-"""
-harness += visible(ui).replace('    private var visible:', '    var visible:') + '\n}\n'
-harness += 'struct LayoutHarness {\n' + columns.replace('    private var purchaseColumns:', '    var purchaseColumns:') + '\n}\n'
-tests = r"""
+""" + purchase + groups + """
 @main struct Tests {
- static func item(_ id: Int64, _ date: Date?, _ name: String = "App") -> MirsaStorePurchase {
-  .init(id: id, bundleID: "example.\(id)", name: name, version: "1", date: date)
- }
  static func main() {
-  let columns=LayoutHarness().purchaseColumns
-  precondition(columns.count==3)
-  for column in columns {
-   guard case .flexible(let minimum) = column.size else { fatalError() }
-   precondition(minimum==0 && column.spacing==12)
+  var cal=Calendar(identifier:.gregorian); cal.timeZone=TimeZone(secondsFromGMT:0)!
+  func item(_ id:Int64,_ date:Date?)->MirsaStorePurchase {
+   .init(id:id,bundleID:"example",name:"App",version:"1",date:date)
   }
-  // Three equal columns fit compact and larger widths without adaptive column-count changes.
-  for viewport in [320.0,375,390,430,768] {
-   let content=viewport-40
-   let width=(content-Double(columns.count-1)*12)/Double(columns.count)
-   precondition(width>24) // square icon remains visible inside tile padding
-   precondition(abs(width*3+24-content)<0.001)
-  }
-  let now=Date()
-  let old=Calendar.current.date(byAdding:.month,value:-18,to:now)!
-  let rows=[item(123,now,"YouTube"),item(456,old,"ParkingPro"),item(789,nil,"واتساب")]
-  for (query,ids) in [("youtube",[123]),("EXAMPLE.456",[456]),("789",[789]),("واتساب",[789]),("none",[])] as [(String,[Int64])] {
-   precondition(FilterHarness(purchases:rows,months:0,query:query).visible.map(\.id)==ids)
-  }
-  for months in [1,6,12] {
-   precondition(FilterHarness(purchases:rows,months:months,query:"").visible.map(\.id)==[123])
-  }
-  precondition(FilterHarness(purchases:rows,months:0,query:"").visible.map(\.id)==[123,456,789])
-  precondition(FilterHarness(purchases:[],months:0,query:"").visible.isEmpty)
-  print("PASS actual Swift three equal column configuration, compact-width layout, unchanged query/month filters, count and original item identity/order")
+  let nov=cal.date(from:DateComponents(year:2026,month:11,day:13))!
+  let oct=cal.date(from:DateComponents(year:2026,month:10,day:4))!
+  let groups=StorePurchaseGroups.make([item(1,oct),item(2,nov),item(3,nil),item(4,nov)],calendar:cal)
+  precondition(groups.map { $0.items.map(\.id) } == [[2,4],[1],[3]])
+  precondition(groups.last!.month == nil)
+  precondition(StorePurchaseGroups.make([],calendar:cal).isEmpty)
+  let title=StorePurchaseGroups.title(nov,locale:Locale(identifier:"ar"),calendar:cal)
+  precondition(!title.isEmpty)
+  print("PASS actual month grouping, newest first, stable row IDs, unknown date group, Arabic header")
  }
 }
 """
-with tempfile.TemporaryDirectory(prefix='purchase-groups-') as d:
-    p = Path(d)/'test.swift'
-    p.write_text('import Foundation\n'+purchase+harness+tests)
-    binary = str(Path(d)/'test')
-    subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(p),'-o',binary],check=True)
-    subprocess.run([binary],check=True,timeout=20)
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d)/'tests.swift';p.write_text(source)
+ subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(p),'-o',d+'/tests'],check=True)
+ subprocess.run([d+'/tests'],check=True,timeout=20)
