@@ -39,3 +39,10 @@ try clips shorter and longer than 10 seconds; verify crop and first-frame
 thumbnail; import/apply through normal paired VPN flow; confirm motion on lock
 screen; force-close/relaunch and ensure imported wallpaper persists. Confirm
 existing .tendies imports and other tabs remain unchanged.
+
+Compatibility text provenance
+-----------------------------
+The "patched on iOS 27.2 beta 3 and later" wording comes from the old in-repo
+text (ContentView.swift before 3036e03: "iOS 18.0 - 27.2 beta 2, 27.2 b3+ patched",
+commit 40640c4 docs: update iOS compatibility matrix). No other version claim is made.
+Restored on 163e740 (identity fix 5.58.1, verification.json). 3866abb2 was a mistaken id.

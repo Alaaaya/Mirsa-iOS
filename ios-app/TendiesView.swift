@@ -9,6 +9,23 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Localized text for this screen: all five app languages, German included.
+func wtr(_ en: String, _ ar: String, de: String, ckb: String, kmr: String) -> String {
+    switch L.lang { case .english: return en; case .german: return de; case .arabic: return ar; case .sorani: return ckb; case .kurmanji: return kmr }
+}
+
+enum VideoWallpaperUserError: Error {
+    case notVideo, unreadable
+    var message: String {
+        switch self {
+        case .notVideo:
+            return wtr("This file is not a video.", "هالملف مو فيديو.", de: "Diese Datei ist kein Video.", ckb: "ئەم فایلە ڤیدیۆ نییە.", kmr: "Ev pel ne vîdyo ye.")
+        case .unreadable:
+            return wtr("This video can't be read or is not supported.", "ما قدرنا نقرا الفيديو أو مو مدعوم.", de: "Dieses Video kann nicht gelesen werden oder wird nicht unterstützt.", ckb: "ناتوانرێت ئەم ڤیدیۆیە بخوێنرێتەوە یان پشتگیری ناکرێت.", kmr: "Ev vîdyo nayê xwendin an nayê piştgirîkirin.")
+        }
+    }
+}
+
 struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
@@ -22,7 +39,7 @@ struct TendiesView: View {
         showVideoPicker = false
         guard let result = result else { return }
         switch result {
-        case .failure(let error): vm.errorMessage = error.localizedDescription
+        case .failure(let error): vm.errorMessage = VideoWallpaperUserError.unreadable.message; _ = error
         case .success(let source):
             preparingVideo = true
             videoProgress = 0
@@ -40,7 +57,7 @@ struct TendiesView: View {
                     }.value
                     defer { try? FileManager.default.removeItem(at: archive) }
                     await vm.importTendieFiles(urls: [archive])
-                } catch { vm.errorMessage = error.localizedDescription }
+                } catch { vm.errorMessage = VideoWallpaperUserError.unreadable.message }
             }
         }
     }
@@ -104,27 +121,29 @@ struct TendiesView: View {
                     Button {
                         showVideoPicker = true
                     } label: {
-                        Label(tr("Video from Photos", "فيديو من الاستوديو", ckb: "ڤیدیۆ لە وێنەکان", kmr: "Vîdyo ji Wêneyan"), systemImage: "video.badge.plus")
+                        Label(wtr("Video from Photos", "فيديو من الاستوديو", de: "Video aus Fotos", ckb: "ڤیدیۆ لە وێنەکان", kmr: "Vîdyo ji Wêneyan"), systemImage: "video.badge.plus")
                     }
                     .disabled(preparingVideo || videoApplyRunning)
                     Button {
                         showVideoFilePicker = true
                     } label: {
-                        Label(tr("Video from Files", "فيديو من الملفات", ckb: "ڤیدیۆ لە فایلەکان", kmr: "Vîdyo ji Pelan"), systemImage: "folder.badge.plus")
+                        Label(wtr("Video from Files", "فيديو من الملفات", de: "Video aus Dateien", ckb: "ڤیدیۆ لە فایلەکان", kmr: "Vîdyo ji Pelan"), systemImage: "folder.badge.plus")
                     }
                     .disabled(preparingVideo || videoApplyRunning)
                     if preparingVideo {
                         ProgressView(value: videoProgress) {
-                            Text(tr("Preparing video…", "عم نجهّز الفيديو…", ckb: "ڤیدیۆ ئامادە دەکرێت…", kmr: "Vîdyo tê amadekirin…"))
+                            Text(wtr("Preparing video…", "عم نجهّز الفيديو…", de: "Video wird vorbereitet…", ckb: "ڤیدیۆ ئامادە دەکرێت…", kmr: "Vîdyo tê amadekirin…"))
                         }
                     }
-                    Text(tr("Video wallpaper for the lock screen: pick a video from Photos or Files. It uses the first 10 seconds, cropped to fit your screen. When it is ready, flash it below. This is a system wallpaper, not just an app background.",
+                    Text(wtr("Video wallpaper for the lock screen: pick a video from Photos or Files. It uses the first 10 seconds, cropped to fit your screen. When it is ready, flash it below. This is a system wallpaper, not just an app background.",
                             "خلفية فيديو لشاشة القفل: اختار فيديو من الاستوديو أو الملفات. بنستخدم أول ١٠ ثواني ونقصّها حسب شاشتك. لما يجهز اضغط تطبيق تحت. هي خلفية للنظام مو بس خلفية للتطبيق.",
+                            de: "Video-Hintergrund für den Sperrbildschirm: Wähle ein Video aus Fotos oder Dateien. Es werden die ersten 10 Sekunden verwendet und passend zum Bildschirm zugeschnitten. Wenn es bereit ist, wende es unten an. Das ist ein System-Hintergrund, nicht nur ein App-Hintergrund.",
                             ckb: "ڤیدیۆی پاشبنەما بۆ شاشەی قوفڵ: ڤیدیۆیەک لە وێنەکان یان فایلەکان هەڵبژێرە. یەکەم ١٠ چرکە بەکاردێت و لەگەڵ شاشەکەت دەگونجێت. کاتێک ئامادە بوو لە خوارەوە جێبەجێی بکە.",
                             kmr: "Wêneya vîdyoyê ji bo ekrana qefilandinê: vîdyoyekê ji Wêneyan an Pelan hilbijêre. 10 çirkeyên pêşîn tên bikaranîn û li gorî ekranê tên birîn. Gava amade bû li jêr bi cih bîne.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text(tr("Experimental. The apply method is patched on iOS 27.2 beta 3 and later.",
+                    Text(wtr("Experimental. The apply method is patched on iOS 27.2 beta 3 and later.",
                             "ميزة تجريبية. طريقة التطبيق مسدودة على iOS 27.2 beta 3 والأحدث.",
+                            de: "Experimentell. Die Anwendungsmethode ist ab iOS 27.2 Beta 3 gepatcht.",
                             ckb: "تاقیکارییە. شێوازی جێبەجێکردن لە iOS 27.2 beta 3 و نوێتر داخراوە.",
                             kmr: "Ceribandin e. Rêbaza sepandinê li iOS 27.2 beta 3 û nûtir hatiye girtin."))
                         .font(.caption).foregroundStyle(.orange)
@@ -290,16 +309,17 @@ struct TendiesView: View {
             }
             .fileImporter(isPresented: $showVideoFilePicker, allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie]) { result in
                 switch result {
-                case .failure(let error): vm.errorMessage = error.localizedDescription
+                case .failure(let error):
+                    // Cancelling the picker is not an error.
+                    if (error as? CocoaError)?.code != .userCancelled { vm.errorMessage = VideoWallpaperUserError.unreadable.message }
                 case .success(let url):
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    do {
-                        let copy = FileManager.default.temporaryDirectory
-                            .appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension)
-                        try FileManager.default.copyItem(at: url, to: copy)
-                        videoPicked(.success(copy))
-                    } catch { vm.errorMessage = error.localizedDescription }
+                    Task { @MainActor in
+                        do {
+                            let copy = try await Task.detached(priority: .userInitiated) { try VideoFileImport.copyVideo(from: url) }.value
+                            videoPicked(.success(copy))
+                        } catch let e as VideoWallpaperUserError { vm.errorMessage = e.message
+                        } catch { vm.errorMessage = VideoWallpaperUserError.unreadable.message }
+                    }
                 }
             }
             .sheet(item: $selectedDetailItem) { item in
@@ -511,5 +531,20 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             parent.dismiss()
         }
+    }
+}
+
+enum VideoFileImport {
+    /// Copies a Files-picked video into temp storage while security-scoped access is open.
+    static func copyVideo(from url: URL) throws -> URL {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType
+            ?? UTType(filenameExtension: url.pathExtension)
+        guard let type, type.conforms(to: .movie) else { throw VideoWallpaperUserError.notVideo }
+        let copy = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension)
+        do { try FileManager.default.copyItem(at: url, to: copy) } catch { throw VideoWallpaperUserError.unreadable }
+        return copy
     }
 }
