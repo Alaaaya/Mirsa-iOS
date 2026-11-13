@@ -44,6 +44,8 @@ int main(void) {
  CHECK(!breadcrumb_case(path,2,0,0));CHECK(!breadcrumb_case(path,3,0,0));
  CHECK(!breadcrumb_case(path,4,0,0));CHECK(!breadcrumb_case(path,5,0,0));
  CHECK(!mirsa_bb_start(path,0));CHECK(access(path,F_OK)!=0);
+ int protected_fd=open(path,O_WRONLY|O_CREAT,0600);CHECK(protected_fd>=0);CHECK(write(protected_fd,"keep",4)==4);close(protected_fd);
+ CHECK(link(path,linkpath)==0);CHECK(!mirsa_bb_start(linkpath,1));struct stat intact;CHECK(stat(path,&intact)==0);CHECK(intact.st_size==4);unlink(linkpath);unlink(path);
  CHECK(symlink(path,linkpath)==0);CHECK(!mirsa_bb_start(linkpath,1));unlink(linkpath);
  pid_t pid=fork();CHECK(pid>=0);
  if(pid==0){if(!mirsa_bb_start(path,1))_exit(3);raise(SIGABRT);_exit(4);}

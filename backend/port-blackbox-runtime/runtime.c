@@ -82,11 +82,11 @@ int mirsa_bb_read_event(int fd, struct mirsa_bb_event *e) {
 }
 int mirsa_bb_start(const char *path,int opted_in) {
     if (!opted_in || active || !path) return 0;
-    int fd=open(path,O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW|O_CLOEXEC,0600);
+    int fd=open(path,O_WRONLY|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0600);
     if (fd<0) return 0;
     struct stat st;
     if (fstat(fd,&st)!=0 || !S_ISREG(st.st_mode) || st.st_uid!=getuid() ||
-        st.st_nlink!=1 || fchmod(fd,0600)!=0) {close(fd);return 0;}
+        st.st_nlink!=1 || fchmod(fd,0600)!=0 || ftruncate(fd,0)!=0) {close(fd);return 0;}
     event_fd=fd; writing=0; active=1;
     for (unsigned i=0;i<COUNT;i++) {
         struct sigaction previous, action;
