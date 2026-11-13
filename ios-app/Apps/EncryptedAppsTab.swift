@@ -14,6 +14,8 @@ struct EncryptedAppsTab: View {
     /// Recreates the inline sign-in/search screen when the session changed elsewhere.
     @State private var storeViewID = UUID()
     @State private var libraryQuery = ""
+    /// Follows `libraryQuery` after a short pause so typing does not re-filter the queue per keystroke.
+    @State private var appliedLibraryQuery = ""
     @State private var showingAdd = false
     @State private var showingTools = false
     @State private var priorAccountID: String?
@@ -129,6 +131,9 @@ struct EncryptedAppsTab: View {
     private func page<Content: View>(_ tab: AppStoreSectionTab, @ViewBuilder _ content: () -> Content) -> some View {
         content()
             .storePageTransition(visible: section == tab)
+            // One shared background is drawn by the tab; hidden pages rest their animations.
+            .environment(\.storeBackdropProvided, true)
+            .environment(\.storePageVisible, section == tab)
             .allowsHitTesting(section == tab)
             .accessibilityHidden(section != tab)
     }
@@ -186,7 +191,7 @@ struct EncryptedAppsTab: View {
     }
 
     private var filteredEntries: [EncryptedIPAEntry] {
-        let q = libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let q = appliedLibraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return store.entries }
         return store.entries.filter {
             $0.name.localizedCaseInsensitiveContains(q) || $0.version.localizedCaseInsensitiveContains(q)
@@ -287,6 +292,11 @@ struct EncryptedAppsTab: View {
         .scrollContentBackground(.hidden)
         .environment(\.defaultMinListRowHeight, 1)
         .scrollDismissesKeyboard(.interactively)
+        .task(id: libraryQuery) {
+            if libraryQuery.isEmpty { appliedLibraryQuery = ""; return }
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            if !Task.isCancelled { appliedLibraryQuery = libraryQuery }
+        }
         .refreshable { await refreshDownloads() }
         .task(id: store.entries.map(\.id)) { await refreshStorage() }
         .onChange(of: store.installingID) { old, new in
@@ -460,6 +470,9 @@ private struct EncryptedEntryCard: View {
     let onDelete: () -> Void
 
     @State private var installStart: Date?
+    /// Icon average colour, computed once per entry off the main thread.
+    @State private var iconTint: Color?
+    private var tintKey: String { "store-ipa|" + entry.id.uuidString }
     @State private var showNotes = false
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
@@ -477,7 +490,7 @@ private struct EncryptedEntryCard: View {
         let notes = warnings(match)
         let installing = store.installingID == entry.id
         let icon = store.icon(entry)
-        let tint = StoreLuxe.vivid(IconTint.color(for: "store-ipa|" + entry.id.uuidString, image: icon))
+        let tint = iconTint ?? StoreIconTintCache.cached(tintKey) ?? StoreLuxe.seedColor(entry.bundleID)
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
             HStack(spacing: MirsaSpacing.s) {
                 Group {
@@ -494,7 +507,6 @@ private struct EncryptedEntryCard: View {
                 .frame(width: 64, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8))
-                .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
                     Text("\(entry.version) · \(ByteCountFormatter.string(fromByteCount: entry.sizeBytes, countStyle: .file))")
@@ -554,7 +566,6 @@ private struct EncryptedEntryCard: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
-                        .shadow(color: StoreLuxe.accent.opacity(0.45), radius: 10, y: 4)
                 }
                 .buttonStyle(.mirsaPress)
                 .disabled(store.busy != nil)
@@ -592,6 +603,10 @@ private struct EncryptedEntryCard: View {
             .disabled(installing)
         }
         .onChange(of: store.installingID) { _, id in installStart = id == entry.id ? Date() : nil }
+        .task(id: entry.id) {
+            guard iconTint == nil else { return }
+            if let c = await StoreIconTintCache.color(tintKey, image: store.icon(entry)) { iconTint = c }
+        }
     }
 
     @ViewBuilder private var stateBadge: some View {

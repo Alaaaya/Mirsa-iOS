@@ -224,7 +224,6 @@ struct AppStoreSectionBar: View {
                                 Capsule().fill(LinearGradient(colors: [Color.white.opacity(0.30), .clear], startPoint: .top, endPoint: .center))
                                 Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.8)
                             }
-                            .shadow(color: StoreLuxe.accent.opacity(0.55), radius: 12, y: 4)
                             .matchedGeometryEffect(id: "store-tab", in: ns)
                         }
                     }
@@ -237,7 +236,7 @@ struct AppStoreSectionBar: View {
         }
         .padding(6)
         .frame(height: 62)
-        .storeGlassCapsule(elevation: 1.2)
+        .storeGlassBar()
         .padding(.horizontal, MirsaSpacing.page + MirsaSpacing.xs)
         .padding(.top, MirsaSpacing.xxs)
         .padding(.bottom, MirsaSpacing.xs)
@@ -478,8 +477,9 @@ struct AppStoreAccountPage: View {
             .background {
                 ZStack {
                     RoundedRectangle(cornerRadius: 30, style: .continuous).fill(StoreLuxe.identity).opacity(0.62)
-                    Circle().fill(StoreLuxe.cyan.opacity(0.35)).frame(width: 220).blur(radius: 40).offset(x: 140, y: -70)
-                    Circle().fill(StoreLuxe.accent.opacity(0.45)).frame(width: 180).blur(radius: 46).offset(x: -120, y: 80)
+                    // Glows as radial gradients instead of blurred circles (no blur pass).
+                    RadialGradient(colors: [StoreLuxe.cyan.opacity(0.32), .clear], center: UnitPoint(x: 0.95, y: 0.0), startRadius: 0, endRadius: 190)
+                    RadialGradient(colors: [StoreLuxe.accent.opacity(0.42), .clear], center: UnitPoint(x: 0.05, y: 1.0), startRadius: 0, endRadius: 170)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
             }
@@ -907,6 +907,8 @@ struct AppStorePurchasesPage: View {
     let vm: AppViewModel
     let isActive: Bool
     @State private var query = ""
+    /// The filter follows `query` after a short pause, so typing does not re-filter per keystroke.
+    @State private var appliedQuery = ""
     @State private var months = 0
     @State private var purchases: [MirsaStorePurchase] = []
     @State private var artwork: [Int64: String] = [:]
@@ -922,12 +924,13 @@ struct AppStorePurchasesPage: View {
         let cutoff = Calendar.current.date(byAdding: .month, value: -months, to: Date()) ?? .distantPast
         return purchases.filter {
             (months == 0 || ($0.date ?? .distantPast) >= cutoff) &&
-            (query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) ||
-             $0.bundleID.localizedCaseInsensitiveContains(query) || String($0.id).contains(query))
+            (appliedQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(appliedQuery) ||
+             $0.bundleID.localizedCaseInsensitiveContains(appliedQuery) || String($0.id).contains(appliedQuery))
         }
     }
     var body: some View {
-        ScrollView {
+        let shown = visible
+        return ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
                 StorePageHeader(title: storeText("Purchases", "المشتريات", de: "Käufe", ckb: "کڕینەکان", kmr: "Kirîn"),
                                 subtitle: EncryptedText.tabTitle) {
@@ -947,7 +950,7 @@ struct AppStorePurchasesPage: View {
                     AppStoreSearchField(placeholder: storeText("Search purchases or App ID", "البحث بالمشتريات أو App ID", de: "Käufe oder App-ID suchen", ckb: "گەڕان لە کڕینەکان", kmr: "Li kirînan bigere"), text: $query)
                     purchaseFilters
                     HStack(spacing: MirsaSpacing.xs) {
-                        Text((purchases.isEmpty && (loading || model.refreshingPurchases) ? "…" : String(visible.count)) + storeText(" items", " عنصراً", de: " Einträge", ckb: " بڕگە", kmr: " tişt"))
+                        Text((purchases.isEmpty && (loading || model.refreshingPurchases) ? "…" : String(shown.count)) + storeText(" items", " عنصراً", de: " Einträge", ckb: " بڕگە", kmr: " tişt"))
                             .font(MirsaFont.caption.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 7)
@@ -973,7 +976,7 @@ struct AppStorePurchasesPage: View {
                         .storeGlass(radius: 20, tint: MirsaPalette.warning, sheen: false, elevation: 0.4)
                     } else if purchases.isEmpty && (loading || model.refreshingPurchases) {
                         ForEach(0..<4, id: \.self) { _ in StoreSkeletonCard(iconSize: 52) }
-                    } else if !loading && !model.refreshingPurchases && visible.isEmpty {
+                    } else if !loading && !model.refreshingPurchases && shown.isEmpty {
                         StoreEmptyState(icon: query.isEmpty ? "bag" : "magnifyingglass",
                                         title: query.isEmpty
                                             ? storeText("No purchases here yet", "ما في مشتريات لسا", de: "Noch keine Käufe", ckb: "هێشتا هیچ کڕینێک نییە", kmr: "Hêj kirîn tune")
@@ -985,7 +988,7 @@ struct AppStorePurchasesPage: View {
                                                            kmr: "Sepanên ku vî hesabî girtine an kirîne li vir li gorî mehê xuya dibin."))
                     }
                     LazyVStack(alignment: .leading, spacing: MirsaSpacing.m, pinnedViews: [.sectionHeaders]) {
-                        ForEach(StorePurchaseGroups.make(visible)) { group in
+                        ForEach(StorePurchaseGroups.make(shown)) { group in
                             purchaseGroup(group)
                         }
                     }
@@ -1025,8 +1028,13 @@ struct AppStorePurchasesPage: View {
             if purchases != items { purchases = items }
         }
         .onDisappear { reloadTask?.cancel() }
+        .task(id: query) {
+            if query.isEmpty { appliedQuery = ""; return }
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            if !Task.isCancelled { appliedQuery = query }
+        }
         .scrollDismissesKeyboard(.interactively)
-        .background(StoreLuxeBackground())
+        .background(StorePageBackdrop())
         .environment(\.layoutDirection, .leftToRight)
     }
     private var purchaseFilters: some View {
@@ -1047,7 +1055,6 @@ struct AppStorePurchasesPage: View {
                 .background {
                     if months == value {
                         Capsule().fill(StoreLuxe.identity).opacity(0.8)
-                            .shadow(color: StoreLuxe.accent.opacity(0.45), radius: 8, y: 3)
                     }
                 }
                 .storeGlassCapsule(elevation: 0.2)
@@ -1065,8 +1072,8 @@ struct AppStorePurchasesPage: View {
                     HStack(alignment: .center, spacing: 10) {
                         ZStack {
                             Rectangle().fill(StoreLuxe.identity).opacity(0.35).frame(width: 2)
+                            Circle().fill(StoreLuxe.accent.opacity(0.35)).frame(width: 14, height: 14)
                             Circle().fill(StoreLuxe.accentSoft).frame(width: 8, height: 8)
-                                .shadow(color: StoreLuxe.accent, radius: 4)
                         }
                         .frame(width: 14)
                         purchaseRow(item)
@@ -1122,7 +1129,6 @@ struct AppStorePurchasesPage: View {
                             .frame(width: 44, height: 44)
                             .background(StoreLuxe.identity, in: Circle())
                             .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8))
-                            .shadow(color: StoreLuxe.accent.opacity(0.5), radius: 8, y: 3)
                     }
                     .buttonStyle(.mirsaPress)
                     .disabled(loading || downloading != nil || store.busy != nil)

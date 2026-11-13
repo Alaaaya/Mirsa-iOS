@@ -64,8 +64,6 @@ struct AppStoreAccountView: View {
     @State private var transfer: StoreDownloadProgress?
     @State private var progressAttempt: UUID?
     @FocusState private var focus: Bool
-    /// UI only: hero transition from a result card's icon into the app page header.
-    @Namespace private var hero
     @ObservedObject private var library = StoreLibraryModel.shared
     @ObservedObject private var tints = StoreArtworkTint.shared
 
@@ -102,7 +100,7 @@ struct AppStoreAccountView: View {
         .refreshable { pullToRefresh() }
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(StoreLuxeBackground())
+        .background(StorePageBackdrop())
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
         .task {
@@ -334,7 +332,9 @@ struct AppStoreAccountView: View {
         if !results.isEmpty {
             StoreSectionTitle(title: t("Results", "النتائج", "ئەنجامەکان", "Encam"), trailing: "\(results.count)")
         }
-        ForEach(results) { app in resultRow(app) }
+        LazyVStack(alignment: .leading, spacing: MirsaSpacing.m) {
+            ForEach(results) { app in resultRow(app) }
+        }
         }
     }
 
@@ -346,7 +346,6 @@ struct AppStoreAccountView: View {
                     .foregroundStyle(StoreLuxe.identity).lineLimit(1)
                 Text(t("Search", "بحث", "گەڕان", "Lêgerîn"))
                     .font(MirsaFont.pageTitle).foregroundStyle(.white)
-                    .shadow(color: StoreLuxe.accent.opacity(0.35), radius: 14, y: 4)
             }
             Spacer()
             Button(action: onOpenAccount) {
@@ -619,7 +618,6 @@ struct AppStoreAccountView: View {
                 Button { openDetail(app) } label: {
                     HStack(alignment: .top, spacing: MirsaSpacing.s) {
                         StoreArtwork(url: app.artworkURL, seed: app.bundleID, name: app.name, size: 76)
-                            .matchedGeometryEffect(id: "store-icon-\(app.id)", in: hero)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(app.name).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
                             Text(app.bundleID).font(.caption2.monospaced()).foregroundStyle(Color.white.opacity(0.62)).lineLimit(1)
@@ -644,7 +642,6 @@ struct AppStoreAccountView: View {
                         .padding(.horizontal, 16).frame(height: 36)
                         .background(Capsule().fill(StoreLuxe.identity))
                         .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8))
-                        .shadow(color: StoreLuxe.accent.opacity(0.45), radius: 8, y: 3)
                 }
                 .buttonStyle(.mirsaPress)
                 .disabled(busy != nil || !canDownload(app))
@@ -668,7 +665,8 @@ struct AppStoreAccountView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .fill(LinearGradient(colors: [tint.opacity(0.62), tint.opacity(0.18), Color.clear], startPoint: .topLeading, endPoint: .bottomTrailing))
-                Circle().fill(tint.opacity(0.45)).frame(width: 160).blur(radius: 40).offset(x: -110, y: -40)
+                // Glow as a radial gradient (no per-card blur pass while scrolling).
+                RadialGradient(colors: [tint.opacity(0.42), tint.opacity(0.12), .clear], center: UnitPoint(x: 0.12, y: 0.1), startRadius: 0, endRadius: 150)
             }
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
@@ -749,7 +747,6 @@ struct AppStoreAccountView: View {
         VStack(alignment: .leading, spacing: MirsaSpacing.m) {
             HStack(alignment: .top, spacing: MirsaSpacing.m) {
                 StoreArtwork(url: app.artworkURL, seed: app.bundleID, name: app.name, size: 112)
-                    .matchedGeometryEffect(id: "store-icon-\(app.id)", in: hero)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(app.name).font(.system(size: 24, weight: .heavy, design: .rounded)).foregroundStyle(.white).lineLimit(3)
                         .minimumScaleFactor(0.8)
@@ -767,7 +764,7 @@ struct AppStoreAccountView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 32, style: .continuous)
                     .fill(LinearGradient(colors: [tint.opacity(0.85), tint.opacity(0.30), StoreLuxe.accent.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                Circle().fill(Color.white.opacity(0.16)).frame(width: 200).blur(radius: 50).offset(x: 120, y: -80)
+                RadialGradient(colors: [Color.white.opacity(0.16), .clear], center: UnitPoint(x: 0.9, y: 0.0), startRadius: 0, endRadius: 170)
             }
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         }
