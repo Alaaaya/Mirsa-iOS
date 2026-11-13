@@ -111,6 +111,7 @@ actor MirsaStoreClient {
         generation &+= 1
         challenge = nil
         packages.cancel()
+        StoreResumeStore.clearAll()
         // Keep the stable machine identifier; deleting it on each logout changes identity.
         var deletionError: Error?
         do { try vault.remove("account") } catch { deletionError = error }
@@ -234,7 +235,7 @@ actor MirsaStoreClient {
             try check(run)
             try validate(output: output, app: app, version: version)
             try persist(owner)
-            let url = try await packages.fetch(output: output, bundleID: app.bundleID)
+            let url = try await StoreResumeContext.$account.withValue(owner.email) { try await packages.fetch(output: output, bundleID: app.bundleID) }
             completed = url
             try check(run)
             return url
@@ -260,7 +261,7 @@ actor MirsaStoreClient {
             try check(run)
             try validate(output: output, app: app, version: version)
             try persist(owner)
-            let url = try await packages.fetch(output: output, bundleID: app.bundleID)
+            let url = try await StoreResumeContext.$account.withValue(owner.email) { try await packages.fetch(output: output, bundleID: app.bundleID) }
             completed = url
             try check(run)
             return url
