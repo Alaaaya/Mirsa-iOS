@@ -916,6 +916,7 @@ struct AppStorePurchasesPage: View {
     @State private var error: String?
     @State private var recovery: StoreFreeLicenseRecovery?
     @State private var downloading: Int64?
+    @State private var openDetail: MirsaStorePurchase?
     @State private var reloadID = UUID()
     @State private var reloadTask: Task<Void, Never>?
     @ObservedObject private var tints = StoreArtworkTint.shared
@@ -1001,6 +1002,15 @@ struct AppStorePurchasesPage: View {
             }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
         }
         .refreshable { _ = try? await model.purchases(force: true); await reload() }
+        .sheet(item: $openDetail) { item in
+            NavigationStack {
+                AppStoreAccountView(onDownloaded: { url in
+                    let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+                    store.add(entry)
+                }, searchOnly: true, openAppID: item.id)
+            }
+            .preferredColorScheme(.dark)
+        }
         .task(id: loadIdentity) {
             reloadID = UUID(); reloadTask?.cancel()
             recovery = nil; purchases = model.cachedPurchases; error = nil; loading = false
@@ -1141,6 +1151,8 @@ struct AppStorePurchasesPage: View {
         .padding(.horizontal, MirsaSpacing.s).padding(.vertical, 10)
         .environment(\.layoutDirection, .leftToRight)
         .storeGlass(radius: 22, tint: tint, sheen: true, elevation: 0.5)
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .onTapGesture { StoreHaptics.select(); openDetail = item }
         .contextMenu {
             Button { StoreLinks.copy(item.bundleID) } label: {
                 Label(storeText("Copy Bundle ID", "نسخ Bundle ID", de: "Bundle-ID kopieren", ckb: "کۆپی Bundle ID", kmr: "Bundle ID kopî bike"), systemImage: "doc.on.doc")
