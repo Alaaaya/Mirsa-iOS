@@ -4,43 +4,21 @@ import XCTest
 final class ForgeInspectorTests: XCTestCase {
     private let id = UUID(uuidString: "12345678-1234-1234-1234-123456789abc")!
 
-    func testCaptureRequiresExplicitForegroundMainThreadAction() {
+    /// The server injects the trusted inspector into every tweak and rejects a second copy, so the client scaffold must stay inert.
+    func testScaffoldIsInertValidAndDoesNotEmbedReservedInspector() {
         let code = ForgeInspector.code(tweakID: id)
-        for marker in ["UIGestureRecognizerStateBegan", "[NSThread isMainThread]", "UIApplicationStateActive", "UISceneActivationStateForegroundActive"] {
-            XCTAssertTrue(code.contains(marker), marker)
+        XCTAssertEqual(code, "%hook UIWindow\n- (void)becomeKeyWindow { %orig; }\n%end")
+        for banned in ["mirsa.inspector.v1", "MirsaLocalInspector", "%ctor", "NSURLSession", "UILongPress", "writeToFile"] {
+            XCTAssertFalse(code.contains(banned), banned)
         }
-        XCTAssertFalse(code.contains("%ctor"))
-        XCTAssertFalse(code.contains("NSURLSession"))
+        XCTAssertLessThan(code.utf8.count, 200)
     }
 
-    func testTraversalAndTransportAreBounded() {
-        let code = ForgeInspector.code(tweakID: id)
-        for marker in ["nodes.count < 400", "queue.count >= 400", "depth >= 32", "data.length > 24000", "events.count > 20", "className.length > 128", "UIPasteboardOptionLocalOnly:@YES", "dateWithTimeIntervalSinceNow:120", "SwiftUI/WebView", "@\"truncated\""] {
-            XCTAssertTrue(code.contains(marker), marker)
+    func testGuideDescribesTwoFingerDoubleTapNotLongPress() throws {
+        for f in ["MirsaTrForge.swift", "ForgeFeaturesView.swift"] {
+            let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("ios-app/Apps/" + f)
+            let s = try String(contentsOf: url, encoding: .utf8)
+            XCTAssertFalse(s.contains("then long-press inside it"), f)
         }
-        XCTAssertLessThan(code.utf8.count, 24000)
-    }
-
-    func testGuardIsReadOnlyAndBoundToSuppliedProject() {
-        let code = ForgeInspector.code(tweakID: id)
-        XCTAssertTrue(code.contains("mirsa_guard_\(id.uuidString.lowercased()).plist"))
-        XCTAssertTrue(code.contains("NSHomeDirectory()"))
-        XCTAssertTrue(code.contains("guardDisabled"))
-        XCTAssertFalse(code.contains("writeToFile"))
-        XCTAssertFalse(code.contains("/var/"))
-    }
-
-    func testFreeformContentIsNotExportedAndCopyNeedsPreviewAction() {
-        let code = ForgeInspector.code(tweakID: id)
-        XCTAssertTrue(code.contains("secureTextEntry"))
-        XCTAssertTrue(code.contains("[safeWords containsObject:"))
-        XCTAssertTrue(code.contains("@\"identifier\":@\"[redacted]\""))
-        XCTAssertFalse(code.contains("accessibilityLabel"))
-        XCTAssertFalse(code.contains("accessibilityIdentifier"))
-        XCTAssertFalse(code.contains("UITextView *)view).text"))
-        let action = code.range(of: "actionWithTitle:@\"Copy / نسخ\"")!
-        let copy = code.range(of: "setItems:")!
-        XCTAssertLessThan(action.lowerBound, copy.lowerBound)
-        XCTAssertTrue(code.contains("mirsa.inspector.v1"))
     }
 }
