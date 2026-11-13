@@ -264,3 +264,25 @@ int MirsaRelaunchSelf(void) {
     }
     return 0;
 }
+
+
+// Targeted, read-only local query. Missing/filtered/unsupported results are UNKNOWN,
+// never proof of absence. Do not enumerate apps or infer presence from URL schemes.
+int MirsaInstalledBundleState(const char *bundleID) {
+    @try {
+        if (!bundleID) return -1;
+        NSString *bid = [NSString stringWithUTF8String:bundleID];
+        Class cls = NSClassFromString(@"LSApplicationProxy");
+        SEL lookup = NSSelectorFromString(@"applicationProxyForIdentifier:");
+        if (!bid.length || ![cls respondsToSelector:lookup]) return -1;
+        id proxy = ((id (*)(id, SEL, id))objc_msgSend)(cls, lookup, bid);
+        SEL identifier = NSSelectorFromString(@"bundleIdentifier");
+        SEL installed = NSSelectorFromString(@"isInstalled");
+        if (!proxy || ![proxy respondsToSelector:identifier] || ![proxy respondsToSelector:installed]) return -1;
+        NSString *actual = ((id (*)(id, SEL))objc_msgSend)(proxy, identifier);
+        if (![actual isKindOfClass:NSString.class] || [actual caseInsensitiveCompare:bid] != NSOrderedSame) return -1;
+        // A negative from this private API can be privacy-filtered or offloaded.
+        // Only a positive is reliable enough to block replacement.
+        return ((BOOL (*)(id, SEL))objc_msgSend)(proxy, installed) ? 1 : -1;
+    } @catch (NSException *exception) { return -1; }
+}

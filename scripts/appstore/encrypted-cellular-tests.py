@@ -20,6 +20,21 @@ if '--source-only' in sys.argv:
 stubs = r"""
 import Foundation
 func tr(_ en: String, _ ar: String) -> String { en }
+func tr(_ en: String, _ ar: String, ckb: String, kmr: String) -> String {
+ switch L.lang { case .english:return en; case .arabic:return ar; case .sorani:return ckb; case .kurmanji:return kmr }
+}
+enum CellularConsentFixture {
+ static var state: Int32 = -1
+ static var allow = true
+ static var prompts = 0
+ static var queries: [String] = []
+ static func confirm() async -> Bool { prompts += 1; return allow }
+}
+@_cdecl("MirsaInstalledBundleState")
+func MirsaInstalledBundleState(_ bundle: UnsafePointer<CChar>) -> Int32 {
+ CellularConsentFixture.queries.append(String(cString:bundle))
+ return CellularConsentFixture.state
+}
 enum EncryptedIPAError: Error { case noInfo }
 enum SideloadError: Error { case message(String) }
 enum Fixture {
@@ -106,6 +121,8 @@ enum WiFiPathState { case unknown, wifi, notWifi }
 }
 struct AppViewModel {}
 enum L {
+    enum Language { case english, arabic, sorani, kurmanji }
+    static var lang = Language.english
     static var isArabic = false
     static func t(_ key: String) -> String { key }
     static func f(_ key: String, _ value: String) -> String { key + value }
@@ -145,6 +162,22 @@ tests = r"""
         do { _ = try EncryptedLocalInstall.identity(in:Fixture.file); fatalError("invalid metadata accepted") } catch {}
         Fixture.multiple = false; Fixture.oversized = false; Fixture.info["CFBundleVersion"] = "1042"
     }
+    // Installed detection blocks BEFORE local server, manifest or iOS handoff.
+    CellularConsentFixture.state = 1
+    let opened = UIApplication.shared.opens; let servers = LocalOTAServer.all.count
+    do { try await EncryptedLocalInstall.handoff(Fixture.file); fatalError("replacement allowed") } catch {}
+    precondition(UIApplication.shared.opens == opened && LocalOTAServer.all.count == servers)
+    precondition(CellularConsentFixture.queries.last == "example.owned")
+    CellularConsentFixture.state = -1; CellularConsentFixture.allow = false
+    do { try await EncryptedLocalInstall.handoff(Fixture.file); fatalError("cancel ignored") } catch is CancellationError {} catch { fatalError("wrong cancellation") }
+    precondition(UIApplication.shared.opens == opened && LocalOTAServer.all.count == servers)
+    CellularConsentFixture.allow = true
+    for lang in [L.Language.english, .arabic, .sorani, .kurmanji] {
+        L.lang = lang
+        precondition(!EncryptedLocalInstall.replacementWarning.isEmpty && !EncryptedLocalInstall.unknownWarning.isEmpty)
+    }
+    L.lang = .english
+    precondition(EncryptedLocalInstall.replacementWarning.contains("local data"))
     for mode in ["start","manifest","open","noRequest","success"] {
         LocalOTAServer.failStart = mode == "start"
         LocalOTAManifest.reachable = mode != "manifest"
@@ -160,10 +193,12 @@ tests = r"""
         WiFiPathMonitor.shared.state = state
         let h = EncryptedAppsStore(); EncryptedAppsStore.shared = h
         let app = EncryptedIPAEntry(); h.entries = [app]
+        let queriesBefore = CellularConsentFixture.queries.count
         let nativeBefore = SideloadService.calls; let gateBefore = AppsStore.shared.gates
         await h.install(app,vm:nil)
         precondition(h.busy == nil && h.installingID == nil && AppsStore.shared.busy == nil)
         if state == .wifi {
+            precondition(CellularConsentFixture.queries.count == queriesBefore)
             precondition(SideloadService.calls == nativeBefore+1 && h.entries[0].installedAt != nil && h.saves == 1)
         } else {
             precondition(SideloadService.calls == nativeBefore && h.entries[0].installedAt == nil && h.saves == 0)
@@ -182,12 +217,12 @@ tests = r"""
     precondition(LocalOTAServer.all.count == before+1, "double tap started two handoffs")
     precondition((try! Data(contentsOf:Fixture.file)) == original)
     precondition(OTABackgroundBox.ended >= 4)
-    print("PASS actual cellular helper/router: original bytes retained, private metadata not read, correct build version, no upload/sign, bounded failures/cleanup, first GET only, unchanged Wi-Fi tunnel, unknown fails closed, no fake installed flag, double tap serialized")
+    print("PASS actual cellular helper/router: original bytes retained, private metadata not read, correct build version, no upload/sign, bounded failures/cleanup, first GET only, unchanged Wi-Fi tunnel, unknown fails closed, no fake installed flag, double tap serialized; installed blocks pre-handoff, unknown asks and permits fresh/cancel; four app locales + German fallback")
  }
 }
 """
 with tempfile.TemporaryDirectory(prefix='encrypted-cellular-') as d:
     path = Path(d)/'main.swift'
-    path.write_text(stubs + method + '\n}\n' + helper.replace('import UIKit','') + tests)
+    path.write_text(stubs + method + '\n}\n' + helper.split('@_silgen_name')[0].replace('import UIKit','') + tests)
     subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(path),'-o',str(Path(d)/'tests')],check=True)
     subprocess.run([str(Path(d)/'tests')],check=True,timeout=30)
