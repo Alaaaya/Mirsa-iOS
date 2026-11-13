@@ -90,24 +90,48 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     }
 
     /// App Store section: each page of its own tab bar, with a DEBUG-only fixture account (no Apple request).
+    /// Captured in both Apple Store styles; `-mirsa.store.style` sets the same UserDefaults key the
+    /// Settings picker writes (argument domain, this launch only).
     func testAppStoreSectionPages() {
         let pages: [(tab: String, route: String?, name: String)] = [
             ("search", nil, "search"), ("search", "detail", "detail"), ("downloads", nil, "downloads"),
             ("purchases", nil, "purchases"), ("account", nil, "account"), ("account", "settings", "settings"),
         ]
-        for lang in ["ar", "en"] {
-            for page in pages {
-                var extra = ["-MirsaStoreFixtureAccount", "-MirsaStoreTab", page.tab]
-                if page.route == "detail" { extra.append("-MirsaStoreFixtureDetail") }
-                else if let route = page.route { extra += ["-MirsaStoreRoute", route] }
-                let app = launch("encrypted", lang: lang, extra: extra)
-                shot(app, "\(lang)_store-\(page.name)")
-                if page.name == "settings" || page.name == "downloads" || page.name == "detail" {
-                    scrollToBottom(app)
-                    shot(app, "\(lang)_store-\(page.name)-bottom")
+        for style in ["classic", "new"] {
+            for lang in ["ar", "en"] {
+                for page in pages {
+                    var extra = ["-mirsa.store.style", style, "-MirsaStoreFixtureAccount", "-MirsaStoreTab", page.tab]
+                    if page.route == "detail" { extra.append("-MirsaStoreFixtureDetail") }
+                    else if let route = page.route { extra += ["-MirsaStoreRoute", route] }
+                    let app = launch("encrypted", lang: lang, extra: extra)
+                    shot(app, "\(lang)_\(style)_store-\(page.name)")
+                    if page.name == "settings" || page.name == "downloads" || page.name == "detail" {
+                        scrollToBottom(app)
+                        shot(app, "\(lang)_\(style)_store-\(page.name)-bottom")
+                    }
+                    app.terminate()
                 }
-                app.terminate()
             }
+        }
+    }
+
+    /// Mirsa's main settings scrolled to the Apple Store style option (picker + explanation).
+    func testStoreStyleSetting() {
+        for lang in ["ar", "en"] {
+            let app = launch("settings", lang: lang)
+            let picker = app.descendants(matching: .any).matching(identifier: "store-style-picker").firstMatch
+            var tries = 0
+            while alive(app) && tries < 12 && !(picker.exists && picker.isHittable) {
+                app.swipeUp(velocity: .slow); tries += 1
+            }
+            if alive(app) && picker.exists {
+                // Bring the option and its footer text toward the middle of the screen.
+                let frame = picker.frame, screen = app.frame
+                if frame.midY > screen.height * 0.55 { app.swipeUp(velocity: .slow) }
+            }
+            Thread.sleep(forTimeInterval: 1.0)
+            shot(app, "\(lang)_settings-store-style")
+            app.terminate()
         }
     }
 
