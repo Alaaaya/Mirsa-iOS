@@ -1,0 +1,228 @@
+import XCTest
+
+/// Screenshot of the REAL ForgeChatThreadView with a seeded no-network store (DEBUG harness only).
+final class MirsaAIChatFixtureUITests: XCTestCase {
+    private func openEmptyChat(_ state: String = "", theme: String = "liquid", largeText: Bool = false, language: String = "ar") -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-embedded", "-MirsaChatFixture",
+                               "-MirsaChatEmbeddedFixture", "-MirsaChatEmptyFixture", "-mirsa.theme", theme,
+                               "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+        if !state.isEmpty { app.launchArguments.append(state) }
+        if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        app.launch()
+        // A relaunch after landscape must finish restoring the full portrait
+        // window before a toolbar tap. A transient transformed window can expose
+        // an element whose hit point is outside the actual screen.
+        let portrait = NSPredicate { _, _ in
+            let frame = app.windows.firstMatch.frame
+            return frame.width >= 300 && frame.height > frame.width
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: portrait, object: app)], timeout: 15), .completed)
+        let newChat = app.buttons["chat-new"]
+        XCTAssertTrue(newChat.waitForExistence(timeout: 20))
+        let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: newChat)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 10), .completed)
+        newChat.tap()
+        XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 10))
+        return app
+    }
+
+    private func waitForLandscape(_ app: XCUIApplication) -> Bool {
+        let predicate = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: app)], timeout: 10) == .completed
+    }
+
+    private func assertComposer(_ app: XCUIApplication, keyboard: Bool = false, liquid: Bool = true, name: String) {
+        // SwiftUI.VerticalTextView reports conflicting legacy/modern element types
+        // on iOS 26. Query its stable identifier without a TextField/TextView filter.
+        let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+        guard input.waitForExistence(timeout: 10) else {
+            print("COMPOSER_ACCESSIBILITY_TREE \(app.debugDescription)")
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "missing_" + name; failure.lifetime = .keepAlways; add(failure)
+            XCTFail("composer missing")
+            return
+        }
+        XCTAssertTrue(input.isHittable, "composer not reachable")
+        let bounds = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(input.frame.width, 30)
+        XCTAssertGreaterThanOrEqual(input.frame.minY, bounds.minY)
+        XCTAssertLessThanOrEqual(input.frame.maxY, bounds.maxY)
+        let send = app.buttons["chat-send"]
+        XCTAssertTrue(send.exists)
+        XCTAssertLessThanOrEqual(send.frame.maxY, bounds.maxY)
+        if keyboard {
+            let keys = app.keyboards.firstMatch
+            XCTAssertTrue(keys.waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(input.frame.maxY, keys.frame.minY + 1, "composer obscured by keyboard")
+        } else if liquid {
+            // SwiftUI exposes this HStack's identifier on its tab buttons.
+            // Require the real dock, rather than silently skipping its geometry.
+            let dock = app.buttons.matching(identifier: "mirsa-tab-dock").firstMatch
+            // Since 2.1 a conversation opens full screen (fullScreenCover) over the
+            // tab bar. Then the dock is covered and cannot obscure the composer;
+            // the composer/send bounds checks above still apply.
+            let fullScreen = app.buttons["chat-back"].exists && !(dock.exists && dock.isHittable)
+            if fullScreen {
+                let status = app.staticTexts["chat-composer-status"]
+                if status.exists { XCTAssertLessThanOrEqual(status.frame.maxY, bounds.maxY, "inline status off screen") }
+            } else {
+            XCTAssertTrue(dock.exists, "floating dock missing in liquid theme")
+            }
+            if dock.exists && !fullScreen {
+                XCTAssertLessThanOrEqual(input.frame.maxY, dock.frame.minY + 1, "composer obscured by dock")
+                XCTAssertLessThanOrEqual(send.frame.maxY, dock.frame.minY + 1, "send button obscured by dock")
+                let status = app.staticTexts["chat-composer-status"]
+                if status.exists {
+                    XCTAssertLessThanOrEqual(status.frame.maxY, dock.frame.minY + 1, "inline status obscured by dock")
+                }
+            }
+        }
+        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        a.name = name; a.lifetime = .keepAlways; add(a)
+    }
+
+    func testEmptyNewChatComposerKeyboardAndRotation() {
+        let app = openEmptyChat()
+        assertComposer(app, name: "empty_portrait")
+        XCTAssertFalse(app.buttons["chat-send"].isEnabled)
+        // Attachments 2.1 flag OFF: the 2.0 photo button stays, no attachments menu.
+        XCTAssertFalse(app.buttons["chat-attach"].exists, "attachments menu must be hidden while the feature flag is off")
+        let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+        input.tap(); input.typeText("hello")
+        XCTAssertTrue(app.buttons["chat-send"].isEnabled)
+        assertComposer(app, keyboard: true, name: "empty_portrait_keyboard")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitForLandscape(app))
+        assertComposer(app, keyboard: true, name: "empty_landscape_keyboard")
+        app.swipeDown()
+        // Interactive keyboard dismissal can depend on scroll position. Relaunch to
+        // assert the keyboard-off landscape independently of that gesture.
+        app.terminate()
+        let landscape = openEmptyChat()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitForLandscape(landscape))
+        assertComposer(landscape, name: "empty_landscape")
+        landscape.terminate()
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    func testQuotaZeroKeepsComposerAndInlineStatus() {
+        let app = openEmptyChat("-MirsaChatQuotaFixture")
+        assertComposer(app, name: "quota_zero")
+        XCTAssertTrue(app.staticTexts["chat-composer-status"].exists)
+        app.terminate()
+    }
+
+    func testRegistrationFailureKeepsComposerAndInlineStatus() {
+        let app = openEmptyChat("-MirsaChatRegistrationFailureFixture")
+        assertComposer(app, name: "registration_failed")
+        XCTAssertTrue(app.staticTexts["chat-composer-status"].exists)
+        app.terminate()
+    }
+
+    func testRegistrationPendingClassicLargeTextKeepsComposer() {
+        let app = openEmptyChat("-MirsaChatRegistrationPendingFixture", theme: "classic", largeText: true)
+        assertComposer(app, liquid: false, name: "registration_pending_classic_large_text")
+        app.terminate()
+    }
+
+    func testDraft4000And4001ScalarLimitInAllLanguages() {
+        let errors = [
+            "en": "Maximum 4,000 characters. Shorten your message or split it into two.",
+            "ar": "الحد ٤٠٠٠ حرف. اختصر رسالتك أو قسّمها لرسالتين.",
+            "ckb": "زۆرترین ٤٠٠٠ پیت. نامەکەت کورت بکەوە یان بیکە بە دوو نامە.",
+            "kmr": "Herî zêde 4.000 tîp. Peyamê kurt bike an bike du peyam."
+        ]
+        for language in ["en", "ar", "ckb", "kmr"] {
+            for count in [4000, 4001] {
+                let app = openEmptyChat("-MirsaChatDraft\(count)Fixture", language: language)
+                assertComposer(app, name: "draft_\(count)_\(language)")
+                let counter = app.staticTexts["chat-character-limit"]
+                XCTAssertTrue(counter.waitForExistence(timeout: 5))
+                XCTAssertTrue(counter.label.hasPrefix("\(count) / 4000 "))
+                XCTAssertEqual(app.buttons["chat-send"].isEnabled, count == 4000)
+                let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+                XCTAssertEqual((input.value as? String)?.unicodeScalars.count, count, "Draft was truncated")
+                // Accessibility exposes the counter, while the full localized error remains visible.
+                if count == 4001 {
+                    XCTAssertEqual(counter.value as? String, errors[language])
+                }
+                app.terminate()
+            }
+        }
+    }
+
+    func testChatFixtureScreenshot() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                               "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 15), "welcome text missing")
+        XCTAssertTrue(app.staticTexts["chat-waiting"].waitForExistence(timeout: 5), "working indicator missing")
+        XCTAssertTrue(app.staticTexts["Make me a tweak that hides the dock labels."].exists, "user bubble missing")
+        XCTAssertTrue(app.staticTexts["Got it. I'll build it and send it here when it's ready."].exists, "assistant reply missing")
+        Thread.sleep(forTimeInterval: 1.5)
+        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        a.name = "mirsa_ai_chat"; a.lifetime = .keepAlways; add(a)
+        XCTAssertEqual(app.state, .runningForeground)
+        app.terminate()
+    }
+
+    func testChatFixtureScreenshotArabic() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                               "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar_SA"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 15), "welcome text missing")
+        XCTAssertTrue(app.staticTexts["chat-waiting"].waitForExistence(timeout: 5), "working indicator missing")
+        Thread.sleep(forTimeInterval: 1.5)
+        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        a.name = "mirsa_ai_chat_ar"; a.lifetime = .keepAlways; add(a)
+        XCTAssertEqual(app.state, .runningForeground)
+        app.terminate()
+    }
+
+    /// Mirsa 2.1 attachment rules (URL validation, text files, JPEG normalisation) run in-app.
+    func testAttachmentRulesSelfTest() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                               "-MirsaAttachmentRulesSelfTest", "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let badge = app.staticTexts["attachment-rules-selftest"]
+        XCTAssertTrue(badge.waitForExistence(timeout: 20), "self-test badge missing")
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != 'RUNNING'"), object: badge)
+        XCTAssertEqual(XCTWaiter.wait(for: [done], timeout: 30), .completed)
+        XCTAssertEqual(badge.label, "PASS")
+        app.terminate()
+    }
+
+    /// Attachments menu (DEBUG fixture only, the release flag stays OFF): From link refuses an IPA link.
+    func testAttachmentMenuFixtureRejectsIPALink() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                               "-MirsaChatAttachmentsFixture", "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 15))
+        let attach = app.buttons["chat-attach"]
+        XCTAssertTrue(attach.waitForExistence(timeout: 10), "attachments menu missing in fixture")
+        attach.tap()
+        XCTAssertTrue(app.buttons["Photos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Files"].exists)
+        let link = app.buttons["From link"]
+        XCTAssertTrue(link.exists)
+        let menu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menu.name = "attachments_menu"; menu.lifetime = .keepAlways; add(menu)
+        link.tap()
+        let field = app.textFields["chat-link-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("https://example.com/Mirsa.ipa")
+        app.buttons["chat-link-add"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-link-error").firstMatch.waitForExistence(timeout: 5), "IPA link was not refused")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "attachments_link_ipa_refused"; shot.lifetime = .keepAlways; add(shot)
+        app.terminate()
+    }
+}
