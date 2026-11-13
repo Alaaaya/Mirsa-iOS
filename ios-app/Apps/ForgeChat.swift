@@ -1036,7 +1036,7 @@ struct ForgeChatThreadView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
                     if let a = m.attachments, !a.isEmpty { ChatAttachmentStrip(metas: a, threadID: m.threadID, alignment: .leading) }
-                    if let t = m.text, !t.isEmpty { Text(t).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading) }
+                    if let t = m.text, !t.isEmpty { Text(ForgeChatMarkdown.attributed(t)).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading) }
                     if m.role == "result" {
                         if m.result?.artifact == nil { Label(ForgeChatText.resultSaved, systemImage: "checkmark.shield").font(.caption).foregroundStyle(.green) }
                         if let n = m.result?.name { Text(n).font(.caption.bold()) }
