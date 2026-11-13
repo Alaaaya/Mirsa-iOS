@@ -8,6 +8,53 @@ import UIKit
 enum EncryptedLocalInstall {
     private static var active: LocalOTAServer?
 
+    enum Presence { case installed, unknown }
+    static func presence(bundleID: String) -> Presence {
+        bundleID.withCString { MirsaInstalledBundleState($0) == 1 ? .installed : .unknown }
+    }
+
+    static func localized(_ en: String, _ ar: String, _ de: String, _ ckb: String, _ kmr: String) -> String {
+        // Mirsa has four explicit app locales. English fallback on a German
+        // device uses German here; Kurdish selection always keeps its script.
+        if L.lang == .english, Locale.preferredLanguages.first?.hasPrefix("de") == true { return de }
+        return tr(en, ar, ckb: ckb, kmr: kmr)
+    }
+
+    static var replacementWarning: String {
+        localized(
+            "This cellular install method cannot replace an existing copy here. Use Wi-Fi + LocalDevVPN to replace it while keeping its data. Alternatively, delete the app yourself first, but deleting it removes its local data. Mirsa will not delete anything.",
+            "طريقة التثبيت عبيانات الموبايل ما بتستبدل النسخة الموجودة هون. استخدم الواي فاي مع LocalDevVPN لتستبدلها وتحافظ على بياناتها. أو احذف التطبيق بنفسك أولاً، بس الحذف بيمسح بياناته المحلية. مرسى ما بيحذف شي.",
+            "Diese Installation über mobile Daten kann eine vorhandene Kopie hier nicht ersetzen. Nutze WLAN + LocalDevVPN, um sie unter Beibehaltung ihrer Daten zu ersetzen. Alternativ kannst du die App zuerst selbst löschen; dabei gehen ihre lokalen Daten verloren. Mirsa löscht nichts.",
+            "ئەم شێوازە بە داتای مۆبایل ناتوانێت لێرە جێی کۆپییەکی هەبوو بگرێتەوە. Wi-Fi + LocalDevVPN بەکاربهێنە بۆ جێگرتنەوە بە پاراستنی داتاکانی. یان سەرەتا خۆت ئەپەکە بسڕەوە، بەڵام داتای ناوخۆیی دەسڕێتەوە. Mirsa هیچ شتێک ناسڕێتەوە.",
+            "Ev awayê sazkirinê bi daneyên mobîl li vir nikare cihê kopiyeke heyî bigire. Ji bo guherandinê bi parastina daneyan Wi-Fi + LocalDevVPN bikar bîne. An pêşî sepanê bixwe jê bibe, lê ev daneyên wê yên herêmî jê dibe. Mirsa tiştekî jê nabe.")
+    }
+
+    static var unknownWarning: String {
+        localized(
+            "Mirsa could not reliably check whether this app is already installed. A fresh install can continue; an existing copy may be rejected by iOS. ",
+            "مرسى ما قدر يتأكد إذا التطبيق مثبت من قبل. فيك تكمّل لتثبيت جديد؛ إذا في نسخة موجودة ممكن iOS يرفض. ",
+            "Mirsa konnte nicht zuverlässig prüfen, ob diese App bereits installiert ist. Eine Neuinstallation kann fortgesetzt werden; eine vorhandene Kopie kann von iOS abgelehnt werden. ",
+            "Mirsa نەیتوانی بە دڵنیایی بزانێت ئەم ئەپە پێشتر دامەزراوە یان نا. دەتوانیت بە دامەزراندنی نوێ بەردەوام بیت؛ iOS لەوانەیە کۆپییەکی هەبوو ڕەت بکاتەوە. ",
+            "Mirsa nikarî bi bawerî kontrol bike ka ev sepan berê hatiye sazkirin. Sazkirineke nû dikare bidome; iOS dibe ku kopiyeke heyî red bike. ") + replacementWarning
+    }
+
+    static func confirmUnknown() async -> Bool {
+        #if canImport(UIKit)
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
+              var controller = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return false }
+        while let presented = controller.presentedViewController { controller = presented }
+        guard !controller.isBeingDismissed, !(controller is UIAlertController) else { return false }
+        return await withCheckedContinuation { continuation in
+            let alert = UIAlertController(title: "Mirsa", message: unknownWarning, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: localized("Cancel", "إلغاء", "Abbrechen", "پاشگەزبوونەوە", "Betal bike"), style: .cancel) { _ in continuation.resume(returning: false) })
+            alert.addAction(UIAlertAction(title: localized("Continue fresh install", "كمّل تثبيت جديد", "Neuinstallation fortsetzen", "بەردەوام بە لە دامەزراندنی نوێ", "Sazkirina nû bidomîne"), style: .default) { _ in continuation.resume(returning: true) })
+            controller.present(alert, animated: true)
+        }
+        #else
+        return await CellularConsentFixture.confirm()
+        #endif
+    }
+
     struct Identity: Equatable {
         let bundleID: String
         let version: String
@@ -38,6 +85,12 @@ enum EncryptedLocalInstall {
     /// installed or accepted its FairPlay license. There is NO upload fallback.
     static func handoff(_ file: URL) async throws {
         let info = try await Task.detached(priority: .userInitiated) { try identity(in: file) }.value
+        try Task.checkCancellation()
+        switch presence(bundleID: info.bundleID) {
+        case .installed: throw SideloadError.message(replacementWarning)
+        case .unknown:
+            guard await confirmUnknown() else { throw CancellationError() }
+        }
         try Task.checkCancellation()
         let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
         let server = try LocalOTAServer(file: file)
@@ -77,3 +130,6 @@ enum EncryptedLocalInstall {
         handedOff = true
     }
 }
+
+@_silgen_name("MirsaInstalledBundleState")
+private func MirsaInstalledBundleState(_ bundleID: UnsafePointer<CChar>) -> Int32
