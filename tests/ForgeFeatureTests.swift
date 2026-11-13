@@ -363,7 +363,7 @@ import ImageIO
         XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: false), .rejected(.consentOff))
         XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.other", consent: true), .rejected(.wrongBundle))
         XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: String(repeating: "x", count: 2000), capture: cap, projectBundleID: "com.test.target", consent: true), .rejected(.tooLong))
-        XCTAssertTrue(ForgeCaptureContext.chipText(3).contains("3")); XCTAssertFalse(ForgeCaptureContext.reasonText(.tooLong).isEmpty)
+        XCTAssertTrue(ForgeCaptureContext.chipText(3).contains("📎")); XCTAssertFalse(ForgeCaptureContext.chipText(3).contains("User-reviewed")); XCTAssertFalse(ForgeCaptureContext.reasonText(.tooLong).isEmpty)
     }
     func testPreviewHidesRawDebugAndLocalizesKnownLimitation() throws {
         var o = try XCTUnwrap(JSONSerialization.jsonObject(with: capture()) as? [String: Any])
