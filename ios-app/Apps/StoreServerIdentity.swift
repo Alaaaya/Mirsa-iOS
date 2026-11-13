@@ -25,15 +25,11 @@ extension MirsaStoreServerClient {
             }
             // At launch the saved device identity can still be loading. Re-read it (read-only, never enrolling)
             // for a bounded time before concluding this installation has no approved identity.
-            let saved = try await MirsaStoreIdentityLoader.loadRefreshing(
-                refresh: {
-                    // Awaits the app's own idempotent device registration (same saved token) before concluding anything.
-                    do { _ = try await ForgeClient.fixToken() }
-                    catch let e as MirsaStoreServerError { throw e }
-                    catch is CancellationError { throw CancellationError() }
-                    catch { throw MirsaStoreServerError(code: "upstream_unavailable") }
-                },
-                read: { try ForgeClient.existingFixCredentials(bearer: bearer, user: user) })
+            // The app's own idempotent registration (same saved token) must have succeeded once for this user
+            // before the first gate check; concurrent searches share one in-flight registration.
+            let saved = try await MirsaStoreRegistration.shared.credentials(user: user) {
+                try await ForgeClient.fixToken()
+            }
             return MirsaStoreServerIdentity(bearer: saved.accessToken, userID: user,
                 forgeDeviceID: saved.deviceID, forgeDeviceToken: saved.deviceToken)
         })
@@ -82,5 +78,39 @@ enum MirsaStoreIdentityLoader {
         try await refresh()
         try Task.checkCancellation()
         return try read()
+    }
+}
+
+/// Shares one in-flight registration per user and remembers success, so a cold start with a stored token but a
+/// pending registration is never judged by a local read alone. Only a verified registration result is used.
+actor MirsaStoreRegistration {
+    static let shared = MirsaStoreRegistration()
+    private var ready: [UUID: ForgeFixCredentials] = [:]
+    private var inflight: [UUID: Task<ForgeFixCredentials, Error>] = [:]
+
+    func credentials(user: UUID, register: @escaping @Sendable () async throws -> ForgeFixCredentials) async throws -> ForgeFixCredentials {
+        if let done = ready[user] { return done }
+        let task: Task<ForgeFixCredentials, Error>
+        if let running = inflight[user] { task = running } else {
+            task = Task {
+                let c: ForgeFixCredentials
+                do { c = try await register() }
+                catch let e as MirsaStoreServerError { throw e }
+                catch is CancellationError { throw CancellationError() }
+                catch { throw MirsaStoreServerError(code: "upstream_unavailable") }
+                // The returned bearer must belong to the same user; otherwise the result is unknown, not a denial.
+                guard (try? ForgeClient.fixUserID(c.accessToken)) == user else { throw MirsaStoreServerError(code: "upstream_unavailable") }
+                return c
+            }
+            inflight[user] = task
+        }
+        do {
+            let c = try await task.value
+            ready[user] = c; inflight[user] = nil
+            return c
+        } catch {
+            inflight[user] = nil
+            throw error
+        }
     }
 }
