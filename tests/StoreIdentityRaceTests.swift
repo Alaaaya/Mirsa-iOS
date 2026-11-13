@@ -146,9 +146,44 @@ final class StoreIdentityRaceTests: XCTestCase {
 }
 
 final class Flag { var value = false }
+final class RegCounter: @unchecked Sendable { private let l = NSLock(); private var n = 0; func set() { l.lock(); n += 1; l.unlock() }; var count: Int { l.lock(); defer { l.unlock() }; return n } }
 private final class RaceVault: MirsaStoreVault {
     var items: [String: Data] = [:]
     func read(_ key: String) throws -> Data? { items[key] }
     func write(_ data: Data, key: String) throws { items[key] = data }
     func remove(_ key: String) throws { items[key] = nil }
+
+    func testRegistrationSharedAndNeverTrustsLocalRead() async throws {
+        let reg = MirsaStoreRegistration()
+        let user = UUID()
+        let counter = RegCounter()
+        let jwt = StoreIdentityRaceTests.jwt(user)
+        let op: @Sendable () async throws -> ForgeFixCredentials = {
+            counter.set()
+            try await Task.sleep(nanoseconds: 50_000_000)
+            return ForgeFixCredentials(accessToken: jwt, deviceID: "D", deviceToken: String(repeating: "a", count: 64))
+        }
+        async let a = reg.credentials(user: user, register: op)
+        async let b = reg.credentials(user: user, register: op)
+        _ = try await (a, b)
+        _ = try await reg.credentials(user: user, register: op)
+        XCTAssertEqual(counter.count, 1)
+    }
+
+    func testRegistrationTransientAndWrongUserAreUnknown() async {
+        let reg = MirsaStoreRegistration()
+        let user = UUID()
+        for op: @Sendable () async throws -> ForgeFixCredentials in [
+            { throw URLError(.notConnectedToInternet) },
+            { ForgeFixCredentials(accessToken: StoreIdentityRaceTests.jwt(UUID()), deviceID: "D", deviceToken: "t") }] {
+            do { _ = try await reg.credentials(user: user, register: op); XCTFail("must throw") }
+            catch let e as MirsaStoreServerError { XCTAssertEqual(e, MirsaStoreServerError(code: "upstream_unavailable")) }
+            catch { XCTFail("wrong error") }
+        }
+    }
+
+    static func jwt(_ user: UUID) -> String {
+        func b(_ s: String) -> String { Data(s.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "").replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_") }
+        return b("{}") + "." + b("{\"sub\":\"" + user.uuidString.lowercased() + "\",\"role\":\"authenticated\"}") + ".sig"
+    }
 }
