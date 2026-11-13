@@ -470,6 +470,7 @@ struct AppStoreDownloadSettingsPage: View {
     @ObservedObject private var language = AppLanguageStore.shared
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     @State private var tmpSize = "…"
+    @State private var cleanupResult: String?
     @State private var cleaning = false
     @Environment(\.dismiss) private var dismiss
 
@@ -554,6 +555,12 @@ struct AppStoreDownloadSettingsPage: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(cleaning)
+                    if let cleanupResult {
+                        Text(cleanupResult).font(MirsaFont.secondary)
+                            .foregroundStyle(MirsaPalette.textSecondary)
+                            .padding(.horizontal, MirsaSpacing.m)
+                            .padding(.bottom, MirsaSpacing.s)
+                    }
                 }
 
                 AppStoreGroup {
@@ -595,10 +602,29 @@ struct AppStoreDownloadSettingsPage: View {
 
     private func cleanTemp() {
         cleaning = true
+        cleanupResult = nil
         DispatchQueue.global(qos: .utility).async {
-            _ = MirsaManagedTmp.cleanNow()
-            let text = MirsaManagedTmp.sizeText
-            DispatchQueue.main.async { tmpSize = text; cleaning = false }
+            let before = MirsaManagedTmp.size()
+            let removed = MirsaManagedTmp.cleanNow()
+            let after = MirsaManagedTmp.size()
+            let freed = ByteCountFormatter.string(fromByteCount: max(0, before - after), countStyle: .file)
+            let text = ByteCountFormatter.string(fromByteCount: after, countStyle: .file)
+            DispatchQueue.main.async {
+                tmpSize = text
+                cleaning = false
+                if after > 0 {
+                    cleanupResult = tr("Freed \(freed). Remaining files are protected, in use, or created during this session. Finish current work and relaunch Mirsa to retry.",
+                        "تم تفريغ \(freed). الملفات الباقية محمية، قيد الاستخدام، أو انعملت بهالجلسة. خلّص الشغل وافتح مرسى من جديد لتجرّب.",
+                        ckb: "\(freed) بەتاڵ کرا. فایلە ماوەکان پارێزراون یان بەکاردێن یان لەم دانیشتنە دروستکراون. دوای تەواوبوونی کار میرسا دووبارە بکەرەوە.",
+                        kmr: "\(freed) hate valakirin. Pelên mayî parastî ne, di bikaranînê de ne an di vê danişînê de hatine çêkirin. Piştî xebatê Mirsa ji nû ve veke.")
+                } else if removed > 0 {
+                    cleanupResult = tr("Freed \(freed). Temporary files cleaned.", "تم تفريغ \(freed). نضّفنا الملفات المؤقتة.",
+                        ckb: "\(freed) بەتاڵ کرا. فایلە کاتییەکان پاککرانەوە.", kmr: "\(freed) hate valakirin. Pelên demkî hatin paqijkirin.")
+                } else {
+                    cleanupResult = tr("No unused temporary files to remove.", "ما في ملفات مؤقتة غير مستخدمة للحذف.",
+                        ckb: "هیچ فایلێکی کاتی بەکارنەهاتوو نییە بۆ سڕینەوە.", kmr: "Pelên demkî yên nayên bikaranîn ji bo jêbirinê tune ne.")
+                }
+            }
         }
     }
 }
