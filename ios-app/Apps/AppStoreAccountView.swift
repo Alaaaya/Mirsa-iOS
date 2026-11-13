@@ -828,6 +828,7 @@ struct AppStoreAccountView: View {
                     let sorted = Self.newestFirst(list)
                     let visible = Array(sorted.prefix(metadataLimit[key] ?? 20))
                     VStack(spacing: 0) {
+                        Color.clear.frame(height: 0).task(id: visible.count) { requestMetadata(app, ids: visible + Array(sorted.dropFirst(visible.count).prefix(20))) }
                         ForEach(visible, id: \.self) { id in
                             Rectangle().fill(MirsaPalette.stroke).frame(height: 1)
                             versionRow(key: key, id: id, title: versionName(app, id), subtitle: "ID \(id)")
@@ -1189,29 +1190,38 @@ struct AppStoreAccountView: View {
     }
 
     private func requestMetadata(_ app: MirsaStoreApp, ids: [String]) {
-        let ids = Array(ids.filter { metadata[app.bundleID]?[$0]?.status != "ready" && metadata[app.bundleID]?[$0]?.status != "unavailable" }.prefix(20))
-        guard !ids.isEmpty else { return }
         let key = app.bundleID
+        // Disk cache first: names never change for an external version ID.
+        for id in ids where metadata[key]?[id] == nil {
+            if let v = StoreVersionNameCache.get(key, id) { metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "ready", version: v) }
+        }
+        // Visible rows first, then the next 20 rows prefetched quietly.
+        let pending = Array(ids.filter { metadata[key]?[$0]?.status != "ready" && metadata[key]?[$0]?.status != "unavailable" })
+        guard !pending.isEmpty else { return }
         metadataTasks[key]?.cancel()
         let generation = operationGeneration
         metadataTasks[key] = Task {
-            // Visible rows arrive first in bounded parallel batches; keep cached names.
-            for start in stride(from: 0, to: ids.count, by: 6) {
-                let batch = Array(ids[start..<min(start + 6, ids.count)])
+            // Apple answers through one serialized session, so small chunks publish each name as soon as it arrives.
+            for start in stride(from: 0, to: pending.count, by: 2) {
+                let chunk = Array(pending[start..<min(start + 2, pending.count)])
                 guard !Task.isCancelled, generation == operationGeneration else { return }
                 do {
-                    let entries = try await client.versionMetadata(app, externalVersionIDs: batch)
+                    let entries = try await withThrowingTaskGroup(of: [MirsaStoreServerClient.VersionMetadata].self) { group in
+                        group.addTask { try await client.versionMetadata(app, externalVersionIDs: chunk) }
+                        group.addTask { try await Task.sleep(nanoseconds: 90_000_000_000); throw MirsaStoreError.serviceUnavailable }
+                        defer { group.cancelAll() }
+                        return try await group.next() ?? []
+                    }
                     guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for id in batch {
+                    for id in chunk {
                         let item = entries.first { $0.externalVersionID == id }
+                        if item?.status == "ready", let v = item?.version { StoreVersionNameCache.set(key, id, v) }
                         metadata[key, default: [:]][id] = item?.status == "ready" ? item :
                             .init(externalVersionID: id, status: "unavailable", version: nil)
                     }
                 } catch {
                     guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for id in batch {
-                        metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil)
-                    }
+                    for id in chunk { metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil) }
                 }
             }
         }
