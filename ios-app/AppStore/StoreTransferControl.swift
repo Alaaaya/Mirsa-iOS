@@ -77,10 +77,16 @@ final class StoreTransferControl: ObservableObject, @unchecked Sendable {
     @Published private(set) var expected: Int64 = 0
     private let lock = NSLock()
     private var current: StoreTransferRun?
+    private var generation: UInt64 = 0
+    private let enqueue: (@escaping () -> Void) -> Void
+
+    init(enqueue: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
+        self.enqueue = enqueue
+    }
 
     func begin() -> StoreTransferRun {
         let run = StoreTransferRun()
-        lock.lock(); current = run; lock.unlock()
+        lock.lock(); generation &+= 1; current = run; lock.unlock()
         publish(run, .running, 0, 0)
         return run
     }
@@ -88,9 +94,13 @@ final class StoreTransferControl: ObservableObject, @unchecked Sendable {
     func end(_ run: StoreTransferRun) {
         lock.lock()
         guard current === run else { lock.unlock(); return }
+        let endedGeneration = generation
         current = nil; lock.unlock()
         run.resume()
-        DispatchQueue.main.async { self.phase = .idle; self.received = 0; self.expected = 0 }
+        enqueue {
+            guard self.isEndedGeneration(endedGeneration) else { return }
+            self.phase = .idle; self.received = 0; self.expected = 0
+        }
     }
 
     private var run: StoreTransferRun? { lock.lock(); defer { lock.unlock() }; return current }
@@ -103,13 +113,17 @@ final class StoreTransferControl: ObservableObject, @unchecked Sendable {
     func cancelCurrent() { run?.cancelNow() }
 
     func setPhase(_ run: StoreTransferRun, _ p: Phase) {
-        DispatchQueue.main.async { if self.isCurrent(run) { self.phase = p } }
+        enqueue { if self.isCurrent(run) { self.phase = p } }
     }
     func progress(_ run: StoreTransferRun, _ r: Int64, _ e: Int64) {
-        DispatchQueue.main.async { if self.isCurrent(run) { self.received = r; self.expected = e } }
+        enqueue { if self.isCurrent(run) { self.received = r; self.expected = e } }
     }
     private func publish(_ run: StoreTransferRun, _ p: Phase, _ r: Int64, _ e: Int64) {
-        DispatchQueue.main.async { if self.isCurrent(run) { self.phase = p; self.received = r; self.expected = e } }
+        enqueue { if self.isCurrent(run) { self.phase = p; self.received = r; self.expected = e } }
+    }
+    private func isEndedGeneration(_ value: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return current == nil && generation == value
     }
     private func isCurrent(_ run: StoreTransferRun) -> Bool { lock.lock(); defer { lock.unlock() }; return current === run }
 }
