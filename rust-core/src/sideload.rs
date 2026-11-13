@@ -1142,11 +1142,12 @@ async fn dev_tool(pairing_path: String, kind: String, arg: String, out_path: Str
                 Ok(json!(apps.iter().filter_map(|app| {
                     let d = app.as_dictionary()?;
                     let get = |key: &str| d.get(key).map(plist_to_json).unwrap_or(serde_json::Value::Null);
+                    let has_store_evidence = ["ApplicationDSID", "iTunesStoreAccountIdentifier", "StoreItemIdentifier"]
+                        .iter().any(|key| d.get(*key).map(|v| !matches!(v, plist::Value::String(s) if s.is_empty() || s == "0") && !matches!(v, plist::Value::Integer(n) if n.as_unsigned() == Some(0))).unwrap_or(false));
                     Some(json!({
                         "CFBundleIdentifier": get("CFBundleIdentifier"),
                         "CFBundleShortVersionString": get("CFBundleShortVersionString"),
-                        "hasStoreEvidence": ["ApplicationDSID", "iTunesStoreAccountIdentifier", "StoreItemIdentifier"]
-                            .iter().any(|key| d.get(*key).map(|v| !matches!(v, plist::Value::String(s) if s.is_empty() || s == "0") && !matches!(v, plist::Value::Integer(n) if n.as_unsigned() == Some(0))).unwrap_or(false)),
+                        "hasStoreEvidence": has_store_evidence,
                         "StoreItemIdentifier": get("StoreItemIdentifier"),
                     }))
                 }).collect::<Vec<_>>()))
