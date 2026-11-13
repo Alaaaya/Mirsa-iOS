@@ -17,6 +17,10 @@ struct EncryptedAppsTab: View {
     @State private var showingAdd = false
     @State private var showingTools = false
     @State private var priorAccountID: String?
+    /// Session-only: entries whose last install attempt ended with an error.
+    @State private var failedInstalls: Set<UUID> = []
+    @State private var storageSizes: [UUID: Int64] = [:]
+    @State private var storageFree: Int64?
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
 
@@ -24,7 +28,7 @@ struct EncryptedAppsTab: View {
         // Every page stays alive while hidden, so switching tabs never cancels a
         // running sign-in, search or download in the App Store screen.
         ZStack {
-            AuroraBackground().ignoresSafeArea()
+            StoreLuxeBackground()
             page(.search) { searchPage }
             page(.downloads) { downloadsPage }
             page(.purchases) { AppStorePurchasesPage(store: store, model: storeAccount, vm: vm, isActive: section == .purchases) }
@@ -36,7 +40,9 @@ struct EncryptedAppsTab: View {
                                         storeAccount.updateAccount(nil); storeViewID = UUID()
                                         showingAppStore = true } },
                                     onOpen: { tab in withAnimation(MirsaMotion.select) { section = tab } },
-                                    onSignedOut: { storeViewID = UUID() })
+                                    onSignedOut: { storeViewID = UUID() },
+                                    onAccountSwitched: { storeAccount.updateAccount(nil); storeViewID = UUID(); Task { await storeAccount.refresh() } },
+                                    onOpenTools: { showingTools = true })
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { AppStoreSectionBar(selection: $section) }
@@ -126,7 +132,7 @@ struct EncryptedAppsTab: View {
 
     private func page<Content: View>(_ tab: AppStoreSectionTab, @ViewBuilder _ content: () -> Content) -> some View {
         content()
-            .opacity(section == tab ? 1 : 0)
+            .storePageTransition(visible: section == tab)
             .allowsHitTesting(section == tab)
             .accessibilityHidden(section != tab)
     }
@@ -164,9 +170,16 @@ struct EncryptedAppsTab: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: MirsaSpacing.m) {
-                    MirsaPageHeader(title: AppStoreSectionTab.search.title, subtitle: EncryptedText.tabTitle) {
-                        LanguageGlobeMenu(size: MirsaIconSize.button)
+                    StorePageHeader(title: AppStoreSectionTab.search.title, subtitle: EncryptedText.tabTitle) {
+                        LanguageGlobeMenu(size: MirsaIconSize.button).storeGlassCapsule()
                     }
+                    StoreEmptyState(icon: "magnifyingglass",
+                                    title: storeText("Search the App Store", "ابحث بمتجر أبل", de: "Im App Store suchen", ckb: "گەڕان لە App Store", kmr: "Li App Store bigere"),
+                                    message: storeText("Find apps your Apple Account owns and keep them as untouched IPAs.",
+                                                       "لاقي التطبيقات يلي بيملكها حساب Apple تبعك واحتفظ فيها كملفات IPA متل ما هي.",
+                                                       de: "Finde Apps, die deinem Apple-Konto gehören, und behalte sie als unveränderte IPAs.",
+                                                       ckb: "ئەو ئەپانە بدۆزەوە کە ئەکاونتی Appleـەکەت خاوەنیانە و وەک IPAی دەستکارینەکراو هەڵیانبگرە.",
+                                                       kmr: "Sepanên ku hesabê te yê Apple xwedî ye bibîne û wekî IPAyên neguherî biparêze."))
                     appStoreButton
                     importButton
                 }
@@ -186,50 +199,152 @@ struct EncryptedAppsTab: View {
     }
 
     private var downloadsPage: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: MirsaSpacing.m) {
-                MirsaPageHeader(title: AppStoreSectionTab.downloads.title, subtitle: EncryptedText.tabTitle) {
+        List {
+            Group {
+                StorePageHeader(title: AppStoreSectionTab.downloads.title, subtitle: EncryptedText.tabTitle) {
                     HStack(spacing: MirsaSpacing.xs) {
                         Button { showingAdd = true } label: { MirsaIconButtonLabel(systemName: "plus") }
-                            .modifier(MirsaSolidCard(shape: Circle(), tint: nil, elevation: 1))
+                            .storeGlassCapsule()
                             .disabled(store.busy != nil)
                             .accessibilityLabel(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"))
                             .accessibilityIdentifier("store-add-download")
                         Button { showingTools = true } label: { MirsaIconButtonLabel(systemName: "wrench.and.screwdriver") }
-                            .modifier(MirsaSolidCard(shape: Circle(), tint: nil, elevation: 1))
+                            .storeGlassCapsule()
                             .accessibilityLabel(StoreFeatureText.tools)
                         LanguageGlobeMenu(size: MirsaIconSize.button)
+                            .storeGlassCapsule()
                     }
+                    .buttonStyle(.plain)
                 }
-                AppStoreSearchField(placeholder: t("Search by name, version or Bundle ID", "البحث بالاسم أو الإصدار أو Bundle ID",
-                                                   "گەڕان بە ناو، وەشان یان Bundle ID", "Bi nav, guherto an Bundle ID bigere"),
+                AppStoreSearchField(placeholder: storeText("Search by name, version or Bundle ID", "البحث بالاسم أو الإصدار أو Bundle ID",
+                                                           de: "Nach Name, Version oder Bundle-ID suchen",
+                                                           ckb: "گەڕان بە ناو، وەشان یان Bundle ID", kmr: "Bi nav, guherto an Bundle ID bigere"),
                                     text: $libraryQuery)
-                if store.entries.isEmpty {
-                    emptyCard
+                if !store.entries.isEmpty {
+                    StoreStorageSummary(slices: storageSlices, total: storageTotal, free: storageFree)
+                }
+                if store.busy != nil && store.installingID == nil {
+                    importingRow
+                }
+            }
+            .modifier(StoreListRow())
+
+            if store.entries.isEmpty {
+                Group {
+                    StoreEmptyState(icon: "arrow.down.app.fill",
+                                    title: t("No encrypted IPAs yet", "لسّا ما في IPA مشفّرة", "هێشتا هیچ IPAیەکی شفرەکراو نییە", "Hêj IPA ya şîfrekirî tune"),
+                                    message: storeText("Download an app you own from Search or Purchases, or import an App Store IPA from Files.",
+                                                       "نزّل تطبيق بتملكه من البحث أو المشتريات، أو استورد IPA من App Store من الملفات.",
+                                                       de: "Lade eine eigene App über Suche oder Käufe, oder importiere eine App-Store-IPA aus Dateien.",
+                                                       ckb: "ئەپێک کە خاوەنیتی لە گەڕان یان کڕینەکان دابگرە، یان IPAیەک لە Files هاوردە بکە.",
+                                                       kmr: "Sepanek ku ya te ye ji Lêgerîn an Kirînan daxe, an IPA yek ji Files bîne."),
+                                    actionTitle: storeLoginAvailable ? AppStoreSectionTab.search.title : nil,
+                                    action: openSearchAction)
                     importButton
-                } else {
-                    Text(t("Items: ", "العناصر: ", "بڕگەکان: ", "Tişt: ") + "\(filteredEntries.count)")
-                        .font(MirsaFont.sectionTitle).foregroundStyle(.white)
-                        .padding(.top, MirsaSpacing.xs)
+                }
+                .modifier(StoreListRow())
+            } else {
+                Section {
                     if filteredEntries.isEmpty {
                         Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
                             .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                            .modifier(StoreListRow())
                     }
                     ForEach(filteredEntries) { entry in
-                        EncryptedEntryCard(entry: entry, store: store, vm: vm) { pendingDelete = entry }
+                        EncryptedEntryCard(entry: entry, store: store, vm: vm, failed: failedInstalls.contains(entry.id),
+                                           onInstall: { install(entry) }) { pendingDelete = entry }
+                            .modifier(StoreListRow())
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button { install(entry) } label: {
+                                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
+                                }
+                                .tint(StoreLuxe.accent)
+                                .disabled(store.busy != nil)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button { StoreHaptics.delete(); pendingDelete = entry } label: {
+                                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash.fill")
+                                }
+                                .tint(MirsaPalette.danger)
+                                .disabled(store.installingID == entry.id)
+                            }
                     }
-                    importButton
+                } header: {
+                    StoreSectionTitle(title: storeText("Queue", "قائمة الانتظار", de: "Warteschlange", ckb: "ڕیز", kmr: "Rêz"),
+                                      trailing: "\(filteredEntries.count)")
+                        .textCase(nil)
+                        .padding(.vertical, 6)
                 }
-                Text(t("About App Store IPAs", "عن ملفات IPA من App Store", "دەربارەی IPAکانی App Store", "Derbarê IPAyên App Store"))
-                    .font(MirsaFont.sectionTitle).foregroundStyle(.white)
+                importButton.modifier(StoreListRow())
+            }
+
+            Group {
+                StoreSectionTitle(title: t("About App Store IPAs", "عن ملفات IPA من App Store", "دەربارەی IPAکانی App Store", "Derbarê IPAyên App Store"))
                     .padding(.top, MirsaSpacing.s)
                 introCard
                 benefitsCard
+                Color.clear.frame(height: MirsaSpacing.xl)
             }
-            .padding(.horizontal, MirsaSpacing.page)
-            .padding(.bottom, MirsaSpacing.xl)
+            .modifier(StoreListRow())
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 1)
         .scrollDismissesKeyboard(.interactively)
+        .refreshable { await refreshDownloads() }
+        .task(id: store.entries.map(\.id)) { await refreshStorage() }
+        .onChange(of: store.installingID) { old, new in
+            // Session-only queue state: an install that ended with an error shows as failed with Retry.
+            guard let old, new == nil else { return }
+            let installed = store.entries.first(where: { $0.id == old })?.installedAt != nil
+            if store.error != nil && !installed { failedInstalls.insert(old) } else { failedInstalls.remove(old) }
+        }
+    }
+
+    private var openSearchAction: (() -> Void)? {
+        guard storeLoginAvailable else { return nil }
+        return { withAnimation(MirsaMotion.select) { section = .search } }
+    }
+
+    /// Same install call as the card's button; clears a previous failure first.
+    private func install(_ entry: EncryptedIPAEntry) {
+        guard store.busy == nil else { return }
+        failedInstalls.remove(entry.id)
+        StoreHaptics.install()
+        Task { await store.install(entry, vm: vm) }
+    }
+
+    private func refreshDownloads() async {
+        await refreshStorage()
+        await storeAccount.refresh()
+    }
+
+    private func refreshStorage() async {
+        let entries = store.entries
+        let result = await StoreStorageReader.read(entries)
+        storageSizes = result.sizes
+        storageFree = result.free
+    }
+
+    private var storageTotal: Int64 { storageSlices.reduce(0) { $0 + $1.bytes } }
+    private var storageSlices: [StoreStorageSummary.Slice] {
+        store.entries
+            .compactMap { e in storageSizes[e.id].map { StoreStorageSummary.Slice(id: e.id, name: e.name, bytes: $0, color: StoreLuxe.seedColor(e.bundleID)) } }
+            .sorted { $0.bytes > $1.bytes }
+    }
+
+    private var importingRow: some View {
+        HStack(spacing: MirsaSpacing.s) {
+            ProgressView().tint(StoreLuxe.loading)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(store.busy ?? "").font(MirsaFont.secondary).foregroundStyle(.white).lineLimit(2)
+                MirsaIndeterminateBar()
+            }
+            StoreStateBadge(title: storeText("Loading", "عم يحمّل", de: "Lädt", ckb: "بارکردن", kmr: "Tê barkirin"), color: StoreLuxe.loading)
+        }
+        .padding(MirsaSpacing.card)
+        .storeGlass(radius: 22, tint: StoreLuxe.loading, elevation: 0.5)
+        .accessibilityElement(children: .combine)
     }
 
     private var introCard: some View {
@@ -245,7 +360,7 @@ struct EncryptedAppsTab: View {
         }
         .padding(MirsaSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .mirsaCard()
+        .storeGlass(radius: 24, sheen: false, elevation: 0.5)
     }
 
     private var benefitsCard: some View {
@@ -270,7 +385,7 @@ struct EncryptedAppsTab: View {
         }
         .padding(MirsaSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .mirsaCard()
+        .storeGlass(radius: 24, sheen: false, elevation: 0.5)
     }
 
     private func benefitRow(_ icon: String, _ text: String) -> some View {
@@ -310,7 +425,7 @@ struct EncryptedAppsTab: View {
                   systemImage: "clock.badge")
                 .font(MirsaFont.button).foregroundStyle(MirsaPalette.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .mirsaCard()
+                .storeGlass(radius: 24, sheen: false, elevation: 0.5)
                 .accessibilityIdentifier("encrypted-appstore-coming-soon")
             Text(t("Signing in to Apple inside Mirsa is not available yet. You can still import App Store IPAs from Files.",
                    "تسجيل الدخول لحساب Apple جوا مرسى مو متاح لسا. لسا فيك تستورد IPA من الملفات.",
@@ -335,7 +450,7 @@ struct EncryptedAppsTab: View {
         }
         .padding(MirsaSpacing.xl)
         .frame(maxWidth: .infinity)
-        .mirsaCard()
+        .storeGlass(radius: 24, sheen: false, elevation: 0.5)
     }
 }
 
@@ -343,6 +458,9 @@ private struct EncryptedEntryCard: View {
     let entry: EncryptedIPAEntry
     @ObservedObject var store: EncryptedAppsStore
     let vm: AppViewModel
+    var failed = false
+    /// The existing install call (store.install), wrapped by the page for haptics and queue state.
+    let onInstall: () -> Void
     let onDelete: () -> Void
 
     @State private var installStart: Date?
@@ -350,32 +468,45 @@ private struct EncryptedEntryCard: View {
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
 
+    private enum QueueState { case loading, failed, installed, ready }
+    private var state: QueueState {
+        if store.installingID == entry.id { return .loading }
+        if failed { return .failed }
+        if entry.installedAt != nil { return .installed }
+        return .ready
+    }
+
     var body: some View {
         let match = store.match(entry)
         let notes = warnings(match)
         let installing = store.installingID == entry.id
+        let icon = store.icon(entry)
+        let tint = StoreLuxe.vivid(IconTint.color(for: "store-ipa|" + entry.id.uuidString, image: icon))
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
             HStack(spacing: MirsaSpacing.s) {
                 Group {
-                    if let img = store.icon(entry) { Image(uiImage: img).resizable().scaledToFill() }
-                    else { Image(systemName: "app.dashed").font(.title).foregroundStyle(MirsaPalette.textTertiary) }
+                    if let img = icon { Image(uiImage: img).resizable().scaledToFill() }
+                    else {
+                        ZStack {
+                            LinearGradient(colors: [StoreLuxe.seedColor(entry.bundleID), StoreLuxe.seedColor(entry.bundleID + "~")],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                            Text(String(entry.name.prefix(1)).uppercased())
+                                .font(.system(size: 26, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                        }
+                    }
                 }
-                .frame(width: 60, height: 60)
-                .background(MirsaPalette.cardRaised)
-                .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8))
+                .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(entry.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
                     Text("\(entry.version) · \(ByteCountFormatter.string(fromByteCount: entry.sizeBytes, countStyle: .file))")
                         .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
                     Text(entry.bundleID).font(.caption2.monospaced()).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if entry.installedAt != nil {
-                    Label(t("Installed", "مثبّت", "دامەزراوە", "Sazkirî"), systemImage: "checkmark.seal.fill")
-                        .font(MirsaFont.badge).foregroundStyle(MirsaPalette.success)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(MirsaPalette.success.opacity(0.14), in: Capsule())
-                }
+                stateBadge
             }
             purchaserRow
             if !notes.isEmpty {
@@ -398,15 +529,40 @@ private struct EncryptedEntryCard: View {
                 }
             }
             if installing { installProgress }
-            HStack(spacing: MirsaSpacing.xs) {
-                Button { Task { await store.install(entry, vm: vm) } } label: {
-                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app")
-                        .frame(maxWidth: .infinity)
+            if state == .failed {
+                HStack(spacing: MirsaSpacing.xs) {
+                    Image(systemName: "xmark.octagon.fill").foregroundStyle(StoreLuxe.failed)
+                    Text(storeText("The last install did not finish.", "آخر تثبيت ما كمل.", de: "Die letzte Installation wurde nicht abgeschlossen.",
+                                   ckb: "دوایین دامەزراندن تەواو نەبوو.", kmr: "Sazkirina dawî neqediya."))
+                        .font(MirsaFont.caption).foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                    Button { onInstall() } label: {
+                        Label(storeText("Retry", "إعادة المحاولة", de: "Erneut", ckb: "دووبارە", kmr: "Dîsa"), systemImage: "arrow.clockwise")
+                            .font(MirsaFont.button).foregroundStyle(.white)
+                            .padding(.horizontal, 12).frame(height: 32)
+                            .background(StoreLuxe.failed.opacity(0.85), in: Capsule())
+                    }
+                    .buttonStyle(.mirsaPress)
+                    .disabled(store.busy != nil)
+                    .accessibilityIdentifier("store-queue-retry")
                 }
-                .buttonStyle(.mirsaPrimary)
+                .padding(10)
+                .background(StoreLuxe.failed.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            HStack(spacing: MirsaSpacing.xs) {
+                Button { onInstall() } label: {
+                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
+                        .font(MirsaFont.button).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
+                        .shadow(color: StoreLuxe.accent.opacity(0.45), radius: 10, y: 4)
+                }
+                .buttonStyle(.mirsaPress)
                 .disabled(store.busy != nil)
+                .opacity(store.busy != nil ? 0.55 : 1)
                 StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
-                Button(role: .destructive, action: onDelete) {
+                Button { StoreHaptics.delete(); onDelete() } label: {
                     Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
                         .foregroundStyle(MirsaPalette.danger)
                 }
@@ -415,15 +571,46 @@ private struct EncryptedEntryCard: View {
             }
         }
         .padding(MirsaSpacing.card)
-        .mirsaCard()
+        .storeGlass(radius: 26, tint: tint, elevation: 0.8)
+        .contextMenu {
+            Button { StoreLinks.copy(entry.bundleID) } label: {
+                Label(storeText("Copy Bundle ID", "نسخ Bundle ID", de: "Bundle-ID kopieren", ckb: "کۆپی Bundle ID", kmr: "Bundle ID kopî bike"), systemImage: "doc.on.doc")
+            }
+            if let id = entry.metadata?.itemID, let link = StoreLinks.appPage(id: id, country: AppStoreSectionModel.shared.account?.country ?? "us") {
+                ShareLink(item: link) {
+                    Label(storeText("Share App Store link", "مشاركة رابط App Store", de: "App-Store-Link teilen", ckb: "هاوبەشکردنی بەستەری App Store", kmr: "Girêdana App Store parve bike"), systemImage: "square.and.arrow.up")
+                }
+            }
+            Button { onInstall() } label: {
+                Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app")
+            }
+            .disabled(store.busy != nil)
+            Button(role: .destructive) { StoreHaptics.delete(); onDelete() } label: {
+                Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
+            }
+            .disabled(installing)
+        }
         .onChange(of: store.installingID) { _, id in installStart = id == entry.id ? Date() : nil }
+    }
+
+    @ViewBuilder private var stateBadge: some View {
+        switch state {
+        case .loading:
+            StoreStateBadge(title: storeText("Installing", "عم يثبّت", de: "Installiert", ckb: "دادەمەزرێت", kmr: "Tê sazkirin"), color: StoreLuxe.loading)
+        case .failed:
+            StoreStateBadge(title: storeText("Failed", "فشل", de: "Fehlgeschlagen", ckb: "سەرنەکەوت", kmr: "Têk çû"), color: StoreLuxe.failed, icon: "exclamationmark")
+        case .installed:
+            StoreStateBadge(title: t("Installed", "مثبّت", "دامەزراوە", "Sazkirî"), color: StoreLuxe.done, icon: "checkmark")
+        case .ready:
+            StoreStateBadge(title: storeText("Ready", "جاهز", de: "Bereit", ckb: "ئامادەیە", kmr: "Amade"), color: StoreLuxe.ready)
+        }
     }
 
     /// Percentage from the existing install progress; speed estimated in the UI from
     /// that fraction, the file size and the elapsed time.
     private var installProgress: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: min(max(store.progress, 0), 1)).tint(MirsaPalette.accentSoft)
+            ProgressView(value: min(max(store.progress, 0), 1)).tint(StoreLuxe.loading)
             TimelineView(.periodic(from: installStart ?? Date(), by: 1)) { ctx in
                 let fraction = min(max(store.progress, 0), 1)
                 let elapsed = installStart.map { ctx.date.timeIntervalSince($0) } ?? 0
