@@ -1272,6 +1272,11 @@ struct LicensesView: View {
              note: "Copyright (c) 2026 Johnny Franks. MIT License."),
     ]
 
+    @State private var showLicenses = false
+    private var licensesTitle: String {
+        storeText("Licenses", "التراخيص", de: "Lizenzen", ckb: "مۆڵەتنامەکان", kmr: "Lîsans")
+    }
+
     private var version: String {
         let i = Bundle.main.infoDictionary
         let v = i?["CFBundleShortVersionString"] as? String ?? "?"
@@ -1302,12 +1307,33 @@ struct LicensesView: View {
                     LabeledContent("X", value: "@rasmtk30")
                 }
             }
-            Section(tr("Open-source licenses", "تراخيص المكتبات المفتوحة")) {
-                ForEach(items) { i in licenseRow(i) }
+            Section {
+                Button { showLicenses = true } label: {
+                    HStack {
+                        Label(licensesTitle, systemImage: "doc.text").foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel(licensesTitle)
             }
         }.listRowBackground(MirsaPalette.row) }
         .mirsaScreen()
         .navigationTitle(tr("About", "حول التطبيق"))
+        .sheet(isPresented: $showLicenses) {
+            NavigationStack {
+                List { Group { ForEach(items) { i in licenseRow(i) } }.listRowBackground(MirsaPalette.row) }
+                    .mirsaScreen()
+                    .navigationTitle(licensesTitle)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(storeText("Done", "تم", de: "Fertig", ckb: "تەواو", kmr: "Temam")) { showLicenses = false }
+                        }
+                    }
+            }
+        }
     }
 
     private func licenseRow(_ i: Item) -> some View {
