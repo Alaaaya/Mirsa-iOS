@@ -81,6 +81,17 @@ struct AppStoreAccountView: View {
                     detailView(app, account: account)
                 } else {
                     if searchOnly { searchHeader }
+                    if searchOnly && StoreSearchNavigation(term: term, resultCount: results.count, searched: searched, genreActive: discoveryGenre != nil, detailOpen: false).showsBack {
+                        HStack {
+                            Button { StoreHaptics.select(); exitSearchToMain() } label: {
+                                Label(storeText("Back", "رجوع", de: "Zurück", ckb: "گەڕانەوە", kmr: "Vegere"), systemImage: "chevron.left")
+                                    .font(MirsaFont.button).foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36).storeGlassCapsule(elevation: 0.3)
+                            }
+                            .buttonStyle(B.font(MirsaFont.button).foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36).storeGlassCapsule(elevation: 0.3))
+                            .accessibilityIdentifier("store-search-back")
+                            Spacer()
+                        }
+                    }
                     if !searchOnly {
                         Text(t("My App Store", "حسابي بالـApp Store", "ئەپستۆری من", "App Store ya min"))
                             .font(MirsaFont.pageTitle).foregroundStyle(.white)
@@ -362,6 +373,12 @@ struct AppStoreAccountView: View {
         .environment(\.layoutDirection, (AppLanguageStore.shared.current == .arabic || AppLanguageStore.shared.current == .sorani) ? .rightToLeft : .leftToRight)
     }
 
+    private func exitSearchToMain() {
+        var nav = StoreSearchNavigation(term: term, resultCount: results.count, searched: searched, genreActive: discoveryGenre != nil, detailOpen: false)
+        nav.returnToMain()
+        term = nav.term; results = []; searched = nav.searched; discoveryGenre = nil; focus = false
+    }
+
     private func searchControls(_ a: MirsaStoreAccount) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
@@ -372,7 +389,7 @@ struct AppStoreAccountView: View {
                     .disabled(busy != nil).foregroundStyle(.white)
                     .accessibilityIdentifier("store-search-input")
                 if !term.isEmpty {
-                    Button { term = ""; results = []; searched = false; discoveryGenre = nil } label: { Image(systemName: "xmark.circle.fill") }
+                    Button { exitSearchToMain() } label: { Image(systemName: "xmark.circle.fill") }
                         .foregroundStyle(MirsaPalette.textTertiary)
                         .accessibilityLabel(t("Clear", "مسح", "سڕینەوە", "Paqij bike"))
                 }
