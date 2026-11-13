@@ -25,9 +25,15 @@ extension MirsaStoreServerClient {
             }
             // At launch the saved device identity can still be loading. Re-read it (read-only, never enrolling)
             // for a bounded time before concluding this installation has no approved identity.
-            let saved = try await MirsaStoreIdentityLoader.load {
-                try ForgeClient.existingFixCredentials(bearer: bearer, user: user)
-            }
+            let saved = try await MirsaStoreIdentityLoader.loadRefreshing(
+                refresh: {
+                    // Awaits the app's own idempotent device registration (same saved token) before concluding anything.
+                    do { _ = try await ForgeClient.fixToken() }
+                    catch let e as MirsaStoreServerError { throw e }
+                    catch is CancellationError { throw CancellationError() }
+                    catch { throw MirsaStoreServerError(code: "upstream_unavailable") }
+                },
+                read: { try ForgeClient.existingFixCredentials(bearer: bearer, user: user) })
             return MirsaStoreServerIdentity(bearer: saved.accessToken, userID: user,
                 forgeDeviceID: saved.deviceID, forgeDeviceToken: saved.deviceToken)
         })
@@ -37,6 +43,8 @@ extension MirsaStoreServerClient {
 extension MirsaStoreOnDeviceClient {
     static let shared = MirsaStoreOnDeviceClient(gate: {
         await MirsaStoreServerClient.shared.loginAvailable()
+    }, stateGate: {
+        await MirsaStoreServerClient.shared.gateState()
     }, historyGate: {
         try await MirsaStoreServerClient.shared.authorizeHistory()
     })
@@ -62,22 +70,17 @@ enum MirsaStoreIdentityLoader {
         }
     }
 
-    /// First action after a cold start can race the identity check. Only the definitive-not-ready signal
-    /// (staging_denied) is retried, bounded and cancellable; every other error, and a denial that outlasts
-    /// the bound, is returned as-is. The operation re-evaluates the gate on each attempt (never cached).
-    static func retryWhileNotReady<T>(attempts: Int = 40, delayNanoseconds: UInt64 = 500_000_000,
-                                      sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
-                                      operation: () async throws -> T) async throws -> T {
-        var tried = 0
-        while true {
-            try Task.checkCancellation()
-            do { return try await operation() }
-            catch let error as MirsaStoreServerError {
-                guard case .code(let code) = error, code == "staging_denied" else { throw error }
-                tried += 1
-                if tried >= max(1, attempts) { throw error }
-                try await sleep(delayNanoseconds)
-            }
+    /// Read the saved identity; if it is not there yet, await one real registration/refresh and read again.
+    /// A transient refresh failure surfaces as upstream_unavailable (unknown), never as an identity denial.
+    /// Only a missing identity after a successful refresh is the definitive staging_denied.
+    static func loadRefreshing<T>(refresh: () async throws -> Void, read: () throws -> T) async throws -> T {
+        do { return try read() }
+        catch let error as MirsaStoreServerError {
+            guard case .code(let code) = error, code == "staging_denied" else { throw error }
         }
+        try Task.checkCancellation()
+        try await refresh()
+        try Task.checkCancellation()
+        return try read()
     }
 }

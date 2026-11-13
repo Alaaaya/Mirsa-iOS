@@ -50,44 +50,105 @@ final class StoreIdentityRaceTests: XCTestCase {
         XCTAssertEqual(sleeps, 0)
     }
 
-    func testFirstSearchWaitsForIdentityThenRunsExactlyOneLookup() async throws {
-        var lookups = 0, gateChecks = 0
-        let r: [Int] = try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 5, sleep: { _ in }, operation: {
-            gateChecks += 1
-            if gateChecks < 3 { throw self.denied() }
-            lookups += 1
-            return [1632106976]
+    func testRefreshRunsThenIdentityReadsOnce() async throws {
+        var ready = false, refreshes = 0
+        let v: String = try await MirsaStoreIdentityLoader.loadRefreshing(refresh: { refreshes += 1; ready = true }, read: {
+            if !ready { throw self.denied() }
+            return "ok"
         })
-        XCTAssertEqual(r, [1632106976])
-        XCTAssertEqual(lookups, 1)
+        XCTAssertEqual(v, "ok"); XCTAssertEqual(refreshes, 1)
     }
 
-    func testKnownUnauthorizedIsNotRetried() async {
-        var calls = 0
+    func testRefreshFailureIsTransientNotDenial() async {
         do {
-            let _: Int = try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 5, sleep: { _ in }, operation: { calls += 1; throw MirsaStoreServerError(code: "unauthorized") })
+            let _: String = try await MirsaStoreIdentityLoader.loadRefreshing(refresh: { throw MirsaStoreServerError(code: "upstream_unavailable") }, read: { throw self.denied() })
             XCTFail("must throw")
-        } catch let e as MirsaStoreServerError { XCTAssertEqual(e, .code("unauthorized")) } catch { XCTFail("type") }
-        XCTAssertEqual(calls, 1)
+        } catch let e as MirsaStoreServerError { XCTAssertEqual(e, .code("upstream_unavailable")) } catch { XCTFail("type") }
     }
 
-    func testPersistentDenialIsBoundedAndSurfaced() async {
-        var calls = 0
+    func testMissingAfterSuccessfulRefreshIsDefinitiveDenial() async {
         do {
-            let _: Int = try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 3, sleep: { _ in }, operation: { calls += 1; throw self.denied() })
+            let _: String = try await MirsaStoreIdentityLoader.loadRefreshing(refresh: {}, read: { throw self.denied() })
             XCTFail("must throw")
         } catch let e as MirsaStoreServerError { XCTAssertEqual(e, .code("staging_denied")) } catch { XCTFail("type") }
-        XCTAssertEqual(calls, 3)
     }
 
-    func testCancellationStopsWaiting() async {
-        var calls = 0
-        let task = Task { () -> Int in
-            try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 100, sleep: { _ in try await Task.sleep(nanoseconds: 20_000_000) }, operation: { calls += 1; throw self.denied() })
-        }
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        task.cancel()
-        do { _ = try await task.value; XCTFail("must cancel") } catch {}
-        XCTAssertLessThan(calls, 100)
+    func testPresentIdentityNeverRefreshes() async throws {
+        var refreshes = 0
+        let _: Int = try await MirsaStoreIdentityLoader.loadRefreshing(refresh: { refreshes += 1 }, read: { 1 })
+        XCTAssertEqual(refreshes, 0)
     }
+
+    func testUnauthorizedIsNotRefreshed() async {
+        var refreshes = 0
+        do {
+            let _: Int = try await MirsaStoreIdentityLoader.loadRefreshing(refresh: { refreshes += 1 }, read: { throw MirsaStoreServerError(code: "unauthorized") })
+            XCTFail("must throw")
+        } catch {}
+        XCTAssertEqual(refreshes, 0)
+    }
+
+    // Real MirsaStoreServerClient path with a controllable, delayed identity and a real /account round trip.
+    private func client(_ outcome: @escaping () async throws -> MirsaStoreServerIdentity,
+                        http: @escaping MirsaStoreServerClient.HTTP) -> MirsaStoreServerClient {
+        MirsaStoreServerClient(identity: outcome, vault: RaceVault(), http: http)
+    }
+    private func identity() -> MirsaStoreServerIdentity {
+        .init(bearer: "b", userID: UUID(), forgeDeviceID: "91f71c66-b727-450e-8de2-244a1cf85915",
+              forgeDeviceToken: String(repeating: "a", count: 64))
+    }
+    private func ok(_ req: URLRequest) -> (Data, Int) {
+        req.url!.path.hasSuffix("/devices")
+            ? (Data(#"{"deviceToken":"\#(String(repeating: "D", count: 43))"}"#.utf8), 200)
+            : (Data(#"{"status":"signed_out"}"#.utf8), 200)
+    }
+
+    func testGateStateAuthorizedWhenIdentityReady() async {
+        let c = client({ self.identity() }, http: { self.ok($0) })
+        let s = await c.gateState()
+        XCTAssertEqual(s, .authorized)
+    }
+
+    func testGateStateDefinitiveDenialsAndUnknown() async {
+        for (code, expected) in [("staging_denied", MirsaStoreGateState.denied), ("unauthorized", .denied),
+                                 ("upstream_unavailable", .unknown), ("rate_limited", .unknown)] {
+            let c = client({ throw MirsaStoreServerError(code: code) }, http: { self.ok($0) })
+            let s = await c.gateState()
+            XCTAssertEqual(s, expected, code)
+        }
+        let net = client({ self.identity() }, http: { _ in throw URLError(.timedOut) })
+        let timeout = await net.gateState()
+        XCTAssertEqual(timeout, .unknown)
+    }
+
+    func testDelayedIdentityFirstCallUnknownNotDenialThenAuthorized() async {
+        let box = Flag()
+        let c = client({
+            if !box.value { throw MirsaStoreServerError(code: "upstream_unavailable") }
+            return self.identity()
+        }, http: { self.ok($0) })
+        let first = await c.gateState()
+        XCTAssertEqual(first, .unknown)
+        box.value = true
+        let second = await c.gateState()
+        XCTAssertEqual(second, .authorized)
+    }
+
+    func testOnDeviceClientMapsStatesWithoutIdentityDenialForUnknown() async {
+        for (state, expected) in [(MirsaStoreGateState.unknown, "upstream_unavailable"), (.denied, "staging_denied")] {
+            let c = MirsaStoreOnDeviceClient(gate: { false }, stateGate: { state }, vault: RaceVault())
+            do { _ = try await c.search(term: "1632106976", country: "TR"); XCTFail("must throw") }
+            catch let e as MirsaStoreServerError { XCTAssertEqual(e, .code(expected)) }
+            catch let e as MirsaStoreError { XCTAssertEqual(e, .signedOut) } // no saved account: gate order not under test
+            catch { XCTFail("type") }
+        }
+    }
+}
+
+final class Flag { var value = false }
+private final class RaceVault: MirsaStoreVault {
+    var items: [String: Data] = [:]
+    func read(_ key: String) throws -> Data? { items[key] }
+    func write(_ data: Data, key: String) throws { items[key] = data }
+    func remove(_ key: String) throws { items[key] = nil }
 }

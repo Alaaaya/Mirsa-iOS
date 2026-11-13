@@ -27,6 +27,7 @@ actor MirsaStoreOnDeviceClient {
     typealias Gate = () async -> Bool
     private let historyGate: () async throws -> Void
     private let gate: Gate
+    private let stateGate: (() async -> MirsaStoreGateState)?
     struct SavedAccount: Identifiable, Sendable, Equatable {
         let id: String
         let account: MirsaStoreAccount
@@ -40,6 +41,7 @@ actor MirsaStoreOnDeviceClient {
     private var clients: [String: MirsaStoreClient] = [:]
     private var registry: Registry?
     init(local: MirsaStoreClient? = nil, gate: @escaping Gate,
+         stateGate: (() async -> MirsaStoreGateState)? = nil,
          historyGate: (() async throws -> Void)? = nil,
          vault: any MirsaStoreVault = MirsaStoreKeychain(),
          factory: ((String) -> MirsaStoreClient)? = nil) {
@@ -53,6 +55,7 @@ actor MirsaStoreOnDeviceClient {
             registry = Registry(ids: ["legacy"], selected: "legacy")
         }
         self.gate = gate
+        self.stateGate = stateGate
         self.historyGate = historyGate ?? {
             guard await gate() else { throw MirsaStoreServerError(code: "staging_denied") }
         }
@@ -119,6 +122,15 @@ actor MirsaStoreOnDeviceClient {
         return id
     }
     private func authorize() async throws {
+        if let stateGate {
+            let state = await stateGate()
+            try Task.checkCancellation()
+            switch state {
+            case .authorized: return
+            case .denied: throw MirsaStoreServerError(code: "staging_denied")
+            case .unknown: throw MirsaStoreServerError(code: "upstream_unavailable")
+            }
+        }
         guard await gate() else { throw MirsaStoreServerError(code: "staging_denied") }
         try Task.checkCancellation()
     }
