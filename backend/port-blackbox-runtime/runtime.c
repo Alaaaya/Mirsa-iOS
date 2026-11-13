@@ -5,6 +5,9 @@
 #include "breadcrumb.h"
 #include <stdatomic.h>
 #include <ucontext.h>
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <mach/arm/thread_status.h>
+#endif
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -35,7 +38,7 @@ static void handler(int sig, siginfo_t *info, void *context) {
     (void)info;uintptr_t sp=0;
     ucontext_t *uc=context;
 #if defined(__APPLE__) && defined(__aarch64__)
-    if(uc)sp=(uintptr_t)uc->uc_mcontext->__ss.__sp;
+    if(uc)sp=(uintptr_t)arm_thread_state64_get_sp(uc->uc_mcontext->__ss);
 #elif defined(__APPLE__) && defined(__x86_64__)
     if(uc)sp=(uintptr_t)uc->uc_mcontext->__ss.__rsp;
 #elif defined(__linux__) && defined(__x86_64__)
