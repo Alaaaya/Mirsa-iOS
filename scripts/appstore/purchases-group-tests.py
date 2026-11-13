@@ -50,6 +50,7 @@ allowed.update({
     'ios-app/Apps/GuestLoader.m',
     'ios-app/Apps/EncryptedApps.swift', 'ios-app/Apps/EncryptedLocalInstall.swift',
     'scripts/appstore/encrypted-cellular-tests.py',
+    'scripts/appstore/download-progress-tests.py', 'ios-app/AppStore/StorePackages.swift',
     'scripts/appstore/version-name-tests.py', 'scripts/appstore/commerce-lock-tests.py', 'scripts/appstore/commerce_lock_scope.py',
     'scripts/appstore/commerce-session-tests.py', 'vendor/ApplePackage/Package.swift',
     'vendor/ApplePackage/Sources/ApplePackage/Models/StoreDownloadEndpoint.swift',

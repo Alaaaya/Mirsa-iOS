@@ -59,6 +59,8 @@ struct AppStoreAccountView: View {
     /// UI only: the app whose detail page is open, and when the current task started.
     @State private var selected: MirsaStoreApp?
     @State private var busySince: Date?
+    @State private var transfer: StoreDownloadProgress?
+    @State private var progressAttempt: UUID?
     @FocusState private var focus: Bool
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { tr(en, ar, ckb: ckb, kmr: kmr) }
@@ -764,16 +766,40 @@ struct AppStoreAccountView: View {
                 Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal")) { work?.cancel() }
                     .buttonStyle(.mirsaSecondary)
             }
-            MirsaIndeterminateBar()
-            Text(t("Size and speed are not reported for this step yet, so only the elapsed time is shown.",
-                   "الحجم والسرعة مو متاحين لهالخطوة لسا، فبنعرض الوقت يلي مضى بس.",
-                   "قەبارە و خێرایی بۆ ئەم هەنگاوە هێشتا نانێردرێن، بۆیە تەنها کاتی تێپەڕیو نیشان دەدرێت.",
-                   "Mezinahî û lez ji bo vê gavê hêj nayên ragihandin, ji ber vê tenê dema derbasbûyî tê nîşandan."))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let transfer {
+                if let fraction = transfer.fraction {
+                    ProgressView(value: fraction, total: 1).tint(.white)
+                    Text("\(Int(fraction * 100))%").font(MirsaFont.caption.monospacedDigit())
+                } else {
+                    MirsaIndeterminateBar()
+                }
+                Text(transferPhase(transfer.phase)).font(MirsaFont.caption)
+                if transfer.received > 0 {
+                    let received = ByteCountFormatter.string(fromByteCount: transfer.received, countStyle: .file)
+                    let speed = ByteCountFormatter.string(fromByteCount: Int64(min(transfer.speed, Double(Int64.max / 2))), countStyle: .file) + "/s"
+                    let total = transfer.expected > 0
+                        ? " / " + ByteCountFormatter.string(fromByteCount: transfer.expected, countStyle: .file) : ""
+                    Text(received + total + " · " + speed)
+                        .font(MirsaFont.caption.monospacedDigit()).foregroundStyle(MirsaPalette.textTertiary)
+                }
+            } else {
+                MirsaIndeterminateBar()
+            }
         }
         .padding(MirsaSpacing.card).mirsaCard()
         .accessibilityElement(children: .combine)
+    }
+
+    private func transferPhase(_ phase: StoreDownloadProgress.Phase) -> String {
+        switch phase {
+        case .preparing: return t("Preparing licence and download link…", "عم جهّز الترخيص ورابط التنزيل…", "ئامادەکردنی مۆڵەت و بەستەر…", "Lîsans û girêdan amade dibin…")
+        case .downloading: return t("Downloading…", "عم نزّل…", "داگرتن…", "Daxistin…")
+        case .packaging: return t("Adding original Apple licence…", "عم ضيف ترخيص Apple الأصلي…", "زیادکردنی مۆڵەتی ئەسڵی Apple…", "Lîsansa resen a Apple tê zêdekirin…")
+        case .validating: return t("Checking IPA…", "عم تحقق من ملف IPA…", "پشکنینی IPA…", "IPA tê kontrolkirin…")
+        case .saving: return t("Saving to your library…", "عم احفظ بالمكتبة…", "هەڵگرتن لە کتێبخانە…", "Li pirtûkxaneyê tê tomarkirin…")
+        case .saved: return t("Saved", "انحفظ", "هەڵگیرا", "Hat tomarkirin")
+        case .failed: return t("Download stopped", "وقف التنزيل", "داگرتن وەستا", "Daxistin rawestiya")
+        }
     }
 
     // MARK: actions
@@ -783,12 +809,24 @@ struct AppStoreAccountView: View {
         focus = false
         busy = message
         let generation = operationGeneration
+        let attempt = UUID()
+        progressAttempt = attempt
+        transfer = nil
+        let report: @Sendable (StoreDownloadProgress.Event) -> Void = { event in
+            Task { @MainActor in
+                guard progressAttempt == attempt, generation == operationGeneration else { return }
+                if transfer == nil { transfer = StoreDownloadProgress() }
+                transfer?.apply(event)
+            }
+        }
         work = Task {
             defer { password = ""; code = "" }
-            do { try await op() }
+            do { try await StoreDownloadProgress.$report.withValue(report) { try await op() } }
             catch is CancellationError {}
             catch { if generation == operationGeneration { notice = describe(error) } }
-            if generation == operationGeneration { busy = nil; work = nil }
+            if generation == operationGeneration, progressAttempt == attempt {
+                progressAttempt = nil; transfer = nil; busy = nil; work = nil
+            }
         }
     }
 
@@ -865,13 +903,17 @@ struct AppStoreAccountView: View {
         guard app.price == 0, (!otherStore || accountAvailable.contains(app.id)) else { return }
         let version = chosen[app.bundleID]
         run(t("Getting free license and downloading…", "عم نجيب الترخيص المجاني وننزّل…", "مۆڵەتی بێبەرامبەر وەردەگیرێت و دادەگیرێت…", "Lîsansa belaş tê girtin û tê daxistin…")) {
+            transfer = StoreDownloadProgress()
             let generation = operationGeneration
             let url = try await client.acquireFreeAppAndDownload(app, externalVersionID: version)
             ownership[app.id] = .owned
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try Task.checkCancellation()
             guard generation == operationGeneration else { throw CancellationError() }
+            transfer?.apply(.init(phase: .saving))
             try await onDownloaded(url)
+            try Task.checkCancellation()
+            transfer?.apply(.init(phase: .saved))
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
                        "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
         }
@@ -894,6 +936,7 @@ struct AppStoreAccountView: View {
         guard canDownload(app) else { selected = app; return }
         let version = chosen[app.bundleID]
         run(t("Preparing and downloading…", "عم جهّز ونزّل…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
+            transfer = StoreDownloadProgress()
             let generation = operationGeneration
             let url: URL
             do { url = try await client.downloadOwnedApp(app, externalVersionID: version) }
@@ -905,7 +948,10 @@ struct AppStoreAccountView: View {
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try Task.checkCancellation()
             guard generation == operationGeneration else { throw CancellationError() }
+            transfer?.apply(.init(phase: .saving))
             try await onDownloaded(url)
+            try Task.checkCancellation()
+            transfer?.apply(.init(phase: .saved))
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
                        "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
         }
@@ -925,6 +971,7 @@ struct AppStoreAccountView: View {
         recovery = nil
         guard pending.revision == session.sessionRevision else { return }
         run(t("Refreshing free licence and retrying…", "عم نحدّث الترخيص المجاني ونعيد المحاولة…", "نوێکردنەوەی مۆڵەت…", "Lîsans nû dibe…")) {
+            transfer = StoreDownloadProgress()
             let url = try await StoreFreeLicenseRecovery.retryOnce(consent: true, acquire: {
                 guard pending.revision == session.sessionRevision else { throw CancellationError() }
                 try await client.acquireFreeApp(pending.app)
@@ -935,7 +982,10 @@ struct AppStoreAccountView: View {
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             guard pending.revision == session.sessionRevision else { throw CancellationError() }
             try Task.checkCancellation()
+            transfer?.apply(.init(phase: .saving))
             try await onDownloaded(url)
+            try Task.checkCancellation()
+            transfer?.apply(.init(phase: .saved))
             ownership[pending.app.id] = .owned
             notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.", "هەڵگیرا.", "Hat tomarkirin.")
             // Failure goes directly to run's diagnostics. Never offer/acquire in a loop.
