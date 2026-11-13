@@ -116,18 +116,21 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     }
 
     /// Mirsa's main settings scrolled to the Apple Store style option (picker + explanation).
+    /// Short controlled drags so the option lands mid-screen instead of being flung past.
     func testStoreStyleSetting() {
         for lang in ["ar", "en"] {
             let app = launch("settings", lang: lang)
             let picker = app.descendants(matching: .any).matching(identifier: "store-style-picker").firstMatch
+            let height = app.frame.height
             var tries = 0
-            while alive(app) && tries < 12 && !(picker.exists && picker.isHittable) {
-                app.swipeUp(velocity: .slow); tries += 1
-            }
-            if alive(app) && picker.exists {
-                // Bring the option and its footer text toward the middle of the screen.
-                let frame = picker.frame, screen = app.frame
-                if frame.midY > screen.height * 0.55 { app.swipeUp(velocity: .slow) }
+            while alive(app) && tries < 30 {
+                tries += 1
+                let y = picker.exists ? picker.frame.midY : height
+                if picker.exists && y > height * 0.25 && y < height * 0.6 { break }
+                let up = !picker.exists || y >= height * 0.6
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.7 : 0.4))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.45 : 0.6))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
             }
             Thread.sleep(forTimeInterval: 1.0)
             shot(app, "\(lang)_settings-store-style")
