@@ -61,7 +61,7 @@ static void MirsaBlackboxStart(void) {
                 @"installationID":@MIRSA_BB_INSTALLATION,
                 @"reportToken":@MIRSA_BB_REPORT_TOKEN,
                 @"eventID":NSUUID.UUID.UUIDString.lowercaseString,
-                @"signal":@(e.signal_number),@"exception":@(e.exception==1),
+                @"version":@(e.version),@"signal":@(e.signal_number),@"exception":@(e.exception==1),
                 @"hookIndex":@(e.hook_index),@"hookDepth":@(e.hook_depth),
                 @"manifestSHA256":@MIRSA_BB_MANIFEST_SHA};
             NSData *json=[NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
