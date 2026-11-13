@@ -106,6 +106,19 @@ final class ForgeQueuedTests: XCTestCase {
         let q = try await store.generate(p.id, prompt: "lost one")
         XCTAssertTrue(q); XCTAssertEqual(keys.count, 2); XCTAssertEqual(keys[0], keys[1])
     }
+    func testInspectorAttachedClassesCreateQueuedNoBadResponse() async throws {
+        let store = ForgeStore.shared; let saved = store.projects; defer { store.projects = saved }
+        let p = project(); store.projects = [p]; let before = snapshot(p)
+        let outgoing = ForgeCaptureContext.composed(prompt: "hide ads", classes: ["AdView", "BannerCell"])
+        XCTAssertNotEqual(outgoing, "hide ads")
+        var seen: [[String: Any]] = []
+        ForgeQueued.transport = { body, key in seen.append(body); return (self.data(self.receipt(thread: body["threadID"] as? String)), 200) }
+        let q = try await store.generate(p.id, prompt: outgoing)
+        XCTAssertTrue(q); XCTAssertEqual(seen.count, 1)
+        XCTAssertEqual(seen[0]["prompt"] as? String, outgoing)
+        XCTAssertEqual(snapshot(store.project(p.id)!), before)
+        XCTAssertNotNil(store.queuedNotice)
+    }
     func testStoreReadyCodeStillAddsVersion() async throws {
         let store = ForgeStore.shared; let saved = store.projects; defer { store.projects = saved }
         let p = project(); store.projects = [p]
