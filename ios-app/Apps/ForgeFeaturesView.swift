@@ -211,7 +211,7 @@ struct ForgeFeaturesView: View {
     private var inspectorBody: some View {
         Group {
             VStack(alignment: .leading, spacing: 8) {
-                Text(text("Inject the inspector above, install your app copy, then long-press inside it. Only the active foreground UIKit scene is captured, with sensitive text redacted. Preview before copying. Save that JSON to Files and import it here.", "احقن المفتش من فوق وثبّت نسخة التطبيق، بعدها اضغط مطوّل داخله. بيلتقط UIKit للشاشة المفتوحة بس وبخفي النصوص الحساسة. عاين قبل النسخ، احفظ JSON بالملفات واستورده هون.")).font(.caption)
+                Text(text("Inject the inspector above, install your app copy, then double-tap with two fingers inside it. Only the active foreground UIKit scene is captured, with sensitive text redacted. Preview before copying. Save that JSON to Files and import it here.", "احقن المفتش من فوق وثبّت نسخة التطبيق، بعدها اضغط ضغطتين بإصبعين داخله. بيلتقط UIKit للشاشة المفتوحة بس وبخفي النصوص الحساسة. عاين قبل النسخ، احفظ JSON بالملفات واستورده هون.")).font(.caption)
                 Text(text("SwiftUI/WebView internals may be unavailable. No other-app container access. Live tweak log streaming is unavailable; imported logs are only the inspector's actual local events.", "تفاصيل SwiftUI وWebView ممكن ما تظهر. ما في وصول لملفات تطبيقات ثانية. البث المباشر لسجل التويك مو متاح؛ السجل المستورد بس أحداث المفتش الفعلية.")).font(.caption).foregroundStyle(.orange)
                 Button(text("Import capture JSON", "استيراد JSON المفتش")) { importingCapture = true }
                 if let capture {
