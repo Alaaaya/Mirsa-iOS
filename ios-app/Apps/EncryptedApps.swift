@@ -182,6 +182,7 @@ final class EncryptedAppsStore: ObservableObject {
     @Published var busy: String?
     @Published var progress: Double = 0
     @Published var installingID: UUID?
+    private var installAttemptID: UUID?
     @Published var error: String?
     @Published var toast: String?
 
@@ -276,8 +277,16 @@ final class EncryptedAppsStore: ObservableObject {
         // Reserve before the first await, including path resolution, so repeated
         // taps or a certificate install cannot race this handoff.
         busy = L.t("busy.installing"); apps.busy = busy; progress = 0; installingID = entry.id
+        let attemptID = UUID()
+        installAttemptID = attemptID
         var ok = false
-        defer { busy = nil; apps.busy = nil; installingID = nil; if !ok { progress = 0 } }
+        defer {
+            if installAttemptID == attemptID {
+                busy = nil; apps.busy = nil; installingID = nil
+                installAttemptID = nil
+                if !ok { progress = 0 }
+            }
+        }
         apps.error = nil
         let cellular = await WiFiPathMonitor.shared.resolve() == .notWifi
         if !cellular {
@@ -296,21 +305,24 @@ final class EncryptedAppsStore: ObservableObject {
         if cellular {
             do {
                 try await EncryptedLocalInstall.handoff(file)
-                ok = true; progress = 1
-                // OTA cannot prove device installation, so never mark installedAt.
-                toast = EncryptedText.t(
-                    "iOS started receiving the app. Keep Mirsa open until installation finishes. The IPA stays on this device.",
-                    "iOS بلّش يستلم التطبيق. خلّي مرسى مفتوح لحد ما يخلص التثبيت. ملف الـIPA بيضل عهالجهاز.",
-                    "iOS دەستی بە وەرگرتنی ئەپ کرد. Mirsa کراوە بهێڵەوە تا دامەزراندن تەواو دەبێت. IPA لەم ئامێرە دەمێنێتەوە.",
-                    "iOS dest bi wergirtina sepanê kir. Mirsa vekirî bihêle heta sazkirin xilas dibe. IPA li ser vê amûrê dimîne.")
-            } catch { self.error = error.localizedDescription }
+                guard installAttemptID == attemptID else { return }
+                // Receiving bytes is not installation proof, especially when an
+                // older copy with the same bundle ID already exists.
+                progress = 0
+                toast = EncryptedLocalInstall.unconfirmed
+            } catch {
+                guard installAttemptID == attemptID else { return }
+                if error is CancellationError { toast = EncryptedLocalInstall.unconfirmed }
+                else { self.error = AppsStore.friendly(error) }
+            }
             return
         }
         do {
             _ = try await Task.detached {
                 try SideloadService.installStoreIPA(ipaPath: path) { f, _ in
                     Task { @MainActor in
-                        EncryptedAppsStore.shared.progress = f
+                        guard self.installAttemptID == attemptID else { return }
+                        self.progress = f
                     }
                 }
             }.value

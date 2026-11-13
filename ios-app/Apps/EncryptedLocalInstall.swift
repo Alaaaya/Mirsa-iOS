@@ -8,6 +8,33 @@ import UIKit
 enum EncryptedLocalInstall {
     private static var active: LocalOTAServer?
 
+    /// One bounded attempt. Detached callbacks can only finish their own gate.
+    @MainActor private final class Attempt {
+        var continuation: CheckedContinuation<Void, Error>?
+        var worker: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+        var stop: (() -> Void)?
+        var finished = false
+        func finish(_ result: Result<Void, Error>) {
+            guard !finished else { return }
+            finished = true
+            timer?.cancel()
+            if case .failure = result { worker?.cancel(); stop?() }
+            let pending = continuation
+            continuation = nil
+            pending?.resume(with: result)
+        }
+    }
+
+    static var unconfirmed: String {
+        localized(
+            "Installation could not be confirmed. The install button is available again. Check the Home Screen; if the app is already installed, use Wi-Fi + LocalDevVPN to replace it without deleting its data.",
+            "ما قدرنا نتأكد من التثبيت. زر التثبيت رجع اشتغل. شوف الشاشة الرئيسية؛ إذا التطبيق موجود، استخدم الواي فاي مع LocalDevVPN لتستبدله بدون حذف بياناته.",
+            "Die Installation konnte nicht bestätigt werden. Die Installationstaste ist wieder verfügbar. Prüfe den Home-Bildschirm; nutze bei einer vorhandenen App WLAN + LocalDevVPN, um ihre Daten zu behalten.",
+            "دامەزراندن پشتڕاست نەکرایەوە. دوگمەی دامەزراندن دووبارە بەردەستە. شاشەی سەرەکی بپشکنە؛ بۆ ئەپی هەبوو Wi-Fi + LocalDevVPN بەکاربهێنە بۆ پاراستنی داتا.",
+            "Sazkirin nehat piştrastkirin. Bişkojka sazkirinê dîsa amade ye. Ekrana sereke kontrol bike; ji bo sepana heyî Wi-Fi + LocalDevVPN bikar bîne da dane neyên jêbirin.")
+    }
+
     enum Presence { case installed, unknown }
     static func presence(bundleID: String) -> Presence {
         bundleID.withCString { MirsaInstalledBundleState($0) == 1 ? .installed : .unknown }
@@ -44,16 +71,35 @@ enum EncryptedLocalInstall {
               var controller = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return false }
         while let presented = controller.presentedViewController { controller = presented }
         guard !controller.isBeingDismissed, !(controller is UIAlertController) else { return false }
-        return await withCheckedContinuation { continuation in
-            let alert = UIAlertController(title: "Mirsa", message: unknownWarning, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: localized("Cancel", "إلغاء", "Abbrechen", "پاشگەزبوونەوە", "Betal bike"), style: .cancel) { _ in continuation.resume(returning: false) })
-            alert.addAction(UIAlertAction(title: localized("Continue fresh install", "كمّل تثبيت جديد", "Neuinstallation fortsetzen", "بەردەوام بە لە دامەزراندنی نوێ", "Sazkirina nû bidomîne"), style: .default) { _ in continuation.resume(returning: true) })
-            controller.present(alert, animated: true)
-        }
+        let consent = Consent()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                consent.continuation = continuation
+                guard !Task.isCancelled else { consent.finish(false); return }
+                let alert = UIAlertController(title: "Mirsa", message: unknownWarning, preferredStyle: .alert)
+                consent.alert = alert
+                alert.addAction(UIAlertAction(title: localized("Cancel", "إلغاء", "Abbrechen", "پاشگەزبوونەوە", "Betal bike"), style: .cancel) { _ in consent.finish(false) })
+                alert.addAction(UIAlertAction(title: localized("Continue fresh install", "كمّل تثبيت جديد", "Neuinstallation fortsetzen", "بەردەوام بە لە دامەزراندنی نوێ", "Sazkirina nû bidomîne"), style: .default) { _ in consent.finish(true) })
+                controller.present(alert, animated: true)
+            }
+        } onCancel: { Task { @MainActor in consent.finish(false) } }
         #else
         return await CellularConsentFixture.confirm()
         #endif
     }
+
+    #if canImport(UIKit)
+    @MainActor private final class Consent {
+        var continuation: CheckedContinuation<Bool, Never>?
+        weak var alert: UIAlertController?
+        func finish(_ allow: Bool) {
+            guard let pending = continuation else { return }
+            continuation = nil
+            alert?.dismiss(animated: true)
+            pending.resume(returning: allow)
+        }
+    }
+    #endif
 
     struct Identity: Equatable {
         let bundleID: String
@@ -84,6 +130,27 @@ enum EncryptedLocalInstall {
     /// Success means iOS started fetching the untouched archive, not that it
     /// installed or accepted its FairPlay license. There is NO upload fallback.
     static func handoff(_ file: URL) async throws {
+        let attempt = Attempt()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                attempt.continuation = continuation
+                guard !Task.isCancelled else { attempt.finish(.failure(CancellationError())); return }
+                attempt.worker = Task {
+                    do {
+                        try await performHandoff(file, attempt: attempt)
+                        attempt.finish(.success(()))
+                    } catch { attempt.finish(.failure(error)) }
+                }
+                attempt.timer = Task {
+                    do { try await Task.sleep(nanoseconds: 30_000_000_000) }
+                    catch { return }
+                    attempt.finish(.failure(SideloadError.message(unconfirmed)))
+                }
+            }
+        } onCancel: { Task { @MainActor in attempt.finish(.failure(CancellationError())) } }
+    }
+
+    private static func performHandoff(_ file: URL, attempt: Attempt) async throws {
         let info = try await Task.detached(priority: .userInitiated) { try identity(in: file) }.value
         try Task.checkCancellation()
         switch presence(bundleID: info.bundleID) {
@@ -94,6 +161,7 @@ enum EncryptedLocalInstall {
         try Task.checkCancellation()
         let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
         let server = try LocalOTAServer(file: file)
+        attempt.stop = { server.stop() }
         var handedOff = false
         defer { if !handedOff { server.stop(); if active === server { active = nil } } }
         let background = UIApplication.shared.beginBackgroundTask(withName: "Mirsa App Store local install") { server.stop() }
@@ -117,7 +185,7 @@ enum EncryptedLocalInstall {
         // Keep the exact source file alive in its existing library. Do not
         // replace an earlier local server until iOS has accepted this handoff.
         let requested = await withTaskCancellationHandler {
-            await server.awaitFirstRequest(timeout: 60)
+            await server.awaitFirstRequest(timeout: 30)
         } onCancel: { server.stop() }
         try Task.checkCancellation()
         guard requested else {
