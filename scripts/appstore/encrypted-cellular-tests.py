@@ -18,7 +18,9 @@ assert 'if installAttemptID == attemptID' in method
 assert 'guard self.installAttemptID == attemptID else { return }' in method
 assert 'ok = true; progress = 1' not in cellular
 assert 'iOS did not request' not in helper
-assert '30_000_000_000' in helper and 'didBecomeActiveNotification' in helper
+assert '10_000_000_000' in helper and 'didBecomeActiveNotification' in helper
+assert 'attempt.started >= 10' in helper and 'awaitFirstRequest(timeout: 10)' in helper
+assert '30_000_000_000' not in helper
 assert 'error.localizedDescription' in cellular and 'AppsStore.friendly(error)' not in cellular
 if '--source-only'  in sys.argv:
     print('PASS source contract: no sign/upload, real build metadata, Wi-Fi preserved, cellular never claims installation')
@@ -268,6 +270,6 @@ tests = r"""
 """
 with tempfile.TemporaryDirectory(prefix='encrypted-cellular-') as d:
     path = Path(d)/'main.swift'
-    path.write_text(stubs + method + '\n}\n' + helper.split('@_silgen_name')[0].replace('import UIKit','').replace('30_000_000_000', '50_000_000') + tests)
+    path.write_text(stubs + method + '\n}\n' + helper.split('@_silgen_name')[0].replace('import UIKit','').replace('10_000_000_000', '50_000_000') + tests)
     subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(path),'-o',str(Path(d)/'tests')],check=True)
     subprocess.run([str(Path(d)/'tests')],check=True,timeout=30)
