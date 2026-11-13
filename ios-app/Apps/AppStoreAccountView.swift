@@ -37,6 +37,8 @@ struct AppStoreAccountView: View {
     @State private var metadataTasks: [String: Task<Void, Never>] = [:]
     @State private var metadataLimit: [String: Int] = [:]
     @State private var chosen: [String: String] = [:]
+    @State private var preflightTask: Task<Void, Never>?
+    @State private var pendingOS: (app: MirsaStoreApp, acquire: Bool)?
     @State private var versionListAttempted: Set<Int64> = []
     @State private var term = ""
     @State private var results: [MirsaStoreApp] = []
@@ -122,7 +124,16 @@ struct AppStoreAccountView: View {
             .preferredColorScheme(.dark)
         }
         .onChange(of: busy) { _, value in busySince = value == nil ? nil : (busySince ?? Date()) }
+        .confirmationDialog(StoreFeatureText.osConfirmTitle, isPresented: Binding(get: { pendingOS != nil }, set: { if !$0 { pendingOS = nil } }), titleVisibility: .visible) {
+            Button(StoreFeatureText.continueAnyway) {
+                if let p = pendingOS { pendingOS = nil; if p.acquire { acquire(p.app) } else { download(p.app) } }
+            }
+            Button(StoreFeatureText.cancel, role: .cancel) { pendingOS = nil }
+        } message: { Text(StoreFeatureText.minOSWarn) }
         .onChange(of: account) { _, value in
+            // Account switched: drop in-flight work and every account-specific result immediately.
+            operationGeneration = UUID(); preflightTask?.cancel(); preflightTask = nil; work?.cancel(); work = nil; busy = nil; transfer = nil; progressAttempt = nil
+            results = []; accountAvailable = []; metadata = [:]; pendingOS = nil
             recovery = nil; ownership = [:]; versionListAttempted = []; versions = [:]; chosen = [:]
             if value == nil { selected = nil }
         }
@@ -132,7 +143,7 @@ struct AppStoreAccountView: View {
             versionListAttempted.insert(app.id)
             loadVersions(app)
         }
-        .onDisappear { password = ""; code = ""; work?.cancel(); cancelMetadata() }
+        .onDisappear { preflightTask?.cancel(); password = ""; code = ""; work?.cancel(); cancelMetadata() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
         } message: { Text(notice ?? "") }
@@ -592,7 +603,7 @@ struct AppStoreAccountView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(t("Opens the app page", "بيفتح صفحة التطبيق", "پەڕەی ئەپەکە دەکاتەوە", "Rûpela sepanê vedike"))
-            Button { download(app) } label: {
+            Button { guardedStart(app, acquire: false) } label: {
                 Text(canDownload(app) ? t("Download", "تنزيل", "داگرتن", "Daxe") : t("Not in account store", "مو بمتجر حسابك", "لە ستۆرەکەت نییە", "Ne li stoya te ye"))
                     .font(MirsaFont.button).foregroundStyle(.white)
                     .padding(.horizontal, 16).frame(height: 34)
@@ -633,7 +644,7 @@ struct AppStoreAccountView: View {
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
 
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            Button { download(app) } label: {
+            Button { guardedStart(app, acquire: false) } label: {
                 HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }.frame(maxWidth: .infinity)
             }
             .buttonStyle(.mirsaPrimary).disabled(busy != nil || !canDownload(app))
@@ -642,6 +653,8 @@ struct AppStoreAccountView: View {
             }
             Text(t("Version: ", "النسخة: ", "وەشان: ", "Guherto: ") + chosenLabel(app))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+            StoreCatalogDetailCard(app: app, country: effectiveCountry, externalVersionID: effectiveVersion(app),
+                                   versionLabel: chosenLabel(app))
             Text(t("Needs this account to own the app. Saved unchanged in the App Store tab.",
                    "لازم الحساب يملك التطبيق. بينحفظ متل ما هو بتبويب متجر أبل.",
                    "پێویستە ئەکاونتەکە خاوەنی ئەپەکە بێت. وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵدەگیرێت.",
@@ -649,7 +662,7 @@ struct AppStoreAccountView: View {
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Divider().overlay(MirsaPalette.stroke)
             if app.price == 0 && ownership[app.id] != .owned {
-                Button { acquire(app) } label: { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")).frame(maxWidth: .infinity) }
+                Button { guardedStart(app, acquire: true) } label: { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")).frame(maxWidth: .infinity) }
                     .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || (otherStore && !accountAvailable.contains(app.id)))
                     .accessibilityIdentifier("store-detail-get")
             }
@@ -745,8 +758,12 @@ struct AppStoreAccountView: View {
         return t("Loading name…", "عم يتحمّل الاسم…", "ناو بار دەکرێت…", "Nav tê barkirin…")
     }
 
+    /// Exact external version: explicit choice, else persisted pin (nil means latest).
+    private func effectiveVersion(_ app: MirsaStoreApp) -> String? {
+        chosen[app.bundleID] ?? StoreLibraryModel.shared.pin(bundleID: app.bundleID, country: effectiveCountry)?.externalVersionID
+    }
     private func chosenLabel(_ app: MirsaStoreApp) -> String {
-        guard let id = chosen[app.bundleID] else { return t("Latest", "الأحدث", "نوێترین", "Ya herî nû") + " · " + app.version }
+        guard let id = effectiveVersion(app) else { return t("Latest", "الأحدث", "نوێترین", "Ya herî nû") + " · " + app.version }
         if let item = metadata[app.bundleID]?[id], item.status == "ready", let version = item.version { return "\(version) · ID \(id)" }
         return "ID \(id)"
     }
@@ -883,7 +900,8 @@ struct AppStoreAccountView: View {
     private func search() {
         guard busy == nil else { return }
         let q: String
-        do { q = try StoreSearchQuery.parse(term).term }
+        var urlAppID: Int64?
+        do { let parsed = try StoreSearchQuery.parse(term); q = parsed.term; if case .appID(let s) = parsed, term.contains("/") { urlAppID = Int64(s) } }
         catch { notice = t("Enter an app name, numeric App ID or an Apple App Store link.", "اكتب اسم تطبيق أو App ID رقمي أو رابط من متجر Apple.", "ناو یان ناسنامە یان بەستەری Apple بنووسە.", "Nav, App ID an girêdana Apple binivîse."); return }
         run(t("Searching…", "عم نبحث…", "گەڕان…", "Lêgerîn…")) {
             let country = effectiveCountry
@@ -895,17 +913,39 @@ struct AppStoreAccountView: View {
             try Task.checkCancellation()
             guard country == effectiveCountry else { return }
             results = found; accountAvailable = available; searched = true
+            if let urlAppID, let hit = found.first(where: { $0.id == urlAppID }) { selected = hit }
             recentSearchData = StoreRecentSearches.adding(q, to: recentSearchData)
+        }
+    }
+
+    /// Checks the exact chosen version's minimum iOS first; warns but never blocks.
+    private func guardedStart(_ app: MirsaStoreApp, acquire isAcquire: Bool) {
+        guard busy == nil else { return }
+        let version = effectiveVersion(app)
+        let country = effectiveCountry
+        // Captured before the first await: an account switch must not start a download for the new account.
+        let expectedAccount = account
+        let generation = operationGeneration
+        preflightTask?.cancel()
+        preflightTask = Task {
+            let item = try? await StoreCatalog.fetch(appID: app.id, bundleID: nil, country: country)
+            guard !Task.isCancelled, generation == operationGeneration, account == expectedAccount,
+                  country == effectiveCountry else { return }
+            if StoreCatalogDetailCard.osWarning(item, externalVersionID: version) { pendingOS = (app, isAcquire) }
+            else if isAcquire { acquire(app) } else { download(app) }
         }
     }
 
     private func acquire(_ app: MirsaStoreApp) {
         guard app.price == 0, (!otherStore || accountAvailable.contains(app.id)) else { return }
-        let version = chosen[app.bundleID]
+        let version = effectiveVersion(app)
         run(t("Getting free license and downloading…", "عم نجيب الترخيص المجاني وننزّل…", "مۆڵەتی بێبەرامبەر وەردەگیرێت و دادەگیرێت…", "Lîsansa belaş tê girtin û tê daxistin…")) {
             transfer = StoreDownloadProgress()
             let generation = operationGeneration
-            let url = try await client.acquireFreeAppAndDownload(app, externalVersionID: version)
+            let selectedID = try await client.selectedAccountID()
+            try Task.checkCancellation()
+            guard generation == operationGeneration else { throw CancellationError() }
+            let url = try await client.acquireFreeAppAndDownload(app, externalVersionID: version, expectedAccountID: selectedID)
             ownership[app.id] = .owned
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try Task.checkCancellation()
@@ -934,12 +974,15 @@ struct AppStoreAccountView: View {
 
     private func download(_ app: MirsaStoreApp) {
         guard canDownload(app) else { selected = app; return }
-        let version = chosen[app.bundleID]
+        let version = effectiveVersion(app)
         run(t("Preparing and downloading…", "عم جهّز ونزّل…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
             transfer = StoreDownloadProgress()
             let generation = operationGeneration
+            let selectedID = try await client.selectedAccountID()
+            try Task.checkCancellation()
+            guard generation == operationGeneration else { throw CancellationError() }
             let url: URL
-            do { url = try await client.downloadOwnedApp(app, externalVersionID: version) }
+            do { url = try await client.downloadOwnedApp(app, externalVersionID: version, expectedAccountID: selectedID) }
             catch {
                 if await offerRecovery(error, app: app, version: version) { return }
                 recordOwnershipFailure(error, app: app); throw error

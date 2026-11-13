@@ -374,6 +374,10 @@ final class PairNotifier: NSObject, UNUserNotificationCenterDelegate {
     // Swiped away before pairing finished: show it again.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
+        if response.actionIdentifier != UNNotificationDismissActionIdentifier,
+           response.notification.request.content.userInfo["mirsaRoute"] as? String == "wishlist" {
+            DispatchQueue.main.async { NotificationCenter.default.post(name: Notification.Name("mirsa.store.wishlist.open"), object: nil) }
+        }
         if response.actionIdentifier == UNNotificationDismissActionIdentifier,
            response.notification.request.identifier == pinID, let pin = currentPIN {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.showPIN(pin) }

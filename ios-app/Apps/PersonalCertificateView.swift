@@ -60,7 +60,7 @@ struct PersonalProfileVerification: Codable, Equatable {
         guard warning.code == "entitlements_dropped" else { return warning.message }
         let title: String
         switch AppLanguageStore.shared.current {
-        case .english: title = "Compatibility mode removed unsupported entitlements; related features may not work."
+        case .english, .german: title = "Compatibility mode removed unsupported entitlements; related features may not work."
         case .arabic: title = "وضع التوافق حذف صلاحيات مو مدعومة؛ الميزات المرتبطة فيها ممكن ما تشتغل."
         case .sorani: title = "دۆخی گونجان دەسەڵاتە پشتگیرینەکراوەکانی سڕییەوە؛ تایبەتمەندییە پەیوەندیدارەکان لەوانەیە کار نەکەن."
         case .kurmanji: title = "Moda lihevhatinê destûrên bê piştgirî rakirin; dibe ku taybetmendiyên girêdayî wan nexebitin."
@@ -240,7 +240,7 @@ struct PersonalEncryptionWarning: Error, Decodable {
     var requiresConsent: Bool { main_encrypted || embedded_encrypted > 0 }
     static func localized(_ language: AppLanguage, _ values: [String]) -> String {
         switch language {
-        case .english: return values[0]
+        case .english, .german: return values[0]
         case .arabic: return values[1]
         case .sorani: return values[2]
         case .kurmanji: return values[3]

@@ -5,7 +5,7 @@ extension MirsaTr {
         var s = en
         if let t = fileTools[en] {
             switch AppLanguageStore.shared.current {
-            case .english: s = en
+            case .english, .german: s = en
             case .arabic: s = t.0
             case .sorani: s = t.1
             case .kurmanji: s = t.2

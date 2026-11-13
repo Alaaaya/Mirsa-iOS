@@ -15,13 +15,13 @@ extension MirsaTr {
             if n % 100 >= 3 && n % 100 <= 10 { return .few }
             if n % 100 >= 11 && n % 100 <= 99 { return .many }
             return .other
-        case .english, .sorani, .kurmanji:
+        case .english, .german, .sorani, .kurmanji:
             return n == 1 ? .one : .other
         }
     }
 
     private static func code(_ l: AppLanguage) -> String {
-        switch l { case .english: return "en"; case .arabic: return "ar"; case .sorani: return "ckb"; case .kurmanji: return "kmr" }
+        switch l { case .english, .german: return "en"; case .arabic: return "ar"; case .sorani: return "ckb"; case .kurmanji: return "kmr" }
     }
 
     /// Explicit format key. Falls back Arabic, then the key itself (never a raw English sentence from a missing key).

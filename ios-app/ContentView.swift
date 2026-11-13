@@ -662,8 +662,14 @@ struct ContentView: View {
                 .ignoresSafeArea(.keyboard)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in vm.selectedTab = .encrypted }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
         .onOpenURL { url in
+            if url.scheme == "mirsa", url.host == "wishlist" {
+                vm.selectedTab = .encrypted
+                NotificationCenter.default.post(name: Notification.Name("mirsa.store.wishlist.open"), object: nil)
+                return
+            }
             if OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]); return }
             // mirsa://launch?bundle=… from a Home Screen shortcut.
             if HomeShortcut.handle(url) { vm.selectedTab = .apps; return }

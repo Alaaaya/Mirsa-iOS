@@ -48,7 +48,7 @@ enum IPAEditorService {
     static func archiveError(_ detail: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
         func text(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String {
             switch language {
-            case .english: return en
+            case .english, .german: return en
             case .arabic: return ar
             case .sorani: return ckb
             case .kurmanji: return kmr

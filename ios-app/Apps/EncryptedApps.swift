@@ -233,6 +233,7 @@ final class EncryptedAppsStore: ObservableObject {
             let snapshot = try await Task.detached(priority: .userInitiated) { try OpenInIPA.snapshot(url) }.value
             defer { OpenInIPA.remove(snapshot) }
             let entry = try await Self.adopt(file: snapshot, move: false)
+            StoreIPAProtection.markSaved(id: entry.id)
             add(entry)
         } catch { self.error = error.localizedDescription }
     }
@@ -329,6 +330,8 @@ final class EncryptedAppsStore: ObservableObject {
             ok = true
             if let i = entries.firstIndex(where: { $0.id == entry.id }) { entries[i].installedAt = Date(); save() }
             toast = L.f("toast.installed", entry.name)
+            // Tunnel installation returned confirmed success; OTA handoff never reaches here.
+            if StoreIPAProtection.mayClean(entry, confirmed: true) { delete(entry) }
         } catch {
             self.error = AppsStore.friendly(error)
         }

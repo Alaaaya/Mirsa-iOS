@@ -70,7 +70,7 @@ import CoreImage.CIFilterBuiltins
     }
 }
 private func linkText(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String {
-    switch L.lang { case .english: return en; case .arabic: return ar; case .sorani: return ckb; case .kurmanji: return kmr }
+    switch L.lang { case .english, .german: return en; case .arabic: return ar; case .sorani: return ckb; case .kurmanji: return kmr }
 }
 
 /// Embed for an existing signed export, never for an unsigned configuration export.
