@@ -10,13 +10,6 @@ private final class MockCDN: URLProtocol {
     struct Reply { var status: Int; var headers: [String: String]; var body: Data; var cutAfter: Int? = nil }
     nonisolated(unsafe) static var handler: ((URLRequest) -> Reply)?
     nonisolated(unsafe) static var requests: [URLRequest] = []
-    private static let lock = NSLock()
-    private static var bodyFailure: (() -> Void)?
-    static func acknowledgeBody(_ bytes: Int64) {
-        guard bytes > 0 else { return }
-        lock.lock(); let fail = bodyFailure; bodyFailure = nil; lock.unlock()
-        fail?()
-    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -28,12 +21,11 @@ private final class MockCDN: URLProtocol {
             if cut == 0 {
                 client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
             } else {
-                // Fail only after the delegate has written the chunk. Foundation may drop
-                // queued didLoad callbacks if URLProtocol reports failure in the same turn.
-                Self.lock.lock()
-                Self.bodyFailure = { [self] in client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost)) }
-                Self.lock.unlock()
+                // Complete a deliberately short body. URLProtocol may buffer didLoad
+                // until completion, so waiting for delegate progress before completing
+                // creates a circular wait. Production detects EOF before Content-Length.
                 client?.urlProtocol(self, didLoad: r.body.prefix(cut))
+                client?.urlProtocolDidFinishLoading(self)
             }
         } else {
             client?.urlProtocol(self, didLoad: r.body)
@@ -55,7 +47,7 @@ final class StoreResumableDownloadTests: XCTestCase {
 
     private func make(max: Int64 = 1000, wait: @escaping StoreResumableDownload.NetworkWait = { .becameOnline }) -> StoreResumableDownload {
         StoreResumableDownload(folder: dir.appendingPathComponent("f"), maxBytes: max, protocolClasses: [MockCDN.self],
-                               validate: { try MirsaStorePolicy.downloadURL($0) }, networkWait: wait, report: { bytes, _, _ in MockCDN.acknowledgeBody(bytes) })
+                               validate: { try MirsaStorePolicy.downloadURL($0) }, networkWait: wait)
     }
     private func serve(etag: String = "\"v1\"", cutFirst: Int? = nil) {
         var first = true
@@ -76,7 +68,7 @@ final class StoreResumableDownloadTests: XCTestCase {
         try await make().download(url, to: out, run: StoreTransferRun())
         XCTAssertEqual(try Data(contentsOf: out), body)
     }
-    func testNetworkLossResumesWithRange() async throws {
+    func testTruncatedEOFResumesWithRange() async throws {
         serve(cutFirst: 40)
         let out = dir.appendingPathComponent("out.ipa")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -85,6 +77,36 @@ final class StoreResumableDownloadTests: XCTestCase {
         XCTAssertEqual(MockCDN.requests.count, 2)
         XCTAssertEqual(MockCDN.requests[1].value(forHTTPHeaderField: "Range"), "bytes=40-")
         XCTAssertEqual(MockCDN.requests[1].value(forHTTPHeaderField: "If-Range"), "\"v1\"")
+    }
+    func testConnectionLostPreservesExistingPartialAndRetriesRange() async throws {
+        // Explicit URLError path with a pre-existing partial. The EOF test above
+        // separately proves partial bytes originate from the real delegate pipeline.
+        let folder = dir.appendingPathComponent("f")
+        try StoreResumeStore.prepare(folder)
+        try body.prefix(40).write(to: StoreResumeStore.partial(folder))
+        let headers = StoreResponseHeaders(etag: "\"v1\"", lastModified: nil,
+                                           contentRange: nil, contentLength: "100", contentEncoding: nil)
+        var state = StoreRangeLogic.freshState(headers, total: 100)
+        state.bytes = 40
+        StoreResumeStore.save(state, folder)
+        var first = true
+        MockCDN.handler = { [body] _ in
+            if first {
+                first = false
+                return .init(status: 206, headers: ["ETag": "\"v1\"", "Content-Range": "bytes 40-99/100",
+                                                   "Content-Length": "60"], body: Data(), cutAfter: 0)
+            }
+            return .init(status: 206, headers: ["ETag": "\"v1\"", "Content-Range": "bytes 40-99/100",
+                                               "Content-Length": "60"], body: Data(body.suffix(60)))
+        }
+        let out = dir.appendingPathComponent("out.ipa")
+        try await make().download(url, to: out, run: StoreTransferRun())
+        XCTAssertEqual(try Data(contentsOf: out), body)
+        XCTAssertEqual(MockCDN.requests.count, 2)
+        for request in MockCDN.requests {
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=40-")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "If-Range"), "\"v1\"")
+        }
     }
     func testChangedFileRestartsFromZero() async throws {
         var n = 0
