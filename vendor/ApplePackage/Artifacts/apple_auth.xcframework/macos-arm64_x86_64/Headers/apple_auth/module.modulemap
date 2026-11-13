@@ -1,4 +1,0 @@
-module apple_auth {
-    header "client_c_api.h"
-    export *
-}

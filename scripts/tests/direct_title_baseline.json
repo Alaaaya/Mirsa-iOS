@@ -1,9 +1,0 @@
-{
-  "ios-app/Apps/PersonalProjectDetailView.swift": [
-    "toggle(personalText(\"Direct injection (main executable)\", \"حقن مباشر بالملف الرئيسي\""
-  ],
-  "ios-app/Apps/MirsaTr.swift": [
-    "\"Direct injection (main executable)\": \"تێخستنی ڕاستەوخۆ (جێبەجێکاری سەرەکی)\",",
-    "\"Direct injection (main executable)\": \"Têxistina rasterast (pelê icrakar ê sereke)\","
-  ]
-}
