@@ -30,8 +30,10 @@ final class ForgeQueuedTests: XCTestCase {
             receipt(["originalID": "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"]), receipt(["code": "int x;"]), receipt(["status": "queued"]),
             receipt(["replayed": "no"]), receipt(["message": 1]), ["saved": true]]
         var noReview = receipt(); noReview.removeValue(forKey: "reviewID"); bads.append(noReview)
-        for b in bads { XCTAssertThrowsError(try ForgeQueued.decode(status: 200, data: data(b), expectedThreadID: thread)) }
+        for (index, b) in bads.enumerated() { XCTAssertThrowsError(try ForgeQueued.decode(status: 200, data: data(b), expectedThreadID: thread), "malformed fixture \(index)") }
         XCTAssertThrowsError(try ForgeQueued.decode(status: 202, data: data(["code": "x"]), expectedThreadID: thread))
+        XCTAssertThrowsError(try ForgeQueued.decode(status: 202, data: data(receipt()), expectedThreadID: thread))
+        XCTAssertThrowsError(try ForgeQueued.decode(status: 200, data: data([:]), expectedThreadID: thread))
         XCTAssertThrowsError(try ForgeQueued.decode(status: 204, data: data([:]), expectedThreadID: thread))
         XCTAssertThrowsError(try ForgeQueued.decode(status: 200, data: data(receipt()), expectedThreadID: thread, knownOriginalID: "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"))
     }
@@ -88,6 +90,7 @@ final class ForgeQueuedTests: XCTestCase {
     func testStoreBadReceiptThrowsAndKeepsKeyForRetry() async throws {
         let store = ForgeStore.shared; let saved = store.projects; defer { store.projects = saved }
         let p = project(); store.projects = [p]; let before = snapshot(p)
+        store.queuedNotice = "stale receipt from earlier request"
         var keys: [String] = []
         for bad in [{ (t: String) in self.receipt(["code": "x"], thread: t) }, { (t: String) in self.receipt(thread: "99999999-2222-3333-4444-555555555555") }] {
             ForgeQueued.transport = { body, key in keys.append(key); return (self.data(bad(body["threadID"] as! String)), 200) }

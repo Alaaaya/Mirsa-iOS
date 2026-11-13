@@ -5,22 +5,25 @@ import ImageIO
 @testable import Mirsa
 
 @MainActor final class ForgeFeatureTests: XCTestCase {
-    func testGuideCopyInExistingFourLanguagesAndUniqueSeenKeys() {
+    func testGuideCopyAcrossAllLanguagesAndUniqueSeenKeys() {
         let previous = AppLanguageStore.shared.current
         defer { AppLanguageStore.shared.set(previous) }
-        XCTAssertEqual(Set(ForgeGuide.allCases.map(\.seenKey)).count, 4)
+        XCTAssertEqual(Set(ForgeGuide.allCases.map(\.seenKey)).count, ForgeGuide.allCases.count)
         var subtitles: [ForgeGuide: Set<String>] = [:]
         for language in AppLanguage.allCases {
             AppLanguageStore.shared.set(language)
             for feature in ForgeGuide.allCases {
                 XCTAssertFalse(feature.subtitle.isEmpty)
                 XCTAssertFalse(feature.subtitle.contains("\n"))
-                XCTAssertEqual(feature.steps.count, 3)
+                XCTAssertEqual(feature.steps.count, feature == .port ? 4 : 3)
                 XCTAssertTrue(feature.steps.allSatisfy { !$0.isEmpty })
                 subtitles[feature, default: []].insert(feature.subtitle)
             }
         }
-        XCTAssertTrue(subtitles.values.allSatisfy { $0.count == 4 })
+        for feature in ForgeGuide.allCases {
+            // Legacy tr copy intentionally shares the English fallback in German; tr5 tools have five distinct translations.
+            XCTAssertEqual(subtitles[feature]?.count, feature == .port || feature == .blackbox ? 5 : 4, feature.rawValue)
+        }
         AppLanguageStore.shared.set(.english)
         XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("cannot read system crash logs"))
         XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("not prove"))
