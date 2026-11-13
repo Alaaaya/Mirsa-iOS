@@ -6,6 +6,8 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/Sources/MirsaStoreKit" "$WORK/Tests/MirsaStoreKitTests"
 cp "$ROOT"/ios-app/AppStore/*.swift "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/StoreClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+cp "$ROOT/tests/StoreRangeLogicTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+cp "$ROOT/tests/StoreResumableDownloadTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/tests/StoreServerTransportTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/tests/StoreServerClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/ios-app/Apps/RealAppDeletion.swift" "$WORK/Sources/MirsaStoreKit/"
