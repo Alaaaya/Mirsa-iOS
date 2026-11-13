@@ -7,6 +7,13 @@ import UIKit
 @MainActor
 enum EncryptedLocalInstall {
     private static var active: LocalOTAServer?
+    enum Failure: LocalizedError {
+        case message(String)
+        var errorDescription: String? {
+            if case .message(let text) = self { return text }
+            return nil
+        }
+    }
 
     /// One bounded attempt. Detached callbacks can only finish their own gate.
     @MainActor private final class Attempt {
@@ -145,7 +152,7 @@ enum EncryptedLocalInstall {
                 ) { _ in
                     Task { @MainActor in
                         if ProcessInfo.processInfo.systemUptime - attempt.started >= 30 {
-                            attempt.finish(.failure(SideloadError.message(unconfirmed)))
+                            attempt.finish(.failure(Failure.message(unconfirmed)))
                         }
                     }
                 }
@@ -159,7 +166,7 @@ enum EncryptedLocalInstall {
                 attempt.timer = Task {
                     do { try await Task.sleep(nanoseconds: 30_000_000_000) }
                     catch { return }
-                    attempt.finish(.failure(SideloadError.message(unconfirmed)))
+                    attempt.finish(.failure(Failure.message(unconfirmed)))
                 }
             }
         } onCancel: { Task { @MainActor in attempt.finish(.failure(CancellationError())) } }
@@ -169,7 +176,7 @@ enum EncryptedLocalInstall {
         let info = try await Task.detached(priority: .userInitiated) { try identity(in: file) }.value
         try Task.checkCancellation()
         switch presence(bundleID: info.bundleID) {
-        case .installed: throw SideloadError.message(replacementWarning)
+        case .installed: throw Failure.message(replacementWarning)
         case .unknown:
             guard await confirmUnknown() else { throw CancellationError() }
         }
@@ -187,14 +194,14 @@ enum EncryptedLocalInstall {
               let manifest = LocalOTAManifest.url(base: base, port: port, token: server.token,
                 bundleID: info.bundleID, version: info.version, title: info.title, bytes: size),
               await LocalOTAManifest.preflight(manifest, port: port) else {
-            throw SideloadError.message(tr(
+            throw Failure.message(tr(
                 "The local installation manifest is unavailable. Nothing was uploaded. Try again, or use Wi-Fi with LocalDevVPN.",
                 "ملف التثبيت المحلي مو متاح. ما رفعنا شي. جرّب مرة تانية، أو استخدم الواي فاي مع LocalDevVPN."))
         }
         try Task.checkCancellation()
         let target = try OTAInstallLink.make(manifestURL: manifest)
         guard await UIApplication.shared.open(target) else {
-            throw SideloadError.message(tr("iOS could not open the installer. Nothing was uploaded.",
+            throw Failure.message(tr("iOS could not open the installer. Nothing was uploaded.",
                 "iOS ما فتح المثبّت. ما رفعنا شي."))
         }
         // Keep the exact source file alive in its existing library. Do not
@@ -203,7 +210,7 @@ enum EncryptedLocalInstall {
             await server.awaitFirstRequest(timeout: 30)
         } onCancel: { server.stop() }
         try Task.checkCancellation()
-        guard requested else { throw SideloadError.message(unconfirmed) }
+        guard requested else { throw Failure.message(unconfirmed) }
         active?.stop()
         active = server
         handedOff = true
