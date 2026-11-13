@@ -60,8 +60,16 @@ final class ForgeFrameworkClassesTests: XCTestCase {
         let fw = Data(slice(subtype: 0, classNames: ["Secret"], cryptid: 1))
         let u = try ipa(files: ["Payload/X.app/X": Data(slice(subtype: 0, classNames: [])), "Payload/X.app/Frameworks/F.framework/F": fw])
         defer { try? FileManager.default.removeItem(at: u) }
-        XCTAssertTrue(ForgeFrameworkClasses.classes(ipa: u).isEmpty)
+        let r = ForgeFrameworkClasses.scan(ipa: u); XCTAssertTrue(r.classes.isEmpty); XCTAssertEqual(r.encrypted, 1)
     }
+    func testMixedEncryptedAndClearFrameworksKeepsClear() throws {
+        let u = try ipa(files: ["Payload/X.app/X": Data(slice(subtype: 0, classNames: [])),
+            "Payload/X.app/Frameworks/E.framework/E": Data(slice(subtype: 0, classNames: ["Secret"], cryptid: 1)),
+            "Payload/X.app/Frameworks/C.framework/C": Data(slice(subtype: 0, classNames: ["Clear"]))])
+        defer { try? FileManager.default.removeItem(at: u) }
+        let r = ForgeFrameworkClasses.scan(ipa: u); XCTAssertEqual(r.classes, ["Clear"]); XCTAssertEqual(r.encrypted, 1)
+    }
+    // Fixtures exercise __objc_classname strings and framework discovery only; __objc_classlist and chained pointers are not parsed.
     func testTruncatedBinaryDoesNotCrash() {
         let f = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? Data(fat(slice(subtype: 0, classNames: ["A"])).prefix(0x4010)).write(to: f); defer { try? FileManager.default.removeItem(at: f) }
