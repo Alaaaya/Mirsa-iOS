@@ -160,29 +160,53 @@ actor MirsaStoreClient {
         } catch { throw safe(error) }
     }
 
-    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
-        guard !ids.isEmpty, ids.count <= 20, Set(ids).count == ids.count,
-              ids.allSatisfy(MirsaStoreServerClient.numericVersion) else { throw MirsaStoreError.invalidInput }
+    private var versionNameCache: [String: MirsaStoreServerClient.VersionMetadata] = [:]
+
+    /// Read-only metadata has its own snapshots, never the commerce reservation.
+    private func versionName(_ app: MirsaStoreApp, id: String, run: UInt64) async throws -> MirsaStoreServerClient.VersionMetadata {
+        try check(run)
+        var owner = try requiredAccount()
+        let cacheKey = String(generation) + ":" + String(app.id) + ":" + id
+        if let cached = versionNameCache[cacheKey] { return cached }
+        do {
+            let name = try await engine.versionMetadata(account: &owner, app: app.software, version: id)
+            try check(run)
+            guard !name.isEmpty, name.utf8.count <= 128,
+                  !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw MirsaStoreError.invalidPackage
+            }
+            let entry = MirsaStoreServerClient.VersionMetadata(externalVersionID: id, status: "ready", version: name)
+            versionNameCache[cacheKey] = entry
+            return entry
+        } catch {
+            try check(run)
+            return .init(externalVersionID: id, status: "unavailable", version: nil)
+        }
+    }
+
+    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
+        guard !externalVersionIDs.isEmpty, externalVersionIDs.count <= 20,
+              Set(externalVersionIDs).count == externalVersionIDs.count,
+              externalVersionIDs.allSatisfy(MirsaStoreServerClient.numericVersion) else { throw MirsaStoreError.invalidInput }
         try prepare()
         let run = generation
         try check(run)
-        var owner = try requiredAccount()
-        let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
-        try check(run)
-        guard fresh.id == app.id else { throw MirsaStoreError.invalidPackage }
+        let ids = externalVersionIDs
         var entries: [MirsaStoreServerClient.VersionMetadata] = []
-        for id in ids {
-            do {
-                let version = try await engine.versionMetadata(account: &owner, app: fresh, version: id)
+        // Bound active requests to six; each child owns an independent account copy.
+        try await withThrowingTaskGroup(of: MirsaStoreServerClient.VersionMetadata.self) { group in
+            var cursor = 0
+            for _ in 0..<min(6, ids.count) {
+                let id = ids[cursor]; cursor += 1
+                group.addTask { try await self.versionName(app, id: id, run: run) }
+            }
+            while let entry = try await group.next() {
                 try check(run)
-                guard !version.isEmpty, version.utf8.count <= 128,
-                      !version.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-                    throw MirsaStoreError.invalidPackage
+                entries.append(entry)
+                if cursor < ids.count {
+                    let id = ids[cursor]; cursor += 1
+                    group.addTask { try await self.versionName(app, id: id, run: run) }
                 }
-                entries.append(.init(externalVersionID: id, status: "ready", version: version))
-            } catch {
-                try check(run)
-                entries.append(.init(externalVersionID: id, status: "unavailable", version: nil))
             }
         }
         return entries

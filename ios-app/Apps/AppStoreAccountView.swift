@@ -964,11 +964,9 @@ struct AppStoreAccountView: View {
         metadataTasks[key]?.cancel()
         let generation = operationGeneration
         metadataTasks[key] = Task {
-            // Publish each small batch as soon as it finishes. Previously all twenty
-            // sequential Apple manifests had to finish before the first name appeared.
-            // Keep requests serial: they share signer and account-cookie state.
-            for start in stride(from: 0, to: ids.count, by: 4) {
-                let batch = Array(ids[start..<min(start + 4, ids.count)])
+            // Visible rows arrive first in bounded parallel batches; keep cached names.
+            for start in stride(from: 0, to: ids.count, by: 6) {
+                let batch = Array(ids[start..<min(start + 6, ids.count)])
                 guard !Task.isCancelled, generation == operationGeneration else { return }
                 do {
                     let entries = try await client.versionMetadata(app, externalVersionIDs: batch)

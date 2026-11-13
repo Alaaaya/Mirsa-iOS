@@ -6,10 +6,12 @@ def legacy_reservations(text):
         a = text.index(marker)
         b = text.index('    private func begin() throws', a)
         text = text[:a] + text[b:]
-    a = text.index('    func versionMetadata(')
-    b = text.index('\n    }', a)
-    body = text[a:b]
-    body = body.replace('        try prepare()\n        let run = generation\n        try check(run)',
-                        '        let run = try begin(); defer { busy = false }')
-    body = body.replace('        return entries', '        try persist(owner)\n        return entries')
-    return text[:a] + body + text[b:]
+    # This read-only coordinator is covered by executable parallel metadata tests.
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    old = subprocess.check_output(['git','show','2f15e57:ios-app/AppStore/StoreClient.swift'], cwd=root, text=True)
+    baseline = old[old.index('    func versionMetadata('):old.index('    /// Returns a local encrypted IPA')]
+    a = text.index('    private var versionNameCache:')
+    b = text.index('    /// One explicit free Get', a)
+    return text[:a] + baseline + text[b:]
