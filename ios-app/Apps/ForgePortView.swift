@@ -11,16 +11,23 @@ enum ForgeRepairGate {
             let token = try await ForgeClient.fixToken()
             let data = try await ForgeClient.fixRequest(["action": "port-capabilities"], deviceToken: token, maxBytes: 4096)
             guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any], o["schema"] as? Int == 1, o["autoEnable"] as? Bool == false, o["delivery"] as? String == "fix-inbox" else { return .init() }
-            return .init(port: o["portAvailable"] as? Bool == true, blackbox: o["blackboxAvailable"] as? Bool == true)
+            return .init(port: o["portAvailable"] as? Bool == true && o["uploads"] as? String == "authenticated-stream-v1" && ForgePortUploader.base != nil, blackbox: o["blackboxAvailable"] as? Bool == true)
         } catch { return .init() }
     }
 }
 
 extension ForgeStore {
-    /// The server contract needs private IPA uploads whose transport is not defined yet.
-    /// Until it is, nothing is submitted, even if capabilities say available.
-    func sendPortRequest(projectID: UUID, versionID: UUID, old: ForgePortScan, new: ForgePortScan, plan: ForgePortPlan, requestID: UUID) async throws {
-        throw ForgeClient.Failure.message(ForgePortText.unavailable)
+    /// Uploads both IPAs (raw stream) then submits ids+hashes. Requires capability AND an approved base.
+    func sendPortRequest(projectID: UUID, versionID: UUID, oldFile: URL, newFile: URL, old: ForgePortScan, new: ForgePortScan, requestID: UUID) async throws -> String {
+        guard let p = project(projectID), let v = p.versions.first(where: { $0.id == versionID }), old.bundleID == p.bundleID, new.bundleID == p.bundleID
+        else { throw ForgeClient.Failure.message("No matching tweak.") }
+        guard await ForgeRepairGate.fetch().port else { throw ForgeClient.Failure.message(ForgePortText.unavailable) }
+        let cr = try await ForgeClient.fixToken()
+        let a = try await ForgePortUploader.upload(file: oldFile, role: "old", credentials: cr)
+        let b = try await ForgePortUploader.upload(file: newFile, role: "new", credentials: cr)
+        let o = try await ForgePortUploader.request(id: requestID, tweakID: v.tweakID, bundleID: p.bundleID, name: ForgeFeaturePolicy.name(p.name),
+            sourceSHA256: ForgeFixItem.sha(Data(v.code.utf8)), code: v.code, old: a, new: b, credentials: cr)
+        return (o["status"] as? String) ?? "queued"
     }
 }
 
@@ -44,6 +51,8 @@ struct ForgePortView: View {
     @State private var consent = false
     @State private var caps = ForgeRepairCapabilities()
     @State private var requestID = UUID()
+    @State private var oldFile: URL?
+    @State private var newFile: URL?
 
     private var project: ForgeProject? { store.project(projectID) }
 
@@ -58,12 +67,13 @@ struct ForgePortView: View {
                     pickRow("new", tr5("New app IPA (tweak broke)", "IPA الجديد (التويك خرب)", de: "Neue App-IPA (Tweak defekt)", ckb: "IPAی نوێ (تویک تێکچوو)", kmr: "IPAya nû (tweak xira bû)"), new)
                     if busy { ProgressView() }
                     if let plan { planView(plan) }
-                    if sent { Text(tr5("Request sent. Reopen Mirsa later; a fixed version appears in Versions for review.", "انبعت الطلب. افتح مرسى بعدين؛ بتظهر نسخة مصلّحة بالنسخ للمراجعة.", de: "Anfrage gesendet. Öffne Mirsa später; eine reparierte Version erscheint zur Prüfung unter Versionen.", ckb: "داواکاری نێردرا. دواتر میرسا بکەرەوە؛ وەشانی چاککراو لە وەشانەکان دەردەکەوێت.", kmr: "Daxwaz hat şandin. Paşê Mirsa veke; guhertoyeke sererastkirî di Guhertoyan de xuya dibe.")).foregroundStyle(.green).font(.footnote) }
+                    if sent { Text(tr5("Request sent for manual review. Nothing is repaired automatically; a reviewed version may appear in Versions later.", "انبعت الطلب. افتح مرسى بعدين؛ بتظهر نسخة مصلّحة بالنسخ للمراجعة.", de: "Anfrage gesendet. Öffne Mirsa später; eine reparierte Version erscheint zur Prüfung unter Versionen.", ckb: "داواکاری نێردرا. دواتر میرسا بکەرەوە؛ وەشانی چاککراو لە وەشانەکان دەردەکەوێت.", kmr: "Daxwaz hat şandin. Paşê Mirsa veke; guhertoyeke sererastkirî di Guhertoyan de xuya dibe.")).foregroundStyle(.green).font(.footnote) }
                     if let error { Text(error).foregroundStyle(.orange).font(.footnote) }
                 }.padding(18)
             }
             .background(forgeCard.ignoresSafeArea()).foregroundStyle(.white)
             .navigationTitle(ForgePortText.title).navigationBarTitleDisplayMode(.inline)
+            .onDisappear { for f in [oldFile, newFile].compactMap({ $0 }) { try? FileManager.default.removeItem(at: f) } }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Done", "تم", ckb: "تەواو", kmr: "Temam")) { dismiss() }.disabled(busy) } }
             .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }), allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data, .data]) { result in
                 let slot = picking; picking = nil
@@ -97,7 +107,7 @@ struct ForgePortView: View {
             } else {
                 Toggle(tr5("I agree to send this list", "بوافق عإرسال هالقائمة", de: "Ich stimme zu, diese Liste zu senden", ckb: "ڕازیم ئەم لیستە بنێردرێت", kmr: "Razî me ev lîste bê şandin"), isOn: $consent)
                 Button(tr5("Send repair request", "إرسال طلب الإصلاح", de: "Reparaturanfrage senden", ckb: "ناردنی داواکاری چاککردن", kmr: "Daxwaza sererastkirinê bişîne")) { send(plan) }
-                    .disabled(true)
+                    .disabled(!consent || !caps.port || busy || sent)
             }
         }.padding(12).background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
@@ -108,8 +118,12 @@ struct ForgePortView: View {
         Task { @MainActor in
             defer { busy = false; if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let s = try await Task.detached(priority: .userInitiated) { try ForgePortScanner.scan(ipa: url) }.value
-                if let p = project, s.bundleID != p.bundleID { throw ForgePortError.differentApp }
+                let copy = FileManager.default.temporaryDirectory.appendingPathComponent("port-" + UUID().uuidString + ".ipa")
+                try await Task.detached(priority: .userInitiated) { try FileManager.default.copyItem(at: url, to: copy) }.value
+                let s: ForgePortScan
+                do { s = try await Task.detached(priority: .userInitiated) { try ForgePortScanner.scan(ipa: copy) }.value } catch { try? FileManager.default.removeItem(at: copy); throw error }
+                if let p = project, s.bundleID != p.bundleID { try? FileManager.default.removeItem(at: copy); throw ForgePortError.differentApp }
+                if slot == "old" { if let f = oldFile { try? FileManager.default.removeItem(at: f) }; oldFile = copy } else { if let f = newFile { try? FileManager.default.removeItem(at: f) }; newFile = copy }
                 if slot == "old" { old = s } else { new = s }
                 if let o = old, let n = new, let p = project, let v = p.currentVersion {
                     let hooks = ForgePortMapper.hooks(in: v.code)
@@ -121,11 +135,11 @@ struct ForgePortView: View {
     }
 
     private func send(_ plan: ForgePortPlan) {
-        guard let o = old, let n = new, let v = project?.currentVersion, consent, !busy, !sent else { return }
+        guard let o = old, let n = new, let oldF = oldFile, let nf = newFile, let v = project?.currentVersion, consent, !busy, !sent else { return }
         busy = true; error = nil
         Task { @MainActor in
             defer { busy = false }
-            do { try await store.sendPortRequest(projectID: projectID, versionID: v.id, old: o, new: n, plan: plan, requestID: requestID); sent = true }
+            do { _ = try await store.sendPortRequest(projectID: projectID, versionID: v.id, oldFile: oldF, newFile: nf, old: o, new: n, requestID: requestID); sent = true }
             catch { self.error = error.localizedDescription }
         }
     }
