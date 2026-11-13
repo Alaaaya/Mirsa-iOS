@@ -4,24 +4,30 @@ from pathlib import Path
 import subprocess, tempfile, sys
 r = Path(__file__).resolve().parents[2]
 ui = (r/'ios-app/Apps/AppStoreSection.swift').read_text()
-base = subprocess.check_output(['git', 'show', '193256bd89abb046ada6fe5fbdca64762929619e:ios-app/Apps/AppStoreSection.swift'], cwd=r, text=True)
+base = subprocess.check_output(['git', 'show', '6a6325f4fd3c6602c68abec959946b51b89639ea:ios-app/Apps/AppStoreSection.swift'], cwd=r, text=True)
 def visible(s):
     return s[s.index('    private var visible: [MirsaStorePurchase]'):s.index('    var body: some View {', s.index('    private var visible: [MirsaStorePurchase]'))]
 assert visible(ui) == visible(base), "filter semantics changed"
 start = '    @MainActor private func reload() async {'
 download_start = '    @MainActor private func download('
-assert ui[ui.index(start):ui.index(download_start)] == base[base.index(start):base.index(download_start)], "history loading, paging or artwork changed"
+assert ui[ui.index(start):ui.index(download_start)].replace("model.purchases()", "MirsaStoreOnDeviceClient.shared.purchaseHistory()") == base[base.index(start):base.index(download_start)], "history loading, paging or artwork changed"
 # Authorized recovery modifies only the failed-download branch, not original import.
 old_download = base[base.index(download_start):].rsplit('\n}', 1)[0]
 new_download = ui[ui.index(download_start):ui.index('    @MainActor private func recoverDownload(')]
 assert old_download.split('        } catch is CancellationError {}')[0] in new_download
 assert 'store.add(entry)' in new_download
 for path in ['ios-app/AppStore/StorePurchaseHistory.swift', 'ios-app/AppStore/StoreSearchState.swift', 'ios-app/AppStore/StoreDiscovery.swift']:
-    old = subprocess.check_output(['git', 'show', '193256bd89abb046ada6fe5fbdca64762929619e:'+path], cwd=r)
-    assert old == (r/path).read_bytes(), path
+    old = subprocess.check_output(['git', 'show', '6a6325f4fd3c6602c68abec959946b51b89639ea:'+path], cwd=r)
+    assert old.replace(b"Identifiable, Sendable {", b"Identifiable, Sendable, Codable, Equatable {") == (r/path).read_bytes() if path.endswith("StorePurchaseHistory.swift") else old == (r/path).read_bytes(), path
 assert 'String(visible.count)' in ui and '1028' not in ui
 page = ui[ui.index('struct AppStorePurchasesPage:'):]
-assert ui[:ui.index('struct AppStorePurchasesPage:')].replace("import ApplePackage\n", "") == base[:base.index('struct AppStorePurchasesPage:')].replace("import ApplePackage\n", ""), "Search or other tab changed"
+assert ui[ui.index("enum AppStoreSectionTab:"):ui.index("/// Read-only view")] == base[base.index("enum AppStoreSectionTab:"):base.index("/// Read-only view")], "Store tab navigation changed"
+assert "purchases = model.cachedPurchases" in page
+assert ".onReceive(model.$cachedPurchases)" in page
+assert "if cachedPurchases != result" in ui
+assert "historyGeneration == generation" in ui and "self.account == account" in ui
+assert 'appendingPathComponent("MirsaPurchaseHistory"' in ui and "SHA256.hash" in ui
+assert ".atomic, .completeFileProtectionUntilFirstUserAuthentication" in ui
 
 assert 'LazyVGrid' not in page and 'purchaseTile(' not in page
 assert 'ForEach(StorePurchaseGroups.make(visible))' in page
@@ -35,8 +41,8 @@ row = page[page.index('    private func purchaseRow('):page.index(start)]
 assert row == base[base.index('    private func purchaseRow('):base.index(start)]
 # Everything other than the one Purchases view, its tests and workflow stays exact.
 import hashlib
-changed = subprocess.check_output(['git', 'diff', '--name-only', '193256b'], cwd=r, text=True).splitlines()
-allowed = {'ios-app/Apps/AppStoreSection.swift', 'scripts/appstore/purchases-group-tests.py', '.github/workflows/precise-build.yml',
+changed = subprocess.check_output(['git', 'diff', '--name-only', '6a6325f'], cwd=r, text=True).splitlines()
+allowed = {'ios-app/MirsaApp.swift', 'ios-app/AppStore/StorePurchaseHistory.swift', 'ios-app/Apps/AppStoreSection.swift', 'scripts/appstore/purchases-group-tests.py', '.github/workflows/precise-build.yml',
 'ios-app/Apps/AppStoreAccountView.swift', 'ios-app/AppStore/StoreClient.swift',
 'ios-app/AppStore/StoreOnDeviceClient.swift', 'ios-app/AppStore/StoreFreeLicenseRecovery.swift',
 'vendor/ApplePackage/Sources/ApplePackage/Commands/Purchase.swift',
@@ -85,6 +91,12 @@ struct MirsaStoreApp { let id: Int64; let bundleID: String; let name: String; le
   }
   let nov=cal.date(from:DateComponents(year:2026,month:11,day:13))!
   let oct=cal.date(from:DateComponents(year:2026,month:10,day:4))!
+  let cacheURL=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  let original=[item(1,oct),item(2,nov),item(3,nil)]
+  try! JSONEncoder().encode(original).write(to:cacheURL,options:.atomic)
+  let restored=try! JSONDecoder().decode([MirsaStorePurchase].self,from:Data(contentsOf:cacheURL))
+  precondition(restored == original)
+  try! FileManager.default.removeItem(at:cacheURL)
   let groups=StorePurchaseGroups.make([item(1,oct),item(2,nov),item(3,nil),item(4,nov)],calendar:cal)
   precondition(groups.map { $0.items.map(\.id) } == [[2,4],[1],[3]])
   precondition(groups.last!.month == nil)

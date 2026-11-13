@@ -1,5 +1,6 @@
 import SwiftUI
 import ApplePackage
+import CryptoKit
 
 // MARK: - App Store section shell (UI only)
 //
@@ -57,12 +58,67 @@ final class AppStoreSectionModel: ObservableObject {
     }
     #endif
 
+    @Published private(set) var cachedPurchases: [MirsaStorePurchase] = []
+    @Published private(set) var refreshingPurchases = false
+    private var historyTask: Task<[MirsaStorePurchase], Error>?
+    private var historyAccount: MirsaStoreAccount?
+    private var historyGeneration = UUID()
+    private var historyDate: Date?
+    private func purchaseCacheURL(_ account: MirsaStoreAccount) -> URL {
+        let identity = account.email.lowercased() + "|" + account.country.lowercased()
+        let hash = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MirsaPurchaseHistory", isDirectory: true).appendingPathComponent(hash + ".json")
+    }
+    func purchases(force: Bool = false) async throws -> [MirsaStorePurchase] {
+        guard let account else { return [] }
+        if let task = historyTask, historyAccount == account { return try await task.value }
+        if !force, let historyDate, Date().timeIntervalSince(historyDate) < 60 { return cachedPurchases }
+        let generation = UUID()
+        historyGeneration = generation
+        historyAccount = account
+        refreshingPurchases = true
+        let task = Task { try await MirsaStoreOnDeviceClient.shared.purchaseHistory() }
+        historyTask = task
+        defer {
+            if historyGeneration == generation { historyTask = nil; refreshingPurchases = false }
+        }
+        let result = try await task.value
+        guard self.account == account, historyGeneration == generation else { throw CancellationError() }
+        if cachedPurchases != result { cachedPurchases = result }
+        historyDate = Date()
+        let url = purchaseCacheURL(account)
+        // Atomic, private per-account cache. No credentials are persisted here.
+        Task.detached(priority: .utility) {
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try JSONEncoder().encode(result).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            } catch { /* A cache failure must not hide a successful history response. */ }
+        }
+        return result
+    }
+
     @Published private(set) var sessionRevision = 0
 
     func updateAccount(_ value: MirsaStoreAccount?) {
+        let changed = account != value
         sessionRevision += 1
         account = value
         loaded = true
+        if changed {
+            let previousHistory = historyTask
+            previousHistory?.cancel(); historyTask = nil; historyGeneration = UUID()
+            refreshingPurchases = false; historyDate = nil; cachedPurchases = []
+            if let value, let data = try? Data(contentsOf: purchaseCacheURL(value)),
+               let items = try? JSONDecoder().decode([MirsaStorePurchase].self, from: data) {
+                cachedPurchases = items
+            }
+            if value != nil { Task {
+                _ = try? await previousHistory?.value
+                guard self.account == value else { return }
+                _ = try? await self.purchases()
+            } }
+        }
     }
 
     func refresh() async {
@@ -660,7 +716,7 @@ struct AppStorePurchasesPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
                 MirsaPageHeader(title: tr("Purchases", "المشتريات", ckb: "کڕینەکان", kmr: "Kirîn")) {
-                    Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading || !isActive)
+                    Button { Task { _ = try? await model.purchases(force: true); await reload() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading || !isActive)
                         .accessibilityLabel(tr("Refresh purchases", "تحديث المشتريات", ckb: "نوێکردنەوەی کڕینەکان", kmr: "Kirînan nû bike"))
                 }
                 if let account = model.account {
@@ -668,7 +724,7 @@ struct AppStorePurchasesPage: View {
                     AppStoreSearchField(placeholder: tr("Search purchases or App ID", "البحث بالمشتريات أو App ID", ckb: "گەڕان لە کڕینەکان", kmr: "Li kirînan bigere"), text: $query)
                     purchaseFilters
                     HStack {
-                        Text(String(visible.count) + tr(" items", " عنصراً", ckb: " بڕگە", kmr: " tişt"))
+                        Text((purchases.isEmpty && (loading || model.refreshingPurchases) ? "…" : String(visible.count)) + tr(" items", " عنصراً", ckb: " بڕگە", kmr: " tişt"))
                             .font(MirsaFont.caption.weight(.semibold))
                             .foregroundStyle(MirsaPalette.accentSoft)
                             .padding(.horizontal, 12).padding(.vertical, 7)
@@ -677,10 +733,12 @@ struct AppStorePurchasesPage: View {
                             .accessibilityIdentifier("store-purchases-count")
                         Spacer()
                     }
-                    if loading { ProgressView() }
+                    if loading || model.refreshingPurchases {
+                        HStack { Spacer(); ProgressView().controlSize(.small) }
+                    }
                     if let error {
                         Text(error).font(MirsaFont.secondary).foregroundStyle(MirsaPalette.warning)
-                    } else if !loading && visible.isEmpty {
+                    } else if !loading && !model.refreshingPurchases && visible.isEmpty {
                         Text(tr("No matching purchases.", "ما في مشتريات مطابقة.", ckb: "هیچ کڕینێک ناگونجێت.", kmr: "Kirînek li hev nayê.")).foregroundStyle(MirsaPalette.textSecondary)
                     }
                     LazyVStack(alignment: .leading, spacing: MirsaSpacing.l) {
@@ -694,10 +752,10 @@ struct AppStorePurchasesPage: View {
                 }
             }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
         }
-        .refreshable { await reload() }
+        .refreshable { _ = try? await model.purchases(force: true); await reload() }
         .task(id: loadIdentity) {
             reloadID = UUID(); reloadTask?.cancel()
-            recovery = nil; purchases = []; artwork = [:]; error = nil; loading = false
+            recovery = nil; purchases = model.cachedPurchases; error = nil; loading = false
             if isActive { await reload() }
         }
         .confirmationDialog(tr("Refresh free licence and retry?", "تحديث الترخيص المجاني وإعادة التنزيل؟", ckb: "مۆڵەتی بێبەرامبەر نوێ بکەوە؟", kmr: "Lîsansa belaş nû bike?"),
@@ -714,6 +772,9 @@ struct AppStorePurchasesPage: View {
                     "Apple رفضت التنزيل، مو دليل إنك ما بتملك التطبيق. بموافقتك منحدّث الترخيص إذا مجاني بمتجر حسابك وبنعيد نفس التنزيل مرة وحدة. ما في شراء مدفوع.",
                     ckb: "تەنها مۆڵەتی بێبەرامبەر بە ڕەزامەندی تۆ نوێ دەکرێتەوە، پاشان جارێک هەوڵ دەدرێت.",
                     kmr: "Tenê bi razîbûna te lîsansa belaş nû dibe û carekê tê ceribandin."))
+        }
+        .onReceive(model.$cachedPurchases) { items in
+            if purchases != items { purchases = items }
         }
         .onDisappear { reloadTask?.cancel() }
         .scrollDismissesKeyboard(.interactively)
@@ -838,7 +899,7 @@ struct AppStorePurchasesPage: View {
             model.sessionRevision == revision && model.account == account
         }
         do {
-            let result = try await MirsaStoreOnDeviceClient.shared.purchaseHistory()
+            let result = try await model.purchases()
             guard isCurrent() else { return }
             purchases = result
             // Public metadata lookup in bounded chunks, not authenticated history replay.

@@ -55,6 +55,7 @@ struct MirsaApp: App {
             .mirsaKeyboardDismissal()
             .mirsaLeftToRightChrome()
             .task { if !MirsaUITestHarness.active { await ForgeStore.shared.syncFixInbox() } }
+            .task { if !MirsaUITestHarness.active { await AppStoreSectionModel.shared.refresh() } }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { OpenInProjectCoordinator.shared.presentNext() }
                 if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
