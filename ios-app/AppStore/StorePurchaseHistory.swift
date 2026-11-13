@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency import ApplePackage
 
-struct MirsaStorePurchase: Identifiable, Sendable {
+struct MirsaStorePurchase: Identifiable, Sendable, Codable, Equatable {
     let id: Int64
     let bundleID: String
     let name: String
