@@ -60,13 +60,14 @@ enum ForgeClient {
         try await postStatus(body, timeout: timeout, retryBind: retryBind, allowAccepted: false).0
     }
 
-    static func postStatus(_ body: [String: Any], timeout: TimeInterval = 120, retryBind: Bool = true, allowAccepted: Bool) async throws -> (Data, Int) {
+    static func postStatus(_ body: [String: Any], timeout: TimeInterval = 120, retryBind: Bool = true, allowAccepted: Bool, idempotencyKey: String? = nil) async throws -> (Data, Int) {
         var req = URLRequest(url: endpoint, timeoutInterval: timeout)
         req.httpMethod = "POST"
         // Build/inject calls need the same registered device credentials as chat (x-mirsa-device-token); the server auth is unchanged.
         let creds = try await fixToken(forceRefresh: !retryBind)
         req.setValue("Bearer " + creds.accessToken, forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let k = idempotencyKey { req.setValue(k, forHTTPHeaderField: "Idempotency-Key") }
         req.setValue(creds.deviceID, forHTTPHeaderField: "x-mirsa-device")
         req.setValue(creds.deviceToken, forHTTPHeaderField: "x-mirsa-device-token")
         req.httpBody = try JSONSerialization.data(withJSONObject: withDeviceLink(body))
@@ -77,7 +78,7 @@ enum ForgeClient {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if status == 403, retryBind, ["device_not_bound", "device_auth_required"].contains((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "") {
             _ = try? await get(["action": "gallery"])
-            return try await postStatus(body, timeout: timeout, retryBind: false, allowAccepted: allowAccepted)
+            return try await postStatus(body, timeout: timeout, retryBind: false, allowAccepted: allowAccepted, idempotencyKey: idempotencyKey)
         }
         guard status == 200 || (allowAccepted && status == 202) else { throw failure(status, data) }
         return (data, status)
