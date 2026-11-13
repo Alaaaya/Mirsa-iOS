@@ -626,8 +626,7 @@ struct ForgeChatThreadView: View {
     private var threadStatus: String { (store.threads.first { $0.id == threadID }?.status ?? "").lowercased() }
     /// Edit only while nothing has started on it: the newest row, a user message, and the request not yet being built.
     private func canEdit(_ id: UUID) -> Bool {
-        guard ForgeChatFeatures.serverEditDelete, queued.isEmpty, msgs.last?.id == id, msgs.last?.role == "user" else { return false }
-        return ["", "open", "new", "queued", "pending"].contains(threadStatus)
+        ForgeChatFeatures.serverEditDelete && ForgeChatMutationPolicy.canMutate(messageID: id, messages: msgs, hasPending: !queued.isEmpty, status: threadStatus)
     }
     private func messageText(_ id: UUID) -> String? {
         if let m = msgs.first(where: { $0.id == id }) { return m.text }
@@ -636,7 +635,7 @@ struct ForgeChatThreadView: View {
     private func openMenu(id: UUID, text: String, isUser: Bool, confirmed: Bool) {
         menuTarget = ForgeChatMenuTarget(id: id, threadID: threadID, text: text, isUser: isUser,
                                          canEdit: isUser && confirmed && canEdit(id),
-                                         canDelete: isUser && confirmed && ForgeChatFeatures.serverEditDelete,
+                                         canDelete: isUser && confirmed && canEdit(id),
                                          reactable: confirmed)
     }
     private func startReply(id: UUID, text: String?, isUser: Bool) {
@@ -644,15 +643,24 @@ struct ForgeChatThreadView: View {
         withAnimation(.easeOut(duration: 0.18)) { replyTo = ForgeChatReplyRef(messageID: id, snippet: ForgeChatLocal.snippet(text), fromUser: isUser) }
         composerFocused = true
     }
+    private func reaction(_ id: UUID) -> String? {
+        if ForgeChatFeatures.serverReplyAndReactions { return msgs.first { $0.id == id }?.reaction }
+        return local.reactions[id]
+    }
+    private func quote(_ id: UUID, confirmed: Bool) -> ForgeChatReplyRef? {
+        guard confirmed, ForgeChatFeatures.serverReplyAndReactions else { return local.replies[id] }
+        guard let m = msgs.first(where: { $0.id == id }), let target = m.replyToMessageID else { return nil }
+        return ForgeChatReplyRef(messageID: target, snippet: ForgeChatLocal.snippet(m.replyQuoteText), fromUser: m.replyQuoteRole == "user")
+    }
     /// Quote above, reaction below, swipe right to reply, long press for the menu.
     @ViewBuilder private func chrome<C: View>(id: UUID, text: String?, isUser: Bool, confirmed: Bool, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-            if let ref = local.replies[id] {
+            if let ref = quote(id, confirmed: confirmed) {
                 ForgeChatQuote(ref: ref, exists: messageText(ref.messageID) != nil || ref.messageID == id) { jumpTo = ref.messageID }
             }
             content()
                 .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
-            if let e = local.reactions[id] {
+            if let e = reaction(id) {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
             }
         }
@@ -770,10 +778,17 @@ struct ForgeChatThreadView: View {
         .alert(ForgeChatText.reportThanks, isPresented: $reportDone) {}
         .overlay {
             if let t = menuTarget {
-                ForgeChatMessageMenu(target: t, current: local.reactions[t.id],
+                ForgeChatMessageMenu(target: t, current: reaction(t.id),
                     onReact: { e in
-                        local.toggleReaction(e, on: t.id)
-                        store.sendReaction(threadID: t.threadID, messageID: t.id, reaction: local.reactions[t.id])
+                        if ForgeChatFeatures.serverReplyAndReactions {
+                            let selected = reaction(t.id) == e ? nil : e
+                            Task {
+                                let result = await store.sendReaction(threadID: t.threadID, messageID: t.id, reaction: selected)
+                                if result != .ok { actionError = ForgeChatText.reportFailed }
+                            }
+                        } else {
+                            local.toggleReaction(e, on: t.id)
+                        }
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         closeMenu()
                     },
