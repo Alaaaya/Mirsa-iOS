@@ -21,7 +21,8 @@ export async function buildAndDeliverAutomaticPort({store,jobID,storageRoot,buil
   !Number.isSafeInteger(original.version)||original.version<1)throw Error('original_metadata_missing');
  const claimed=store.db.prepare("UPDATE jobs SET status='awaiting_review' WHERE id=? AND status='ready_for_build'").run(jobID);
  if(claimed.changes!==1)throw Error('job_already_claimed');
- const dir=await mkdtemp(join(buildRoot,'mirsa-port-build-'));
+ const temp=await mkdtemp(join(buildRoot,'mirsa-port-build-'));
+ const dir=join(temp,'project');
  try {
   await recordConsentedPortReport({store,jobID,existingReportRPC});
   const prepared=await prepareBuild({directory:dir,name:'MirsaPort',source:plan.code,expectedSourceSHA256:sha(plan.code)});
@@ -34,7 +35,7 @@ export async function buildAndDeliverAutomaticPort({store,jobID,storageRoot,buil
     sourceSHA256:job.source_hash,originalCode:source.code,originalVersion:original.version,originalSettings:original.settings},
    artifact,review:{approved:true,jobID:job.id,originalSourceSHA256:job.source_hash,outputSourceSHA256:sha(plan.code),evidenceSHA256},
    existingFixPush});
-  if(!delivery||delivery.error||delivery.ok!==true)throw Error('fix_delivery_not_confirmed');
+  if(!delivery||delivery.error||delivery.ok!==true||delivery.id!==artifact.id)throw Error('fix_delivery_not_confirmed');
   const receipt={id:job.id,fixID:artifact.id,status:'delivered',originalSourceSHA256:job.source_hash,
    newSourceSHA256:sha(plan.code),dylibSHA256:sha(result.dylib),version:artifact.version,
    evidenceSHA256,reviewedFixReady:true,manualEnableRequired:true};
@@ -42,5 +43,5 @@ export async function buildAndDeliverAutomaticPort({store,jobID,storageRoot,buil
   store.db.prepare("UPDATE jobs SET status='delivered' WHERE id=?").run(jobID);
   return receipt;
  }catch(error){store.db.prepare("UPDATE jobs SET status='failed' WHERE id=?").run(jobID);throw error;}
- finally{await rm(dir,{recursive:true,force:true});}
+ finally{await rm(temp,{recursive:true,force:true});}
 }
