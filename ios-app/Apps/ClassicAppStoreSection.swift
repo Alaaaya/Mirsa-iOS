@@ -553,6 +553,7 @@ struct ClassicAppStorePurchasesPage: View {
     @State private var error: String?
     @State private var recovery: StoreFreeLicenseRecovery?
     @State private var downloading: Int64?
+    @State private var openDetail: MirsaStorePurchase?
     @State private var reloadID = UUID()
     @State private var reloadTask: Task<Void, Never>?
     private var loadIdentity: String { "\(model.sessionRevision)|\(model.account?.email ?? "")|\(isActive)" }
@@ -605,6 +606,15 @@ struct ClassicAppStorePurchasesPage: View {
             }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
         }
         .refreshable { _ = try? await model.purchases(force: true); await reload() }
+        .sheet(item: $openDetail) { item in
+            NavigationStack {
+                ClassicAppStoreAccountView(onDownloaded: { url in
+                    let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+                    store.add(entry)
+                }, searchOnly: true, openAppID: item.id)
+            }
+            .preferredColorScheme(.dark)
+        }
         .task(id: loadIdentity) {
             reloadID = UUID(); reloadTask?.cancel()
             recovery = nil; purchases = model.cachedPurchases; error = nil; loading = false
@@ -725,6 +735,8 @@ struct ClassicAppStorePurchasesPage: View {
             .accessibilityHidden(true)
         }
         .padding(.horizontal, MirsaSpacing.card).padding(.vertical, 14)
+        .contentShape(Rectangle())
+        .onTapGesture { openDetail = item }
     }
 
     @MainActor private func reload() async {
