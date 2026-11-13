@@ -1,19 +1,13 @@
 import SwiftUI
 
-/// Library tools sheet: updates, wishlist, pinned versions, cleanup setting.
-/// Backed by StoreLibraryModel (core worker). Downloaded updates are adopted and installed by the caller.
+/// Library tools sheet: wishlist, pinned versions, accounts and cleanup setting.
 struct StoreLibraryToolsView: View {
     @ObservedObject private var model = StoreLibraryModel.shared
-    let country: String
     let onAccountSwitched: () -> Void
     let onAddAccount: () -> Void
     @State private var accounts: [MirsaStoreOnDeviceClient.SavedAccount] = []
     @State private var selectedID: String?
-    /// Caller adopts the downloaded file into the library and starts the existing install path.
-    let onUpdateDownloaded: (URL) async -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var checking = false
-    @State private var busyID: String?
     @State private var message: String?
     @AppStorage("mirsa.store.autoCleanIPA") private var autoClean = false
     @State private var notify = false
@@ -23,13 +17,6 @@ struct StoreLibraryToolsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section(T.updates) {
-                    if model.updatesChecked && model.updates.isEmpty { Text(T.upToDate).foregroundStyle(.secondary) }
-                    ForEach(model.updates) { item in updateRow(item) }
-                    Button { Task { await check() } } label: {
-                        HStack { if checking { ProgressView() }; Text(T.checkNow) }
-                    }.disabled(checking)
-                }
                 Section(T.wishlist) {
                     if model.wishlist.isEmpty { Text(T.noWishes).foregroundStyle(.secondary) }
                     ForEach(model.wishlist) { w in
@@ -97,34 +84,6 @@ struct StoreLibraryToolsView: View {
         }
     }
 
-    private func updateRow(_ item: StoreUpdateItem) -> some View {
-        let osNewer = StoreVersionPolicy.newer(item.latest.minimumOSVersion ?? "", than: UIDevice.current.systemVersion)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(item.latest.app.name)
-            Text("\(item.installedVersion) → \(item.latest.app.version)").font(.caption).foregroundStyle(.secondary)
-            if let notes = item.latest.notes(forVersion: nil), !notes.isEmpty {
-                DisclosureGroup(T.whatsNew) { Text(notes).font(.footnote) }
-            }
-            if osNewer == true { Text(T.minOSWarn).font(.caption).foregroundStyle(.orange) }
-            Button {
-                Task { await download(item) }
-            } label: {
-                HStack { if busyID == item.id { ProgressView() }; Text(T.download) }
-            }.disabled(busyID != nil)
-        }
-    }
-
-    private func check() async {
-        checking = true; defer { checking = false }
-        do { try await model.checkUpdates(country: country); message = nil }
-        catch { message = error.localizedDescription }
-    }
-
-    private func download(_ item: StoreUpdateItem) async {
-        busyID = item.id; defer { busyID = nil }
-        do { let url = try await model.downloadUpdate(item: item); message = nil; await onUpdateDownloaded(url) }
-        catch { message = error.localizedDescription }
-    }
 
 }
 
