@@ -135,6 +135,49 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    // MARK: Store performance sanity (simulator, relative numbers only)
+    //
+    // Time to first store frame (launch until the section bar exists) is printed as
+    // "STORE-PERF <style> <tab> first-frame <s>". The scroll pass is measured with
+    // XCTClockMetric/XCTCPUMetric; xcodebuild prints the averages in the log
+    // ("measured [Clock Monotonic Time, s]"). Gestures wait for the app to be idle,
+    // so heavier rendering and running animations show up as longer times.
+
+    private func perfLaunch(style: String, tab: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "encrypted",
+                               "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+                               "-mirsa.store.style", style, "-MirsaStoreFixtureAccount", "-MirsaStoreTab", tab]
+        let t0 = Date()
+        app.launch()
+        let bar = app.descendants(matching: .any).matching(identifier: "store-tab-\(tab)").firstMatch
+        let ok = bar.waitForExistence(timeout: 20)
+        print(String(format: "STORE-PERF %@ %@ first-frame %.3f %@", style, tab, Date().timeIntervalSince(t0), ok ? "ok" : "timeout"))
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        if alert.waitForExistence(timeout: 1) { alert.buttons.firstMatch.tap() }
+        Thread.sleep(forTimeInterval: 1.0)
+        return app
+    }
+
+    private func perfScroll(style: String, tab: String) {
+        let app = perfLaunch(style: style, tab: tab)
+        let options = XCTMeasureOptions()
+        options.iterationCount = 3
+        measure(metrics: [XCTClockMetric(), XCTCPUMetric(application: app)], options: options) {
+            for _ in 0..<3 { app.swipeUp(velocity: .fast) }
+            for _ in 0..<3 { app.swipeDown(velocity: .fast) }
+        }
+        app.terminate()
+    }
+
+    func testPerfClassicSearch() { perfScroll(style: "classic", tab: "search") }
+    func testPerfNewSearch() { perfScroll(style: "new", tab: "search") }
+    func testPerfClassicPurchases() { perfScroll(style: "classic", tab: "purchases") }
+    func testPerfNewPurchases() { perfScroll(style: "new", tab: "purchases") }
+    func testPerfClassicAccount() { perfScroll(style: "classic", tab: "account") }
+    func testPerfNewAccount() { perfScroll(style: "new", tab: "account") }
+
     func testArabicPages() { run(lang: "ar") }
     func testEnglishPages() { run(lang: "en") }
 }
