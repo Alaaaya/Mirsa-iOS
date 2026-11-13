@@ -113,7 +113,7 @@ enum MirsaStorePurchaseHistory {
                 "X-Apple-I-Client-Time": ISO8601DateFormatter().string(from: now),
                 "X-Apple-I-Locale": "en_US", "X-Apple-I-TimeZone": "Local",
                 "X-Apple-TZ": String(TimeZone.current.secondsFromGMT(for: now) / 60),
-                "X-Guid": Configuration.deviceIdentifier
+                "X-Guid": guid
             ]
             for (key, value) in headers { req.setValue(value, forHTTPHeaderField: key) }
             for (key, value) in cookies.buildCookieHeader(url) { req.setValue(value, forHTTPHeaderField: key) }

@@ -1120,7 +1120,7 @@ async fn dev_tool(pairing_path: String, kind: String, arg: String, out_path: Str
                 "gasgauge": gas.map(|d| plist_to_json(&plist::Value::Dictionary(d))),
             }))
         }
-        "storage" | "installed-store-apps" => {
+        "storage" => {
             let mut c: InstallationProxyClient = dev_connect(&mut tunnel).await?;
             let opts = plist::Value::Dictionary({
                 let mut d = plist::Dictionary::new();
@@ -1128,7 +1128,7 @@ async fn dev_tool(pairing_path: String, kind: String, arg: String, out_path: Str
                 d.insert(
                     "ReturnAttributes".into(),
                     plist::Value::Array(
-                        ["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "CFBundleShortVersionString", "CFBundleVersion", "ApplicationType", "ApplicationDSID", "iTunesStoreAccountIdentifier", "StoreItemIdentifier", "StaticDiskUsage", "DynamicDiskUsage"]
+                        ["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "CFBundleShortVersionString", "CFBundleVersion", "ApplicationType", "StaticDiskUsage", "DynamicDiskUsage"]
                             .iter()
                             .map(|s| plist::Value::String(s.to_string()))
                             .collect(),
@@ -1137,23 +1137,7 @@ async fn dev_tool(pairing_path: String, kind: String, arg: String, out_path: Str
                 d
             });
             let apps = c.browse(Some(opts)).await.map_err(|e| format!("Browse: {e:?}"))?;
-            if kind == "installed-store-apps" {
-                // Return only comparison metadata, never Apple account DSIDs.
-                Ok(json!(apps.iter().filter_map(|app| {
-                    let d = app.as_dictionary()?;
-                    let get = |key: &str| d.get(key).map(plist_to_json).unwrap_or(serde_json::Value::Null);
-                    let has_store_evidence = ["ApplicationDSID", "iTunesStoreAccountIdentifier", "StoreItemIdentifier"]
-                        .iter().any(|key| d.get(*key).map(|v| !matches!(v, plist::Value::String(s) if s.is_empty() || s == "0") && !matches!(v, plist::Value::Integer(n) if n.as_unsigned() == Some(0))).unwrap_or(false));
-                    Some(json!({
-                        "CFBundleIdentifier": get("CFBundleIdentifier"),
-                        "CFBundleShortVersionString": get("CFBundleShortVersionString"),
-                        "hasStoreEvidence": has_store_evidence,
-                        "StoreItemIdentifier": get("StoreItemIdentifier"),
-                    }))
-                }).collect::<Vec<_>>()))
-            } else {
-                Ok(serde_json::Value::Array(apps.iter().map(plist_to_json).collect()))
-            }
+            Ok(serde_json::Value::Array(apps.iter().map(plist_to_json).collect()))
         }
         "profiles" => {
             let mut c: MisagentClient = dev_connect(&mut tunnel).await?;

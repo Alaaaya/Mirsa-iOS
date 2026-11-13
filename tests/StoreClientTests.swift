@@ -618,3 +618,30 @@ final class StoreLibraryPolicyTests: XCTestCase {
         XCTAssertFalse(StoreIPACleanupPolicy.mayDelete(enabled: true, confirmed: true, saved: false, active: false, pinned: true))
     }
 }
+
+// Cold-launch history must initialize ApplePackage under the account GUID,
+// including the real TLS getter that traps on an unset iOS device identifier.
+final class StoreHistoryColdLaunchTests: XCTestCase {
+    func testHistoryLeaseInitializesTLSAndSerializesAccounts() async throws {
+        let firstGUID = "112233445566"
+        let secondGUID = "AABBCCDDEEFF"
+        try await MirsaStoreGUIDLease.shared.run(guid: firstGUID) {
+            XCTAssertEqual(Configuration.deviceIdentifier, firstGUID)
+            _ = Configuration.tlsConfiguration
+            try await Task.sleep(nanoseconds: 20_000_000)
+            XCTAssertEqual(Configuration.deviceIdentifier, firstGUID)
+        }
+        try await MirsaStoreGUIDLease.shared.run(guid: secondGUID) {
+            XCTAssertEqual(Configuration.deviceIdentifier, secondGUID)
+            _ = Configuration.tlsConfiguration
+        }
+        enum Expected: Error { case stop }
+        do {
+            try await MirsaStoreGUIDLease.shared.run(guid: firstGUID) { throw Expected.stop }
+            XCTFail("expected operation failure")
+        } catch Expected.stop {}
+        try await MirsaStoreGUIDLease.shared.run(guid: secondGUID) {
+            XCTAssertEqual(Configuration.deviceIdentifier, secondGUID)
+        }
+    }
+}

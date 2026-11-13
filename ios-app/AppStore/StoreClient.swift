@@ -361,7 +361,12 @@ actor MirsaStoreClient {
         } catch is DecodingError {
             throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid saved account record")
         }
-        let result = try await MirsaStorePurchaseHistory.fetch(owner: owner, guid: machineGUID)
+        // History also initializes ApplePackage TLS/SAP. Hold the same GUID lease
+        // as commerce before any factory can read the process-global identity.
+        let historyGUID = machineGUID
+        let result = try await MirsaStoreGUIDLease.shared.run(guid: historyGUID) {
+            try await MirsaStorePurchaseHistory.fetch(owner: owner, guid: historyGUID)
+        }
         try check(run)
         guard try requiredAccount().directoryServicesIdentifier == owner.directoryServicesIdentifier else {
             throw MirsaStoreError.operationCancelled

@@ -3,20 +3,12 @@ import SwiftUI
 import BackgroundTasks
 import UserNotifications
 
-struct StoreUpdateItem: Identifiable {
-    let installedVersion: String
-    let latest: StoreCatalogItem
-    var id: String { latest.app.bundleID }
-}
-
 @MainActor
 final class StoreLibraryModel: ObservableObject {
     static let shared = StoreLibraryModel()
-    @Published private(set) var updates: [StoreUpdateItem] = []
     @Published private(set) var wishlist: [StoreWishItem] = []
     @Published private(set) var pins: [String: StoreVersionPin] = [:]
     @Published var error: String?
-    @Published private(set) var updatesChecked = false
     private var checkingWishlist = false
     private let root: URL
     private struct State: Codable { var wishlist: [StoreWishItem]; var pins: [String: StoreVersionPin] }
@@ -44,7 +36,6 @@ final class StoreLibraryModel: ObservableObject {
               (try? MirsaStorePolicy.country(country)) != nil else { return }
         pins[key(app.bundleID, country)] = StoreVersionPin(bundleID: app.bundleID, country: country.lowercased(),
                                                           externalVersionID: externalVersionID, version: version)
-        updates.removeAll { $0.latest.app.bundleID == app.bundleID && $0.latest.country == country.lowercased() }
         save()
     }
     func clearPin(bundleID: String, country: String) { pins.removeValue(forKey: key(bundleID, country)); save() }
@@ -92,43 +83,7 @@ final class StoreLibraryModel: ObservableObject {
             UserDefaults.standard.set((position + 1) % ids.count, forKey: "mirsa.store.wishlistCursor")
         }
     }
-    func checkUpdates(country: String) async throws {
-        let cc = try MirsaStorePolicy.country(country).lowercased()
-        updates = []; updatesChecked = false
-        // Actual device inventory, never download history or installedAt.
-        let data = try await Task.detached {
-            guard let inventory = try SideloadService.devTool("installed-store-apps") as? [[String: Any]] else {
-                throw MirsaStoreError.serviceUnavailable
-            }
-            return try JSONSerialization.data(withJSONObject: inventory)
-        }.value
-        let inventory = (try JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-        var found: [StoreUpdateItem] = []
-        for row in inventory {
-            try Task.checkCancellation()
-            guard let bundle = row["CFBundleIdentifier"] as? String,
-                  let version = row["CFBundleShortVersionString"] as? String,
-                  row["hasStoreEvidence"] as? Bool == true,
-                  pin(bundleID: bundle, country: cc) == nil else { continue }
-            let rawID = row["StoreItemIdentifier"]
-            let id = (rawID as? NSNumber)?.int64Value ?? (rawID as? String).flatMap(Int64.init)
-            let latest = try await StoreCatalog.fetch(appID: id, bundleID: bundle, country: cc)
-            if StoreVersionPolicy.newer(latest.app.version, than: version) == true,
-               pin(bundleID: bundle, country: cc) == nil {
-                found.append(StoreUpdateItem(installedVersion: version, latest: latest))
-            }
-        }
-        updates = found; updatesChecked = true
-    }
-    func downloadUpdate(item: StoreUpdateItem) async throws -> URL {
-        let client = MirsaStoreOnDeviceClient.shared
-        // Actor validates the same selected context before every authenticated operation.
-        let selectedID = try await client.selectedAccountID()
-        guard let account = try await client.currentAccount(expectedAccountID: selectedID),
-              account.country.lowercased() == item.latest.country,
-              pin(bundleID: item.id, country: item.latest.country) == nil else { throw MirsaStoreError.invalidInput }
-        return try await client.downloadOwnedApp(item.latest.app, externalVersionID: nil, expectedAccountID: selectedID)
-    }
+
 }
 
 @MainActor
