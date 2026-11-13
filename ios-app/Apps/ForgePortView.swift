@@ -75,7 +75,7 @@ struct ForgePortView: View {
             .navigationTitle(ForgePortText.title).navigationBarTitleDisplayMode(.inline)
             .onDisappear { for f in [oldFile, newFile].compactMap({ $0 }) { try? FileManager.default.removeItem(at: f) } }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Done", "تم", ckb: "تەواو", kmr: "Temam")) { dismiss() }.disabled(busy) } }
-            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }), allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data, .data]) { result in
+            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }), allowedContentTypes: IPAPick.types) { result in
                 let slot = picking; picking = nil
                 if case .success(let url) = result, let slot { load(url, slot: slot) }
             }
