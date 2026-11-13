@@ -1,7 +1,5 @@
 import SwiftUI
 
-// Independently implemented visual homage to NightVibes33/FlekDeck.
-// No upstream code or artwork is copied. See LICENSES/FlekDeck-inspiration.md.
 struct MirsaHomeScreen<Menu: View>: View {
     /// Visible apps only (hidden ones already filtered out by the parent).
     let apps: [ManagedApp]
