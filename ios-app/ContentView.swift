@@ -619,6 +619,9 @@ struct ContentView: View {
     }
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     private var liquidTheme: Bool { theme == MirsaTheme.liquid.rawValue }
+    @AppStorage(StoreStyle.key) private var storeStyle = StoreStyle.fallback.rawValue
+    /// The single-bar App Store (main dock hidden there) belongs to the New store style only.
+    private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
     @State private var chatComposerFocused = false
 
     var body: some View {
@@ -639,8 +642,9 @@ struct ContentView: View {
                 .modifier(ForgeChatUnreadTabBadge())
                 .tag(AppTab.pairing)
 
-            EncryptedAppsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: true))
+            // Classic (default) keeps the original store and the main dock; New draws its own single bar.
+            StoreStyleTab()
+                .modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle))
                 .tabItem { Label(EncryptedText.tabTitle, systemImage: "lock.shield") }
                 .tag(AppTab.encrypted)
 
@@ -651,9 +655,9 @@ struct ContentView: View {
         }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
-            // The App Store tab draws its own single bottom bar (its sections plus a
-            // Mirsa menu back to the other tabs), so the main dock steps aside there.
-            if liquidTheme && !chatComposerFocused && vm.selectedTab != .encrypted {
+            // In the New store style the App Store tab draws its own single bottom bar (its
+            // sections plus a Mirsa menu back to the other tabs), so the main dock steps aside there.
+            if liquidTheme && !chatComposerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
                 LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
                 .ignoresSafeArea(.keyboard)
             }

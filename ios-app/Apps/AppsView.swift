@@ -1169,6 +1169,9 @@ struct AppsSettingsSheet: View {
                     .pickerStyle(.segmented)
                 }
                 Section {
+                    StoreStylePicker()
+                } header: { Text(StoreStyle.settingTitle) } footer: { Text(StoreStyle.explanation) }
+                Section {
                     Stepper(value: $store.realLimit, in: 1...100) {
                         LabeledContent(L.t("settings.limit"), value: "\(store.realLimit)")
                     }
