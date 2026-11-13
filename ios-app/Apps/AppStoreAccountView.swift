@@ -88,7 +88,7 @@ struct AppStoreAccountView: View {
                                 Label(storeText("Back", "رجوع", de: "Zurück", ckb: "گەڕانەوە", kmr: "Vegere"), systemImage: "chevron.left")
                                     .font(MirsaFont.button).foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36).storeGlassCapsule(elevation: 0.3)
                             }
-                            .buttonStyle(B.font(MirsaFont.button).foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36).storeGlassCapsule(elevation: 0.3))
+                            .buttonStyle(.plain)
                             .accessibilityIdentifier("store-search-back")
                             Spacer()
                         }
