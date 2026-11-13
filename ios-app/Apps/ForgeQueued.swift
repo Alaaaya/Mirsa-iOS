@@ -19,12 +19,13 @@ enum ForgeQueued {
     static func isUUID(_ s: String) -> Bool { uuid.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil }
 
     /// Strict decoder. A queued receipt needs saved == true, status == "manual-queue", the thread we sent,
-    /// a well-formed original ID and no code. HTTP 202 is accepted only when it is such a receipt.
+    /// matching UUID review/original IDs and no code. Only HTTP 200 is accepted for v1.
     static func decode(status: Int, data: Data, expectedThreadID: String, knownOriginalID: String? = nil) throws -> ForgeCreateOutcome {
         guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw ForgeClient.Failure.message("Bad response") }
-        if status == 202 || (o["status"] as? String) == "manual-queue" {
-            guard o["saved"] as? Bool == true, o["status"] as? String == "manual-queue", o["code"] == nil,
-                  let thread = o["threadID"] as? String, thread.lowercased() == expectedThreadID.lowercased(),
+        let receiptKeys = ["saved", "status", "threadID", "reviewID", "originalID", "replayed"]
+        if receiptKeys.contains(where: { o[$0] != nil }) {
+            guard status == 200, o["saved"] as? Bool == true, o["status"] as? String == "manual-queue", o["code"] == nil,
+                  let thread = o["threadID"] as? String, isUUID(thread.lowercased()), thread.lowercased() == expectedThreadID.lowercased(),
                   let original = o["originalID"] as? String, isUUID(original.lowercased()),
                   let review = o["reviewID"] as? String, review.lowercased() == original.lowercased(),
                   o["replayed"] is Bool, o["message"] is String else {
@@ -33,7 +34,7 @@ enum ForgeQueued {
             if let k = knownOriginalID, k.lowercased() != original.lowercased() { throw ForgeClient.Failure.message("Bad response") }
             return .queued(ForgeQueuedReceipt(threadID: thread.lowercased(), originalID: original.lowercased(), reviewID: review.lowercased(), replayed: o["replayed"] as? Bool == true))
         }
-        guard status == 200 else { throw ForgeClient.Failure.message("Bad response") }
+        guard status == 200, let code = o["code"] as? String, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ForgeClient.Failure.message("Bad response") }
         return .generated(o)
     }
 

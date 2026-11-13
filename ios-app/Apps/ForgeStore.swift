@@ -147,6 +147,7 @@ struct ForgeProject: Codable, Identifiable {
     func generate(_ id: UUID, prompt: String) async throws -> Bool {
         guard let p = project(id) else { return false }
         busy = tr("Writing the tweak…", "عم أكتب التويك…", ckb: "تویک دەنووسم…", kmr: "Tweak tê nivîsandin…"); defer { busy = nil }
+        queuedNotice = nil
         let outcome = try await ForgeClient.createCall(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": ForgeFeaturePolicy.name(p.name),
                                             "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](), "previousCode": p.currentVersion?.code ?? ""])
         guard case .generated(let r) = outcome else { queuedNotice = ForgeQueued.notice; return true }

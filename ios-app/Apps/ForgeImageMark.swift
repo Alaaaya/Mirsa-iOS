@@ -70,6 +70,7 @@ extension ForgeStore {
         guard let p = project(id), !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard region.width > 0.02, region.height > 0.02, let marked = ForgeImageMark.marked(jpeg, region: region) else { throw ForgeClient.Failure.message(ForgeImageMarkView.hint) }
         guard marked.count <= 1024 * 1024 else { throw ForgeClient.Failure.message("Image exceeds 1 MB.") }
+        queuedNotice = nil
         let outcome = try await ForgeClient.createCall(["action": "image-generate", "name": ForgeFeaturePolicy.name(p.name),
             "bundleID": p.bundleID, "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](),
             "prompt": String(prompt.prefix(2000)), "image": ["mime": "image/jpeg", "base64": marked.base64EncodedString()],
