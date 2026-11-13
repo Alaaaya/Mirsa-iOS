@@ -354,13 +354,16 @@ import ImageIO
     }
     func testAttachContextAllCases() throws {
         let cap = try ForgeCapture.read(capture(false), bundleID: "com.test.target")
-        guard case .attached(let p) = ForgeCaptureContext.attach(prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: true) else { return XCTFail() }
-        XCTAssertTrue(p.contains("UIView")); XCTAssertTrue(p.hasPrefix("hi"))
-        XCTAssertEqual(ForgeCaptureContext.attach(prompt: p, capture: cap, projectBundleID: "com.test.target", consent: true), .alreadyAttached(p))
-        XCTAssertEqual(ForgeCaptureContext.attach(prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: false), .rejected(.consentOff))
-        XCTAssertEqual(ForgeCaptureContext.attach(prompt: "hi", capture: cap, projectBundleID: "com.other", consent: true), .rejected(.wrongBundle))
-        XCTAssertEqual(ForgeCaptureContext.attach(prompt: String(repeating: "x", count: 2000), capture: cap, projectBundleID: "com.test.target", consent: true), .rejected(.tooLong))
-        XCTAssertFalse(ForgeCaptureContext.reasonText(.tooLong).isEmpty); XCTAssertFalse(ForgeCaptureContext.attachedText().isEmpty)
+        guard case .attached(let list) = ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: true) else { return XCTFail() }
+        XCTAssertEqual(list, ["UIView"])
+        let out = ForgeCaptureContext.composed(prompt: "hi", classes: list)
+        XCTAssertEqual(out.components(separatedBy: "UIView").count - 1, 1); XCTAssertTrue(out.hasPrefix("hi"))
+        XCTAssertEqual(ForgeCaptureContext.composed(prompt: "hi", classes: []), "hi")
+        XCTAssertEqual(ForgeCaptureContext.attach(current: list, prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: true), .alreadyAttached(list))
+        XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: false), .rejected(.consentOff))
+        XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.other", consent: true), .rejected(.wrongBundle))
+        XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: String(repeating: "x", count: 2000), capture: cap, projectBundleID: "com.test.target", consent: true), .rejected(.tooLong))
+        XCTAssertTrue(ForgeCaptureContext.chipText(3).contains("3")); XCTAssertFalse(ForgeCaptureContext.reasonText(.tooLong).isEmpty)
     }
     func testPreviewHidesRawDebugAndLocalizesKnownLimitation() throws {
         var o = try XCTUnwrap(JSONSerialization.jsonObject(with: capture()) as? [String: Any])
