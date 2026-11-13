@@ -74,7 +74,7 @@ extension MirsaStoreEngine {
 
 /// ApplePackage still reads a process-wide GUID. Hold a cancellable lease for the
 /// entire library call, including suspension, so another account cannot overwrite it.
-private actor MirsaStoreGUIDLease {
+actor MirsaStoreGUIDLease {
     static let shared = MirsaStoreGUIDLease()
     private var busy = false
     func run<T>(guid: String, operation: () async throws -> T) async throws -> T {
