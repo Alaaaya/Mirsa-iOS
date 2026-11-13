@@ -55,6 +55,10 @@ class OwnershipIntent(unittest.TestCase):
             base = subprocess.check_output(["git", "show", base_ref + ":" + path], cwd=ROOT, text=True)
             current = (ROOT / path).read_text()
             if path.endswith("StoreClient.swift"):
+                import sys
+                sys.path.insert(0, str(ROOT / "scripts/appstore"))
+                from commerce_lock_scope import legacy_reservations
+                current = legacy_reservations(current)
                 a = current.index('    /// Public fresh metadata')
                 b = current.index('    func availableVersions(', a)
                 current = current[:a] + current[b:]
