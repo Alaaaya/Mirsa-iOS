@@ -14,7 +14,10 @@ assert method.index('try await EncryptedLocalInstall.handoff(file)') < method.in
 assert 'if !cellular {' in method and 'await apps.realAppNetworkReady(vm)' in method
 cellular = method[method.index('        if cellular {'):method.index('        do {\n            _ = try await Task.detached')]
 assert '.installedAt = ' not in cellular
-if '--source-only' in sys.argv:
+assert 'if installAttemptID == attemptID' in method
+assert 'guard self.installAttemptID == attemptID else { return }' in method
+assert 'ok = true; progress = 1' not in cellular
+if '--source-only'  in sys.argv:
     print('PASS source contract: no sign/upload, real build metadata, Wi-Fi preserved, cellular never claims installation')
     sys.exit()
 stubs = r"""
@@ -64,6 +67,7 @@ final class LocalOTAServer: @unchecked Sendable {
     static var all: [LocalOTAServer] = []
     static var failStart = false
     static var requested = true
+    static var stalled = false
     let token = "0123456789abcdef0123456789abcdef"
     var stopped = false
     var onStop: (@Sendable () -> Void)?
@@ -74,6 +78,10 @@ final class LocalOTAServer: @unchecked Sendable {
     }
     func stop() { if !stopped { stopped = true; onStop?() } }
     func awaitFirstRequest(timeout: TimeInterval) async -> Bool {
+        if Self.stalled {
+            do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch {}
+            return false
+        }
         for _ in 0..<10 { await Task.yield() }
         return Self.requested
     }
@@ -142,6 +150,7 @@ struct EncryptedIPAEntry { var id = UUID(); var name = "Owned"; var installedAt:
     var busy: String?
     var progress: Double = 0
     var installingID: UUID?
+    var installAttemptID: UUID?
     var error: String?
     var toast: String?
     var saves = 0
@@ -188,6 +197,16 @@ tests = r"""
         precondition(LocalOTAServer.all.last!.stopped == (mode != "success"))
         precondition((try! Data(contentsOf:Fixture.file)) == original)
     }
+    // Deadline covers a system alert which provides no callback. Cancellation
+    // must unblock the row immediately; bytes/old presence never prove success.
+    LocalOTAServer.stalled = true
+    do { try await EncryptedLocalInstall.handoff(Fixture.file); fatalError("timeout accepted") } catch {}
+    precondition(LocalOTAServer.all.last!.stopped)
+    let cancelled = Task { try await EncryptedLocalInstall.handoff(Fixture.file) }
+    for _ in 0..<30 { await Task.yield() }
+    cancelled.cancel()
+    do { try await cancelled.value; fatalError("cancel accepted") } catch {}
+    LocalOTAServer.stalled = false
     precondition(LocalOTAManifest.metadata == ["example.owned","1042","Owned & App"])
     for state in [WiFiPathState.notWifi, .wifi, .unknown] {
         WiFiPathMonitor.shared.state = state
@@ -204,7 +223,7 @@ tests = r"""
             precondition(SideloadService.calls == nativeBefore && h.entries[0].installedAt == nil && h.saves == 0)
         }
         if state == .notWifi {
-            precondition(AppsStore.shared.gates == gateBefore && h.toast!.contains("started receiving"))
+            precondition(AppsStore.shared.gates == gateBefore && h.toast!.contains("could not be confirmed") && h.progress == 0)
         } else { precondition(AppsStore.shared.gates == gateBefore+1) }
     }
     WiFiPathMonitor.shared.state = .notWifi
@@ -216,6 +235,18 @@ tests = r"""
     _ = await (one,two)
     precondition(LocalOTAServer.all.count == before+1, "double tap started two handoffs")
     precondition((try! Data(contentsOf:Fixture.file)) == original)
+    // Fail, cancel, timeout and installed-copy rejection all release the row.
+    for mode in ["installed", "cancel", "failure", "timeout"] {
+        let holder = EncryptedAppsStore(); let entry = EncryptedIPAEntry(); holder.entries = [entry]
+        CellularConsentFixture.state = mode == "installed" ? 1 : -1
+        CellularConsentFixture.allow = mode != "cancel"
+        LocalOTAServer.failStart = mode == "failure"
+        LocalOTAServer.stalled = mode == "timeout"
+        await holder.install(entry,vm:nil)
+        precondition(holder.busy == nil && holder.installingID == nil && holder.progress == 0 && AppsStore.shared.busy == nil)
+        precondition(holder.entries[0].installedAt == nil && holder.saves == 0)
+    }
+
     precondition(OTABackgroundBox.ended >= 4)
     print("PASS actual cellular helper/router: original bytes retained, private metadata not read, correct build version, no upload/sign, bounded failures/cleanup, first GET only, unchanged Wi-Fi tunnel, unknown fails closed, no fake installed flag, double tap serialized; installed blocks pre-handoff, unknown asks and permits fresh/cancel; four app locales + German fallback")
  }
@@ -223,6 +254,6 @@ tests = r"""
 """
 with tempfile.TemporaryDirectory(prefix='encrypted-cellular-') as d:
     path = Path(d)/'main.swift'
-    path.write_text(stubs + method + '\n}\n' + helper.split('@_silgen_name')[0].replace('import UIKit','') + tests)
+    path.write_text(stubs + method + '\n}\n' + helper.split('@_silgen_name')[0].replace('import UIKit','').replace('30_000_000_000', '50_000_000') + tests)
     subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(path),'-o',str(Path(d)/'tests')],check=True)
     subprocess.run([str(Path(d)/'tests')],check=True,timeout=30)
