@@ -305,6 +305,9 @@ final class EncryptedAppsStore: ObservableObject {
         }
         if cellular {
             do {
+                // An OTA transfer can outlive this callback. Conservatively preserve
+                // its source against optional cleanup even if later installs succeed.
+                StoreIPAProtection.markSaved(id: entry.id)
                 try await EncryptedLocalInstall.handoff(file)
                 guard installAttemptID == attemptID else { return }
                 // Receiving bytes is not installation proof, especially when an
