@@ -8,6 +8,8 @@ import ApplePackage
 struct AppStoreAccountView: View {
     var onDownloaded: (URL) async throws -> Void
     var searchOnly = false
+    /// Opens straight on this app detail (used from the purchases list).
+    var openAppID: Int64? = nil
     var onOpenAccount: () -> Void = {}
     @AppStorage("mirsa.store.recentSearches.v1") private var recentSearchData = Data()
 
@@ -146,6 +148,7 @@ struct AppStoreAccountView: View {
             versionListAttempted.insert(app.id)
             loadVersions(app)
         }
+        .task { if let id = openAppID, account != nil, results.isEmpty, selected == nil { term = String(id); search() } }
         .onDisappear { preflightTask?.cancel(); password = ""; code = ""; work?.cancel(); cancelMetadata() }
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
@@ -1052,7 +1055,7 @@ struct AppStoreAccountView: View {
             try Task.checkCancellation()
             guard country == effectiveCountry else { return }
             results = found; accountAvailable = available; searched = true
-            if let urlAppID, let hit = found.first(where: { $0.id == urlAppID }) { selected = hit }
+            if let wanted = urlAppID ?? openAppID, let hit = found.first(where: { $0.id == wanted }) { selected = hit }
             recentSearchData = StoreRecentSearches.adding(q, to: recentSearchData)
         }
     }
