@@ -203,11 +203,7 @@ enum EncryptedLocalInstall {
             await server.awaitFirstRequest(timeout: 30)
         } onCancel: { server.stop() }
         try Task.checkCancellation()
-        guard requested else {
-            throw SideloadError.message(tr(
-                "iOS did not request the app. Keep Mirsa open, confirm Install, and try again. Nothing was uploaded. This method cannot replace an App Store-installed copy; use Wi-Fi with LocalDevVPN to keep its data.",
-                "iOS ما طلب التطبيق. خلّي مرسى مفتوح وأكّد التثبيت وجرّب تاني. ما رفعنا شي. هالطريقة ما بتستبدل نسخة مثبتة من المتجر؛ استخدم الواي فاي مع LocalDevVPN لتحافظ على بياناتها."))
-        }
+        guard requested else { throw SideloadError.message(unconfirmed) }
         active?.stop()
         active = server
         handedOff = true

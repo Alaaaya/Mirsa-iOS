@@ -313,7 +313,7 @@ final class EncryptedAppsStore: ObservableObject {
             } catch {
                 guard installAttemptID == attemptID else { return }
                 if error is CancellationError { toast = EncryptedLocalInstall.unconfirmed }
-                else { self.error = AppsStore.friendly(error) }
+                else { self.error = error.localizedDescription }
             }
             return
         }

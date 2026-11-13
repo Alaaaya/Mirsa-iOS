@@ -17,6 +17,9 @@ assert '.installedAt = ' not in cellular
 assert 'if installAttemptID == attemptID' in method
 assert 'guard self.installAttemptID == attemptID else { return }' in method
 assert 'ok = true; progress = 1' not in cellular
+assert 'iOS did not request' not in helper
+assert '30_000_000_000' in helper and 'didBecomeActiveNotification' in helper
+assert 'error.localizedDescription' in cellular and 'AppsStore.friendly(error)' not in cellular
 if '--source-only'  in sys.argv:
     print('PASS source contract: no sign/upload, real build metadata, Wi-Fi preserved, cellular never claims installation')
     sys.exit()
@@ -102,11 +105,15 @@ final class OTABackgroundBox: @unchecked Sendable {
 enum CertificateOTA { static let localManifestEndpoint: URL? = URL(string:"https://manifest.example/local") }
 enum LocalOTAManifest {
     static var reachable = true
+    static var stalled = false
     static var metadata: [String] = []
     static func url(base: URL, port: UInt16, token: String, bundleID: String, version: String, title: String, bytes: Int64) -> URL? {
         metadata = [bundleID,version,title]; return base
     }
-    static func preflight(_ url: URL, port: UInt16) async -> Bool { reachable }
+    static func preflight(_ url: URL, port: UInt16) async -> Bool {
+        if stalled { do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch {} }
+        return reachable
+    }
 }
 enum OTAInstallLink { static func make(manifestURL: URL) throws -> URL { URL(string:"itms-services://?action=download-manifest")! } }
 enum WiFiPathState { case unknown, wifi, notWifi }
@@ -197,6 +204,13 @@ tests = r"""
         precondition(LocalOTAServer.all.last!.stopped == (mode != "success"))
         precondition((try! Data(contentsOf:Fixture.file)) == original)
     }
+    LocalOTAManifest.stalled = true
+    let beforeBroker = UIApplication.shared.opens
+    let deadlineStart = ProcessInfo.processInfo.systemUptime
+    do { try await EncryptedLocalInstall.handoff(Fixture.file); fatalError("broker timeout accepted") } catch {}
+    precondition(ProcessInfo.processInfo.systemUptime - deadlineStart < 0.5)
+    precondition(UIApplication.shared.opens == beforeBroker && LocalOTAServer.all.last!.stopped)
+    LocalOTAManifest.stalled = false
     // Deadline covers a system alert which provides no callback. Cancellation
     // must unblock the row immediately; bytes/old presence never prove success.
     LocalOTAServer.stalled = true
