@@ -42,11 +42,17 @@ private final class StoreTestAuth: MirsaStoreAuthentication {
     var diagnostic: MirsaStoreAuthDiagnostic?
     var paused: CheckedContinuation<Account, Error>?
     var pause = false
+    var didPause: (() -> Void)?
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
         passwords.append(password)
         if let diagnostic { throw diagnostic }
-        if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
+        if pause {
+            return try await withCheckedThrowingContinuation {
+                paused = $0
+                didPause?()
+            }
+        }
         if twoFactor && code != "123456" { throw AuthenticationError.verificationCodeRequired }
         return testOwner()
     }
@@ -477,12 +483,11 @@ final class MirsaStoreClientTests: XCTestCase {
     func testSignoutDuringInFlightLoginCannotResurrectAccount() async throws {
         let vault = StoreTestVault(), engine = StoreTestEngine()
         engine.auth.pause = true
+        let suspended = expectation(description: "Authentication suspended")
+        engine.auth.didPause = { suspended.fulfill() }
         let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         let login = Task { try await client.signIn(email: "owner@example.invalid", password: "fixture-password") }
-        for _ in 0..<1000 {
-            if engine.auth.paused != nil { break }
-            await Task.yield()
-        }
+        await fulfillment(of: [suspended], timeout: 10)
         guard let paused = engine.auth.paused else { login.cancel(); return XCTFail("did not suspend") }
         do { _ = try await client.search(term: "x", country: "DE"); XCTFail("concurrent request") }
         catch { XCTAssertEqual(error as? MirsaStoreError, .busy) }
