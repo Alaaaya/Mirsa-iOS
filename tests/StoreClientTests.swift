@@ -106,6 +106,31 @@ private final class StoreTestPackages: MirsaStorePackages {
     }
 }
 
+/// Simulates a paused writer that flushes one last chunk while cancellation unwinds.
+private final class LifecycleTestPackages: MirsaStorePackages {
+    let folder = StoreResumeStore.root.appendingPathComponent(UUID().uuidString)
+    let run = StoreTransferRun()
+    let started: XCTestExpectation
+    var finished = false
+    init(started: XCTestExpectation) { self.started = started }
+    func cancel() { run.requestDiscard() }
+    func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
+        try StoreResumeStore.prepare(folder)
+        try Data([1]).write(to: StoreResumeStore.partial(folder))
+        defer {
+            // The purge must be AFTER this last write, not merely after cancel().
+            try? StoreResumeStore.prepare(folder)
+            try? Data([2]).write(to: StoreResumeStore.partial(folder))
+            finished = true
+        }
+        run.pause()
+        started.fulfill()
+        await run.waitWhilePaused()
+        try Task.checkCancellation()
+        throw CancellationError()
+    }
+}
+
 private actor StoreAccountGatePause {
     private var continuation: CheckedContinuation<Bool, Never>?
     private(set) var entered = false
@@ -117,6 +142,44 @@ private actor StoreAccountGatePause {
 }
 
 final class MirsaStoreClientTests: XCTestCase {
+    func testSignOutTerminatesPausedDownloadAndReleasesBusyBeforePurging() async throws {
+        let packages = LifecycleTestPackages(started: expectation(description: "paused writer"))
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: StoreTestEngine(), packages: packages)
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let task = Task { try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())) }
+        await fulfillment(of: [packages.started], timeout: 5)
+        try await client.signOut()
+        XCTAssertTrue(packages.finished)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packages.folder.path))
+        do { _ = try await task.value; XCTFail("download survived logout") } catch {}
+        // No UI task cancellation is needed, and login must no longer be busy.
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+    }
+
+    func testBothAccountSwitchPathsQuiesceWriterPurgePartialsAndRetainSession() async throws {
+        // Exercise beginAddAccount and selectAccount independently with an active writer.
+        for add in [true, false] {
+            let base = StoreTestVault()
+            let packages = LifecycleTestPackages(started: expectation(description: "switch writer"))
+            let local = MirsaStoreClient(vault: StoreTestVault(), engine: StoreTestEngine(), packages: packages)
+            _ = try await local.signIn(email: "owner@example.invalid", password: "fixture-password")
+            let otherID = UUID().uuidString
+            let registry = try JSONSerialization.data(withJSONObject: ["ids": ["legacy", otherID], "selected": "legacy"])
+            try base.write(registry, key: "native.accounts.registry")
+            let client = MirsaStoreOnDeviceClient(gate: { true }, vault: base, factory: { _ in local })
+            let task = Task { try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())) }
+            await fulfillment(of: [packages.started], timeout: 5)
+            if add { _ = try await client.beginAddAccount() }
+            else { try await client.selectAccount(id: otherID) }
+            XCTAssertTrue(packages.finished)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: packages.folder.path))
+            do { _ = try await task.value; XCTFail("download survived switch") } catch {}
+            let account = try await local.currentAccount()
+            XCTAssertNotNil(account)
+            _ = try await local.signIn(email: "owner@example.invalid", password: "fixture-password")
+        }
+    }
+
     func testAccountVaultNamespacesNeverOverlapAndLegacySessionRemainsInPlace() throws {
         let base = StoreTestVault()
         let legacy = MirsaStoreAccountVault(base: base, id: "legacy")
