@@ -7,10 +7,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-@interface MirsaBBTransport : NSObject <NSURLSessionDataDelegate>
+@interface MIRSA_BB_TRANSPORT_CLASS : NSObject <NSURLSessionDataDelegate>
 @property(nonatomic) NSUInteger receivedBytes;
 @end
-@implementation MirsaBBTransport
+@implementation MIRSA_BB_TRANSPORT_CLASS
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
  didReceiveData:(NSData *)data {
     self.receivedBytes += data.length;
@@ -76,7 +76,7 @@ static void MirsaBlackboxStart(void) {
                 c.URLCache=nil; c.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
                 // One best-effort attempt per next launch. No retries/backlog or app content.
                 NSURLSession *session=[NSURLSession sessionWithConfiguration:c
-                    delegate:[MirsaBBTransport new] delegateQueue:nil];
+                    delegate:[MIRSA_BB_TRANSPORT_CLASS new] delegateQueue:nil];
                 [[session dataTaskWithRequest:r] resume];
             }
         }

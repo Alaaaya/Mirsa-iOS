@@ -34,6 +34,7 @@ export async function prepareBuild({directory,name,source,expectedSourceSHA256,e
   await writeFile(join(directory,'HookManifest.json'),JSON.stringify(instrumentation.manifest),{mode:0o600,flag:'wx'});
   const config=[
    '#define MIRSA_BB_OPT_IN 1',
+   '#define MIRSA_BB_TRANSPORT_CLASS MirsaBBTransport_'+enrollment.installationID.replace(/-/g,''),
    '#define MIRSA_BB_MANIFEST_SHA '+JSON.stringify(instrumentation.manifestSHA256),
    '#define MIRSA_BB_INSTALLATION '+JSON.stringify(enrollment.installationID),
    '#define MIRSA_BB_REPORT_TOKEN '+JSON.stringify(enrollment.reportToken),
