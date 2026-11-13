@@ -38,6 +38,7 @@ struct AppStoreAccountView: View {
     @State private var metadata: [String: [String: MirsaStoreServerClient.VersionMetadata]] = [:]
     @State private var metadataTasks: [String: Task<Void, Never>] = [:]
     @State private var metadataLimit: [String: Int] = [:]
+    @State private var metadataAttempts: [String: Int] = [:]
     @State private var chosen: [String: String] = [:]
     @State private var preflightTask: Task<Void, Never>?
     @State private var pendingOS: (app: MirsaStoreApp, acquire: Bool)?
@@ -1241,7 +1242,21 @@ struct AppStoreAccountView: View {
                     }
                 } catch {
                     guard !Task.isCancelled, generation == operationGeneration else { return }
-                    for id in chunk { metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil) }
+                    // Timeout / transport failure is NOT a terminal answer: keep the row loading and retry (bounded).
+                    var retry: [String] = []
+                    for id in chunk {
+                        let n = (metadataAttempts[key + "|" + id] ?? 0) + 1
+                        metadataAttempts[key + "|" + id] = n
+                        if StoreMetadataRetryPolicy.shouldRetry(attempt: n) { retry.append(id) }
+                        else { metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "unavailable", version: nil) }
+                    }
+                    if !retry.isEmpty {
+                        let wait = StoreMetadataRetryPolicy.delay(attempt: metadataAttempts[key + "|" + retry[0]] ?? 1)
+                        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                        guard !Task.isCancelled, generation == operationGeneration else { return }
+                        requestMetadata(app, ids: retry + Array(pending[min(start + 2, pending.count)...]))
+                        return
+                    }
                 }
             }
         }

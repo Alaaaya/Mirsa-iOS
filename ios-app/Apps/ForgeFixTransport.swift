@@ -56,6 +56,7 @@ extension ForgeClient {
               obj["version"] as? Int == 1, obj["deviceToken"] as? String == token else {
             throw Failure.message("Device registration could not be verified.")
         }
+        NotificationCenter.default.post(name: MirsaStoreIdentityLoader.readyNotification, object: nil)
         return credentials
     }
 

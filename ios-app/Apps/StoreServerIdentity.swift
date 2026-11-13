@@ -44,6 +44,8 @@ extension MirsaStoreOnDeviceClient {
 
 /// Bounded, read-only wait for the already-enrolled device identity. Never creates, rotates or resets anything.
 enum MirsaStoreIdentityLoader {
+    /// Posted once the saved device identity is loaded/verified; the Store re-evaluates availability then.
+    static let readyNotification = Notification.Name("mirsa.device.identity.ready")
     static func load<T>(attempts: Int = 20, delayNanoseconds: UInt64 = 500_000_000,
                         sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
                         read: () throws -> T) async throws -> T {
