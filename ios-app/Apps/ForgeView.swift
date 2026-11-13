@@ -95,9 +95,9 @@ struct ForgeView: View {
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
         .navigationBarTitleDisplayMode(.inline).mirsaScreen()
-        .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
+        .fileImporter(isPresented: $picking, allowedContentTypes: IPAPick.types) { r in
             guard case .success(let url) = r else { return }
-            Task { await handle(url) }
+            Task { do { let c = try await IPAPick.privateCopy(url); await handle(c) } catch { self.error = error.localizedDescription } }
         }
         .task { await store.refreshNames() }
         .confirmationDialog(forgeDeleteMessage(toDelete?.appName ?? ""), isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
@@ -288,9 +288,9 @@ struct ForgeProjectView: View {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { store.editCode(id, code: draft); editing = false } } } }
         }
-        .fileImporter(isPresented: $updating, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
+        .fileImporter(isPresented: $updating, allowedContentTypes: IPAPick.types) { r in
             guard case .success(let url) = r else { return }
-            run { let c = try await store.updateTarget(id, ipa: url); note = c ? tr("New app version found, rebuilt.", "لقيت نسخة جديدة وعاد بنيت.", ckb: "وەشانی نوێ دۆزرایەوە.", kmr: "Guhertoya nû hat dîtin.") : tr("Rebuilt.", "عاد بنيت.", ckb: "دووبارە دروستکرا.", kmr: "Ji nû ve hat çêkirin.") }
+            run { let url = try await IPAPick.privateCopy(url); let c = try await store.updateTarget(id, ipa: url); note = c ? tr("New app version found, rebuilt.", "لقيت نسخة جديدة وعاد بنيت.", ckb: "وەشانی نوێ دۆزرایەوە.", kmr: "Guhertoya nû hat dîtin.") : tr("Rebuilt.", "عاد بنيت.", ckb: "دووبارە دروستکرا.", kmr: "Ji nû ve hat çêkirin.") }
         }
     }
 }
