@@ -32,7 +32,9 @@ jobs:
           xcodebuild -version
 
       - name: Validate cold-launch purchase identity
-        run: python3 scripts/appstore/history-startup-tests.py
+        run: |
+          python3 scripts/appstore/history-startup-tests.py
+          python3 scripts/appstore/no-store-updates-tests.py
       - name: Validate on-device App Store backend without simulator
         timeout-minutes: 15
         run: bash scripts/appstore/package-tests.sh
