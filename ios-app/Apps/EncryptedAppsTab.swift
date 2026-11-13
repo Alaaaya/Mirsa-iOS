@@ -45,7 +45,10 @@ struct EncryptedAppsTab: View {
                                     onOpenTools: { showingTools = true })
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { AppStoreSectionBar(selection: $section) }
+        // The single bottom bar in this tab; its inset keeps every page's last rows scrollable above it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            AppStoreSectionBar(selection: $section, onLeave: { tab in withAnimation(MirsaMotion.select) { vm.selectedTab = tab } })
+        }
         .task {
             storeLoginAvailable = false
             storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable()

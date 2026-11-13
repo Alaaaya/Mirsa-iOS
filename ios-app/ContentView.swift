@@ -640,7 +640,7 @@ struct ContentView: View {
                 .tag(AppTab.pairing)
 
             EncryptedAppsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
+                .modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: true))
                 .tabItem { Label(EncryptedText.tabTitle, systemImage: "lock.shield") }
                 .tag(AppTab.encrypted)
 
@@ -651,14 +651,10 @@ struct ContentView: View {
         }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
-            if liquidTheme && !chatComposerFocused {
-                LiquidTabBar(selection: $vm.selectedTab, items: [
-                    LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
-                    LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
-                    LiquidTabItem(tab: .pairing, title: L.t("tools.tab"), icon: "wand.and.stars"),
-                    LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
-                    LiquidTabItem(tab: .personalHub, title: tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), icon: "checkmark.seal"),
-                ])
+            // The App Store tab draws its own single bottom bar (its sections plus a
+            // Mirsa menu back to the other tabs), so the main dock steps aside there.
+            if liquidTheme && !chatComposerFocused && vm.selectedTab != .encrypted {
+                LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
                 .ignoresSafeArea(.keyboard)
             }
         }
@@ -1195,13 +1191,31 @@ struct VPNStatusRow: View {
 
 /// Liquid Glass theme: hide the system tab bar (a floating glass bar replaces it)
 /// and keep content clear of it.
+extension LiquidTabItem {
+    /// The app's main tabs, shared by the floating dock and the App Store bar's Mirsa menu.
+    @MainActor static var mainTabs: [LiquidTabItem] {
+        [
+            LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
+            LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
+            LiquidTabItem(tab: .pairing, title: L.t("tools.tab"), icon: "wand.and.stars"),
+            LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
+            LiquidTabItem(tab: .personalHub, title: tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), icon: "checkmark.seal"),
+        ]
+    }
+}
+
 struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
     var chatEditing: Bool = false
     var nestedNavigation: Bool = false
+    /// The tab draws its own bottom bar (App Store): hide the main bar in every theme
+    /// and reserve no extra clearance; the tab's own bar insets the content.
+    var ownsBottomBar: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
-        if liquid {
+        if ownsBottomBar {
+            content.toolbar(.hidden, for: .tabBar)
+        } else if liquid {
             if nestedNavigation {
                 // A pushed chat destination can lose an ancestor safe-area inset.
                 // Bound the tools NavigationStack itself above the floating dock.
