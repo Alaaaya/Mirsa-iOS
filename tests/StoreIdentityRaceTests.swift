@@ -49,4 +49,45 @@ final class StoreIdentityRaceTests: XCTestCase {
         XCTAssertEqual(v, 7)
         XCTAssertEqual(sleeps, 0)
     }
+
+    func testFirstSearchWaitsForIdentityThenRunsExactlyOneLookup() async throws {
+        var lookups = 0, gateChecks = 0
+        let r: [Int] = try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 5, sleep: { _ in }, operation: {
+            gateChecks += 1
+            if gateChecks < 3 { throw self.denied() }
+            lookups += 1
+            return [1632106976]
+        })
+        XCTAssertEqual(r, [1632106976])
+        XCTAssertEqual(lookups, 1)
+    }
+
+    func testKnownUnauthorizedIsNotRetried() async {
+        var calls = 0
+        do {
+            let _: Int = try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 5, sleep: { _ in }, operation: { calls += 1; throw MirsaStoreServerError(code: "unauthorized") })
+            XCTFail("must throw")
+        } catch let e as MirsaStoreServerError { XCTAssertEqual(e, .code("unauthorized")) } catch { XCTFail("type") }
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testPersistentDenialIsBoundedAndSurfaced() async {
+        var calls = 0
+        do {
+            let _: Int = try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 3, sleep: { _ in }, operation: { calls += 1; throw self.denied() })
+            XCTFail("must throw")
+        } catch let e as MirsaStoreServerError { XCTAssertEqual(e, .code("staging_denied")) } catch { XCTFail("type") }
+        XCTAssertEqual(calls, 3)
+    }
+
+    func testCancellationStopsWaiting() async {
+        var calls = 0
+        let task = Task { () -> Int in
+            try await MirsaStoreIdentityLoader.retryWhileNotReady(attempts: 100, sleep: { _ in try await Task.sleep(nanoseconds: 20_000_000) }, operation: { calls += 1; throw self.denied() })
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        task.cancel()
+        do { _ = try await task.value; XCTFail("must cancel") } catch {}
+        XCTAssertLessThan(calls, 100)
+    }
 }
