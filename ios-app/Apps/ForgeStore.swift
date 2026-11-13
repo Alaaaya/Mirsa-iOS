@@ -33,6 +33,7 @@ struct ForgeProject: Codable, Identifiable {
     @Published var pendingGalleryCode: String? { didSet { if pendingGalleryCode == nil { pendingGallerySource = nil } } }
     @Published var pendingGallerySource: (id: String, version: Int?)?
     @Published var fixNotice: String?
+    @Published var queuedNotice: String?
     var fixSyncing = false
     nonisolated static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaForge", isDirectory: true)
@@ -142,17 +143,20 @@ struct ForgeProject: Codable, Identifiable {
     }
 
     // MARK: versions
-    func generate(_ id: UUID, prompt: String) async throws {
-        guard let p = project(id) else { return }
+    @discardableResult
+    func generate(_ id: UUID, prompt: String) async throws -> Bool {
+        guard let p = project(id) else { return false }
         busy = tr("Writing the tweak…", "عم أكتب التويك…", ckb: "تویک دەنووسم…", kmr: "Tweak tê nivîsandin…"); defer { busy = nil }
-        let r = try await ForgeClient.json(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": ForgeFeaturePolicy.name(p.name),
+        let outcome = try await ForgeClient.createCall(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": ForgeFeaturePolicy.name(p.name),
                                             "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](), "previousCode": p.currentVersion?.code ?? ""])
+        guard case .generated(let r) = outcome else { queuedNotice = ForgeQueued.notice; return true }
         guard let code = r["code"] as? String else { throw ForgeClient.Failure.message("Bad response") }
         let settings = ((r["settings"] as? [[String: Any]]) ?? []).compactMap { s -> ForgeSetting? in
             guard let k = s["key"] as? String, let t = s["title"] as? String, let d = s["default"] as? Bool else { return nil }
             return ForgeSetting(key: k, title: t, default: d)
         }
         addVersion(id, ForgeVersion(prompt: prompt, code: code, settings: settings, explain: (r["explain"] as? String) ?? ""))
+        return false
     }
     func addVersion(_ id: UUID, _ v: ForgeVersion) {
         update(id) { $0.versions.append(v); $0.current = v.id

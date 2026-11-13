@@ -65,14 +65,17 @@ enum ForgeImageMark {
 }
 
 extension ForgeStore {
-    func imageGenerate(_ id: UUID, jpeg: Data, region: CGRect, prompt: String) async throws {
-        guard let p = project(id), !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    @discardableResult
+    func imageGenerate(_ id: UUID, jpeg: Data, region: CGRect, prompt: String) async throws -> Bool {
+        guard let p = project(id), !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard region.width > 0.02, region.height > 0.02, let marked = ForgeImageMark.marked(jpeg, region: region) else { throw ForgeClient.Failure.message(ForgeImageMarkView.hint) }
         guard marked.count <= 1024 * 1024 else { throw ForgeClient.Failure.message("Image exceeds 1 MB.") }
-        let out = try await ForgeClient.json(["action": "image-generate", "name": ForgeFeaturePolicy.name(p.name),
+        let outcome = try await ForgeClient.createCall(["action": "image-generate", "name": ForgeFeaturePolicy.name(p.name),
             "bundleID": p.bundleID, "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](),
             "prompt": String(prompt.prefix(2000)), "image": ["mime": "image/jpeg", "base64": marked.base64EncodedString()],
             "region": ["x": region.minX, "y": region.minY, "w": region.width, "h": region.height]])
+        guard case .generated(let out) = outcome else { queuedNotice = ForgeQueued.notice; return true }
         addVersion(id, try responseVersion(out, prompt: prompt))
+        return false
     }
 }

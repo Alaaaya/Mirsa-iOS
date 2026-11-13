@@ -115,13 +115,16 @@ extension ForgeStore {
         return list
     }
 
-    func imageGenerate(_ id: UUID, jpeg: Data, prompt: String) async throws {
-        guard let p = project(id), !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    @discardableResult
+    func imageGenerate(_ id: UUID, jpeg: Data, prompt: String) async throws -> Bool {
+        guard let p = project(id), !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard jpeg.count <= 1024 * 1024 else { throw ForgeClient.Failure.message("Image exceeds 1 MB.") }
-        let out = try await ForgeClient.json(["action": "image-generate", "name": ForgeFeaturePolicy.name(p.name),
+        let outcome = try await ForgeClient.createCall(["action": "image-generate", "name": ForgeFeaturePolicy.name(p.name),
             "bundleID": p.bundleID, "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](),
             "prompt": String(prompt.prefix(2000)), "image": ["mime": "image/jpeg", "base64": jpeg.base64EncodedString()]])
+        guard case .generated(let out) = outcome else { queuedNotice = ForgeQueued.notice; return true }
         addVersion(id, try responseVersion(out, prompt: prompt))
+        return false
     }
 
     func merge(_ id: UUID, selected: [(ForgeProject, ForgeVersion)]) async throws {
