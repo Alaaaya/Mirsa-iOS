@@ -47,6 +47,7 @@ export async function prepareBuild({directory,name,source,expectedSourceSHA256,e
    runtimeHashes[file]=sha(await readFile(join(directory,file)));
   }
   await writeFile(join(directory,'BlackboxConfig.h'),config,{mode:0o600,flag:'wx'});
+  for(const file of ['Instrumented.xm','HookManifest.json','BlackboxConfig.h'])runtimeHashes[file]=sha(await readFile(join(directory,file)));
   files='Instrumented.xm runtime.c breadcrumb.c BlackboxUploader.m';
  }
  const makefile=[
@@ -60,7 +61,7 @@ export async function prepareBuild({directory,name,source,expectedSourceSHA256,e
   'include $(THEOS_MAKE_PATH)/tweak.mk',''
  ].join('\n');
  await writeFile(join(directory,'Makefile'),makefile,{mode:0o600,flag:'wx'});
- return {sourceSHA256:sha(await readFile(join(directory,'Tweak.xm'))),
+ return {name,makefileSHA256:sha(makefile),sourceSHA256:sha(await readFile(join(directory,'Tweak.xm'))),
    reporterIncluded:Boolean(enrollment),manifest:instrumentation?.manifest??null,manifestSHA256:instrumentation?.manifestSHA256??null,runtimeSHA256:runtimeHashes,files:files.split(' '),requiresDeviceValidation:true};
 }
 export async function deliverReviewedBuild({job,artifact,review,existingFixPush}) {
