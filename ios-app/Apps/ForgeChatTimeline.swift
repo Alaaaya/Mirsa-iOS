@@ -53,7 +53,8 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
     init(id: UUID, threadID: UUID, role: String, text: String?, createdAt: String? = nil, hasImage: Bool? = nil, result: ForgeChatResult? = nil, attachments: [ChatAttachmentMeta]? = nil) {
         self.id = id; self.threadID = threadID; self.role = role; self.text = text; self.createdAt = createdAt; self.hasImage = hasImage; self.result = result; self.attachments = attachments
     }
-    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, replyQuote, reaction, editedAt }
+    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, editedAt }
+    enum QK: String, CodingKey { case replyQuote }
     struct Quote: Decodable { let text: String?; let role: String? }
     /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
     init(from d: Decoder) throws {
@@ -70,8 +71,8 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
         let rows = (try? c.decode([Lossy].self, forKey: .attachments))?.compactMap(\.value)
         attachments = (rows?.isEmpty ?? true) ? nil : rows
         replyToMessageID = (try? c.decode(String.self, forKey: .replyToMessageID)).flatMap { UUID(uuidString: $0) }
-        if let q = try? c.decode(Quote.self, forKey: .replyQuote) { replyQuoteText = q.text; replyQuoteRole = q.role }
-        else if let q = try? c.decode(String.self, forKey: .replyQuote) { replyQuoteText = q }
+        if let q = try? d.container(keyedBy: QK.self).decode(Quote.self, forKey: .replyQuote) { replyQuoteText = q.text; replyQuoteRole = q.role }
+        else if let q = try? d.container(keyedBy: QK.self).decode(String.self, forKey: .replyQuote) { replyQuoteText = q }
         reaction = try? c.decode(String.self, forKey: .reaction)
         editedAt = try? c.decode(String.self, forKey: .editedAt)
     }
