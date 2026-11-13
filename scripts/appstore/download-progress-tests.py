@@ -41,7 +41,7 @@ test=r"""
     unknown.apply(.init(phase:.saved)); precondition(unknown.phase == .failed)
     var cached=StoreDownloadProgress()
     cached.apply(.init(phase:.downloading,received:1000,expected:1000,time:1))
-    precondition(cached.fraction == 0.94 && cached.received == 1000)
+    precondition(abs(cached.fraction! - 0.94) < 0.000001 && cached.received == 1000)
     print("PASS actual progress model: bounded monotonic stages, true byte/speed metrics, unknown length no percentage, cached callback, stale/terminal events ignored, 100 only after validated library save")
  }
 }
