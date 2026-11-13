@@ -44,7 +44,7 @@ struct PurchaseHistoryDiagnostic: Error, LocalizedError, Sendable {
 }
 
 enum MirsaStorePurchaseHistory {
-    static func fetch(owner: Account) async throws -> [MirsaStorePurchase] {
+    static func fetch(owner: Account, guid: String = Configuration.deviceIdentifier) async throws -> [MirsaStorePurchase] {
         try Task.checkCancellation()
         // Validate the exact shared session before attempting SAP/network work.
         // Field names only, never account values or cookie contents.
@@ -54,7 +54,6 @@ enum MirsaStorePurchaseHistory {
         guard !owner.passwordToken.isEmpty else {
             throw PurchaseHistoryDiagnostic(stage: .setup, detail: "missing field passwordToken")
         }
-        let guid = Configuration.deviceIdentifier
         guard guid.utf8.count == 12, guid.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) }) else {
             throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid or missing field guid")
         }
@@ -74,7 +73,7 @@ enum MirsaStorePurchaseHistory {
             throw PurchaseHistoryDiagnostic(stage: .setup, detail: "signer setup error \((error as NSError).code)")
         }
         let secrets = [owner.email, owner.password, owner.appleId, owner.firstName, owner.lastName,
-                       owner.passwordToken, owner.directoryServicesIdentifier, Configuration.deviceIdentifier]
+                       owner.passwordToken, owner.directoryServicesIdentifier, guid]
                        + owner.cookie.map(\.value)
         // Keep the DAAP session cookies returned by login/update, scoped to their origin.
         // Do not change or persist the commerce/login engine's cookie state.
