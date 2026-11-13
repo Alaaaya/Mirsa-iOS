@@ -9,8 +9,12 @@ enum ForgeFrameworkClasses {
     static let maxFrameworks = 400
     static let maxClasses = 400_000
 
-    static func classes(ipa: URL) -> [String] {
-        guard let archive = try? Archive(url: ipa, accessMode: .read) else { return [] }
+    static func classes(ipa: URL) -> [String] { scan(ipa: ipa).classes }
+
+    /// Class names from __objc_classname strings only (may include unreferenced names; __objc_classlist is NOT parsed).
+    static func scan(ipa: URL) -> (classes: [String], encrypted: Int) {
+        var encrypted = 0
+        guard let archive = try? Archive(url: ipa, accessMode: .read) else { return ([], 0) }
         var found = Set<String>()
         var count = 0
         for e in archive where e.type == .file {
@@ -22,9 +26,10 @@ enum ForgeFrameworkClasses {
             if count > maxFrameworks || found.count >= maxClasses { break }
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("fwscan-" + UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: tmp) }
-            guard (try? archive.extract(e, to: tmp)) != nil, let info = try? ForgeMachO.inspect(tmp), !info.encrypted else { continue }
+            guard (try? archive.extract(e, to: tmp)) != nil, let info = try? ForgeMachO.inspect(tmp) else { continue }
+            if info.encrypted { encrypted += 1; continue }
             found.formUnion(info.classes)
         }
-        return found.sorted()
+        return (found.sorted(), encrypted)
     }
 }
