@@ -63,6 +63,7 @@ enum ForgePortScanner {
         scan.build = (plist["CFBundleVersion"] as? String).map { String($0.prefix(32)) } ?? ""
         scan.bundleID = (plist["CFBundleIdentifier"] as? String) ?? ""
         if scan.encrypted { throw ForgePortError.encrypted }
+        scan.classes.formUnion(ForgeFrameworkClasses.classes(ipa: ipa))
         return scan
     }
 
