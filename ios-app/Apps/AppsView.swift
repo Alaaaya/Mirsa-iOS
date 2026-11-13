@@ -1262,8 +1262,6 @@ struct AppInfoSheet: View {
 struct LicensesView: View {
     private struct Item: Identifiable { let id = UUID(); let name: String; let license: String; let url: String; let note: String }
     private let items: [Item] = [
-        Item(name: "FlekDeck UI inspiration", license: "AGPL-3.0 (upstream)", url: "https://github.com/NightVibes33/FlekDeck",
-             note: "Home Screen visual reference. Mirsa's optional implementation is independently written; no FlekDeck source code or artwork is bundled."),
         Item(name: "isideload", license: "MIT", url: "https://github.com/nab138/isideload",
              note: "Apple ID sign-in, anisette, development certificates, App IDs, provisioning profiles and app signing."),
         Item(name: "idevice", license: "MIT", url: "https://github.com/jkcoxson/idevice",
