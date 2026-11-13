@@ -54,6 +54,9 @@ struct ClassicEncryptedAppsTab: View {
             await storeAccount.refresh()
         }
         .onChange(of: section) { _, _ in Task { await storeAccount.refresh() } }
+        .onReceive(NotificationCenter.default.publisher(for: MirsaStoreIdentityLoader.readyNotification)) { _ in
+            Task { storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable(); await storeAccount.refresh() }
+        }
         .sheet(isPresented: $showingAppStore, onDismiss: sessionMayHaveChanged) {
             ClassicAppStoreAccountView(onDownloaded: { url in
                 let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
