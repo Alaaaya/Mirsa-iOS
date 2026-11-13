@@ -48,11 +48,17 @@ jobs:
           xcrun lipo -info MirsaReporter.dylib
           shasum -a 256 MirsaReporter.dylib HookManifest.json Tweak.xm Instrumented.xm > hashes.txt
           test -s MirsaReporter.dylib
+      - name: Build and deliver automatic port through staged owner-bound inbox fixture
+        working-directory: backend/port-blackbox-runtime
+        env:
+          MIRSA_CI_LOGOS: ${{ runner.temp }}/logos/bin/logos.pl
+        run: node ci-auto-pipeline.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: port-blackbox-apple-evidence
           path: |
+            backend/port-blackbox-runtime/pipeline-evidence/
             backend/port-blackbox-runtime/native-test.txt
             backend/port-blackbox-runtime/prepare.json
             backend/port-blackbox-runtime/build-ci/MirsaReporter.dylib

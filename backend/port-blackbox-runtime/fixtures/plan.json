@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "sourceSHA256": "213035ab01fccf145ab8a58176380a309b8c7389ed092217186ec842d6bdbf90",
+  "oldIPA": "abc7c2cac8a10a73861ca14bb429d9a3f4ff2a600d892c11d380d6ebd3fcbe6a",
+  "newIPA": "1a5277c6a54aea63e695498d4f24928ce7f88d1f2476becb69f707ca81eab0d2",
+  "code": "%hook NewController\n- (void)tap { %orig; }\n%end\n",
+  "status": "ready_for_build",
+  "candidates": [
+    {
+      "oldClass": "OldController",
+      "newClass": "NewController",
+      "evidence": "unique_symbol_selector_set",
+      "requiresReview": true,
+      "abiProven": false
+    }
+  ],
+  "unresolved": [],
+  "patches": [],
+  "swiftDiff": {
+    "removed": [],
+    "added": [],
+    "automaticReplacement": false
+  },
+  "limitations": [
+    "main executable only",
+    "stripped/obfuscated methods unresolved",
+    "symbol name or selector similarity is not ABI proof"
+  ],
+  "automaticPort": {
+    "schema": 1,
+    "automatic": true,
+    "originalSourceSHA256": "213035ab01fccf145ab8a58176380a309b8c7389ed092217186ec842d6bdbf90",
+    "outputSourceSHA256": "08ca8daaa3b9582ff8dca30c0f84344afae968b3c4d2cf89b2f59b2d74383eb0",
+    "oldIPA": "abc7c2cac8a10a73861ca14bb429d9a3f4ff2a600d892c11d380d6ebd3fcbe6a",
+    "newIPA": "1a5277c6a54aea63e695498d4f24928ce7f88d1f2476becb69f707ca81eab0d2",
+    "code": "%hook NewController\n- (void)tap { %orig; }\n%end\n",
+    "abiProof": [
+      {
+        "oldClass": "OldController",
+        "newClass": "NewController",
+        "selectors": [
+          "-tap"
+        ],
+        "allArchitectures": [
+          "CPU_TYPE.ARM64:0"
+        ],
+        "basis": "exact-runtime-method-encodings-and-layout;narrow-no-state-hook-body"
+      }
+    ],
+    "limitations": [
+      "ABI evidence is not behavioral or device compatibility proof",
+      "Manual fix inbox activation required"
+    ]
+  }
+}
