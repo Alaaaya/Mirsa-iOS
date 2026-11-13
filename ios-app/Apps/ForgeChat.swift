@@ -617,6 +617,7 @@ struct ForgeChatThreadView: View {
         let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
+    @AppStorage(MirsaChatBackground.key) private var blackChatBackground = false
     private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
     private var draftCount: Int { ForgeChatText.messageCount(text) }
@@ -759,9 +760,9 @@ struct ForgeChatThreadView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             // Same Aurora as the conversation behind it (screen-aligned slice), not a flat gray material.
-            .background { MirsaAuroraSlice().ignoresSafeArea(edges: .bottom) }
+            .background { if blackChatBackground { Color.black.ignoresSafeArea(edges: .bottom) } else { MirsaAuroraSlice().ignoresSafeArea(edges: .bottom) } }
         }
-        .background(AuroraBackground().ignoresSafeArea())
+        .background { if blackChatBackground { Color.black.ignoresSafeArea() } else { AuroraBackground().ignoresSafeArea() } }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $reportTarget) { m in
             ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
@@ -919,10 +920,25 @@ struct ForgeChatThreadView: View {
             Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
                 .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
             if !shortID.isEmpty { shortIDCapsule }
+            blackBackgroundToggle
             Spacer()
         }
         .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
+    }
+
+    /// Small circle next to the thread id: pure black chat background or the original gradient. Visual 28pt, hit target 44pt.
+    private var blackBackgroundToggle: some View {
+        Button { blackChatBackground.toggle() } label: {
+            Image(systemName: blackChatBackground ? "moon.fill" : "moon")
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                .frame(width: 28, height: 28).background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5))
+                .frame(width: 44, height: 44).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(MirsaChatBackground.label(black: blackChatBackground))
+        .accessibilityIdentifier("chat-black-background")
     }
 
     private var inputBar: some View {
@@ -1142,5 +1158,21 @@ struct ForgeChatReactionsTip: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(MirsaPalette.accent.opacity(0.4), lineWidth: 0.8))
         .padding(.horizontal, 14).padding(.top, 8)
         .accessibilityIdentifier("chat-reactions-tip")
+    }
+}
+
+
+/// Per-device choice for the Mirsa AI chat background. Default is the original gradient.
+enum MirsaChatBackground {
+    static let key = "mirsa.chat.blackBackground.v1"
+    static func label(black: Bool) -> String {
+        let on = black
+        switch L.lang {
+        case .english: return on ? "Use gradient background" : "Use black background"
+        case .german: return on ? "Farbverlauf-Hintergrund verwenden" : "Schwarzen Hintergrund verwenden"
+        case .arabic: return on ? "استخدم الخلفية المتدرجة" : "استخدم الخلفية السوداء"
+        case .kurmanji: return on ? "Paşxaneya gradient bikar bîne" : "Paşxaneya reş bikar bîne"
+        case .sorani: return on ? "پاشبنەمای گرادیەنت بەکاربهێنە" : "پاشبنەمای ڕەش بەکاربهێنە"
+        }
     }
 }
