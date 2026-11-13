@@ -856,7 +856,11 @@ struct AppStorePurchasesPage: View {
         downloading = item.id; error = nil
         defer { downloading = nil }
         do {
-            let url = try await MirsaStoreOnDeviceClient.shared.downloadOwnedApp(item.app)
+            let selectedID = try await MirsaStoreOnDeviceClient.shared.selectedAccountID()
+            guard model.sessionRevision == revision, model.account == account else { return }
+            let pin = StoreLibraryModel.shared.pin(bundleID: item.bundleID, country: account.country)
+            let url = try await MirsaStoreOnDeviceClient.shared.downloadOwnedApp(item.app,
+                externalVersionID: pin?.externalVersionID, expectedAccountID: selectedID)
             defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
             try Task.checkCancellation()
             guard model.sessionRevision == revision, model.account == account else { return }
@@ -876,7 +880,9 @@ struct AppStorePurchasesPage: View {
                    let fresh = try? await MirsaStoreOnDeviceClient.shared.freeAppForRecovery(item.app),
                    StoreFreeLicenseRecovery.canOffer(status: diagnostic.httpStatus, price: fresh.price),
                    model.sessionRevision == revision, model.account == account, !Task.isCancelled {
-                    recovery = StoreFreeLicenseRecovery(app: fresh, externalVersionID: nil, revision: revision)
+                    recovery = StoreFreeLicenseRecovery(app: fresh,
+                        externalVersionID: StoreLibraryModel.shared.pin(bundleID: item.bundleID, country: account.country)?.externalVersionID,
+                        revision: revision)
                     return
                 }
                 self.error = commerceError(diagnostic)

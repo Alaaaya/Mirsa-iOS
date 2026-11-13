@@ -33,6 +33,7 @@ struct EncryptedAppsTab: View {
                                     onAddAccount: { Task {
                                         priorAccountID = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID()
                                         _ = try? await MirsaStoreOnDeviceClient.shared.beginAddAccount()
+                                        storeAccount.updateAccount(nil); storeViewID = UUID()
                                         showingAppStore = true } },
                                     onOpen: { tab in withAnimation(MirsaMotion.select) { section = tab } },
                                     onSignedOut: { storeViewID = UUID() })
@@ -59,10 +60,11 @@ struct EncryptedAppsTab: View {
         }
         .sheet(isPresented: $showingTools) {
             StoreLibraryToolsView(country: storeAccount.account?.country ?? "US",
-                                  onAccountSwitched: { storeViewID = UUID(); Task { await storeAccount.refresh() } },
+                                  onAccountSwitched: { storeAccount.updateAccount(nil); storeViewID = UUID(); Task { await storeAccount.refresh() } },
                                   onAddAccount: { showingTools = false; Task {
                                       priorAccountID = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID()
                                       _ = try? await MirsaStoreOnDeviceClient.shared.beginAddAccount()
+                                      storeAccount.updateAccount(nil); storeViewID = UUID()
                                       showingAppStore = true } }) { url in
                 do {
                     let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
@@ -131,22 +133,19 @@ struct EncryptedAppsTab: View {
 
     /// The sign-in sheet may have signed in or out. Reload the inline screen only then.
     private func sessionMayHaveChanged() {
-        if let prior = priorAccountID {
-            priorAccountID = nil
-            Task {
+        let prior = priorAccountID
+        priorAccountID = nil
+        Task {
+            if let prior {
                 let list = (try? await MirsaStoreOnDeviceClient.shared.listAccounts()) ?? []
-                // Cancelled add: the new context is not listed, so restore the previous one.
-                if let current = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID(), !list.contains(where: { $0.id == current }),
-                   list.contains(where: { $0.id == prior }) {
+                if let current = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID(),
+                   !list.contains(where: { $0.id == current }), list.contains(where: { $0.id == prior }) {
                     try? await MirsaStoreOnDeviceClient.shared.selectAccount(id: prior)
                 }
-                await storeAccount.refresh()
             }
-        }
-        let before = storeAccount.account
-        Task {
+            storeAccount.updateAccount(nil)
+            storeViewID = UUID()
             await storeAccount.refresh()
-            if storeAccount.account != before { storeViewID = UUID() }
         }
     }
 
