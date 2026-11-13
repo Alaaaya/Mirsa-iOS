@@ -9,37 +9,136 @@ struct MirsaStoreNativeVault: MirsaStoreVault {
     func remove(_ key: String) throws { try base.remove("native." + key) }
 }
 
+/// Registry and sessions use the same device-only Keychain service. Never derive keys from email.
+struct MirsaStoreAccountVault: MirsaStoreVault {
+    let base: any MirsaStoreVault
+    let id: String
+    private func key(_ key: String) -> String {
+        id == "legacy" ? "native." + key : "native.accounts." + id + "." + key
+    }
+    func read(_ key: String) throws -> Data? { try base.read(self.key(key)) }
+    func write(_ data: Data, key: String) throws { try base.write(data, key: self.key(key)) }
+    func remove(_ key: String) throws { try base.remove(self.key(key)) }
+}
+
 /// The gate checks Mirsa's existing owner-device capability only. Apple credentials,
 /// cookies, SAP exchange, searches and downloads never pass through that gate.
 actor MirsaStoreOnDeviceClient {
     typealias Gate = () async -> Bool
     private let historyGate: () async throws -> Void
     private let gate: Gate
-    private let local: MirsaStoreClient
-    init(local: MirsaStoreClient = MirsaStoreClient(vault: MirsaStoreNativeVault()), gate: @escaping Gate,
-         historyGate: (() async throws -> Void)? = nil) {
-        self.local = local; self.gate = gate
+    struct SavedAccount: Identifiable, Sendable, Equatable {
+        let id: String
+        let account: MirsaStoreAccount
+    }
+    private struct Registry: Codable {
+        var ids: [String]
+        var selected: String
+    }
+    private let vault: any MirsaStoreVault
+    private let factory: (String) -> MirsaStoreClient
+    private var clients: [String: MirsaStoreClient] = [:]
+    private var registry: Registry?
+    init(local: MirsaStoreClient? = nil, gate: @escaping Gate,
+         historyGate: (() async throws -> Void)? = nil,
+         vault: any MirsaStoreVault = MirsaStoreKeychain(),
+         factory: ((String) -> MirsaStoreClient)? = nil) {
+        self.vault = vault
+        self.factory = factory ?? { id in
+            MirsaStoreClient(vault: MirsaStoreAccountVault(base: vault, id: id))
+        }
+        if let local {
+            clients["legacy"] = local
+            // A supplied client is the legacy context (also keeps offline test injection independent of Keychain).
+            registry = Registry(ids: ["legacy"], selected: "legacy")
+        }
+        self.gate = gate
         self.historyGate = historyGate ?? {
             guard await gate() else { throw MirsaStoreServerError(code: "staging_denied") }
         }
+    }
+    private func loadRegistry() throws -> Registry {
+        if let registry { return registry }
+        let value: Registry
+        if let bytes = try vault.read("native.accounts.registry") {
+            value = try JSONDecoder().decode(Registry.self, from: bytes)
+            guard !value.ids.isEmpty, value.ids.contains(value.selected),
+                  Set(value.ids).count == value.ids.count,
+                  value.ids.allSatisfy({ $0 == "legacy" || UUID(uuidString: $0) != nil }) else {
+                throw MirsaStoreError.invalidInput
+            }
+        } else {
+            // Keep the original native keys in place. No copy/delete window and no relogin.
+            value = Registry(ids: ["legacy"], selected: "legacy")
+        }
+        registry = value
+        return value
+    }
+    private func saveRegistry(_ value: Registry) throws {
+        try vault.write(try JSONEncoder().encode(value), key: "native.accounts.registry")
+        registry = value
+    }
+    private func selectedClient(expectedAccountID: String? = nil) throws -> MirsaStoreClient {
+        let id = try loadRegistry().selected
+        guard expectedAccountID == nil || expectedAccountID == id else {
+            throw MirsaStoreError.operationCancelled
+        }
+        return client(id)
+    }
+    private func client(_ id: String) -> MirsaStoreClient {
+        if let client = clients[id] { return client }
+        let created = factory(id)
+        clients[id] = created
+        return created
+    }
+    func selectedAccountID() throws -> String { try loadRegistry().selected }
+    func listAccounts() async throws -> [SavedAccount] {
+        let ids = try loadRegistry().ids
+        try await authorize()
+        var result: [SavedAccount] = []
+        for id in ids {
+            if let account = try await client(id).currentAccount() {
+                result.append(SavedAccount(id: id, account: account))
+            }
+        }
+        return result
+    }
+    func selectAccount(id: String) throws {
+        var value = try loadRegistry()
+        guard value.ids.contains(id) else { throw MirsaStoreError.invalidInput }
+        value.selected = id
+        try saveRegistry(value)
+    }
+    @discardableResult
+    func beginAddAccount() throws -> String {
+        var value = try loadRegistry()
+        let id = UUID().uuidString
+        value.ids.append(id)
+        value.selected = id
+        try saveRegistry(value)
+        return id
     }
     private func authorize() async throws {
         guard await gate() else { throw MirsaStoreServerError(code: "staging_denied") }
         try Task.checkCancellation()
     }
-    func currentAccount() async throws -> MirsaStoreAccount? {
+    func currentAccount(expectedAccountID: String? = nil) async throws -> MirsaStoreAccount? {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         return try await local.currentAccount()
     }
     func signIn(email: String, password: String) async throws -> MirsaStoreLogin {
+        let local = try selectedClient()
         try await authorize()
         return try await local.signIn(email: email, password: password)
     }
     func verify(code: String, password: String? = nil) async throws -> MirsaStoreLogin {
+        let local = try selectedClient()
         try await authorize()
         return try await local.verify(code: code, password: password)
     }
     func search(term: String, country: String? = nil, limit: Int = 25) async throws -> [MirsaStoreApp] {
+        let local = try selectedClient()
         try await authorize()
         guard let account = try await local.currentAccount() else { throw MirsaStoreError.signedOut }
         let country = try MirsaStorePolicy.country(country ?? account.country)
@@ -91,6 +190,7 @@ actor MirsaStoreOnDeviceClient {
     }
 
     func purchaseHistory() async throws -> [MirsaStorePurchase] {
+        let local = try selectedClient()
         do { try await historyGate(); try Task.checkCancellation() }
         catch let error as MirsaStoreServerError {
             // This is Mirsa's device gate, not an Apple/SAP failure.
@@ -107,32 +207,39 @@ actor MirsaStoreOnDeviceClient {
         return try await local.purchaseHistory()
     }
 
-    func acquireFreeApp(_ app: MirsaStoreApp) async throws {
+    func acquireFreeApp(_ app: MirsaStoreApp, expectedAccountID: String? = nil) async throws {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         try await local.acquireFreeApp(app)
     }
-    func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
+    func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil, expectedAccountID: String? = nil) async throws -> URL {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         return try await local.acquireFreeAppAndDownload(app, externalVersionID: externalVersionID)
     }
-    func freeAppForRecovery(_ app: MirsaStoreApp) async throws -> MirsaStoreApp {
+    func freeAppForRecovery(_ app: MirsaStoreApp, expectedAccountID: String? = nil) async throws -> MirsaStoreApp {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         return try await local.freeAppForRecovery(app)
     }
-    func availableVersions(_ app: MirsaStoreApp) async throws -> [String] {
+    func availableVersions(_ app: MirsaStoreApp, expectedAccountID: String? = nil) async throws -> [String] {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         return try await local.availableVersions(app)
     }
-    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
+    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String], expectedAccountID: String? = nil) async throws -> [MirsaStoreServerClient.VersionMetadata] {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         return try await local.versionMetadata(app, externalVersionIDs: ids)
     }
-    func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
+    func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil, expectedAccountID: String? = nil) async throws -> URL {
+        let local = try selectedClient(expectedAccountID: expectedAccountID)
         try await authorize()
         return try await local.downloadOwnedApp(app, externalVersionID: externalVersionID)
     }
     func signOut() async throws {
         // Removing a local session must still work when the gate is offline or revoked.
+        let local = try selectedClient()
         try await local.signOut()
     }
 }

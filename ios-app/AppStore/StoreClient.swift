@@ -8,6 +8,7 @@ actor MirsaStoreClient {
     private let vault: any MirsaStoreVault
     private let engine: any MirsaStoreEngine
     private let packages: any MirsaStorePackages
+    private var machineGUID = ""
     private var prepared = false
     private var busy = false
     private var generation: UInt64 = 0
@@ -305,6 +306,7 @@ actor MirsaStoreClient {
         }
         try vault.remove("challenge")
         if let account = try loadAccount(), !account.password.isEmpty { try persist(account) }
+        machineGUID = guid
         engine.configure(guid: guid)
         prepared = true
     }
@@ -359,7 +361,7 @@ actor MirsaStoreClient {
         } catch is DecodingError {
             throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid saved account record")
         }
-        let result = try await MirsaStorePurchaseHistory.fetch(owner: owner)
+        let result = try await MirsaStorePurchaseHistory.fetch(owner: owner, guid: machineGUID)
         try check(run)
         guard try requiredAccount().directoryServicesIdentifier == owner.directoryServicesIdentifier else {
             throw MirsaStoreError.operationCancelled
