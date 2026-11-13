@@ -91,7 +91,7 @@ struct ClassicAppStoreAccountView: View {
                                 Label(storeText("Back", "رجوع", de: "Zurück", ckb: "گەڕانەوە", kmr: "Vegere"), systemImage: "chevron.left")
                                     .font(MirsaFont.button).foregroundStyle(MirsaPalette.accentSoft).frame(minHeight: 44)
                             }
-                            .buttonStyle(B.font(MirsaFont.button).foregroundStyle(MirsaPalette.accentSoft).frame(minHeight: 44))
+                            .buttonStyle(.plain)
                             .accessibilityIdentifier("store-search-back")
                             Spacer()
                         }
