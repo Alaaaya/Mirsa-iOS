@@ -718,7 +718,7 @@ struct ClassicAppStoreAccountView: View {
                     let sorted = Self.newestFirst(list)
                     let visible = Array(sorted.prefix(metadataLimit[key] ?? 20))
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: 0).task(id: visible.count) { requestMetadata(app, ids: visible + Array(sorted.dropFirst(visible.count).prefix(20))) }
+                        Color.clear.frame(height: 0).task(id: visible.count) { requestMetadata(app, ids: visible + Array(sorted.dropFirst(visible.count).prefix(20)), reset: true) }
                         ForEach(visible, id: \.self) { id in
                             Rectangle().fill(MirsaPalette.stroke).frame(height: 1)
                             versionRow(key: key, id: id, title: versionName(app, id), subtitle: "ID \(id)")
@@ -737,7 +737,7 @@ struct ClassicAppStoreAccountView: View {
                     if visible.contains(where: { metadata[key]?[$0]?.status == "unavailable" }) {
                         Button(t("Retry version names", "إعادة محاولة أسماء النسخ", "دووبارە هەوڵدانەوەی ناوی وەشانەکان", "Navên guhertoyan dîsa biceribîne")) {
                             for id in visible where metadata[key]?[id]?.status == "unavailable" { metadata[key]?[id] = nil }
-                            requestMetadata(app, ids: visible)
+                            requestMetadata(app, ids: visible, reset: true)
                         }
                         .buttonStyle(.mirsaSecondary).disabled(busy != nil)
                     }
@@ -995,7 +995,7 @@ struct ClassicAppStoreAccountView: View {
             ownership[app.id] = .owned
             versions[app.bundleID] = ids
             metadataLimit[app.bundleID] = 20
-            requestMetadata(app, ids: Array(Self.newestFirst(ids).prefix(20)))
+            requestMetadata(app, ids: Array(Self.newestFirst(ids).prefix(20)), reset: true)
         }
     }
 
@@ -1077,8 +1077,11 @@ struct ClassicAppStoreAccountView: View {
         return t("External ID \(id) · loading name", "رقم خارجي \(id) · عم يتحمّل الاسم", "ناسنامەی دەرەکی \(id) · ناو بار دەکرێت", "ID ya derveyî \(id) · nav tê barkirin")
     }
 
-    private func requestMetadata(_ app: MirsaStoreApp, ids: [String]) {
+    private func requestMetadata(_ app: MirsaStoreApp, ids: [String], reset: Bool = false) {
         let key = app.bundleID
+        // A fresh visibility/reopen/manual cycle gives exhausted rows a new bounded attempt budget.
+        // Internal retries pass reset:false, so there is no retry loop.
+        if reset { StoreMetadataRetryPolicy.resetExhausted(key: key, ids: ids, attempts: &metadataAttempts, unavailable: { metadata[key]?[$0]?.status == "unavailable" }, clear: { metadata[key]?[$0] = nil }) }
         // Disk cache first: names never change for an external version ID.
         for id in ids where metadata[key]?[id] == nil {
             if let v = StoreVersionNameCache.get(key, id) { metadata[key, default: [:]][id] = .init(externalVersionID: id, status: "ready", version: v) }
