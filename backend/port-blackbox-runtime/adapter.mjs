@@ -124,10 +124,10 @@ export function createStagedAdapter({store,storageRoot,portEnabled=false,blackbo
       if(existing.user_id!==p.user||existing.device!==p.device||existing.hash!==b.sha256||existing.bytes!==b.bytes||existing.role!==b.role)fail('replay_mismatch',409);
       return existing;
      }
-     const global=store.db.prepare("SELECT count(*) n FROM uploads WHERE expires>? AND state IN ('pending','writing','ready')").get(clock());
+     const global=store.db.prepare("SELECT count(*) n FROM uploads WHERE state IN ('pending','writing','ready')").get();
      if(global.n>=16)fail('global_upload_limit',429);
-     const live=store.db.prepare("SELECT count(*) n,coalesce(sum(bytes),0) bytes FROM uploads WHERE user_id=? AND expires>? AND state IN ('pending','writing','ready')")
-       .get(p.user,clock());
+     const live=store.db.prepare("SELECT count(*) n,coalesce(sum(bytes),0) bytes FROM uploads WHERE user_id=? AND state IN ('pending','writing','ready')")
+       .get(p.user);
      if(live.n>=2||live.bytes+b.bytes>2*MAX)fail('upload_limit',429);
      store.db.prepare('INSERT INTO uploads(id,user_id,device,hash,bytes,role,expires) VALUES(?,?,?,?,?,?,?)')
        .run(b.id,p.user,p.device,b.sha256,b.bytes,b.role,clock()+3600000);
