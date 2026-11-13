@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct ForgeFeaturesView: View {
     let id: UUID
     @Binding var prompt: String
+    @Binding var attachedClasses: [String]
     @Binding var showInspector: Bool
     @ObservedObject private var store = ForgeStore.shared
     @ObservedObject private var library = PersonalAppsLibrary.shared
@@ -220,16 +221,20 @@ struct ForgeFeaturesView: View {
                     Text("\(capture.nodes.count) " + text("UIKit nodes", "عناصر UIKit") + (capture.truncated ? " · " + text("Truncated", "مختصر بسبب الحد") : "")).font(.caption)
                     if let lim = ForgeCaptureContext.limitationsText(capture.limitations) { Text(lim).font(.caption2) }
                     Toggle(text("Allow this reviewed capture to be attached remotely", "اسمح بإرسال هالالتقاط بعد المعاينة"), isOn: $remoteCaptureConsent)
+                        .onChange(of: remoteCaptureConsent) { _, on in if !on { attachedClasses = []; attachNote = "" } }
                     Button(text("Attach reviewed class context to request", "إرفاق الكلاسات بالطلب")) {
                         guard let p = store.project(id) else { return }
-                        switch ForgeCaptureContext.attach(prompt: prompt, capture: capture, projectBundleID: p.bundleID, consent: remoteCaptureConsent) {
-                        case .attached(let next): prompt = next; attachNote = ForgeCaptureContext.attachedText()
+                        switch ForgeCaptureContext.attach(current: attachedClasses, prompt: prompt, capture: capture, projectBundleID: p.bundleID, consent: remoteCaptureConsent) {
+                        case .attached(let list): attachedClasses = list; attachNote = ForgeCaptureContext.attachedText()
                         case .alreadyAttached: attachNote = ForgeCaptureContext.attachedText()
                         case .rejected(let r): attachNote = ForgeCaptureContext.reasonText(r)
                         }
                     }.disabled(!remoteCaptureConsent)
                     if !remoteCaptureConsent { Text(ForgeCaptureContext.reasonText(.consentOff)).font(.caption2).foregroundStyle(.orange) }
                     if !attachNote.isEmpty { Text(attachNote).font(.caption).foregroundStyle(.green) }
+                    if !attachedClasses.isEmpty {
+                        HStack { Text(ForgeCaptureContext.chipText(attachedClasses.count)).font(.caption); Button(ForgeCaptureContext.removeText()) { attachedClasses = []; attachNote = "" }.font(.caption) }
+                    }
                 }
             }.padding(.top, 8)
         }
