@@ -927,20 +927,20 @@ struct ClassicAppStoreAccountView: View {
     private func search() {
         guard busy == nil else { return }
         let submittedTerm = term
+        let generation = operationGeneration
         let q: String
         var urlAppID: Int64?
         do { let parsed = try StoreSearchQuery.parse(term); q = parsed.term; if case .appID(let s) = parsed, term.contains("/") { urlAppID = Int64(s) } }
         catch { notice = t("Enter an app name, numeric App ID or an Apple App Store link.", "اكتب اسم تطبيق أو App ID رقمي أو رابط من متجر Apple.", "ناو یان ناسنامە یان بەستەری Apple بنووسە.", "Nav, App ID an girêdana Apple binivîse."); return }
         run(t("Searching…", "عم نبحث…", "گەڕان…", "Lêgerîn…")) {
             let country = effectiveCountry
-            // The first search after launch may race the device identity check: wait, then run the same query once.
-            let found = try await MirsaStoreIdentityLoader.retryWhileNotReady { try await client.search(term: q, country: country, limit: 25) }
+            let found = try await client.search(term: q, country: country, limit: 25)
             var available: Set<Int64> = []
             if otherStore, let accountCountry = account?.country {
                 available = try await client.availableInStore(found, country: accountCountry)
             }
             try Task.checkCancellation()
-            guard country == effectiveCountry, submittedTerm == term else { return }
+            guard generation == operationGeneration, country == effectiveCountry, submittedTerm == term else { return }
             results = found; accountAvailable = available; searched = true
             if let wanted = urlAppID ?? openAppID, let hit = found.first(where: { $0.id == wanted }) { selected = hit }
             recentSearchData = StoreRecentSearches.adding(q, to: recentSearchData)
