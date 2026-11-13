@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Five-language text for the store library tools (updates, wishlist, pins, accounts, cleanup).
+/// Five-language text for the store library tools (wishlist, pins, accounts, cleanup).
 /// German is picked only when AppLanguage.current raw value is "de" (added globally by the main worker).
 enum StoreFeatureText {
     static func pick(_ en: String, _ ar: String, _ de: String, _ ckb: String, _ kmr: String) -> String { t(en, ar, de, ckb, kmr) }
@@ -19,15 +19,11 @@ enum StoreFeatureText {
     static var cancel: String { t("Cancel", "إلغاء", "Abbrechen", "هەڵوەشاندنەوە", "Betal") }
     static var shareWarning: String { t("This encrypted file may include your Apple purchase identity. Never share it with anyone you don't trust.", "هالملف المشفّر ممكن يحتوي هوية شراء Apple تبعك. لا تشاركه مع حدا ما بتثق فيه.", "Diese verschlüsselte Datei kann deine Apple-Kaufidentität enthalten. Teile sie nie mit Personen, denen du nicht vertraust.", "ئەم فایلە ڕمزکراوە لەوانەیە ناسنامەی کڕینی Appleی تۆی تێدا بێت. هەرگیز لەگەڵ کەسێکی نابڕوادار هاوبەشی مەکە.", "Ev pela şîfrekirî dibe ku nasnameya kirîna te ya Apple tê de be. Qet bi kesê ku pê nabawerî re parve neke.") }
     static var tools: String { t("Library tools", "أدوات المكتبة", "Bibliothek-Tools", "ئامرازەکانی کتێبخانە", "Amûrên pirtûkxaneyê") }
-    static var updates: String { t("Updates", "التحديثات", "Updates", "نوێکارییەکان", "Rojanekirin") }
     static var wishlist: String { t("Wishlist", "قائمة الأمنيات", "Wunschliste", "لیستی خواستەکان", "Lîsteya daxwazan") }
     static var pins: String { t("Pinned versions", "الإصدارات المثبّتة", "Fixierte Versionen", "وەشانە جێگیرکراوەکان", "Guhertoyên sabît") }
     static var settings: String { t("Settings", "الإعدادات", "Einstellungen", "ڕێکخستنەکان", "Mîheng") }
-    static var checkNow: String { t("Check now", "تحقق الآن", "Jetzt prüfen", "ئێستا بپشکنە", "Niha kontrol bike") }
-    static var upToDate: String { t("Everything is up to date.", "كل شي محدّث.", "Alles ist aktuell.", "هەموو شتێک نوێیە.", "Her tişt rojane ye.") }
     static var noWishes: String { t("No paid apps saved yet.", "ما في تطبيقات مدفوعة محفوظة.", "Noch keine kostenpflichtigen Apps gemerkt.", "هێشتا هیچ ئەپێکی پارەدار پاشەکەوت نەکراوە.", "Hê tu sepana bi pere nehatiye tomarkirin.") }
     static var noPins: String { t("No pinned versions.", "ما في إصدارات مثبّتة.", "Keine fixierten Versionen.", "هیچ وەشانێکی جێگیرکراو نییە.", "Tu guherto sabît nîne.") }
-    static var download: String { t("Download update", "نزّل التحديث", "Update laden", "نوێکاری دابگرە", "Rojanekirinê daxe") }
     static var becameFree: String { t("Now free!", "صار مجاني!", "Jetzt kostenlos!", "ئێستا بێبەرامبەرە!", "Niha belaş e!") }
     static var remove: String { t("Remove", "إزالة", "Entfernen", "لابردن", "Rake") }
     static var unpin: String { t("Unpin", "إلغاء التثبيت", "Lösen", "لابردنی جێگیرکردن", "Sabîtiyê rake") }
