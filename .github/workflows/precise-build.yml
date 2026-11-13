@@ -34,6 +34,7 @@ jobs:
           python3 scripts/appstore/purchases-group-tests.py
           python3 scripts/appstore/version-name-tests.py
           python3 scripts/appstore/encrypted-cellular-tests.py
+          python3 scripts/appstore/download-progress-tests.py
           python3 scripts/appstore/versions-list-tests.py
       - name: Offline Apple request parity and ownership evidence tests
         run: swift test --package-path vendor/ApplePackage --filter 'StoreOwnershipEvidenceTests|StoreDownloadRecoveryTests'
