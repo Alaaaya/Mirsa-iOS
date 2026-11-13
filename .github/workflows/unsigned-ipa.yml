@@ -31,6 +31,8 @@ jobs:
           sudo xcode-select -s "$XC"
           xcodebuild -version
 
+      - name: Validate cold-launch purchase identity
+        run: python3 scripts/appstore/history-startup-tests.py
       - name: Validate on-device App Store backend without simulator
         timeout-minutes: 15
         run: bash scripts/appstore/package-tests.sh
