@@ -44,10 +44,18 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
     let id: UUID; let threadID: UUID; let role: String; let text: String?; let createdAt: String?; let hasImage: Bool?; let result: ForgeChatResult?
     /// Mirsa 2.1: message.attachments (public metadata only). nil for every pre-2.1 message.
     let attachments: [ChatAttachmentMeta]?
+    /// Canonical server state (additive, nil on older servers): quoted message id, quote text/role, own reaction, edit time.
+    var replyToMessageID: UUID? = nil
+    var replyQuoteText: String? = nil
+    var replyQuoteRole: String? = nil
+    var reaction: String? = nil
+    var editedAt: String? = nil
     init(id: UUID, threadID: UUID, role: String, text: String?, createdAt: String? = nil, hasImage: Bool? = nil, result: ForgeChatResult? = nil, attachments: [ChatAttachmentMeta]? = nil) {
         self.id = id; self.threadID = threadID; self.role = role; self.text = text; self.createdAt = createdAt; self.hasImage = hasImage; self.result = result; self.attachments = attachments
     }
-    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments }
+    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, editedAt }
+    enum QK: String, CodingKey { case replyQuote, replyQuoteText, replyQuoteRole }
+    struct Quote: Codable { let text: String?; let role: String? }
     /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -62,6 +70,49 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
         struct Lossy: Decodable { let value: ChatAttachmentMeta?; init(from d: Decoder) throws { value = try? ChatAttachmentMeta(from: d) } }
         let rows = (try? c.decode([Lossy].self, forKey: .attachments))?.compactMap(\.value)
         attachments = (rows?.isEmpty ?? true) ? nil : rows
+        replyToMessageID = (try? c.decode(String.self, forKey: .replyToMessageID)).flatMap { UUID(uuidString: $0) }
+        if let q = try? d.container(keyedBy: QK.self).decode(Quote.self, forKey: .replyQuote) { replyQuoteText = q.text; replyQuoteRole = q.role }
+        else if let q = try? d.container(keyedBy: QK.self).decode(String.self, forKey: .replyQuote) { replyQuoteText = q }
+        if replyQuoteText == nil {
+            let legacy = try d.container(keyedBy: QK.self)
+            replyQuoteText = try? legacy.decode(String.self, forKey: .replyQuoteText)
+            replyQuoteRole = try? legacy.decode(String.self, forKey: .replyQuoteRole)
+        }
+        reaction = try? c.decode(String.self, forKey: .reaction)
+        editedAt = try? c.decode(String.self, forKey: .editedAt)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: K.self)
+        try c.encode(id, forKey: .id); try c.encode(threadID, forKey: .threadID)
+        try c.encode(role, forKey: .role); try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt); try c.encodeIfPresent(hasImage, forKey: .hasImage)
+        try c.encodeIfPresent(result, forKey: .result); try c.encodeIfPresent(attachments, forKey: .attachments)
+        try c.encodeIfPresent(replyToMessageID, forKey: .replyToMessageID)
+        try c.encodeIfPresent(reaction, forKey: .reaction); try c.encodeIfPresent(editedAt, forKey: .editedAt)
+        if replyQuoteText != nil || replyQuoteRole != nil {
+            var q = encoder.container(keyedBy: QK.self)
+            try q.encode(Quote(text: replyQuoteText, role: replyQuoteRole), forKey: .replyQuote)
+        }
+    }
+}
+
+/// Mutation acknowledgments do not contain a canonical message. Always read back after acceptance.
+struct ForgeChatEditAck: Decodable {
+    let ok: Bool
+    let messageID: UUID
+    let edited: Bool
+    let reprocessing: Bool
+}
+struct ForgeChatReadSnapshot: Decodable {
+    let messages: [ForgeChatMessage]
+}
+enum ForgeChatMutationPolicy {
+    static let reactions: Set<String> = ["👍", "❤️", "👎", "😭", "❓", "😂", "🔥", "🙏"]
+    static func accepts(_ reaction: String?) -> Bool { reaction.map { reactions.contains($0) } ?? true }
+    static func canMutate(messageID: UUID, messages: [ForgeChatMessage], hasPending: Bool, status: String) -> Bool {
+        guard !hasPending, let latest = messages.last(where: { $0.role == "user" }),
+              latest.id == messageID, latest.result == nil else { return false }
+        return ["", "open", "new", "queued", "pending"].contains(status.lowercased())
     }
 }
 

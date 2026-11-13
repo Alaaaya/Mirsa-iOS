@@ -154,3 +154,72 @@ final class ForgeChatTimelineTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(ForgeChatMessage.self, from: Data("{\"id\":\"\(UUID().uuidString)\",\"role\":\"kat\"}".utf8)).attachments)
     }
 }
+
+final class ForgeChatCanonicalContractTests: XCTestCase {
+    private let id = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+    private let thread = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
+    private let target = UUID(uuidString: "10000000-0000-0000-0000-000000000003")!
+    private func decode(_ fields: [String: Any] = [:]) throws -> ForgeChatMessage {
+        var row: [String: Any] = ["id": id.uuidString, "threadID": thread.uuidString, "role": "user", "text": "hello"]
+        row.merge(fields) { _, new in new }
+        return try JSONDecoder().decode(ForgeChatMessage.self, from: JSONSerialization.data(withJSONObject: row))
+    }
+    func testOldAndNullMetadataDoNotDropMessages() throws {
+        let old = try decode()
+        XCTAssertNil(old.replyToMessageID); XCTAssertNil(old.replyQuoteText); XCTAssertNil(old.reaction); XCTAssertNil(old.editedAt)
+        let nulls = try decode(["replyToMessageID": NSNull(), "replyQuote": NSNull(), "reaction": NSNull(), "editedAt": NSNull()])
+        XCTAssertEqual(old, nulls)
+    }
+    func testCanonicalObjectQuoteAndMetadataRoundTrip() throws {
+        let row = try decode(["replyToMessageID": target.uuidString, "replyQuote": ["id": target.uuidString, "text": "actual quoted message", "role": "kat"], "reaction": "❤️", "editedAt": "2026-11-13T17:00:00Z"])
+        XCTAssertEqual(row.replyToMessageID, target)
+        XCTAssertEqual(row.replyQuoteText, "actual quoted message"); XCTAssertEqual(row.replyQuoteRole, "kat")
+        XCTAssertEqual(row.reaction, "❤️"); XCTAssertNotNil(row.editedAt)
+        let data = try JSONEncoder().encode(row)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNotNil(json["replyQuote"]); XCTAssertNil(json["replyQuoteText"])
+        XCTAssertEqual(try JSONDecoder().decode(ForgeChatMessage.self, from: data), row)
+    }
+    func testStringQuoteAndLegacyCacheArePreserved() throws {
+        let string = try decode(["replyQuote": "short quote"])
+        XCTAssertEqual(string.replyQuoteText, "short quote"); XCTAssertNil(string.replyQuoteRole)
+        XCTAssertEqual(try JSONDecoder().decode(ForgeChatMessage.self, from: JSONEncoder().encode(string)), string)
+        let legacy = try decode(["replyQuoteText": "cached quote", "replyQuoteRole": "user"])
+        XCTAssertEqual(legacy.replyQuoteText, "cached quote"); XCTAssertEqual(legacy.replyQuoteRole, "user")
+    }
+    func testMalformedOptionalMetadataNeverHidesText() throws {
+        let row = try decode(["replyToMessageID": "not-a-uuid", "replyQuote": 7, "reaction": [], "editedAt": false])
+        XCTAssertEqual(row.text, "hello"); XCTAssertNil(row.replyToMessageID)
+        XCTAssertNil(row.replyQuoteText); XCTAssertNil(row.reaction); XCTAssertNil(row.editedAt)
+    }
+    func testEditAckRequiresCanonicalReprocessingContract() throws {
+        let json: [String: Any] = ["ok": true, "messageID": id.uuidString, "edited": true, "reprocessing": true]
+        let ack = try JSONDecoder().decode(ForgeChatEditAck.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(ack.messageID, id); XCTAssertTrue(ack.edited); XCTAssertTrue(ack.reprocessing)
+        XCTAssertThrowsError(try JSONDecoder().decode(ForgeChatEditAck.self, from: Data(#"{"ok":true,"edited":true}"#.utf8)))
+        XCTAssertThrowsError(try JSONDecoder().decode(ForgeChatReadSnapshot.self, from: Data(#"{"ok":true}"#.utf8)))
+    }
+    func testServerReadReplacesMetadataIncludingRemovedReaction() throws {
+        let previous = try decode(["reaction": "👍", "replyToMessageID": target.uuidString, "replyQuote": "old quote"])
+        let canonical = try decode(["reaction": NSNull(), "editedAt": "2026-11-13T17:00:00Z"])
+        let merged = ForgeChatTimeline.mergeConfirmed(previous: [previous], incoming: [canonical])
+        XCTAssertEqual(merged, [canonical]); XCTAssertNil(merged[0].reaction); XCTAssertNil(merged[0].replyQuoteText)
+    }
+    func testMutationEligibilityUsesNewestOwnedUserTurnNotProvisionalReply() throws {
+        let user = try decode()
+        let provisional = ForgeChatMessage(id: target, threadID: thread, role: "kat", text: "")
+        XCTAssertTrue(ForgeChatMutationPolicy.canMutate(messageID: id, messages: [user, provisional], hasPending: false, status: "pending"))
+        XCTAssertFalse(ForgeChatMutationPolicy.canMutate(messageID: target, messages: [user, provisional], hasPending: false, status: "pending"))
+        XCTAssertFalse(ForgeChatMutationPolicy.canMutate(messageID: id, messages: [user], hasPending: true, status: "pending"))
+        for status in ["working", "done", "failed", "building"] {
+            XCTAssertFalse(ForgeChatMutationPolicy.canMutate(messageID: id, messages: [user], hasPending: false, status: status))
+        }
+        let newer = ForgeChatMessage(id: UUID(), threadID: thread, role: "user", text: "newer")
+        XCTAssertFalse(ForgeChatMutationPolicy.canMutate(messageID: id, messages: [user, newer], hasPending: false, status: "pending"))
+    }
+    func testReactionWhitelistIncludesRemovalAndRejectsUnknownInput() {
+        XCTAssertTrue(ForgeChatMutationPolicy.accepts(nil))
+        for emoji in ["👍", "❤️", "👎", "😭", "❓", "😂", "🔥", "🙏"] { XCTAssertTrue(ForgeChatMutationPolicy.accepts(emoji)) }
+        for invalid in ["", "script", "💰", "👍👍"] { XCTAssertFalse(ForgeChatMutationPolicy.accepts(invalid)) }
+    }
+}

@@ -5,8 +5,7 @@ r=Path(__file__).resolve().parents[2]
 package=(r/'ios-app/AppStore/StorePackages.swift').read_text()
 model=package.split('// BEGIN STORE DOWNLOAD PROGRESS')[1].split('// END STORE DOWNLOAD PROGRESS')[0]
 ui=(r/'ios-app/Apps/AppStoreAccountView.swift').read_text()
-assert 'didWriteData bytesWritten' in package and 'received: totalBytesWritten, expected: totalBytesExpectedToWrite' in package
-assert 'received: Int64(size)' in package # cached path
+assert 'StoreResumableDownload(' in package and 'restarted: restarted' in package
 assert package.index('try Self.assemble') < package.index('report?(.init(phase: .validating))')
 assert ui.index('try await onDownloaded(url)') < ui.index('transfer?.apply(.init(phase: .saved))')
 assert 'progressAttempt == attempt' in ui and 'progressAttempt = nil; transfer = nil' in ui
