@@ -143,16 +143,6 @@ final class StoreIdentityRaceTests: XCTestCase {
             catch { XCTFail("type") }
         }
     }
-}
-
-final class Flag { var value = false }
-final class RegCounter: @unchecked Sendable { private let l = NSLock(); private var n = 0; func set() { l.lock(); n += 1; l.unlock() }; var count: Int { l.lock(); defer { l.unlock() }; return n } }
-private final class RaceVault: MirsaStoreVault {
-    var items: [String: Data] = [:]
-    func read(_ key: String) throws -> Data? { items[key] }
-    func write(_ data: Data, key: String) throws { items[key] = data }
-    func remove(_ key: String) throws { items[key] = nil }
-
     func testRegistrationSharedAndNeverTrustsLocalRead() async throws {
         let reg = MirsaStoreRegistration()
         let user = UUID()
@@ -226,4 +216,15 @@ private final class RaceVault: MirsaStoreVault {
         func b(_ s: String) -> String { Data(s.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "").replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_") }
         return b("{}") + "." + b("{\"sub\":\"" + user.uuidString.lowercased() + "\",\"role\":\"authenticated\"}") + ".sig"
     }
+}
+
+
+final class Flag { var value = false }
+final class RegCounter: @unchecked Sendable { private let l = NSLock(); private var n = 0; func set() { l.lock(); n += 1; l.unlock() }; var count: Int { l.lock(); defer { l.unlock() }; return n } }
+private final class RaceVault: MirsaStoreVault {
+    var items: [String: Data] = [:]
+    func read(_ key: String) throws -> Data? { items[key] }
+    func write(_ data: Data, key: String) throws { items[key] = data }
+    func remove(_ key: String) throws { items[key] = nil }
+
 }
