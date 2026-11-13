@@ -15,10 +15,14 @@ enum EncryptedLocalInstall {
         var timer: Task<Void, Never>?
         var stop: (() -> Void)?
         var finished = false
+        var foreground: NSObjectProtocol?
+        let started = ProcessInfo.processInfo.systemUptime
         func finish(_ result: Result<Void, Error>) {
             guard !finished else { return }
             finished = true
             timer?.cancel()
+            if let foreground { NotificationCenter.default.removeObserver(foreground) }
+            foreground = nil
             if case .failure = result { worker?.cancel(); stop?() }
             let pending = continuation
             continuation = nil
@@ -135,6 +139,17 @@ enum EncryptedLocalInstall {
             try await withCheckedThrowingContinuation { continuation in
                 attempt.continuation = continuation
                 guard !Task.isCancelled else { attempt.finish(.failure(CancellationError())); return }
+                #if canImport(UIKit)
+                attempt.foreground = NotificationCenter.default.addObserver(
+                    forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+                ) { _ in
+                    Task { @MainActor in
+                        if ProcessInfo.processInfo.systemUptime - attempt.started >= 30 {
+                            attempt.finish(.failure(SideloadError.message(unconfirmed)))
+                        }
+                    }
+                }
+                #endif
                 attempt.worker = Task {
                     do {
                         try await performHandoff(file, attempt: attempt)

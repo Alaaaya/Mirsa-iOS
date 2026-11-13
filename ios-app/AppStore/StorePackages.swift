@@ -2,6 +2,56 @@ import Foundation
 @preconcurrency import ApplePackage
 import ZIPFoundation
 
+// BEGIN STORE DOWNLOAD PROGRESS
+struct StoreDownloadProgress: Sendable {
+    enum Phase: Int, Sendable { case preparing, downloading, packaging, validating, saving, saved, failed }
+    struct Event: Sendable {
+        let phase: Phase
+        var received: Int64 = 0
+        var expected: Int64 = 0
+        var time: Double = ProcessInfo.processInfo.systemUptime
+    }
+    @TaskLocal static var report: (@Sendable (Event) -> Void)?
+    var phase = Phase.preparing
+    var received: Int64 = 0
+    var expected: Int64 = 0
+    var speed: Double = 0
+    var fraction: Double? = 0
+    private var lastTime: Double?
+    private var lastBytes: Int64 = 0
+    private var terminal = false
+    mutating func apply(_ event: Event) {
+        guard !terminal, event.phase.rawValue >= phase.rawValue else { return }
+        phase = event.phase
+        if phase == .failed { terminal = true; fraction = nil; speed = 0; return }
+        if phase == .downloading {
+            let bytes = max(received, max(0, event.received))
+            if let lastTime, event.time > lastTime {
+                speed = max(0, Double(bytes - lastBytes) / (event.time - lastTime))
+            }
+            lastTime = event.time; lastBytes = bytes
+            received = bytes
+            expected = event.expected > 0 ? event.expected : 0
+            if expected > 0 {
+                let value = 0.05 + 0.89 * min(1, Double(received) / Double(expected))
+                fraction = max(fraction ?? 0, value)
+            } else { fraction = nil }
+        } else {
+            let value: Double
+            switch phase {
+            case .preparing: value = 0
+            case .packaging: value = 0.94
+            case .validating: value = 0.97
+            case .saving: value = 0.99
+            case .saved: value = 1; terminal = true
+            default: return
+            }
+            fraction = max(fraction ?? 0, value)
+        }
+    }
+}
+// END STORE DOWNLOAD PROGRESS
+
 protocol MirsaStorePackages {
     func cancel()
     func fetch(output: DownloadOutput, bundleID: String) async throws -> URL
@@ -32,12 +82,19 @@ final class AppleStorePackages: MirsaStorePackages {
                                                attributes: Self.protection)
         let destination = directory.appendingPathComponent("App.ipa")
         do {
-            let download = StoreCDNDownload()
+            let report = StoreDownloadProgress.report
+            report?(.init(phase: .downloading))
+            let download = StoreCDNDownload(report: report)
             register(download)
             defer { register(nil) }
             try await download.download(url, to: destination)
             try Task.checkCancellation()
+            report?(.init(phase: .packaging))
             try Self.assemble(destination, output: output, bundleID: bundleID)
+            report?(.init(phase: .validating))
+            guard (try destination.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) > 0 else {
+                throw MirsaStoreError.invalidPackage
+            }
             try FileManager.default.setAttributes(Self.protection, ofItemAtPath: destination.path)
             handedOff = true
             return destination
@@ -146,6 +203,11 @@ private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unc
     private var moved = false
     private var task: URLSessionDownloadTask?
     private var cancelled = false
+    private let report: (@Sendable (StoreDownloadProgress.Event) -> Void)?
+    init(report: (@Sendable (StoreDownloadProgress.Event) -> Void)? = nil) {
+        self.report = report
+        super.init()
+    }
     private let maxBytes: Int64 = 4 * 1024 * 1024 * 1024
 
     func cancel() {
@@ -199,6 +261,8 @@ private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unc
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
+        lock.lock(); let live = continuation != nil && !cancelled; lock.unlock()
+        if live { report?(.init(phase: .downloading, received: totalBytesWritten, expected: totalBytesExpectedToWrite)) }
         if totalBytesWritten > maxBytes || totalBytesExpectedToWrite > maxBytes {
             failure = MirsaStoreError.invalidPackage
             downloadTask.cancel()
@@ -215,6 +279,9 @@ private final class StoreCDNDownload: NSObject, URLSessionDownloadDelegate, @unc
             try MirsaStorePolicy.downloadURL(url)
             try FileManager.default.moveItem(at: location, to: destination)
             moved = true
+            lock.lock(); let live = continuation != nil && !cancelled; lock.unlock()
+            if live { report?(.init(phase: .downloading, received: Int64(size),
+                                   expected: response.expectedContentLength)) }
         } catch { failure = error }
     }
 
