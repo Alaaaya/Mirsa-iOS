@@ -11,7 +11,7 @@ final class ForgeFrameworkClassesTests: XCTestCase {
     /// Real-shaped arm64/arm64e slice: __TEXT with __objc_classname, __DATA_CONST with a chained-pointer __objc_classlist,
     /// LC_DYLD_CHAINED_FIXUPS, no symbol table (stripped). Class names are read from the strings section, so no pointer decoding is needed.
     private func slice(subtype: UInt32, classNames: [String], cryptid: UInt32 = 0) -> [UInt8] {
-        let strings = classNames.flatMap { Array($0.utf8) + [0] }
+        let strings: [UInt8] = classNames.flatMap { name -> [UInt8] in Array(name.utf8) + [UInt8(0)] }
         let seg = 72 + 80 * 2, enc = 20, fix = 16
         let hdr = 32, cmdsSize = seg + enc + fix
         let strOff = 0x1000
