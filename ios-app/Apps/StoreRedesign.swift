@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 // MARK: - App Store section redesign: shared look (UI only)
 //
@@ -45,6 +46,10 @@ enum StoreLuxe {
     }
 
     /// Keeps an icon's average colour readable as a card background.
+    /// Pre-tinted glass fill used instead of a per-card blur (close to ultraThinMaterial on the aurora).
+    static let glassTop = Color(red: 0.20, green: 0.19, blue: 0.34).opacity(0.62)
+    static let glassBottom = Color(red: 0.11, green: 0.10, blue: 0.22).opacity(0.70)
+
     static func vivid(_ color: Color) -> Color {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard UIColor(color).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return color }
@@ -54,13 +59,19 @@ enum StoreLuxe {
 
 // MARK: Layered glass
 
-/// Layered glass with the Mirsa rim and a soft top sheen. Liquid Glass theme draws
-/// translucent material; Classic (or Reduce Transparency) draws the solid card.
+/// Layered glass with the Mirsa rim and a soft top sheen.
+///
+/// Performance: cards and chips draw a pre-tinted translucent fill instead of a live blur,
+/// so scrolling lists composite flat layers only. A real `.ultraThinMaterial` is kept for
+/// one region per screen (the floating bar, `material: true`). Only raised surfaces
+/// (elevation >= 1.2: the bar and hero cards, a few per screen) get a single soft shadow,
+/// drawn by the base shape alone. Classic theme or Reduce Transparency draws the solid card.
 struct StoreGlass<S: InsettableShape>: ViewModifier {
     let shape: S
     var tint: Color? = nil
     var sheen = true
     var elevation: Double = 1
+    var material = false
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -70,12 +81,11 @@ struct StoreGlass<S: InsettableShape>: ViewModifier {
         content
             .background {
                 ZStack {
+                    base(liquid: liquid)
                     if liquid {
-                        shape.fill(.ultraThinMaterial)
                         shape.fill(LinearGradient(colors: [tone.opacity(tint == nil ? 0.16 : 0.34), Color.white.opacity(0.02)],
                                                   startPoint: .topLeading, endPoint: .bottomTrailing))
                     } else {
-                        shape.fill(LinearGradient(colors: [MirsaPalette.cardTop, MirsaPalette.card], startPoint: .top, endPoint: .bottom))
                         shape.fill(LinearGradient(colors: [tone.opacity(tint == nil ? 0.14 : 0.32), tone.opacity(0.04)],
                                                   startPoint: .topLeading, endPoint: .bottomTrailing))
                     }
@@ -86,14 +96,33 @@ struct StoreGlass<S: InsettableShape>: ViewModifier {
                         ], startPoint: .top, endPoint: .bottom))
                     }
                 }
-                .shadow(color: tone.opacity(0.16 * elevation), radius: 18 * elevation, y: 9 * elevation)
-                .shadow(color: Color.black.opacity(0.22 * elevation), radius: 8 * elevation, y: 4 * elevation)
             }
             .overlay {
                 shape.strokeBorder(LinearGradient(colors: [Color.white.opacity(0.30), tone.opacity(0.28), Color.white.opacity(0.04)],
                                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.9)
             }
             .contentShape(shape)
+    }
+
+    @ViewBuilder private func base(liquid: Bool) -> some View {
+        if elevation >= 1.2 {
+            fill(liquid: liquid).shadow(color: Color.black.opacity(0.26), radius: 10, y: 5)
+        } else {
+            fill(liquid: liquid)
+        }
+    }
+
+    @ViewBuilder private func fill(liquid: Bool) -> some View {
+        Group {
+            if liquid && material {
+                shape.fill(.ultraThinMaterial)
+            } else if liquid {
+                // Pre-tinted stand-in for the material: same dark violet glass, no blur pass.
+                shape.fill(LinearGradient(colors: [StoreLuxe.glassTop, StoreLuxe.glassBottom], startPoint: .top, endPoint: .bottom))
+            } else {
+                shape.fill(LinearGradient(colors: [MirsaPalette.cardTop, MirsaPalette.card], startPoint: .top, endPoint: .bottom))
+            }
+        }
     }
 }
 
@@ -104,18 +133,49 @@ extension View {
     func storeGlassCapsule(tint: Color? = nil, elevation: Double = 0.6) -> some View {
         modifier(StoreGlass(shape: Capsule(), tint: tint, elevation: elevation))
     }
+    /// The one live-blur region of a screen: the floating section bar.
+    func storeGlassBar(elevation: Double = 1.2) -> some View {
+        modifier(StoreGlass(shape: Capsule(), elevation: elevation, material: true))
+    }
 }
 
 /// Section background: the app's themed aurora with a faint Mirsa glow on top.
+/// Reduce Motion, or a page that is hidden behind another one, freezes the drifting light.
 struct StoreLuxeBackground: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.storePageVisible) private var pageVisible
     var body: some View {
         ZStack {
-            AuroraBackground()
+            AuroraBackground(paused: reduceMotion || !pageVisible)
             RadialGradient(colors: [StoreLuxe.accent.opacity(0.22), .clear], center: .topTrailing, startRadius: 10, endRadius: 420)
             RadialGradient(colors: [StoreLuxe.cyan.opacity(0.10), .clear], center: .bottomLeading, startRadius: 10, endRadius: 380)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
+    }
+}
+
+private struct StoreBackdropProvidedKey: EnvironmentKey { static let defaultValue = false }
+private struct StorePageVisibleKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    /// False for the App Store pages kept alive but hidden, so their animations rest.
+    var storePageVisible: Bool {
+        get { self[StorePageVisibleKey.self] }
+        set { self[StorePageVisibleKey.self] = newValue }
+    }
+    /// Set by the App Store tab, which draws one shared background behind all four pages.
+    var storeBackdropProvided: Bool {
+        get { self[StoreBackdropProvidedKey.self] }
+        set { self[StoreBackdropProvidedKey.self] = newValue }
+    }
+}
+
+/// A page's background: nothing when the tab already draws the shared one (so hidden pages
+/// do not keep extra animated auroras alive), the full background when hosted on its own.
+struct StorePageBackdrop: View {
+    @Environment(\.storeBackdropProvided) private var provided
+    var body: some View {
+        if provided { Color.clear.allowsHitTesting(false) } else { StoreLuxeBackground() }
     }
 }
 
@@ -131,28 +191,85 @@ enum StoreHaptics {
 
 // MARK: Icon colour
 
-/// Loads public App Store artwork once and keeps its dominant (average) colour.
+struct StoreArtworkDecoded: @unchecked Sendable {
+    let image: UIImage
+    let color: Color
+}
+
+/// Off-main image work: download, downsample with ImageIO and average colour.
+enum StoreArtworkDecoder {
+    static func decode(_ url: URL) async -> StoreArtworkDecoded? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                       kCGImageSourceShouldCacheImmediately: true,
+                       kCGImageSourceCreateThumbnailWithTransform: true,
+                       kCGImageSourceThumbnailMaxPixelSize: 360] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        return StoreArtworkDecoded(image: UIImage(cgImage: cg), color: StoreLuxe.vivid(average(cg)))
+    }
+
+    /// Average colour from a 1x1 redraw. Safe off the main thread.
+    static func average(_ cg: CGImage) -> Color {
+        let fallback = Color(red: 0.45, green: 0.35, blue: 0.95)
+        guard let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return fallback }
+        ctx.interpolationQuality = .medium
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard let raw = ctx.data else { return fallback }
+        let p = raw.assumingMemoryBound(to: UInt8.self)
+        return Color(red: Double(p[0]) / 255, green: Double(p[1]) / 255, blue: Double(p[2]) / 255)
+    }
+}
+
+/// Loads public App Store artwork once per URL and keeps its dominant (average) colour.
+/// Images live in an NSCache (not published), so a finished download only redraws the
+/// one icon that asked for it; colour updates are coalesced into one publish per burst.
 @MainActor
 final class StoreArtworkTint: ObservableObject {
     static let shared = StoreArtworkTint()
-    @Published private(set) var images: [String: UIImage] = [:]
     @Published private(set) var colors: [String: Color] = [:]
-    private var inflight: Set<String> = []
+    private let images: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 200
+        return c
+    }()
+    private var inflight: [String: Task<StoreArtworkDecoded?, Never>] = [:]
+    private var pending: [String: Color] = [:]
+    private var flushScheduled = false
 
-    func load(_ urlString: String) {
-        guard !urlString.isEmpty, images[urlString] == nil, !inflight.contains(urlString),
-              let url = URL(string: urlString), url.scheme == "https" else { return }
-        inflight.insert(urlString)
+    func cachedImage(_ urlString: String) -> UIImage? { images.object(forKey: urlString as NSString) }
+
+    func load(_ urlString: String) async -> UIImage? {
+        if let hit = cachedImage(urlString) { return hit }
+        guard !urlString.isEmpty, let url = URL(string: urlString), url.scheme == "https" else { return nil }
+        let task: Task<StoreArtworkDecoded?, Never>
+        if let running = inflight[urlString] { task = running }
+        else {
+            task = Task.detached(priority: .utility) { await StoreArtworkDecoder.decode(url) }
+            inflight[urlString] = task
+        }
+        let result = await task.value
+        inflight[urlString] = nil
+        guard let result else { return nil }
+        images.setObject(result.image, forKey: urlString as NSString)
+        if colors[urlString] == nil && pending[urlString] == nil { enqueue(urlString, result.color) }
+        return result.image
+    }
+
+    private func enqueue(_ key: String, _ color: Color) {
+        pending[key] = color
+        guard !flushScheduled else { return }
+        flushScheduled = true
         Task { @MainActor [weak self] in
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 15
-            let loaded = try? await URLSession.shared.data(for: request)
+            try? await Task.sleep(nanoseconds: 150_000_000)
             guard let self else { return }
-            self.inflight.remove(urlString)
-            guard let data = loaded?.0, let image = UIImage(data: data) else { return }
-            if self.images.count > 160 { self.images.removeAll(); self.colors.removeAll() }
-            self.images[urlString] = image
-            self.colors[urlString] = StoreLuxe.vivid(IconTint.color(for: "store-art|" + urlString, image: image))
+            if self.colors.count > 300 { self.colors.removeAll() }
+            self.colors.merge(self.pending) { _, new in new }
+            self.pending.removeAll()
+            self.flushScheduled = false
         }
     }
 
@@ -161,18 +278,37 @@ final class StoreArtworkTint: ObservableObject {
     }
 }
 
-/// App icon from artwork, with a tinted monogram while loading.
+/// Average colour of local IPA icons, computed once per key off the main thread.
+@MainActor
+enum StoreIconTintCache {
+    private static var colors: [String: Color] = [:]
+    private struct Box: @unchecked Sendable { let image: CGImage }
+
+    static func cached(_ key: String) -> Color? { colors[key] }
+
+    static func color(_ key: String, image: UIImage?) async -> Color? {
+        if let hit = colors[key] { return hit }
+        guard let cg = image?.cgImage else { return nil }
+        let box = Box(image: cg)
+        let c = await Task.detached(priority: .utility) { StoreLuxe.vivid(StoreArtworkDecoder.average(box.image)) }.value
+        colors[key] = c
+        return c
+    }
+}
+
+/// App icon from artwork, with a tinted monogram while loading. Only this icon redraws
+/// when its image arrives. A shadow is drawn for the large hero icon only.
 struct StoreArtwork: View {
     let url: String
     let seed: String
     let name: String
     var size: CGFloat
-    @ObservedObject private var tints = StoreArtworkTint.shared
+    @State private var image: UIImage?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         ZStack {
-            if let image = tints.images[url] {
+            if let image = image ?? StoreArtworkTint.shared.cachedImage(url) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 LinearGradient(colors: [StoreLuxe.seedColor(seed), StoreLuxe.seedColor(seed + "~").opacity(0.75)],
@@ -185,8 +321,13 @@ struct StoreArtwork: View {
         .frame(width: size, height: size)
         .clipShape(shape)
         .overlay(shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.28), radius: size * 0.08, y: size * 0.05)
-        .task(id: url) { tints.load(url) }
+        .background {
+            if size >= 100 { shape.fill(Color.black.opacity(0.35)).shadow(color: .black.opacity(0.3), radius: 8, y: 5) }
+        }
+        .task(id: url) {
+            if let hit = StoreArtworkTint.shared.cachedImage(url) { image = hit; return }
+            image = await StoreArtworkTint.shared.load(url)
+        }
         .accessibilityHidden(true)
     }
 }
@@ -232,7 +373,7 @@ struct StoreMonogram: View {
         }
         .frame(width: size, height: size)
         .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.2))
-        .shadow(color: StoreLuxe.accent.opacity(0.45), radius: size * 0.18, y: size * 0.06)
+        .background(Circle().fill(StoreLuxe.accent.opacity(0.35)).padding(-size * 0.06))
         .accessibilityHidden(true)
     }
 }
@@ -342,7 +483,6 @@ struct StorePageHeader<Trailing: View>: View {
                     .font(MirsaFont.pageTitle)
                     .foregroundStyle(.white)
                     .lineLimit(1).minimumScaleFactor(0.6)
-                    .shadow(color: StoreLuxe.accent.opacity(0.35), radius: 14, y: 4)
             }
             Spacer(minLength: MirsaSpacing.xs)
             trailing()
@@ -364,7 +504,9 @@ struct StoreEmptyState: View {
     var body: some View {
         VStack(spacing: MirsaSpacing.s) {
             ZStack {
-                Circle().fill(StoreLuxe.identitySoft).frame(width: 86, height: 86).blur(radius: 18)
+                Circle().fill(RadialGradient(colors: [StoreLuxe.accent.opacity(0.55), StoreLuxe.cyan.opacity(0.18), .clear],
+                                             center: .center, startRadius: 20, endRadius: 62))
+                    .frame(width: 124, height: 124)
                 Circle().fill(StoreLuxe.identity).frame(width: 64, height: 64)
                     .overlay(Circle().fill(LinearGradient(colors: [Color.white.opacity(0.35), .clear], startPoint: .top, endPoint: .center)))
                 Image(systemName: icon).font(.system(size: 26, weight: .semibold)).foregroundStyle(.white)
@@ -392,6 +534,7 @@ struct StoreEmptyState: View {
 /// Shimmering placeholder block. The UI-test harness keeps it still so XCUITest can idle.
 struct StoreShimmer: ViewModifier {
     @State private var phase: CGFloat = -1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func body(content: Content) -> some View {
         content
             .overlay {
@@ -404,7 +547,7 @@ struct StoreShimmer: ViewModifier {
                 .allowsHitTesting(false)
             }
             .onAppear {
-                guard !MirsaUITestHarness.active else { return }
+                guard !MirsaUITestHarness.active, !reduceMotion else { return }
                 withAnimation(.linear(duration: 1.25).repeatForever(autoreverses: false)) { phase = 1.4 }
             }
     }
@@ -544,13 +687,21 @@ enum StoreLinks {
 // MARK: Page transitions
 
 extension View {
-    /// Smooth cross-fade with a slight lift for the section's pages.
+    /// Smooth cross-fade with a slight lift for the section's pages (cross-fade only with Reduce Motion).
     func storePageTransition(visible: Bool) -> some View {
-        self
+        modifier(StorePageTransition(visible: visible))
+    }
+}
+
+private struct StorePageTransition: ViewModifier {
+    let visible: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content
             .opacity(visible ? 1 : 0)
-            .scaleEffect(visible ? 1 : 0.985, anchor: .bottom)
-            .offset(y: visible ? 0 : 10)
-            .animation(.spring(response: 0.42, dampingFraction: 0.86), value: visible)
+            .scaleEffect(visible || reduceMotion ? 1 : 0.985, anchor: .bottom)
+            .offset(y: visible || reduceMotion ? 0 : 10)
+            .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.42, dampingFraction: 0.86), value: visible)
     }
 }
 
