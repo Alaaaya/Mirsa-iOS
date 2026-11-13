@@ -553,6 +553,8 @@ private struct EncryptedEntryCard: View {
                 Button { onInstall() } label: {
                     Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
                         .font(MirsaFont.button).foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .padding(.horizontal, 10)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
@@ -561,12 +563,15 @@ private struct EncryptedEntryCard: View {
                 .buttonStyle(.mirsaPress)
                 .disabled(store.busy != nil)
                 .opacity(store.busy != nil ? 0.55 : 1)
+                // Share and Delete are icon-only so long labels never wrap mid-word; VoiceOver keeps the full label.
                 StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
+                    .labelStyle(.iconOnly).frame(width: 64)
                 Button { StoreHaptics.delete(); onDelete() } label: {
                     Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
                         .foregroundStyle(MirsaPalette.danger)
                 }
                 .buttonStyle(.mirsaSecondary)
+                .labelStyle(.iconOnly).frame(width: 64)
                 .disabled(installing)
             }
         }

@@ -447,7 +447,7 @@ struct StoreStorageSummary: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(storeText("IPA storage", "مساحة ملفات IPA", de: "IPA-Speicher", ckb: "شوێنی IPA", kmr: "Cihê IPA"))
                         .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
-                    Text(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))
+                    Text(StoreBytes.text(total))
                         .font(.system(size: 28, weight: .bold, design: .rounded)).foregroundStyle(.white).monospacedDigit()
                 }
                 Spacer(minLength: 0)
@@ -456,7 +456,7 @@ struct StoreStorageSummary: View {
                         .font(MirsaFont.secondary.weight(.semibold)).foregroundStyle(MirsaPalette.textSecondary).monospacedDigit()
                     if let free {
                         Text(storeText("Free on iPhone: ", "الفاضي بالآيفون: ", de: "Frei auf dem iPhone: ", ckb: "بەتاڵ لە ئایفۆن: ", kmr: "Vala li iPhone: ")
-                             + ByteCountFormatter.string(fromByteCount: free, countStyle: .file))
+                             + StoreBytes.text(free))
                             .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary).lineLimit(1).minimumScaleFactor(0.8)
                     }
                 }
@@ -482,7 +482,7 @@ struct StoreStorageSummary: View {
                         HStack(spacing: 5) {
                             Circle().fill(s.color).frame(width: 7, height: 7)
                             Text(s.name).lineLimit(1)
-                            Text(ByteCountFormatter.string(fromByteCount: s.bytes, countStyle: .file)).foregroundStyle(MirsaPalette.textTertiary)
+                            Text(StoreBytes.text(s.bytes)).foregroundStyle(MirsaPalette.textTertiary)
                         }
                         .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
                         .frame(maxWidth: 200, alignment: .leading)
@@ -494,6 +494,16 @@ struct StoreStorageSummary: View {
         .storeGlass(radius: 24)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("store-storage-summary")
+    }
+}
+
+enum StoreBytes {
+    /// File size text with digits always ("0 KB", never "Zero KB").
+    static func text(_ bytes: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        f.allowsNonnumericFormatting = false
+        return f.string(fromByteCount: max(0, bytes))
     }
 }
 
