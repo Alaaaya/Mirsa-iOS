@@ -652,7 +652,7 @@ struct AppStoreAccountView: View {
                 Spacer(minLength: 0)
                 Button { openDetail(app) } label: {
                     HStack(spacing: 4) {
-                        Text(t("Versions", "النسخ", "وەشانەکان", "Guherto"))
+                        Text(storeText("Versions", "النسخ", de: "Versionen", ckb: "وەشانەکان", kmr: "Guherto"))
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
                     }
                     .font(MirsaFont.caption.weight(.semibold)).foregroundStyle(Color.white.opacity(0.85))

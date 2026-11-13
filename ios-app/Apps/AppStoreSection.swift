@@ -1061,8 +1061,7 @@ struct AppStorePurchasesPage: View {
     private func purchaseRow(_ item: MirsaStorePurchase) -> some View {
         let art = artwork[item.id] ?? ""
         let tint = tints.tint(art, seed: item.bundleID)
-        // Arabic and Sorani keep the mirrored look of the existing rows (icon on the right).
-        let mirrored = AppLanguageStore.shared.current == .arabic || AppLanguageStore.shared.current == .sorani
+        // Physical LTR in every language (icon left, download action right), like the rest of the section.
         return HStack(spacing: MirsaSpacing.s) {
             StoreArtwork(url: art, seed: item.bundleID, name: item.name.isEmpty ? item.bundleID : item.name, size: 52)
             VStack(alignment: .leading, spacing: 4) {
@@ -1101,7 +1100,7 @@ struct AppStorePurchasesPage: View {
             }.frame(width: 44, height: 44)
         }
         .padding(.horizontal, MirsaSpacing.s).padding(.vertical, 10)
-        .environment(\.layoutDirection, mirrored ? .rightToLeft : .leftToRight)
+        .environment(\.layoutDirection, .leftToRight)
         .storeGlass(radius: 22, tint: tint, sheen: true, elevation: 0.5)
         .contextMenu {
             Button { StoreLinks.copy(item.bundleID) } label: {
