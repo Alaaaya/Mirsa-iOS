@@ -151,7 +151,7 @@ enum EncryptedLocalInstall {
                     forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
                 ) { _ in
                     Task { @MainActor in
-                        if ProcessInfo.processInfo.systemUptime - attempt.started >= 5 {
+                        if ProcessInfo.processInfo.systemUptime - attempt.started >= 10 {
                             attempt.finish(.failure(Failure.message(unconfirmed)))
                         }
                     }
@@ -164,7 +164,7 @@ enum EncryptedLocalInstall {
                     } catch { attempt.finish(.failure(error)) }
                 }
                 attempt.timer = Task {
-                    do { try await Task.sleep(nanoseconds: 5_000_000_000) }
+                    do { try await Task.sleep(nanoseconds: 10_000_000_000) }
                     catch { return }
                     attempt.finish(.failure(Failure.message(unconfirmed)))
                 }
@@ -207,7 +207,7 @@ enum EncryptedLocalInstall {
         // Keep the exact source file alive in its existing library. Do not
         // replace an earlier local server until iOS has accepted this handoff.
         let requested = await withTaskCancellationHandler {
-            await server.awaitFirstRequest(timeout: 5)
+            await server.awaitFirstRequest(timeout: 10)
         } onCancel: { server.stop() }
         try Task.checkCancellation()
         guard requested else { throw Failure.message(unconfirmed) }
