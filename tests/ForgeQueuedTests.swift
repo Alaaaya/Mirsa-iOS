@@ -125,6 +125,29 @@ final class ForgeQueuedTests: XCTestCase {
         XCTAssertTrue(ForgeCaptureContext.composed(prompt: "x", classes: ["A"]).hasPrefix("x"))
         XCTAssertFalse(ForgeCaptureContext.chipText(2).contains("User-reviewed"))
     }
+    func testAttachmentStateEmptyPromptStaysEmptyAndWire() {
+        var st = ForgeAttachmentState(); let a = UUID(), b = UUID()
+        var prompt = ""
+        st.set(["AView", "BCell"], for: a)
+        XCTAssertEqual(prompt, "")
+        XCTAssertEqual(st.classes(for: a), ["AView", "BCell"])
+        XCTAssertTrue(st.wirePrompt(prompt, for: a).contains("AView"))
+        prompt = "my text"
+        st.set(["AView"], for: a)
+        XCTAssertEqual(prompt, "my text")
+        XCTAssertTrue(st.wirePrompt(prompt, for: a).hasPrefix("my text"))
+        XCTAssertEqual(st.classes(for: b), [])
+        XCTAssertEqual(st.wirePrompt(prompt, for: b), "my text")
+        st.set(["BOnly"], for: b)
+        XCTAssertEqual(st.classes(for: a), ["AView"])
+        XCTAssertFalse(st.wirePrompt(prompt, for: a).contains("BOnly"))
+        st.clear(a)
+        XCTAssertEqual(prompt, "my text")
+        XCTAssertEqual(st.wirePrompt(prompt, for: a), "my text")
+        XCTAssertEqual(st.classes(for: b), ["BOnly"])
+        st.clear(b)
+        XCTAssertEqual(st, ForgeAttachmentState())
+    }
     func testStoreReadyCodeStillAddsVersion() async throws {
         let store = ForgeStore.shared; let saved = store.projects; defer { store.projects = saved }
         let p = project(); store.projects = [p]
