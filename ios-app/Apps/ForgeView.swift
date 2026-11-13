@@ -200,6 +200,14 @@ struct ForgeProjectView: View {
                 }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
                 ForgeFeaturesView(id: id, prompt: $prompt, attachedClasses: $attachedClasses, showInspector: $showInspector)
                 ForgePreciseSection(id: id, prompt: $prompt)
+                if let queued = store.queuedNotice {
+                    HStack(alignment: .top) {
+                        Image(systemName: "tray.full")
+                        Text(queued).font(.footnote)
+                        Spacer()
+                        Button { store.queuedNotice = nil } label: { Image(systemName: "xmark") }.frame(width: 44, height: 44)
+                    }.padding(12).appsGlass(cornerRadius: MirsaRadius.l)
+                }
                 if let notice = store.fixNotice {
                     HStack(alignment: .top) {
                         Image(systemName: "checkmark.shield")
