@@ -74,6 +74,7 @@ struct Client {
  let engine=Engine()
  var valid=true
  func begin() throws -> UInt64 { 1 }
+ func beginQueued() async throws -> UInt64 { try begin() }
  func requiredAccount() throws -> Owner { Owner(country:"tr") }
  func country(_ o: Owner) throws -> String { o.country }
  func check(_ run: UInt64) throws { if !valid { throw MirsaStoreError.operationCancelled } }
