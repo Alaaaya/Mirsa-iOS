@@ -31,6 +31,8 @@ struct MirsaApp: App {
         // Apps tab: background refresh of sideloaded apps must be registered
         // before launch finishes.
         AppsStore.registerBackgroundTask()
+        StoreWishlistNotifications.register()
+        StoreWishlistNotifications.schedule()
         AppsStore.importHandoffIfNeeded()
         MirsaChrome.apply()
         // Cold/background launch may still be handing a URLSession file to its delegate.

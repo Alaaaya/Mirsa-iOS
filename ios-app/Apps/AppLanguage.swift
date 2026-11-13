@@ -2,7 +2,7 @@ import SwiftUI
 
 /// App-wide UI language. Arabic is the default. Layout is always physical LTR.
 enum AppLanguage: String, CaseIterable, Identifiable {
-    case arabic = "ar", sorani = "ckb", kurmanji = "kmr", english = "en"
+    case arabic = "ar", sorani = "ckb", kurmanji = "kmr", english = "en", german = "de"
     var id: String { rawValue }
 
     /// Label in the Arabic UI.
@@ -12,6 +12,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .sorani: return "كوردي سوراني"
         case .kurmanji: return "كوردي كرمانجي"
         case .english: return "English"
+        case .german: return "Deutsch"
         }
     }
     var nativeLabel: String {
@@ -20,6 +21,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .sorani: return "کوردی (سۆرانی)"
         case .kurmanji: return "Kurdî (Kurmancî)"
         case .english: return "English"
+        case .german: return "Deutsch"
         }
     }
     var locale: Locale {
@@ -28,6 +30,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .sorani: return Locale(identifier: "ckb")
         case .kurmanji: return Locale(identifier: "kmr")
         case .english: return Locale(identifier: "en")
+        case .german: return Locale(identifier: "de")
         }
     }
 }

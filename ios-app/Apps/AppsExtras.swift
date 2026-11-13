@@ -8,7 +8,7 @@ import UIKit
 /// Bilingual helper for the extras below.
 func tr(_ en: String, _ ar: String) -> String { MirsaTr.pick(en, ar) }
 func tr(_ en: String, _ ar: String, ckb: String, kmr: String) -> String {
-    switch L.lang { case .english: return en; case .arabic: return ar; case .sorani: return ckb; case .kurmanji: return kmr }
+    switch L.lang { case .english, .german: return en; case .arabic: return ar; case .sorani: return ckb; case .kurmanji: return kmr }
 }
 
 extension AppsStore {

@@ -3,7 +3,7 @@ import Foundation
 enum MirsaTr {
     static func pick(_ en: String, _ ar: String) -> String {
         switch AppLanguageStore.shared.current {
-        case .english: return en
+        case .english, .german: return en
         case .arabic: return ar
         case .sorani: return ckb[en] ?? extraCkb[en] ?? forgeCkb[en] ?? ar
         case .kurmanji: return kmr[en] ?? extraKmr[en] ?? forgeKmr[en] ?? ar

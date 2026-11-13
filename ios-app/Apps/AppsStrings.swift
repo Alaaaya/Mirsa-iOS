@@ -9,7 +9,7 @@ enum L {
 
     static func t(_ key: String) -> String {
         switch lang {
-        case .english: return en[key] ?? key
+        case .english, .german: return en[key] ?? key
         case .arabic: return ar[key] ?? en[key] ?? key
         case .sorani: return MirsaTr.ckbKeys[key] ?? ar[key] ?? en[key] ?? key
         case .kurmanji: return MirsaTr.kmrKeys[key] ?? ar[key] ?? en[key] ?? key
