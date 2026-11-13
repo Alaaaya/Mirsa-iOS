@@ -15,6 +15,11 @@ enum MirsaStoreServerError: Error, Equatable {
     init(code: String) { self = .code(Self.allowed.contains(code) ? code : "upstream_unavailable") }
 }
 
+enum MirsaStoreGateState: Equatable {
+    case authorized, denied, unknown
+    static let definitiveDenials: Set<String> = ["staging_denied", "unauthorized", "device_required", "device_limit"]
+}
+
 /// The server is the sole Apple protocol adapter. No password or challenge secret is persisted.
 /// Only an opaque device token bound to the fixed Supabase user is stored in this-device Keychain.
 actor MirsaStoreServerClient {
@@ -150,6 +155,20 @@ actor MirsaStoreServerClient {
     /// A successful typed account response is the server's owner-device capability.
     /// Denials, malformed responses and network failures all keep login closed.
     /// Does not submit Apple credentials or invoke on-device Apple authentication.
+    /// Tri-state check of the same capability. Only the server's/identity's definitive refusals are .denied;
+    /// network errors, timeouts, busy and unknown failures are .unknown (never reported as an identity denial).
+    func gateState() async -> MirsaStoreGateState {
+        do {
+            _ = try await currentAccount()
+            return Task.isCancelled ? .unknown : .authorized
+        } catch let error as MirsaStoreServerError {
+            guard case .code(let code) = error else { return .unknown }
+            return MirsaStoreGateState.definitiveDenials.contains(code) ? .denied : .unknown
+        } catch {
+            return .unknown
+        }
+    }
+
     func loginAvailable() async -> Bool {
         do {
             _ = try await currentAccount()
