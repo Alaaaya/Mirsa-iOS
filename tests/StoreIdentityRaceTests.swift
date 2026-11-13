@@ -182,6 +182,46 @@ private final class RaceVault: MirsaStoreVault {
         }
     }
 
+    func testFailedRegistrationIsNotCachedAndNextAttemptWorks() async throws {
+        let reg = MirsaStoreRegistration()
+        let user = UUID(), jwt = StoreIdentityRaceTests.jwt(user), calls = RegCounter()
+        do {
+            _ = try await reg.credentials(user: user) { calls.set(); throw URLError(.timedOut) }
+            XCTFail("must throw")
+        } catch {}
+        let c = try await reg.credentials(user: user) { calls.set(); return ForgeFixCredentials(accessToken: jwt, deviceID: "D", deviceToken: "t") }
+        XCTAssertEqual(c.deviceID, "D"); XCTAssertEqual(calls.count, 2)
+        let other = UUID(), jwt2 = StoreIdentityRaceTests.jwt(other)
+        let c2 = try await reg.credentials(user: other) { ForgeFixCredentials(accessToken: jwt2, deviceID: "E", deviceToken: "t") }
+        XCTAssertEqual(c2.deviceID, "E")
+    }
+
+    /// Stored token but registration still pending: no server call and no denial until registration completes.
+    func testCoordinatorWaitsForPendingRegistrationBeforeServerAndFirstNumericLookup() async {
+        let reg = MirsaStoreRegistration()
+        let user = UUID(), jwt = StoreIdentityRaceTests.jwt(user)
+        let registered = RegCounter(), serverCalls = RegCounter(), calledBeforeRegistration = RegCounter()
+        let c = client({
+            let creds = try await reg.credentials(user: user) {
+                try await Task.sleep(nanoseconds: 150_000_000)
+                registered.set()
+                return ForgeFixCredentials(accessToken: jwt, deviceID: "D", deviceToken: String(repeating: "a", count: 64))
+            }
+            return MirsaStoreServerIdentity(bearer: creds.accessToken, userID: user, forgeDeviceID: creds.deviceID, forgeDeviceToken: creds.deviceToken)
+        }, http: { req in
+            serverCalls.set()
+            if registered.count == 0 { calledBeforeRegistration.set() }
+            return self.ok(req)
+        })
+        let onDevice = MirsaStoreOnDeviceClient(gate: { false }, stateGate: { await c.gateState() }, vault: RaceVault())
+        do { _ = try await onDevice.search(term: "1632106976", country: "TR") }
+        catch let e as MirsaStoreServerError { XCTAssertNotEqual(e, .code("staging_denied")); XCTAssertNotEqual(e, .code("upstream_unavailable")) }
+        catch {} // signedOut: no saved account, gate already authorized
+        XCTAssertEqual(registered.count, 1)
+        XCTAssertGreaterThan(serverCalls.count, 0)
+        XCTAssertEqual(calledBeforeRegistration.count, 0)
+    }
+
     static func jwt(_ user: UUID) -> String {
         func b(_ s: String) -> String { Data(s.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "").replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_") }
         return b("{}") + "." + b("{\"sub\":\"" + user.uuidString.lowercased() + "\",\"role\":\"authenticated\"}") + ".sig"
