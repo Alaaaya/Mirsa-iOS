@@ -29,6 +29,7 @@ jobs:
           python3 scripts/appstore/search-state-tests.py
           python3 scripts/appstore/discovery-tests.py
           python3 scripts/appstore/commerce-session-tests.py
+          python3 scripts/appstore/commerce-lock-tests.py
           python3 scripts/appstore/free-recovery-tests.py
           python3 scripts/appstore/purchases-group-tests.py
           python3 scripts/appstore/version-name-tests.py

@@ -35,7 +35,7 @@ actor MirsaStoreClient {
     }
 
     func search(term: String, country: String, limit: Int = 25) async throws -> [MirsaStoreApp] {
-        let run = try begin()
+        let run = try await beginQueued()
         defer { busy = false }
         let country = try MirsaStorePolicy.country(country)
         guard Configuration.storeId(for: country) != nil, !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -119,7 +119,7 @@ actor MirsaStoreClient {
 
     /// Explicit free-license action only. Download never silently acquires or purchases.
     func acquireFreeApp(_ app: MirsaStoreApp) async throws {
-        let run = try begin()
+        let run = try await beginQueued()
         defer { busy = false }
         var owner = try requiredAccount()
         do {
@@ -135,7 +135,7 @@ actor MirsaStoreClient {
 
     /// Public fresh metadata in the current account store. Never acquires a licence.
     func freeAppForRecovery(_ app: MirsaStoreApp) async throws -> MirsaStoreApp {
-        let run = try begin()
+        let run = try await beginQueued()
         defer { busy = false }
         let owner = try requiredAccount()
         let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
@@ -146,7 +146,7 @@ actor MirsaStoreClient {
     }
 
     func availableVersions(_ app: MirsaStoreApp) async throws -> [String] {
-        let run = try begin()
+        let run = try await beginQueued()
         defer { busy = false }
         var owner = try requiredAccount()
         do {
@@ -163,7 +163,9 @@ actor MirsaStoreClient {
     func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs ids: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
         guard !ids.isEmpty, ids.count <= 20, Set(ids).count == ids.count,
               ids.allSatisfy(MirsaStoreServerClient.numericVersion) else { throw MirsaStoreError.invalidInput }
-        let run = try begin(); defer { busy = false }
+        try prepare()
+        let run = generation
+        try check(run)
         var owner = try requiredAccount()
         let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
         try check(run)
@@ -183,14 +185,13 @@ actor MirsaStoreClient {
                 entries.append(.init(externalVersionID: id, status: "unavailable", version: nil))
             }
         }
-        try persist(owner)
         return entries
     }
 
     /// One explicit free Get action, one serial reservation and the SAME mutated account.
     /// Never called by a background download or for a paid/unknown-price app.
     func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
-        let run = try begin()
+        let run = try await beginQueued()
         defer { busy = false }
         var owner = try requiredAccount()
         let version = try MirsaStorePolicy.version(externalVersionID)
@@ -221,7 +222,7 @@ actor MirsaStoreClient {
     /// Returns a local encrypted IPA with the account's original SINF, not a decrypted/re-signed app.
     /// Caller may hand this URL to the local importer. No automatic install or sharing.
     func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
-        let run = try begin()
+        let run = try await beginQueued()
         defer { busy = false }
         var owner = try requiredAccount()
         let version = try MirsaStorePolicy.version(externalVersionID)
@@ -282,6 +283,16 @@ actor MirsaStoreClient {
         if let account = try loadAccount(), !account.password.isEmpty { try persist(account) }
         engine.configure(guid: guid)
         prepared = true
+    }
+    /// Wait without owning a reservation. Cancellation/logout cannot release another task's lock.
+    private func beginQueued() async throws -> UInt64 {
+        let expectedGeneration = generation
+        while busy {
+            try check(expectedGeneration)
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try check(expectedGeneration)
+        return try begin()
     }
     private func begin() throws -> UInt64 {
         guard !busy else { throw MirsaStoreError.busy }

@@ -5,7 +5,7 @@ import hashlib
 r = Path(__file__).resolve().parents[2]
 client = (r/'ios-app/AppStore/StoreClient.swift').read_text()
 a = client.split('    func acquireFreeAppAndDownload(', 1)[1].split('    /// Returns a local encrypted IPA', 1)[0]
-assert a.count('try begin()') == 1 and a.count('requiredAccount()') == 1
+assert a.count('try await beginQueued()') == 1 and a.count('requiredAccount()') == 1
 assert 'fresh.id == app.id, fresh.bundleID == app.bundleID' in a
 assert a.index('requireFree(fresh.price)') < a.index('engine.acquire(account: &owner') < a.index('engine.manifest(account: &owner')
 assert a.index('try persist(owner)') < a.index('engine.manifest(')
