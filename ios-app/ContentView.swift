@@ -1208,6 +1208,8 @@ struct LiquidTabChrome: ViewModifier {
                 content
                     .toolbar(.hidden, for: .tabBar)
                     .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+                    // Fill the strip below the padded content with the page background (no black strip behind the dock).
+                    .background(AuroraBackground().ignoresSafeArea())
             } else {
                 content
                     .toolbar(.hidden, for: .tabBar)
