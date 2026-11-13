@@ -778,6 +778,10 @@ struct AppStoreDownloadSettingsPage: View {
                     }
                 }
 
+                AppStoreGroup(title: StoreStyle.settingTitle, footer: StoreStyle.explanation) {
+                    StoreStyleSettingBlock()
+                }
+
                 AppStoreGroup(title: tr("Appearance", "المظهر", ckb: "ڕووکار", kmr: "Xuyang"),
                               footer: tr("Theme and language apply to all of Mirsa, the same as in the main settings.",
                                          "الثيم واللغة بيتطبقوا على كل مرسى، متل الإعدادات الرئيسية.",
