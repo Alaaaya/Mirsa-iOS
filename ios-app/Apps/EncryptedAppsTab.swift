@@ -15,6 +15,8 @@ struct EncryptedAppsTab: View {
     @State private var storeViewID = UUID()
     @State private var libraryQuery = ""
     @State private var showingAdd = false
+    @State private var showingTools = false
+    @State private var priorAccountID: String?
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
 
@@ -28,7 +30,10 @@ struct EncryptedAppsTab: View {
             page(.purchases) { AppStorePurchasesPage(store: store, model: storeAccount, vm: vm, isActive: section == .purchases) }
             page(.account) {
                 AppStoreAccountPage(model: storeAccount, library: store, storeAvailable: storeLoginAvailable,
-                                    onAddAccount: { showingAppStore = true },
+                                    onAddAccount: { Task {
+                                        priorAccountID = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID()
+                                        _ = try? await MirsaStoreOnDeviceClient.shared.beginAddAccount()
+                                        showingAppStore = true } },
                                     onOpen: { tab in withAnimation(MirsaMotion.select) { section = tab } },
                                     onSignedOut: { storeViewID = UUID() })
             }
@@ -48,6 +53,23 @@ struct EncryptedAppsTab: View {
                 let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
                 store.add(entry)
             })
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in
+            section = .downloads; showingTools = true
+        }
+        .sheet(isPresented: $showingTools) {
+            StoreLibraryToolsView(country: storeAccount.account?.country ?? "US",
+                                  onAccountSwitched: { storeViewID = UUID(); Task { await storeAccount.refresh() } },
+                                  onAddAccount: { showingTools = false; Task {
+                                      priorAccountID = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID()
+                                      _ = try? await MirsaStoreOnDeviceClient.shared.beginAddAccount()
+                                      showingAppStore = true } }) { url in
+                do {
+                    let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
+                    store.add(entry)
+                    await store.install(entry, vm: vm)
+                } catch { store.error = error.localizedDescription }
+            }
         }
         .mirsaStatusBarScrim()
         .preferredColorScheme(.dark)
@@ -109,6 +131,18 @@ struct EncryptedAppsTab: View {
 
     /// The sign-in sheet may have signed in or out. Reload the inline screen only then.
     private func sessionMayHaveChanged() {
+        if let prior = priorAccountID {
+            priorAccountID = nil
+            Task {
+                let list = (try? await MirsaStoreOnDeviceClient.shared.listAccounts()) ?? []
+                // Cancelled add: the new context is not listed, so restore the previous one.
+                if let current = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID(), !list.contains(where: { $0.id == current }),
+                   list.contains(where: { $0.id == prior }) {
+                    try? await MirsaStoreOnDeviceClient.shared.selectAccount(id: prior)
+                }
+                await storeAccount.refresh()
+            }
+        }
         let before = storeAccount.account
         Task {
             await storeAccount.refresh()
@@ -162,6 +196,9 @@ struct EncryptedAppsTab: View {
                             .disabled(store.busy != nil)
                             .accessibilityLabel(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"))
                             .accessibilityIdentifier("store-add-download")
+                        Button { showingTools = true } label: { MirsaIconButtonLabel(systemName: "wrench.and.screwdriver") }
+                            .modifier(MirsaSolidCard(shape: Circle(), tint: nil, elevation: 1))
+                            .accessibilityLabel(StoreFeatureText.tools)
                         LanguageGlobeMenu(size: MirsaIconSize.button)
                     }
                 }
@@ -369,6 +406,7 @@ private struct EncryptedEntryCard: View {
                 }
                 .buttonStyle(.mirsaPrimary)
                 .disabled(store.busy != nil)
+                StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
                 Button(role: .destructive, action: onDelete) {
                     Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
                         .foregroundStyle(MirsaPalette.danger)
