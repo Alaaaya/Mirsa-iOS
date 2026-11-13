@@ -489,8 +489,14 @@ final class MirsaStoreClientTests: XCTestCase {
         let login = Task { try await client.signIn(email: "owner@example.invalid", password: "fixture-password") }
         await fulfillment(of: [suspended], timeout: 10)
         guard let paused = engine.auth.paused else { login.cancel(); return XCTFail("did not suspend") }
-        do { _ = try await client.search(term: "x", country: "DE"); XCTFail("concurrent request") }
-        catch { XCTAssertEqual(error as? MirsaStoreError, .busy) }
+        // Read-only search now queues behind commerce work. A second login
+        // still rejects immediately; awaiting a queued search here would prevent
+        // this test from ever releasing its deliberately paused authentication.
+        do {
+            _ = try await client.signIn(email: "second@example.invalid", password: "fixture-password")
+            XCTFail("concurrent login")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .busy) }
+        XCTAssertEqual(engine.auth.calls.count, 1)
         try await client.signOut()
         paused.resume(returning: testOwner())
         do { _ = try await login.value; XCTFail("account resurrected") } catch {}
