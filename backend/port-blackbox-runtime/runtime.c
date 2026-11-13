@@ -64,7 +64,7 @@ static void handler(int sig, siginfo_t *info, void *context) {
             break;
         }
     }
-    (void)kill(getpid(),sig);
+    (void)raise(sig);
     errno = saved_errno;
 }
 int mirsa_bb_read_event(int fd, struct mirsa_bb_event *e) {
