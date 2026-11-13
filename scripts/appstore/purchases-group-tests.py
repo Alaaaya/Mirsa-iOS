@@ -57,7 +57,7 @@ allowed = {'ios-app/Apps/AppStoreSection.swift', 'scripts/appstore/purchases-gro
 'scripts/tests/store_ownership_intent_test.py'}
 # Later owner-authorized native dispatch is confined to these files and pinned MIT headers.
 allowed.update({
-    'scripts/appstore/commerce-lock-tests.py', 'scripts/appstore/commerce_lock_scope.py',
+    'scripts/appstore/version-name-tests.py', 'scripts/appstore/commerce-lock-tests.py', 'scripts/appstore/commerce_lock_scope.py',
     'scripts/appstore/commerce-session-tests.py', 'vendor/ApplePackage/Package.swift',
     'vendor/ApplePackage/Sources/ApplePackage/Models/StoreDownloadEndpoint.swift',
     'vendor/ApplePackage/Sources/ApplePackage/SAP/StoreAMDProof.swift',

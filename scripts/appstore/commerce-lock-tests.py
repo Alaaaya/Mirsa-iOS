@@ -60,3 +60,66 @@ with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'tests.swift';p.write_text(source)
  subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(p),'-o',d+'/tests'],check=True)
  subprocess.run([d+'/tests'],check=True,timeout=20)
+
+# Compile the actual bounded metadata scheduler, not a reimplementation.
+metadata=s[s.index('    private var versionNameCache:'):s.index('    /// One explicit free Get')].replace('private var','var').replace('private func','func')
+stubs="""import Foundation
+enum MirsaStoreError: Error { case invalidInput, invalidPackage, operationCancelled }
+enum MirsaStoreServerClient {
+ struct VersionMetadata: Sendable { let externalVersionID:String; let status:String; let version:String? }
+ static func numericVersion(_ s:String)->Bool { !s.isEmpty && s.allSatisfy { $0.isNumber } }
+}
+struct MirsaStoreApp: Sendable {
+ let id:Int
+ var software: Int { id }
+}
+struct Owner: Sendable { var cookie="snapshot" }
+actor Engine {
+ var active=0; var maximum=0; var calls=0
+ func versionMetadata(account: inout Owner, app:Int, version:String) async throws -> String {
+  active += 1; calls += 1; maximum=max(maximum,active)
+  defer { active -= 1 }
+  try await Task.sleep(nanoseconds:20_000_000)
+  account.cookie="changed"
+  return "v"+version
+ }
+ func stats()->(Int,Int) { (maximum,calls) }
+}
+actor MetadataHarness {
+ let engine=Engine()
+ var generation:UInt64=0
+ var busy=true
+ func prepare() throws {}
+ func requiredAccount() throws -> Owner { Owner() }
+ func check(_ run:UInt64) throws {
+  guard run==generation, !Task.isCancelled else { throw MirsaStoreError.operationCancelled }
+ }
+ func logout() { generation += 1 }
+ func stats() async -> (Int,Int) { await engine.stats() }
+ func lockHeld()->Bool { busy }
+"""
+tests="""
+}
+@main struct Tests {
+ static func main() async throws {
+  let h=MetadataHarness()
+  let app=MirsaStoreApp(id:1)
+  let ids=(1...20).map(String.init)
+  let results=try await h.versionMetadata(app, externalVersionIDs:ids)
+  precondition(results.count==20)
+  let stats=await h.stats()
+  precondition(stats.0==6 && stats.1==20, "must be concurrent and bounded")
+  _ = try await h.versionMetadata(app, externalVersionIDs:ids)
+  let cached=await h.stats(); precondition(cached.1==20, "cache must avoid network")
+  let held=await h.lockHeld(); precondition(held, "metadata changed commerce lock")
+  await h.logout()
+  _ = try await h.versionMetadata(app, externalVersionIDs:["1"])
+  let isolated=await h.stats(); precondition(isolated.1==21, "old session cache leaked")
+  print("PASS actual metadata scheduler: six concurrent maximum, all names, cache hit skips requests, session-isolated cache and no commerce reservation")
+ }
+}
+"""
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d)/'metadata.swift';p.write_text(stubs+metadata+tests)
+ subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(p),'-o',d+'/tests'],check=True)
+ subprocess.run([d+'/tests'],check=True,timeout=20)
