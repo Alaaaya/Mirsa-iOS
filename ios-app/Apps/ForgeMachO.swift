@@ -9,16 +9,17 @@ enum ForgeMachO {
     static func inspect(_ url: URL) throws -> Info {
         let data = try Data(contentsOf: url, options: .alwaysMapped)
         var base = 0
-        guard data.count > 32 else { throw Failure.unreadable }
+        guard data.count > 64 else { throw Failure.unreadable }
         func u32(_ o: Int, big: Bool = false) -> UInt32 {
             let v = data.subdata(in: o..<o + 4).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
             return big ? v.byteSwapped : v
         }
         if u32(0) == 0xBEBAFECA { // fat: pick arm64 slice
-            let n = Int(u32(4, big: true))
+            let n = min(Int(u32(4, big: true)), 16)
             for i in 0..<n {
                 let e = 8 + i * 20
-                if u32(e, big: true) == 0x0100000C { base = Int(u32(e + 8, big: true)); break }
+                guard e + 20 <= data.count else { break }
+                if u32(e, big: true) == 0x0100000C { base = Int(u32(e + 8, big: true)); guard base + 64 <= data.count else { throw Failure.unreadable }; break }
             }
         }
         guard u32(base) == 0xFEEDFACF else { throw Failure.unreadable }
@@ -34,6 +35,7 @@ enum ForgeMachO {
                 let nsects = Int(u32(off + 64))
                 var s = off + 72
                 for _ in 0..<nsects {
+                    guard s + 80 <= data.count else { break }
                     let sect = String(decoding: data.subdata(in: s..<s + 16).prefix { $0 != 0 }, as: UTF8.self)
                     if sect == "__objc_classname" {
                         let size64 = data.subdata(in: s + 40..<s + 48).withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
@@ -48,7 +50,7 @@ enum ForgeMachO {
             }
             off += max(size, 8)
         }
-        let clean = Array(Set(names.filter { !$0.isEmpty && !$0.hasPrefix("_") })).sorted()
+        let clean = Array(Set(names.filter { !$0.isEmpty && (!$0.hasPrefix("_") || $0.hasPrefix("_TtC")) })).sorted()
         return Info(encrypted: encrypted, classes: clean)
     }
 }
