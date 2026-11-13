@@ -85,14 +85,17 @@ enum MirsaStoreIdentityLoader {
 /// pending registration is never judged by a local read alone. Only a verified registration result is used.
 actor MirsaStoreRegistration {
     static let shared = MirsaStoreRegistration()
-    private var ready: [UUID: ForgeFixCredentials] = [:]
-    private var inflight: [UUID: Task<ForgeFixCredentials, Error>] = [:]
+    private var ready: (user: UUID, credentials: ForgeFixCredentials)?
+    private var inflight: (user: UUID, id: UUID, task: Task<ForgeFixCredentials, Error>)?
 
     func credentials(user: UUID, register: @escaping @Sendable () async throws -> ForgeFixCredentials) async throws -> ForgeFixCredentials {
-        if let done = ready[user] { return done }
-        let task: Task<ForgeFixCredentials, Error>
-        if let running = inflight[user] { task = running } else {
-            task = Task {
+        if let done = ready {
+            if done.user == user { return done.credentials }
+            ready = nil // account switch: never reuse or retain another user's credentials
+        }
+        let entry: (user: UUID, id: UUID, task: Task<ForgeFixCredentials, Error>)
+        if let running = inflight, running.user == user { entry = running } else {
+            let task = Task {
                 let c: ForgeFixCredentials
                 do { c = try await register() }
                 catch let e as MirsaStoreServerError { throw e }
@@ -102,14 +105,16 @@ actor MirsaStoreRegistration {
                 guard (try? ForgeClient.fixUserID(c.accessToken)) == user else { throw MirsaStoreServerError(code: "upstream_unavailable") }
                 return c
             }
-            inflight[user] = task
+            entry = (user, UUID(), task)
+            inflight = entry
         }
         do {
-            let c = try await task.value
-            ready[user] = c; inflight[user] = nil
+            let c = try await entry.task.value
+            if inflight?.id == entry.id { inflight = nil }
+            ready = (user, c)
             return c
         } catch {
-            inflight[user] = nil
+            if inflight?.id == entry.id { inflight = nil } // a failed or cancelled registration never stays cached
             throw error
         }
     }
