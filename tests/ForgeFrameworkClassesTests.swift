@@ -17,7 +17,7 @@ final class ForgeFrameworkClassesTests: XCTestCase {
         let strOff = 0x1000
         let listOff = strOff + ((strings.count + 15) & ~15)
         var b = le32(0xFEEDFACF) + le32(0x0100000C) + le32(subtype) + le32(6) + le32(3) + le32(UInt32(cmdsSize)) + le32(0x00200085) + le32(0)
-        b += le32(0x19) + le32(UInt32(seg)) + name16("__TEXT") + name16("") + le64(0) + le64(0x4000) + le64(0) + le64(0x4000) + le32(5) + le32(5) + le32(2) + le32(0)
+        b += le32(0x19) + le32(UInt32(seg)) + name16("__TEXT") + le64(0) + le64(0x4000) + le64(0) + le64(0x4000) + le32(5) + le32(5) + le32(2) + le32(0)
         b += name16("__objc_classname") + name16("__TEXT") + le64(UInt64(strOff)) + le64(UInt64(strings.count)) + le32(UInt32(strOff)) + le32(0) + le32(0) + le32(0) + le32(2) + le32(0) + le32(0) + le32(0)
         b += name16("__objc_classlist") + name16("__DATA_CONST") + le64(UInt64(listOff)) + le64(8) + le32(UInt32(listOff)) + le32(3) + le32(0) + le32(0) + le32(0) + le32(0) + le32(0) + le32(0)
         b += le32(0x2C) + le32(UInt32(enc)) + le32(UInt32(hdr)) + le32(0x4000) + le32(cryptid)
