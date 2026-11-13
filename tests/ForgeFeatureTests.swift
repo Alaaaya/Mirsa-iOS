@@ -352,6 +352,25 @@ import ImageIO
         if let guardValue { o["guardDisabled"] = guardValue }
         return try JSONSerialization.data(withJSONObject: o)
     }
+    func testAttachContextAllCases() throws {
+        let cap = try ForgeCapture.read(capture(false), bundleID: "com.test.target")
+        guard case .attached(let p) = ForgeCaptureContext.attach(prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: true) else { return XCTFail() }
+        XCTAssertTrue(p.contains("UIView")); XCTAssertTrue(p.hasPrefix("hi"))
+        XCTAssertEqual(ForgeCaptureContext.attach(prompt: p, capture: cap, projectBundleID: "com.test.target", consent: true), .alreadyAttached(p))
+        XCTAssertEqual(ForgeCaptureContext.attach(prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: false), .rejected(.consentOff))
+        XCTAssertEqual(ForgeCaptureContext.attach(prompt: "hi", capture: cap, projectBundleID: "com.other", consent: true), .rejected(.wrongBundle))
+        XCTAssertEqual(ForgeCaptureContext.attach(prompt: String(repeating: "x", count: 2000), capture: cap, projectBundleID: "com.test.target", consent: true), .rejected(.tooLong))
+        XCTAssertFalse(ForgeCaptureContext.reasonText(.tooLong).isEmpty); XCTAssertFalse(ForgeCaptureContext.attachedText().isEmpty)
+    }
+    func testPreviewHidesRawDebugAndLocalizesKnownLimitation() throws {
+        var o = try XCTUnwrap(JSONSerialization.jsonObject(with: capture()) as? [String: Any])
+        o["limitations"] = "Foreground originating scene only."
+        let data = try JSONSerialization.data(withJSONObject: o)
+        let text = ForgeCaptureContext.previewText(data)
+        XCTAssertFalse(text.contains("inspector: explicit foreground")); XCTAssertFalse(text.contains("Foreground originating scene"))
+        XCTAssertNotNil(ForgeCaptureContext.limitationsText("Some unknown warning")); XCTAssertEqual(ForgeCaptureContext.limitationsText("Some unknown warning"), "Some unknown warning")
+        XCTAssertNoThrow(try ForgeCapture.read(data, bundleID: "com.test.target"))
+    }
     func testCaptureGuardUnknownDisabledAndWrongTweakFailClosed() throws {
         let tweak = UUID(uuidString: "12345678-1234-1234-1234-123456789abc")!
         XCTAssertFalse(try ForgeCapture.read(capture(), bundleID: "com.test.target").repairAllowed(tweakID: tweak))
