@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Text-only onboarding attached to existing tools. No requests, permissions or feature state.
 enum ForgeGuide: String, CaseIterable {
-    case image, crash, archive, publish
+    case image, crash, archive, publish, port, blackbox
 
     var subtitle: String { lines[0] }
     var steps: [String] { Array(lines.dropFirst()) }
@@ -26,6 +26,19 @@ enum ForgeGuide: String, CaseIterable {
             tr("Added or signed IPAs are saved here for this app.", "نسخ IPA اللي بتضيفها أو بتوقّعها بتنحفظ هون لهالتطبيق.", ckb: "IPAە زیادکراو یان واژۆکراوەکان لێرە بۆ ئەم ئەپە پاشەکەوت دەکرێن.", kmr: "IPA yên zêdekirî an îmzekirî li vir ji bo vê appê tên tomarkirin."),
             tr("Choose how many versions to keep per app.", "حدّد قديش نسخة بدك تحتفظ لكل تطبيق.", ckb: "ژمارەی وەشانە پاشەکەوتکراوەکان بۆ هەر ئەپێک هەڵبژێرە.", kmr: "Hilbijêre ji bo her appê çend guhertoyan biparêzî."),
             tr("Tap the install icon beside an older version, then finish the usual import, signing and installation steps as needed. The archive copy stays here.", "اضغط رمز التثبيت جنب النسخة الأقدم، وكمّل خطوات الاستيراد والتوقيع والتثبيت المعتادة حسب الحاجة. النسخة المحفوظة بتضل هون.", ckb: "ئایکۆنی دامەزراندن لە تەنیشت وەشانی کۆنتر دابگرە و هەنگاوەکانی هاوردەکردن، واژۆکردن و دامەزراندن بەپێی پێویست تەواو بکە. لەبەرگیراوەکە لێرە دەمێنێتەوە.", kmr: "Îkona sazkirinê li kêleka guhertoya kevntir bitikîne û gavên asayî yên anîn, îmzekirin û sazkirinê biqedîne. Kopiya arşîvê li vir dimîne.")
+        ]
+        case .port: return [
+            tr5("Repair a tweak after the app updated, using the old and new IPA.", "أصلح تويك بعد ما التطبيق تحدّث باستخدام الـ IPA القديم والجديد.", de: "Repariere einen Tweak nach einem App-Update mit alter und neuer IPA.", ckb: "تویک چاک بکە دوای نوێبوونەوەی ئەپ بە IPAی کۆن و نوێ.", kmr: "Piştî nûvekirina appê tweakê bi IPAya kevn û nû sererast bike."),
+            tr5("Pick the decrypted IPA of the version where the tweak worked.", "اختار الـ IPA المفكوك للنسخة اللي كان التويك شغال فيها.", de: "Wähle die entschlüsselte IPA der Version, in der der Tweak funktionierte.", ckb: "IPAی کراوەی ڕەمزی ئەو وەشانە هەڵبژێرە کە تویک تێیدا کاری دەکرد.", kmr: "IPAya bê şîfre ya guhertoya ku tweak tê de dixebitî hilbijêre."),
+            tr5("Pick the decrypted IPA of the new version.", "اختار الـ IPA المفكوك للنسخة الجديدة.", de: "Wähle die entschlüsselte IPA der neuen Version.", ckb: "IPAی کراوەی ڕەمزی وەشانی نوێ هەڵبژێرە.", kmr: "IPAya bê şîfre ya guhertoya nû hilbijêre."),
+            tr5("Mirsa lists which hooks still work, which can be renamed safely and which need a decision. Nothing is guessed.", "مرسى بيعرض أي هوكات لسا شغالة وأيها بينعاد تسميتها بأمان وأيها بدها قرار. ما في تخمين.", de: "Mirsa zeigt, welche Hooks noch funktionieren, welche sicher umbenannt werden können und welche eine Entscheidung brauchen. Nichts wird geraten.", ckb: "میرسا نیشان دەدات کام هووک ماون، کامیان بە سەلامەتی ناو دەگۆڕدرێن و کامیان بڕیاریان دەوێت. هیچ گومانێک نییە.", kmr: "Mirsa nîşan dide kîjan hook dixebitin, kîjan bi ewlehî nav diguherin û kîjan biryarê dixwazin. Tiştek nayê texmînkirin."),
+            tr5("Agree and send. The repaired version arrives in Versions for your review and never enables itself.", "وافق وابعت. النسخة المصلّحة بتوصل للنسخ لمراجعتك وما بتتفعّل لحالها.", de: "Zustimmen und senden. Die reparierte Version kommt zur Prüfung unter Versionen und aktiviert sich nie selbst.", ckb: "ڕازی بە و بینێرە. وەشانی چاککراو بۆ پێداچوونەوە دێتە وەشانەکان و خۆی چالاک نابێت.", kmr: "Razî be û bişîne. Guhertoya sererastkirî ji bo kontrolê tê Guhertoyan û bi xwe çalak nabe.")
+        ]
+        case .blackbox: return [
+            tr5("Optional anonymous crash reports that help fix your tweaks.", "تقارير كراش مجهولة اختيارية بتساعد بإصلاح تويكاتك.", de: "Optionale anonyme Absturzberichte, die helfen, deine Tweaks zu reparieren.", ckb: "ڕاپۆرتی کڕاشی نەناسراوی ئارەزوومەندانە بۆ چاککردنی تویکەکانت.", kmr: "Raporên qelibînê yên nenas û bijarte ji bo sererastkirina tweakên te."),
+            tr5("Turn the switch on to agree. It is off until you do.", "شغّل المفتاح لتوافق. هو مطفي لحتى توافق.", de: "Schalte ihn ein, um zuzustimmen. Bis dahin ist er aus.", ckb: "گۆڕەکە بکەرەوە بۆ ڕازیبوون. تا ئەو کاتە کوژاوەیە.", kmr: "Ji bo razîbûnê guhêzkê veke. Heta wê demê girtî ye."),
+            tr5("If a tweaked app ends unexpectedly, only the small record described below is queued.", "إذا تطبيق فيه تويك سكّر فجأة، بينحط بالطابور بس السجل الصغير المذكور تحت.", de: "Wenn eine App mit Tweak unerwartet endet, wird nur der unten beschriebene kleine Eintrag eingereiht.", ckb: "ئەگەر ئەپێکی تویککراو لەناکاو کۆتایی بێت، تەنها تۆمارە بچووکەکەی خوارەوە دەخرێتە ڕیز.", kmr: "Ger appeke bi tweak ji nişkê ve biqede, tenê tomara piçûk a li jêr tê rêzkirin."),
+            tr5("Reports are sent when the server feature is active. Turn it off any time to delete the queue.", "التقارير بتنبعت لما ميزة السيرفر تكون شغّالة. أطفيه بأي وقت لتحذف الطابور.", de: "Berichte werden gesendet, sobald die Serverfunktion aktiv ist. Jederzeit ausschaltbar, dann wird die Warteschlange gelöscht.", ckb: "ڕاپۆرتەکان کاتێک دەنێردرێن کە تایبەتمەندی سێرڤەر چالاک بێت. هەر کاتێک بیکوژێنەوە ڕیزەکە دەسڕێتەوە.", kmr: "Dema taybetmendiya serverê çalak be rapor tên şandin. Her dem bigire da ku rêz jê bibe.")
         ]
         case .publish: return [
             tr("Review the name, target app and what it does.", "راجع الاسم والتطبيق وشو بيعمل التويك.", ckb: "ناو، ئەپی ئامانج و کاری تویکەکە بپشکنە.", kmr: "Nav, appa armanc û karê tweakê kontrol bike."),
