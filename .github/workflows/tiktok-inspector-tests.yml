@@ -2,7 +2,7 @@ name: TikTok scan and inspector tests
 on:
   workflow_dispatch:
   push:
-    branches: [mirsa/tiktok-class-scan-tests-none]
+    branches: [mirsa/tiktok-class-scan]
 permissions:
   contents: read
 jobs:
