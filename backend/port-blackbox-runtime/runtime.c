@@ -4,7 +4,11 @@
 #include "runtime.h"
 #include "breadcrumb.h"
 #include <stdatomic.h>
+#if defined(__APPLE__)
+#include <sys/ucontext.h>
+#else
 #include <ucontext.h>
+#endif
 #if defined(__APPLE__) && defined(__aarch64__)
 #include <mach/arm/thread_status.h>
 #endif
