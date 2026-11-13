@@ -6,7 +6,8 @@ import ImageIO
 //
 // Mirsa never decrypts, re-signs or edits these packages. It reads the package
 // metadata (iTunesMetadata.plist, Info.plist, SC_Info/*.sinf) to show who bought
-// the app, then hands the original file to installation_proxy unchanged. iOS
+// the app, then hands the original file to installation_proxy on Wi-Fi or serves it
+// locally to the iOS installer on cellular. iOS
 // alone decides whether the FairPlay purchase is valid on this device.
 
 enum EncryptedText {
@@ -265,27 +266,46 @@ final class EncryptedAppsStore: ObservableObject {
         UIImage(contentsOfFile: Self.iconURL(entry.id).path)
     }
 
-    /// Installs the stored file as-is through the existing device tunnel (Wi-Fi + LocalDevVPN + pairing).
+    /// Keeps the existing Wi-Fi tunnel path; cellular serves the same IPA locally, without signing or upload.
     func install(_ entry: EncryptedIPAEntry, vm: AppViewModel?) async {
         guard busy == nil, AppsStore.shared.busy == nil else {
             error = tr("Finish the current import first.", "خلّص الاستيراد الحالي أولاً.")
             return
         }
         let apps = AppsStore.shared
+        // Reserve before the first await, including path resolution, so repeated
+        // taps or a certificate install cannot race this handoff.
+        busy = L.t("busy.installing"); apps.busy = busy; progress = 0; installingID = entry.id
+        var ok = false
+        defer { busy = nil; apps.busy = nil; installingID = nil; if !ok { progress = 0 } }
         apps.error = nil
-        guard await apps.realAppNetworkReady(vm) else {
-            error = apps.error ?? EncryptedText.t("Installing needs Wi-Fi + LocalDevVPN", "التثبيت بدو واي فاي + LocalDevVPN",
-                                                  "دامەزراندن پێویستی بە Wi-Fi + LocalDevVPN هەیە", "Sazkirin Wi-Fi + LocalDevVPN dixwaze")
-            apps.error = nil
-            return
+        let cellular = await WiFiPathMonitor.shared.resolve() == .notWifi
+        if !cellular {
+            guard await apps.realAppNetworkReady(vm) else {
+                error = apps.error ?? EncryptedText.t("Installing needs Wi-Fi + LocalDevVPN", "التثبيت بدو واي فاي + LocalDevVPN",
+                                                      "دامەزراندن پێویستی بە Wi-Fi + LocalDevVPN هەیە", "Sazkirin Wi-Fi + LocalDevVPN dixwaze")
+                apps.error = nil
+                return
+            }
         }
-        let path = Self.ipaURL(entry.id).path
+        let file = Self.ipaURL(entry.id)
+        let path = file.path
         guard FileManager.default.fileExists(atPath: path) else {
             error = InstallErrorText.sanitize("MIRSA_SOURCE_IPA_MISSING", arabic: L.isArabic); return
         }
-        busy = L.t("busy.installing"); progress = 0; installingID = entry.id
-        var ok = false
-        defer { busy = nil; installingID = nil; if !ok { progress = 0 } }
+        if cellular {
+            do {
+                try await EncryptedLocalInstall.handoff(file)
+                ok = true; progress = 1
+                // OTA cannot prove device installation, so never mark installedAt.
+                toast = EncryptedText.t(
+                    "iOS started receiving the app. Keep Mirsa open until installation finishes. The IPA stays on this device.",
+                    "iOS بلّش يستلم التطبيق. خلّي مرسى مفتوح لحد ما يخلص التثبيت. ملف الـIPA بيضل عهالجهاز.",
+                    "iOS دەستی بە وەرگرتنی ئەپ کرد. Mirsa کراوە بهێڵەوە تا دامەزراندن تەواو دەبێت. IPA لەم ئامێرە دەمێنێتەوە.",
+                    "iOS dest bi wergirtina sepanê kir. Mirsa vekirî bihêle heta sazkirin xilas dibe. IPA li ser vê amûrê dimîne.")
+            } catch { self.error = error.localizedDescription }
+            return
+        }
         do {
             _ = try await Task.detached {
                 try SideloadService.installStoreIPA(ipaPath: path) { f, _ in
