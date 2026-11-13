@@ -234,7 +234,7 @@ enum ForgeCaptureContext {
         classes.isEmpty ? prompt : prompt + marker + classes.joined(separator: ", ")
     }
     static func chipText(_ count: Int) -> String {
-        storeText("\(count) UIKit classes attached", "\(count) كلاس مرفق", de: "\(count) UIKit-Klassen angehängt", ckb: "\(count) کلاس لکێنراوە", kmr: "\(count) çînên UIKit girêdayî")
+        storeText("📎 Inspector classes ✓", "📎 كلاسات المفتش ✓", de: "📎 Inspector-Klassen ✓", ckb: "📎 کلاسەکانی پشکنەر ✓", kmr: "📎 Çînên Lêkolînerê ✓")
     }
     static func removeText() -> String {
         storeText("Remove", "إزالة", de: "Entfernen", ckb: "لابردن", kmr: "Rake")
