@@ -59,19 +59,12 @@ struct EncryptedAppsTab: View {
             section = .downloads; showingTools = true
         }
         .sheet(isPresented: $showingTools) {
-            StoreLibraryToolsView(country: storeAccount.account?.country ?? "US",
-                                  onAccountSwitched: { storeAccount.updateAccount(nil); storeViewID = UUID(); Task { await storeAccount.refresh() } },
+            StoreLibraryToolsView(onAccountSwitched: { storeAccount.updateAccount(nil); storeViewID = UUID(); Task { await storeAccount.refresh() } },
                                   onAddAccount: { showingTools = false; Task {
                                       priorAccountID = try? await MirsaStoreOnDeviceClient.shared.selectedAccountID()
                                       _ = try? await MirsaStoreOnDeviceClient.shared.beginAddAccount()
                                       storeAccount.updateAccount(nil); storeViewID = UUID()
-                                      showingAppStore = true } }) { url in
-                do {
-                    let entry = try await EncryptedAppsStore.adopt(file: url, move: false)
-                    store.add(entry)
-                    await store.install(entry, vm: vm)
-                } catch { store.error = error.localizedDescription }
-            }
+                                      showingAppStore = true } })
         }
         .mirsaStatusBarScrim()
         .preferredColorScheme(.dark)
