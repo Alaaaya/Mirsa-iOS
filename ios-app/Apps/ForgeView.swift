@@ -141,7 +141,9 @@ struct ForgeProjectView: View {
     let id: UUID
     @ObservedObject private var store = ForgeStore.shared
     @State private var prompt = ""
-    @State private var attachedClasses: [String] = []
+    @State private var attachments = ForgeAttachmentState()
+    private var attachedClasses: [String] { attachments.classes(for: id) }
+    private var attachedBinding: Binding<[String]> { Binding(get: { attachments.classes(for: id) }, set: { attachments.set($0, for: id) }) }
     @State private var error: String?
     @State private var note: String?
     @State private var shareURL: URL?
@@ -181,15 +183,15 @@ struct ForgeProjectView: View {
                     TextEditor(text: $prompt).frame(height: 90).scrollContentBackground(.hidden).padding(6).background(Color.black.opacity(0.3)).cornerRadius(10).foregroundStyle(.white)
                         .overlay(alignment: .topLeading) { if prompt.isEmpty { Text(tr("Describe the tweak you want…", "اوصف التويك اللي بدك ياه…", ckb: "تویکەکە باس بکە…", kmr: "Tweaka xwe vebêje…")).foregroundStyle(.white.opacity(0.4)).padding(.horizontal, 12).padding(.vertical, 14).allowsHitTesting(false) } }
                     if !attachedClasses.isEmpty {
-                        HStack { Image(systemName: "paperclip"); Text(ForgeCaptureContext.chipText(attachedClasses.count)).font(.caption); Spacer(); Button(ForgeCaptureContext.removeText()) { attachedClasses = [] }.font(.caption) }
+                        HStack { Image(systemName: "paperclip"); Text(ForgeCaptureContext.chipText(attachedClasses.count)).font(.caption); Spacer(); Button(ForgeCaptureContext.removeText()) { attachments.clear(id) }.font(.caption) }
                             .padding(8).background(Color.white.opacity(0.1)).cornerRadius(10)
                     }
                     forgeButton("square.and.arrow.down.on.square", ForgeDylibText.importTitle) { importingDylib = true }
                     HStack {
                         forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run {
-                            let outgoing = ForgeCaptureContext.composed(prompt: prompt, classes: attachedClasses)
+                            let outgoing = attachments.wirePrompt(prompt, for: id)
                             guard outgoing.count <= ForgeCaptureContext.promptLimit else { throw ForgeClient.Failure.message(ForgeCaptureContext.reasonText(.tooLong)) }
-                            try await store.generate(id, prompt: outgoing); prompt = ""; attachedClasses = []
+                            try await store.generate(id, prompt: outgoing); prompt = ""; attachments.clear(id)
                         } }
                         Menu {
                             Button(tr("Inject inspector", "احقن المفتش", ckb: "پشکنەر بچەسپێنە", kmr: "Lêkolîner bixe")) { run { let ipa = try await store.injectInspector(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
@@ -198,7 +200,7 @@ struct ForgeProjectView: View {
                         } label: { forgeLabel("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) }
                     }
                 }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
-                ForgeFeaturesView(id: id, prompt: $prompt, attachedClasses: $attachedClasses, showInspector: $showInspector)
+                ForgeFeaturesView(id: id, prompt: $prompt, attachedClasses: attachedBinding, showInspector: $showInspector)
                 ForgePreciseSection(id: id, prompt: $prompt)
                 if let queued = store.queuedNotice {
                     HStack(alignment: .top) {
