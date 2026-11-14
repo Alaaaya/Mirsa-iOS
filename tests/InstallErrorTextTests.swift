@@ -4,9 +4,9 @@ import XCTest
 final class InstallErrorTextTests: XCTestCase {
     func testOnlyConfirmedSourceAbsenceSuggestsRedownload() {
         XCTAssertEqual(InstallErrorText.sanitize("MIRSA_SOURCE_IPA_MISSING", arabic: false),
-                       "The app file is missing. Download it again.")
+                       "The original IPA is missing. Import the IPA again or download it from its link.")
         XCTAssertEqual(InstallErrorText.sanitize("MIRSA_SOURCE_IPA_MISSING", arabic: true),
-                       "ملف التطبيق مو موجود، نزّله من جديد")
+                       "ملف التثبيت الأصلي مو موجود. استورد ملف الـIPA أو حمّله من الرابط من جديد.")
         let error = "Install failed: No such file or directory (os error 2)\n/Users/runner/.cargo/registry/src/isideload-0.5.2/src/sideload/install.rs:162"
         for arabic in [true, false] {
             let safe = InstallErrorText.sanitize(error, arabic: arabic)
