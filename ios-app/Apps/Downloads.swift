@@ -211,7 +211,7 @@ enum HomeShortcut {
             "PayloadUUID": UUID().uuidString,
             "PayloadDisplayName": app.name,
             "Label": app.name,
-            "URL": "mirsa://launch?bundle=\(app.id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? app.id)",
+            "URL": launchURL(for: app.id).absoluteString,
             "IsRemovable": true,
             "FullScreen": true,
             "IgnoreManifestScope": true,
@@ -230,11 +230,29 @@ enum HomeShortcut {
         return try? PropertyListSerialization.data(fromPropertyList: root, format: .xml, options: 0)
     }
 
-    /// mirsa://launch?bundle=<id>
+    /// Mirsa-only scheme. The Setup app never registers it, so a Home Screen
+    /// shortcut can't open Setup by mistake. Legacy "mirsa" links still parse.
+    static let launchScheme = "mirsa-container"
+
+    static func launchURL(for id: String) -> URL {
+        var c = URLComponents()
+        c.scheme = launchScheme; c.host = "launch"
+        c.queryItems = [URLQueryItem(name: "bundle", value: id)]
+        return c.url!
+    }
+
+    /// Returns the container id only for a well-formed launch link.
+    static func containerID(from url: URL) -> String? {
+        guard let s = url.scheme?.lowercased(), s == launchScheme || s == "mirsa", url.host == "launch",
+              let bid = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "app" || $0.name == "bundle" })?.value,
+              !bid.isEmpty, bid.count <= 255
+        else { return nil }
+        return bid
+    }
+
+    /// mirsa-container://launch?bundle=<id>
     static func handle(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "mirsa", url.host == "launch",
-              let bid = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "app" || $0.name == "bundle" })?.value
-        else { return false }
+        guard let bid = containerID(from: url) else { return false }
         let store = AppsStore.shared
         guard let app = store.apps.first(where: { $0.id == bid }) else {
             store.error = tr("That app isn't in Mirsa anymore.", "هالتطبيق ما عاد موجود بـMirsa.")

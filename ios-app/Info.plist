@@ -88,6 +88,14 @@
 				<string>mirsa</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.alaa.mirsa.container</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mirsa-container</string>
+			</array>
+		</dict>
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>

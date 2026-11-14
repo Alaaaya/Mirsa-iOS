@@ -5,10 +5,7 @@ struct NoProfileShortcutGuide: View {
     let app: ManagedApp
     @State private var sharing = false
     private var launchURL: URL {
-        var c = URLComponents()
-        c.scheme = "mirsa"; c.host = "launch"
-        c.queryItems = [URLQueryItem(name: "app", value: app.id)]
-        return c.url!
+        HomeShortcut.launchURL(for: app.id)
     }
     private var guide: String {
         MirsaTr.f("shortcut", app.name, app.id, launchURL.absoluteString)
