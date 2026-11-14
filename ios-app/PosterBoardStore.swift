@@ -2,19 +2,65 @@ import Foundation
 import CryptoKit
 
 @_silgen_name("mirsa_pb_access_acquire")
-private func acquirePosterBoardAccess(_ path: UnsafePointer<CChar>) -> Int64
+private func acquirePosterBoardAccess(_ path: UnsafePointer<CChar>, _ error: UnsafeMutablePointer<Int64>,
+                                     _ log: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> UnsafeMutableRawPointer?
+@_silgen_name("mirsa_pb_access_copy_path")
+private func copyPosterBoardAccessPath(_ handle: UnsafeMutableRawPointer) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("mirsa_pb_access_release")
-private func releasePosterBoardAccess(_ handle: Int64)
+private func releasePosterBoardAccess(_ handle: UnsafeMutableRawPointer) -> UnsafeMutablePointer<CChar>?
+@_silgen_name("mirsa_pb_access_free_string")
+private func freePosterBoardAccessString(_ value: UnsafeMutablePointer<CChar>)
 
-/// Access is scoped to one container, released on every exit. No app-group
-/// entitlement, Library rename, global preferences or database reset is used.
+/// A scoped lease owns the effective access alias and restores its own signed
+/// group's original Caches on close. No guessed/foreign group entitlement.
 final class PosterBoardLease {
-    let handle: Int64
-    init(path: String) throws {
-        handle = path.withCString { acquirePosterBoardAccess($0) }
-        guard handle >= 0 else { throw PosterBoardStore.failure("Direct PosterBoard access unavailable (lease \(handle)). No wallpaper was applied.") }
+    private var handle: UnsafeMutableRawPointer?
+    let targetURL: URL
+    let effectiveURL: URL
+    private let log: (String) -> Void
+    init(path: String, log: @escaping (String) -> Void = { _ in }) throws {
+        self.log = log
+        targetURL = URL(fileURLWithPath: path)
+        var code: Int64 = 0
+        var diagnostic: UnsafeMutablePointer<CChar>?
+        let acquired = path.withCString { acquirePosterBoardAccess($0, &code, &diagnostic) }
+        let detail = diagnostic.map { String(cString: $0) } ?? ""
+        if let diagnostic { freePosterBoardAccessString(diagnostic) }
+        if !detail.isEmpty { log(detail) }
+        guard let acquired else {
+            throw PosterBoardStore.failure("Scoped PosterBoard access unavailable (lease \(code)). No wallpaper was applied.\n\(detail)")
+        }
+        guard let pointer = copyPosterBoardAccessPath(acquired) else {
+            if let cleanup = releasePosterBoardAccess(acquired) { freePosterBoardAccessString(cleanup) }
+            throw PosterBoardStore.failure("PosterBoard access returned no verified path.")
+        }
+        effectiveURL = URL(fileURLWithPath: String(cString: pointer))
+        freePosterBoardAccessString(pointer)
+        handle = acquired
     }
-    deinit { releasePosterBoardAccess(handle) }
+    /// Only the lease's exact alias may resolve to the corresponding target.
+    /// Any additional symlink within Library, providers or descriptors is rejected.
+    func permits(_ url: URL) -> Bool {
+        guard handle != nil else { return false }
+        let base = effectiveURL.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path == base || path.hasPrefix(base + "/") else { return false }
+        let suffix = String(path.dropFirst(base.count))
+        return PosterBoardStore.normalizedPath(url.resolvingSymlinksInPath().path) ==
+            PosterBoardStore.normalizedPath(targetURL.path + suffix)
+    }
+    func close() throws {
+        guard let current = handle else { return }
+        handle = nil
+        guard let pointer = releasePosterBoardAccess(current) else { return }
+        let detail = String(cString: pointer)
+        freePosterBoardAccessString(pointer)
+        if !detail.isEmpty {
+            log(detail)
+            throw PosterBoardStore.failure("PosterBoard access cleanup needs attention. Original Caches backup was retained.\n\(detail)")
+        }
+    }
+    deinit { try? close() }
 }
 
 enum PosterBoardStore {
@@ -36,24 +82,24 @@ enum PosterBoardStore {
         }
         return path
     }
-    /// /var is an OS-owned alias of /private/var on iOS. Ignore only that
-    /// alias, never arbitrary symlinks inside a container or descriptor path.
-    static func unredirected(_ url: URL) -> Bool {
-        func normalize(_ path: String) -> String {
-            path.hasPrefix("/private/var/") ? String(path.dropFirst(8)) : path
-        }
-        return normalize(url.resolvingSymlinksInPath().path) == normalize(url.standardizedFileURL.path)
+    static func normalizedPath(_ path: String) -> String {
+        path.hasPrefix("/private/var/") ? String(path.dropFirst(8)) : path
     }
-    static func validateIdentity(_ container: URL) throws {
+    /// Ignore only iOS's /var alias, plus the exact alias of an active lease.
+    static func unredirected(_ url: URL, lease: PosterBoardLease? = nil) -> Bool {
+        if let lease { return lease.permits(url) }
+        return normalizedPath(url.resolvingSymlinksInPath().path) == normalizedPath(url.standardizedFileURL.path)
+    }
+    static func validateIdentity(_ container: URL, lease: PosterBoardLease? = nil) throws {
         for name in [".com.apple.mobile_container_manager.metadata.plist", "com.apple.mobile_container_manager.metadata.plist"] {
             let file = container.appendingPathComponent(name)
+            guard unredirected(file, lease: lease) else { continue }
             if let data = try? Data(contentsOf: file),
                let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
                info["MCMMetadataIdentifier"] as? String == "com.apple.PosterBoard" {
-                // Metadata alone is insufficient if this is an uninitialized/old container.
                 let store = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore")
                 guard (try store.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])).isDirectory == true,
-                      unredirected(store) else {
+                      unredirected(store, lease: lease) else {
                     throw failure("PosterBoard datastore is missing or redirected.")
                 }
                 return
@@ -61,28 +107,29 @@ enum PosterBoardStore {
         }
         throw failure("Container identity could not be verified as com.apple.PosterBoard.")
     }
+    private static func verifiedContainer(_ path: String) -> Bool {
+        guard let lease = try? PosterBoardLease(path: path) else { return false }
+        let valid = (try? validateIdentity(lease.effectiveURL, lease: lease)) != nil
+        do { try lease.close(); return valid } catch { return false }
+    }
+    private static func entries(_ root: String) throws -> [String] {
+        let lease = try PosterBoardLease(path: root)
+        do {
+            let entries = try FileManager.default.contentsOfDirectory(atPath: lease.effectiveURL.path)
+            try lease.close() // release the root alias before acquiring any child
+            return entries
+        } catch { try? lease.close(); throw error }
+    }
     static func discover(cached: String? = nil) throws -> String {
-        if let cached, let path = try? canonicalContainer(cached),
-           let lease = try? PosterBoardLease(path: path) {
-            if (try? validateIdentity(URL(fileURLWithPath: path))) != nil {
-                return withExtendedLifetime(lease) { path }
-            }
-        }
+        if let cached, let path = try? canonicalContainer(cached), verifiedContainer(path) { return path }
         for root in roots {
-            guard let lease = try? PosterBoardLease(path: root) else { continue }
-            let result: String? = withExtendedLifetime(lease) {
-                guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return nil }
-                for entry in entries.sorted() where UUID(uuidString: entry) != nil {
-                    let path = root + "/" + entry
-                    guard let child = try? PosterBoardLease(path: path) else { continue }
-                    let valid = withExtendedLifetime(child) { (try? validateIdentity(URL(fileURLWithPath: path))) != nil }
-                    if valid { return path }
-                }
-                return nil
+            guard let entries = try? entries(root) else { continue }
+            for entry in entries.sorted() where UUID(uuidString: entry) != nil {
+                let path = root + "/" + entry
+                if verifiedContainer(path) { return path }
             }
-            if let result { return result }
         }
-        throw failure("PosterBoard container could not be verified with direct access.")
+        throw failure("PosterBoard container could not be verified with scoped access.")
     }
     struct Layout {
         let version: String
@@ -142,14 +189,14 @@ enum PosterBoardStore {
     /// Copies only new descriptor directories, preserving package identity. Existing wallpapers and SQLite stay untouched.
     /// Caller holds the validated container lease. Local fixture tests exercise this same path.
     static func install(_ descriptors: [(url: URL, ext: String)], container: URL,
-                        resetProtections: Bool, backupRoot: URL, log: (String) -> Void) throws -> Int {
-        try validateIdentity(container)
+                        resetProtections: Bool, backupRoot: URL, lease: PosterBoardLease? = nil, log: (String) -> Void) throws -> Int {
+        try validateIdentity(container, lease: lease)
         guard !descriptors.isEmpty else { throw failure("Archive contains no wallpaper descriptors.") }
         let fm = FileManager.default, target = try layout(container)
         let backup = backupRoot.appendingPathComponent(UUID().uuidString)
         try fm.createDirectory(at: backup, withIntermediateDirectories: true)
         let prefs = container.appendingPathComponent("Library/Preferences/com.apple.PosterBoard.unprotectedUserDefaults.plist")
-        guard unredirected(prefs) else { throw failure("Redirected preference path rejected.") }
+        guard unredirected(prefs, lease: lease) else { throw failure("Redirected preference path rejected.") }
         let existed = fm.fileExists(atPath: prefs.path)
         // A read failure is not an empty preference file. Never overwrite unreadable state.
         let original = existed ? try Data(contentsOf: prefs) : nil
@@ -167,7 +214,7 @@ enum PosterBoardStore {
                 let expected = try manifest(descriptor.url)
                 for provider in try providers(for: descriptor.ext, available: target.providers) {
                     let parent = target.extensions.appendingPathComponent(provider + "/descriptors")
-                    guard unredirected(parent) else { throw failure("Redirected descriptor destination rejected.") }
+                    guard unredirected(parent, lease: lease) else { throw failure("Redirected descriptor destination rejected.") }
                     try fm.createDirectory(at: parent, withIntermediateDirectories: true)
                     // References may use a non-UUID identifier (including imported SMB packages).
                     // Preserve its exact spelling and reject invalid paths rather than renaming it.
@@ -181,7 +228,10 @@ enum PosterBoardStore {
                     created.append(destination) // remove even a partially copied new directory on failure
                     try fm.copyItem(at: descriptor.url, to: destination)
                     guard try manifest(destination) == expected else { throw failure("Descriptor readback SHA-256 mismatch.") }
-                    proof[destination.path] = expected
+                    let verifiedPath = lease.map {
+                        $0.targetURL.path + String(destination.path.dropFirst(container.path.count))
+                    } ?? destination.path
+                    proof[verifiedPath] = expected
                     installedProviders.insert(provider)
                     log("Verified \(expected.count) files at v\(target.version)/\(provider)/descriptors/\(id)")
                 }
@@ -196,7 +246,7 @@ enum PosterBoardStore {
             preferencesTouched = true
             try bytes.write(to: prefs, options: .atomic)
             guard try Data(contentsOf: prefs) == bytes else { throw failure("Preference readback failed.") }
-            let report: [String: Any] = ["container": container.path, "version": target.version, "files": proof,
+            let report: [String: Any] = ["container": lease?.targetURL.path ?? container.path, "accessPath": container.path, "version": target.version, "files": proof,
                                         "preferencesExisted": existed, "galleryRegistrationVerified": false]
             try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
                 .write(to: backup.appendingPathComponent("verified-copy.json"), options: .atomic)

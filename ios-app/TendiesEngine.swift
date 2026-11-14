@@ -283,10 +283,11 @@ public final class TendiesEngine {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let lease = try PosterBoardLease(path: normalized)
+                    let lease = try PosterBoardLease(path: normalized, log: log)
+                    defer { try? lease.close() }
                     try withExtendedLifetime(lease) {
-                        let container = URL(fileURLWithPath: normalized)
-                        try PosterBoardStore.validateIdentity(container)
+                        let container = lease.effectiveURL
+                        try PosterBoardStore.validateIdentity(container, lease: lease)
                         let fm = FileManager.default
                         let stage = fm.temporaryDirectory.appendingPathComponent("tendie_flash_" + UUID().uuidString)
                         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
@@ -309,10 +310,11 @@ public final class TendiesEngine {
                         }
                         let backupRoot = fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("TendiesBackups")
                         let copies = try PosterBoardStore.install(all, container: container, resetProtections: resetProtections,
-                                                                 backupRoot: backupRoot, log: log)
+                                                                 backupRoot: backupRoot, lease: lease, log: log)
                         log("Verified \(copies) descriptor copies. Gallery registration is not yet verified on this device.")
                         progress(1)
                     }
+                    try lease.close()
                     continuation.resume()
                 } catch { continuation.resume(throwing: error) }
             }

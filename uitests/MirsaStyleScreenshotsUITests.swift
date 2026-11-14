@@ -187,11 +187,12 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         continueAfterFailure = false
         for lang in ["ar", "en"] {
             for largeText in [false, true] {
-                let extra = ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"] +
+              for theme in ["liquid", "classic"] {
+                let extra = ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture", "-MirsaWallpaperFlashLogFixture", "-mirsa.theme", theme] +
                     (largeText ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] : [])
                 let app = launch("tools", lang: lang, extra: extra)
                 XCTAssertTrue(tap(app, ["Tendies"]))
-                let prefix = "\(lang)_tendies_\(largeText ? "large" : "standard")"
+                let prefix = "\(lang)_tendies_\(theme)_\(largeText ? "large" : "standard")"
                 shot(app, prefix + "_top")
                 let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
                 revealWallpaperElement(field, identifier: "wallpaper-description", in: app)
@@ -213,7 +214,11 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                     shot(app, prefix + "_keyboard")
                     done.tap()
                     XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForExistence(timeout: 5))
+                    if theme == "liquid" {
+                        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForExistence(timeout: 5))
+                    } else {
+                        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
+                    }
                 }
                 let generate = app.buttons["wallpaper-generate"]
                 revealWallpaperElement(generate, identifier: "wallpaper-generate", in: app)
@@ -224,6 +229,9 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 let respring = app.buttons["wallpaper-respring"]
                 revealWallpaperElement(respring, identifier: "wallpaper-respring", in: app)
                 XCTAssertTrue(respring.isHittable, "Respring must stay above the dock")
+                XCTAssertGreaterThan(respring.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+                XCTAssertLessThanOrEqual(respring.frame.maxY, wallpaperVisibleBottom(in: app),
+                                         "The whole red action must clear the actual tab bar, not just be hittable")
                 let flash = app.buttons["wallpaper-flash"]
                 XCTAssertTrue(flash.exists)
                 // Disabled (no selection) is correct, but the full label must be visible.
@@ -236,7 +244,15 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 revealWallpaperElement(help, identifier: "wallpaper-flash-help", in: app)
                 XCTAssertLessThanOrEqual(help.frame.maxY, wallpaperVisibleBottom(in: app))
                 shot(app, prefix + "_screen_bottom")
+                let log = app.descendants(matching: .any).matching(identifier: "wallpaper-flash-log").firstMatch
+                revealWallpaperElement(log, identifier: "wallpaper-flash-log", in: app)
+                XCTAssertTrue(log.exists, "The populated Flash Log must participate in layout")
+                shot(app, prefix + "_populated_log")
+                revealWallpaperElement(respring, identifier: "wallpaper-respring", in: app, unmaterializedDistance: -80)
+                XCTAssertLessThanOrEqual(respring.frame.maxY, wallpaperVisibleBottom(in: app))
+                shot(app, prefix + "_actions_after_log")
                 app.terminate()
+              }
             }
         }
     }
@@ -271,7 +287,9 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         let dock = app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
         // Assert against the actual obstruction, not a guessed 110pt inset that
         // incorrectly rejects a fully visible footer on the compact simulator.
-        return dock.exists ? dock.frame.minY - 8 : app.frame.maxY - 8
+        if dock.exists { return dock.frame.minY - 8 }
+        let nativeBar = app.tabBars.firstMatch
+        return nativeBar.exists ? nativeBar.frame.minY - 8 : app.frame.maxY - 8
     }
 
     private func revealWallpaperElement(_ element: XCUIElement, identifier: String, in app: XCUIApplication, unmaterializedDistance: CGFloat = 80) {

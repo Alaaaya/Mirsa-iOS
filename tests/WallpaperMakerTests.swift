@@ -522,3 +522,61 @@ extension WallpaperMakerTests {
         XCTAssertThrowsError(try PosterBoardStore.manifest(root))
     }
 }
+
+
+#if DEBUG && targetEnvironment(simulator)
+@_silgen_name("mirsa_pb_test_allowed")
+private func posterAccessAllowed(_ path: UnsafePointer<CChar>) -> Int32
+@_silgen_name("mirsa_pb_test_restore")
+private func posterAccessRestore(_ caches: UnsafePointer<CChar>, _ backup: UnsafePointer<CChar>,
+                                 _ existed: Int32, _ target: UnsafePointer<CChar>) -> Int32
+
+final class PosterBoardAccessSafetyTests: XCTestCase {
+    func testOnlyDataRootsOrUUIDChildrenAllowed() {
+        let root = "/var/mobile/Containers/Data/Application"
+        for path in [root, root + "/" + UUID().uuidString] {
+            XCTAssertEqual(path.withCString { posterAccessAllowed($0) }, 1)
+        }
+        for path in ["/var/mobile/Library", root + "/../Library", root + "/not-a-uuid", root + "/" + UUID().uuidString + "/Library"] {
+            XCTAssertEqual(path.withCString { posterAccessAllowed($0) }, 0)
+        }
+    }
+    func testRestoreKeepsOriginalCachesAndNeverDeletesConflictingReplacement() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("mirsa-access-fixture-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let caches = root.appendingPathComponent("Caches"), backup = root.appendingPathComponent("Caches.mirsa-pb-backup")
+        let target = root.appendingPathComponent("target")
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
+        let marker = Data("keep the original cache".utf8)
+        try marker.write(to: backup.appendingPathComponent("original"))
+        try Data("do not touch target".utf8).write(to: target.appendingPathComponent("target-marker"))
+        func restore() -> Int32 {
+            caches.path.withCString { c in backup.path.withCString { b in target.path.withCString { t in
+                posterAccessRestore(c, b, 1, t)
+            } } }
+        }
+        try fm.createSymbolicLink(at: caches, withDestinationURL: target)
+        XCTAssertEqual(restore(), 1)
+        XCTAssertEqual(try Data(contentsOf: caches.appendingPathComponent("original")), marker)
+        XCTAssertTrue(fm.fileExists(atPath: target.appendingPathComponent("target-marker").path))
+        // Recreate an interrupted session, with a new real Caches from someone else.
+        try fm.moveItem(at: caches, to: backup)
+        try fm.createDirectory(at: caches, withIntermediateDirectories: true)
+        try Data("replacement".utf8).write(to: caches.appendingPathComponent("new"))
+        XCTAssertEqual(restore(), 0)
+        XCTAssertEqual(try Data(contentsOf: backup.appendingPathComponent("original")), marker)
+        XCTAssertTrue(fm.fileExists(atPath: caches.appendingPathComponent("new").path))
+        XCTAssertTrue(fm.fileExists(atPath: target.appendingPathComponent("target-marker").path))
+    }
+    func testLocalizedLabelsDoNotChangeSerializedProviderValues() {
+        XCTAssertEqual(TendiePosterType.suggestedPhotos.rawValue, "Suggested Photos")
+        XCTAssertEqual(TendiePosterType.collections.rawValue, "Collections")
+        XCTAssertEqual(WallpaperMakerStrings.text(.suggestedPhotosType, language: .arabic), "صور مقترحة")
+        XCTAssertEqual(WallpaperMakerStrings.text(.deselectAll, language: .arabic), "شيل تحديد الكل")
+        XCTAssertFalse(TendiesConnectionHint.matches("Direct PosterBoard access unavailable (lease -106)."))
+    }
+}
+#endif

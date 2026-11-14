@@ -22,6 +22,31 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn('"galleryRegistrationVerified": false', store)
         self.assertNotIn("removeItem(at: container)", store)
 
+    def test_scoped_strategies_never_enable_library_parent_rename(self):
+        source = (R / "ios-app/PosterBoardAccess.m").read_text()
+        for label in ["class13-traversal", "class7-symlink", "class2-stage", "class2-subpath", "class12-geod-traversal"]:
+            self.assertIn(label, source)
+        self.assertIn('CFSTR("com.apple.security.application-groups")', source)
+        self.assertIn('CFSTR("get-task-allow")', source)
+        self.assertNotIn('group.com.kamui.escape', source)
+        self.assertNotIn('removeItem', source)
+        self.assertNotIn('class2_parent', source)
+        self.assertIn('transport staging is not destination verification', source)
+        self.assertIn('backup retained', source)
+
+    def test_layout_bounds_viewport_and_tests_actual_bars(self):
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertIn('.safeAreaInset(edge: .bottom', view)
+        self.assertIn('anchor: .center', view)
+        self.assertNotIn('Button(selectedAll ? "Deselect All"', view)
+        self.assertNotIn('posterType.rawValue', view)
+        tests = (R / "uitests/MirsaStyleScreenshotsUITests.swift").read_text()
+        self.assertIn('for theme in ["liquid", "classic"]', tests)
+        self.assertIn('app.tabBars.firstMatch', tests)
+        self.assertIn('respring.frame.maxY, wallpaperVisibleBottom', tests)
+        self.assertIn('MirsaWallpaperFlashLogFixture', tests)
+        self.assertIn('PosterBoardAccessSafetyTests', (R / ".github/workflows/forge-validation.yml").read_text())
+
     def test_upgrade_advances_live_25(self):
         guard = (R / "scripts/verify_release_upgrade.py").read_text()
         self.assertIn('== "2.6"', guard)

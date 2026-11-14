@@ -2,6 +2,7 @@ import Foundation
 
 enum WallpaperMakerStrings {
     enum Key: String, CaseIterable {
+        case selectAll, deselectAll, collectionsType, suggestedPhotosType, mercuryType, containerType
         case cutout, cutoutHelp, cutoutReady, cutoutNoSubject, cutoutUnavailable, cutoutPreparing, connectionHint, containerUnavailable, copyVerified, applyFailed
         case chooseTendies, importMore, importHint
         case unlock, off, unlockZoom, unlockSlide, gyro, floating, effectsHelp
@@ -21,6 +22,12 @@ enum WallpaperMakerStrings {
         return values[key]![column]
     }
     static let values: [Key: [String]] = [
+        .selectAll: ["Select All", "اختار الكل", "Alle auswählen", "Hemûyan hilbijêre", "هەمووی هەڵبژێرە"],
+        .deselectAll: ["Deselect All", "شيل تحديد الكل", "Auswahl aufheben", "Hilbijartina hemûyan rake", "هەڵبژاردنی هەمووی لاببە"],
+        .collectionsType: ["Collections", "المجموعات", "Sammlungen", "Koleksiyon", "کۆمەڵەکان"],
+        .suggestedPhotosType: ["Suggested Photos", "صور مقترحة", "Vorgeschlagene Fotos", "Wêneyên pêşniyarkirî", "وێنە پێشنیارکراوەکان"],
+        .mercuryType: ["Mercury", "ميركوري", "Mercury", "Mercury", "میرکیوری"],
+        .containerType: ["App Container", "حاوية التطبيق", "App-Container", "Konteynera sepanê", "کۆنتەینەری ئەپ"],
         .applyFailed: ["Wallpaper installation could not be completed. Check Flash Log before retrying; it includes copy and rollback details.", "ما اكتمل تطبيق الخلفية. شوف سجل التطبيق قبل ما تعيد المحاولة؛ فيه تفاصيل النسخ والتراجع عن التغييرات.", "Hintergrund konnte nicht vollständig installiert werden. Vor erneutem Versuch Flash-Protokoll mit Kopier- und Wiederherstellungsdetails prüfen.", "Sazkirina dîwarê temam nebû. Berî dubarekirinê Flash Log bixwîne; hûrguliyên kopîkirin û vegerandinê tê de ne.", "دامەزراندنی پاشبنەما تەواو نەبوو. پێش دووبارەکردنەوە تۆمارەکە ببینە؛ وردەکاری کۆپی و گەڕاندنەوەی گۆڕانکارییەکانی تێدایە."],
         .copyVerified: ["Wallpaper files copied and read back successfully. Restarting the interface next. Appearance in the system gallery still needs to be checked on this iPhone.", "ملفات الخلفية اننسخت وتأكدت منها بعد النسخ. هلأ رح تعيد الواجهة تشغيلها. بعدها لازم تتأكد من ظهور الخلفية بمعرض النظام عهالآيفون.", "Dateien kopiert und durch Rücklesen geprüft. Die Oberfläche startet anschließend neu. Erscheinen in der Systemgalerie muss auf diesem iPhone noch geprüft werden.", "Pel hatin kopîkirin û bi xwendina paşê piştrastkirin. Rûkar dê ji nû ve dest pê bike. Divê xuya bûna di galeriya pergalê de li ser vê iPhone-ê were kontrolkirin.", "فایلەکان کۆپی کران و بە خوێندنەوە پشتڕاست کرانەوە. ڕووکار دووبارە دەست پێدەکاتەوە. دەرکەوتن لە گەلەری سیستەم لەم iPhoneە هێشتا پێویستی بە پشکنین هەیە."],
         .containerUnavailable: ["PosterBoard access could not be verified. Nothing was applied. See Flash Log for details.", "ما قدرت أتأكد من الوصول لخلفيات النظام. ما طبّقت شي. التفاصيل بسجل التطبيق.", "PosterBoard-Zugriff nicht bestätigt. Nichts angewendet. Details im Flash-Protokoll.", "Gihîştina PosterBoard nehat piştrastkirin. Tiştek nehat sepandin. Hûrgulî di Flash Log de ne.", "دەستگەیشتن بە PosterBoard پشتڕاست نەکرایەوە. هیچ جێبەجێ نەکرا. وردەکاری لە تۆمارەکەدایە."],
