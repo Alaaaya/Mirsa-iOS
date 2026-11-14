@@ -249,9 +249,11 @@ struct ChatAttachmentPickers: ViewModifier {
     /// .txt / .json always; .zip / .deb / .dylib only with MirsaFeatures.binaryAttachmentsEnabled.
     /// No new exported UTIs: dynamic types by extension, and .data as a fallback when iOS knows none
     /// (the extension and size are still checked below, so .data does not mean any file).
-    static var fileTypes: [UTType] {
+    static var fileTypes: [UTType] { fileTypes(binaryEnabled: MirsaFeatures.binaryAttachmentsEnabled) }
+
+    static func fileTypes(binaryEnabled: Bool) -> [UTType] {
         var types: [UTType] = [.plainText, .json]
-        guard MirsaFeatures.binaryAttachmentsEnabled else { return types }
+        guard binaryEnabled else { return types }
         types.append(.zip)
         for ext in ["deb", "dylib"] {
             types.append(UTType(filenameExtension: ext, conformingTo: .data) ?? UTType(filenameExtension: ext) ?? .data)
@@ -283,7 +285,7 @@ extension ChatAttachmentPickers {
     /// Size is checked before reading; at most 5 MiB + 1 byte is ever read, then extension and container family.
     fileprivate func handleBinary(_ url: URL) {
         let name = url.lastPathComponent
-        if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size > ChatAttachmentRules.binaryMaxBytes {
+        if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, ChatAttachmentRules.binaryTooLarge(size) {
             note = ChatAttachmentText.file(.binarySize); return
         }
         guard let h = try? FileHandle(forReadingFrom: url) else { note = ChatAttachmentText.file(.type); return }
