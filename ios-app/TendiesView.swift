@@ -53,6 +53,9 @@ struct TendiesView: View {
                     }
                 }
 
+                // Original video wallpaper feature (2.4) at the top of the same tab
+                OriginalVideoWallpaperBlock(applyRunning: videoApplyRunning)
+
                 // Section 1: Import Wallpapers
                 Section {
                     Button {

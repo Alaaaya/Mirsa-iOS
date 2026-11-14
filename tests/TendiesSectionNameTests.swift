@@ -45,3 +45,24 @@ final class TendiesSectionNameTests: XCTestCase {
     }
 
 }
+
+final class VideoWallpaperSameSectionTests: XCTestCase {
+    func testStringsInEveryLanguage() {
+        XCTAssertEqual(AppLanguage.allCases.count, 5)
+        for language in AppLanguage.allCases {
+            for key in [VideoWallpaperSection.Key.tab, .fromPhotos, .preparing, .info, .experimental] {
+                XCTAssertFalse(VideoWallpaperSection.text(key, language: language).isEmpty)
+            }
+        }
+    }
+
+    func testVideoBlockIsFirstInTendiesTab() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let src = try String(contentsOf: root.appendingPathComponent("ios-app/TendiesView.swift"), encoding: .utf8)
+        let video = try XCTUnwrap(src.range(of: "OriginalVideoWallpaperBlock("))
+        let maker = try XCTUnwrap(src.range(of: "WallpaperMakerSection("))
+        XCTAssertLessThan(video.lowerBound, maker.lowerBound)
+        let tools = try String(contentsOf: root.appendingPathComponent("ios-app/Apps/ToolsTab.swift"), encoding: .utf8)
+        XCTAssertFalse(tools.contains("videoWallpaper"))
+    }
+}
