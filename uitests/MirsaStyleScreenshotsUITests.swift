@@ -260,7 +260,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(field.isHittable)
             // Return using the same bounded visibility helper, not three guessed
             // swipes that depend on Dynamic Type and localized row heights.
-            revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app)
+            revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app, unmaterializedDistance: -80)
             XCTAssertTrue(video.isHittable)
             shot(app, "\(lang)_videowallpaper_top")
             app.terminate()
@@ -274,7 +274,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         return dock.exists ? dock.frame.minY - 8 : app.frame.maxY - 8
     }
 
-    private func revealWallpaperElement(_ element: XCUIElement, identifier: String, in app: XCUIApplication) {
+    private func revealWallpaperElement(_ element: XCUIElement, identifier: String, in app: XCUIApplication, unmaterializedDistance: CGFloat = 80) {
         let top = app.navigationBars.firstMatch.frame.maxY + 8
         let bottom = wallpaperVisibleBottom(in: app)
         // Accessibility text makes the populated three-layer form much taller.
@@ -294,7 +294,10 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             // UIKit's draggable scroll indicator. The failed respring screenshot
             // moved backwards to earlier effects instead of continuing down.
             let center = (top + bottom) / 2
-            let error = frame.map { $0.midY - center } ?? 80
+            // A virtualized target has no measurable frame. Use the caller's
+            // known document direction: video is ABOVE the maker, while the
+            // other requested controls are BELOW the current viewport.
+            let error = frame.map { $0.midY - center } ?? unmaterializedDistance
             let distance = min(80, max(-80, error))
             // Prefer a fully visible, non-editable text label as the pan anchor.
             // Keep both endpoints in the actual unobstructed content viewport,
