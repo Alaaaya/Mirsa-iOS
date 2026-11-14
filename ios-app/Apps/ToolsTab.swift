@@ -62,7 +62,7 @@ struct ToolsTab: View {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
                             .overlay(alignment: .topTrailing) { if s == .create { ForgeChatUnreadDot(count: unread).offset(x: 12, y: -8) } }
-                        Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .wallpapers ? tr("Video wallpaper", "خلفية فيديو", ckb: "ڤیدیۆ پاشبنەما", kmr: "Wêneya vîdyoyê") : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity)
