@@ -120,22 +120,79 @@ enum PosterBoardStore {
         }
         return true
     }
-    static func validateIdentity(_ container: URL, lease: PosterBoardLease? = nil) throws {
-        for name in [".com.apple.mobile_container_manager.metadata.plist", "com.apple.mobile_container_manager.metadata.plist"] {
-            let file = container.appendingPathComponent(name)
-            guard unredirected(file, lease: lease) else { continue }
-            if let data = try? Data(contentsOf: file),
-               let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-               info["MCMMetadataIdentifier"] as? String == "com.apple.PosterBoard" {
-                let store = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore")
-                guard (try store.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])).isDirectory == true,
-                      unredirected(store, lease: lease) else {
-                    throw failure("PosterBoard datastore is missing or redirected.")
-                }
-                return
+    static func validateIdentity(_ container: URL, lease: PosterBoardLease? = nil,
+                                 log: (String) -> Void = { _ in }) throws {
+        let fm = FileManager.default
+        log("PosterBoard identity resolved path: " + container.resolvingSymlinksInPath().path)
+        if let lease {
+            log("PosterBoard lease target: " + lease.targetURL.path)
+            if let link = try? fm.destinationOfSymbolicLink(atPath: lease.effectiveURL.path) {
+                log("PosterBoard lease symlink target: " + link)
             }
         }
-        throw failure("Container identity could not be verified as com.apple.PosterBoard.")
+        do {
+            let names = try fm.contentsOfDirectory(atPath: container.path).sorted()
+            log("PosterBoard top-level names: " + String(describing: names))
+        } catch { log("PosterBoard top-level listing error: " + error.localizedDescription) }
+        var metadataConfirmed = false
+        var conflictingIdentifier = false
+        for name in [".com.apple.mobile_container_manager.metadata.plist", "com.apple.mobile_container_manager.metadata.plist"] {
+            let file = container.appendingPathComponent(name)
+            log("PosterBoard " + name + " exists=" + String(fm.fileExists(atPath: file.path)) +
+                " readable=" + String(fm.isReadableFile(atPath: file.path)))
+            guard unredirected(file, lease: lease) else {
+                log("PosterBoard metadata path validation rejected: " + name)
+                continue
+            }
+            do {
+                let data = try Data(contentsOf: file)
+                let value = try PropertyListSerialization.propertyList(from: data, format: nil)
+                let identifier = (value as? [String: Any])?["MCMMetadataIdentifier"] as? String
+                log("PosterBoard " + name + " MCMMetadataIdentifier=" + (identifier ?? "<missing/non-string>"))
+                if identifier == "com.apple.PosterBoard" { metadataConfirmed = true }
+                else if identifier != nil { conflictingIdentifier = true }
+            } catch {
+                let detail = error as NSError
+                log("PosterBoard " + name + " read/parse error: " + detail.domain + " " +
+                    String(detail.code) + " " + detail.localizedDescription)
+            }
+        }
+        guard !conflictingIdentifier else {
+            throw failure("Container metadata identifies a different app; refusing PosterBoard access.")
+        }
+        let store = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore")
+        guard unredirected(store, lease: lease),
+              (try? store.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+            throw failure("PosterBoard datastore is missing or redirected.")
+        }
+        if metadataConfirmed {
+            log("PosterBoard identity verified by container metadata.")
+            return
+        }
+        // A scoped lease to an exact canonical container plus an existing,
+        // versioned Apple poster provider is required when MCM metadata is hidden.
+        // A directory name alone is not identity proof. Never override a readable
+        // conflicting identifier, and never create markers to satisfy this rule.
+        guard let lease,
+              (try? canonicalContainer(lease.targetURL.path)) != nil,
+              lease.permits(container) else {
+            throw failure("Container identity could not be verified as com.apple.PosterBoard.")
+        }
+        let existing = try layout(container)
+        let known = existing.providers.intersection([
+            "com.apple.WallpaperKit.CollectionsPoster", "com.apple.Posters.CollectionsPosterApp",
+            "com.apple.MercuryPoster", "com.apple.Posters.MercuryPosterApp"
+        ])
+        guard !known.isEmpty else { throw failure("No existing Apple poster provider proves container identity.") }
+        for provider in known {
+            let path = existing.extensions.appendingPathComponent(provider)
+            guard unredirected(path, lease: lease),
+                  (try? path.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                throw failure("PosterBoard provider is missing or redirected.")
+            }
+        }
+        log("PosterBoard identity verified by scoped canonical target and existing datastore version " +
+            existing.version + " providers " + String(describing: known.sorted()) + "; MCM metadata unavailable.")
     }
     private static func verifiedContainer(_ path: String) -> Bool {
         guard let lease = try? PosterBoardLease(path: path) else { return false }
@@ -222,7 +279,7 @@ enum PosterBoardStore {
     /// Caller holds the validated container lease. Local fixture tests exercise this same path.
     static func install(_ descriptors: [(url: URL, ext: String)], container: URL,
                         resetProtections: Bool, backupRoot: URL, lease: PosterBoardLease? = nil, log: (String) -> Void) throws -> Int {
-        try validateIdentity(container, lease: lease)
+        try validateIdentity(container, lease: lease, log: log)
         guard !descriptors.isEmpty else { throw failure("Archive contains no wallpaper descriptors.") }
         let fm = FileManager.default, target = try layout(container)
         let backup = backupRoot.appendingPathComponent(UUID().uuidString)

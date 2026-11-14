@@ -294,7 +294,7 @@ public final class TendiesEngine {
                     defer { try? lease.close() }
                     try withExtendedLifetime(lease) {
                         let container = lease.effectiveURL
-                        try PosterBoardStore.validateIdentity(container, lease: lease)
+                        try PosterBoardStore.validateIdentity(container, lease: lease, log: log)
                         let fm = FileManager.default
                         let stage = fm.temporaryDirectory.appendingPathComponent("tendie_flash_" + UUID().uuidString)
                         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
