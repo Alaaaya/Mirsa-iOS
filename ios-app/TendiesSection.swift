@@ -4,4 +4,5 @@ import Foundation
 /// (ar, en, de, ku-kmr, ckb); never translate.
 enum TendiesSection {
     static let name = "Tendies"
+    static func title(language: AppLanguage) -> String { name }
 }

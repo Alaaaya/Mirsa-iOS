@@ -26,6 +26,31 @@ final class HomeShortcutSchemeTests: XCTestCase {
         // handle() only looks the id up among installed containers; unknown ids just show an error.
     }
 
+    @MainActor
+    func testColdShortcutWaitsForInitializationAndLaunchesExactIDOnce() throws {
+        var launched: [String] = []
+        let route = HomeShortcutLaunchRoute { launched.append($0) }
+        let id = "com.alaa.player.cold"
+        route.receive(try XCTUnwrap(HomeShortcut.containerID(from: HomeShortcut.launchURL(for: id))))
+        XCTAssertTrue(launched.isEmpty)
+        route.markReady()
+        XCTAssertEqual(launched, [id])
+        route.markReady()
+        XCTAssertEqual(launched, [id])
+    }
+
+    @MainActor
+    func testWarmShortcutAutoLaunchesExactIDOnce() throws {
+        var launched: [String] = []
+        let route = HomeShortcutLaunchRoute { launched.append($0) }
+        route.markReady()
+        let id = "com.alaa.player.warm"
+        route.receive(try XCTUnwrap(HomeShortcut.containerID(from: HomeShortcut.launchURL(for: id))))
+        XCTAssertEqual(launched, [id])
+        route.markReady()
+        XCTAssertEqual(launched, [id])
+    }
+
     func testNormalPlistRegistersContainerSchemeSeparately() throws {
         let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
         let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
