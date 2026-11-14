@@ -200,8 +200,17 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 XCTAssertGreaterThan(field.frame.height, 65, "Multiline text needs intrinsic height")
                 shot(app, prefix + "_multiline")
                 if !largeText {
-                    field.tap()
+                    // XCTest's automatic activation point picked (37, 511.5),
+                    // inside the padded corner of the RTL 311x80 input, not its
+                    // editable interior. Use the visible center; keep keyboard,
+                    // editing, toolbar and whole-field clearance assertions real.
+                    print("WALLPAPER-INPUT beforeTap frame=\(field.frame) matches=\(app.descendants(matching: .any).matching(identifier: "wallpaper-description").count)")
+                    XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "wallpaper-description").count, 1)
+                    field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+                    field.typeText("Wallpaper")
+                    XCTAssertTrue((field.value as? String)?.contains("Wallpaper") == true,
+                                  "The visible input must accept actual text, not just show a keyboard")
                     let done = app.buttons["wallpaper-keyboard-done"]
                     XCTAssertTrue(done.waitForExistence(timeout: 3))
                     XCTAssertEqual(app.buttons.matching(identifier: "wallpaper-keyboard-done").count, 1,
