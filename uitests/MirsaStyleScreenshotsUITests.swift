@@ -259,15 +259,29 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             // Fixed 32%-screen swipes overshoot the compact safe viewport at
             // accessibility sizes, alternating above/below the target forever.
             // Move toward its measured center in bounded, non-flinging steps.
-            // Use the Form gutter, not a text field, slider or reorder handle.
+            // Drag content, NOT the five-point window edge. The edge overlaps
+            // UIKit's draggable scroll indicator. The failed respring screenshot
+            // moved backwards to earlier effects instead of continuing down.
             let center = (top + bottom) / 2
             let error = frame.map { $0.midY - center } ?? 80
             let distance = min(80, max(-80, error))
-            let start = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: app.frame.width - 5, dy: center + distance / 2))
-            let end = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: app.frame.width - 5, dy: center - distance / 2))
-            print("WALLPAPER-REVEAL \(identifier) frame=\(String(describing: frame)) safe=\(top)...\(bottom) distance=\(distance)")
+            // Prefer a fully visible, non-editable text label as the pan anchor.
+            // Keep both endpoints in the actual unobstructed content viewport,
+            // away from sliders, text inputs, reorder handles and either edge.
+            let labels = app.staticTexts.allElementsBoundByIndex.filter {
+                let f = $0.frame
+                return f.width > 40 && f.height < 180
+                    && f.midX > 40 && f.midX < app.frame.width - 40
+                    && f.midY > top + 84 && f.midY < bottom - 84
+                    && $0.isHittable
+            }
+            let anchor = labels.min { abs($0.frame.midY - center) < abs($1.frame.midY - center) }
+            let point = anchor.map { CGPoint(x: $0.frame.midX, y: $0.frame.midY) }
+                ?? CGPoint(x: app.frame.midX, y: center)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: point.x, dy: point.y))
+            let end = origin.withOffset(CGVector(dx: point.x, dy: point.y - distance))
+            print("WALLPAPER-REVEAL \(identifier) frame=\(String(describing: frame)) safe=\(top)...\(bottom) distance=\(distance) contentAnchor=\(point)")
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         shot(app, "unreachable_" + identifier)
