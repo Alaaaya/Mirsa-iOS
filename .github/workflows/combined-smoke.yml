@@ -49,3 +49,71 @@ jobs:
         with:
           name: launch-shot
           path: launch.png
+
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run style screenshot UITests
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=sorted(ds, key=lambda d: (0 if "SE" in d["name"] else 1 if d["name"] in ("iPhone 16e","iPhone 16","iPhone 17") else 2, d["name"])); print(pick[0]["udid"])')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerLayout test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
+      - name: Export named screenshots
+        if: always()
+        run: |
+          if [ -d build/StyleUI.xcresult ]; then
+            mkdir -p build/raw build/shots
+            xcrun xcresulttool export attachments --path build/StyleUI.xcresult --output-path build/raw
+            python3 - <<'PY'
+          import json, os, re, shutil
+          m = json.load(open("build/raw/manifest.json"))
+          for t in m:
+              for a in t.get("attachments", []):
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
+                  if not name.lower().endswith(".png"): name += ".png"
+                  shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
+          print("\n".join(sorted(os.listdir("build/shots"))))
+          PY
+          fi
+          mkdir -p build/crashes
+          cp ~/Library/Logs/DiagnosticReports/*Mirsa* build/crashes/ 2>/dev/null || true
+          ls build/crashes
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wallpaper-shots
+          path: |
+            build/shots
+            build/crashes
+            build/style-ui.log
+          if-no-files-found: warn

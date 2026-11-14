@@ -181,6 +181,71 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     func testPerfClassicAccount() { perfScroll(style: "classic", tab: "account") }
     func testPerfNewAccount() { perfScroll(style: "new", tab: "account") }
 
+    /// Real tools tab, dock and NavigationStack, with local DEBUG-only sample photos.
+    /// No network AI call or wallpaper apply/respring is performed by this test.
+    func testWallpaperMakerLayout() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            for largeText in [false, true] {
+                let extra = ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"] +
+                    (largeText ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] : [])
+                let app = launch("tools", lang: lang, extra: extra)
+                XCTAssertTrue(tap(app, ["Tendies"]))
+                let prefix = "\(lang)_tendies_\(largeText ? "large" : "standard")"
+                shot(app, prefix + "_top")
+                let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
+                revealWallpaperElement(field, in: app)
+                XCTAssertTrue(field.isHittable)
+                XCTAssertGreaterThan(field.frame.height, 65, "Multiline text needs intrinsic height")
+                shot(app, prefix + "_multiline")
+                if !largeText {
+                    field.tap()
+                    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+                    shot(app, prefix + "_keyboard")
+                    let done = app.buttons["wallpaper-keyboard-done"]
+                    XCTAssertTrue(done.waitForExistence(timeout: 3))
+                    done.tap()
+                    XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+                }
+                let generate = app.buttons["wallpaper-generate"]
+                revealWallpaperElement(generate, in: app)
+                XCTAssertTrue(generate.isHittable)
+                let compatibility = app.staticTexts["wallpaper-compatibility"]
+                revealWallpaperElement(compatibility, in: app)
+                shot(app, prefix + "_maker_bottom")
+                let respring = app.buttons["wallpaper-respring"]
+                revealWallpaperElement(respring, in: app)
+                XCTAssertTrue(respring.isHittable, "Respring must stay above the dock")
+                let flash = app.buttons["wallpaper-flash"]
+                XCTAssertTrue(flash.exists)
+                // Disabled (no selection) is correct, but the full label must be visible.
+                if !largeText {
+                    XCTAssertGreaterThan(flash.frame.minY, 130)
+                    XCTAssertLessThan(flash.frame.maxY, app.frame.maxY - 90)
+                }
+                shot(app, prefix + "_actions")
+                let help = app.staticTexts["wallpaper-flash-help"]
+                revealWallpaperElement(help, in: app)
+                XCTAssertLessThanOrEqual(help.frame.maxY, app.frame.maxY - 90)
+                shot(app, prefix + "_screen_bottom")
+                app.terminate()
+            }
+        }
+    }
+
+    private func revealWallpaperElement(_ element: XCUIElement, in app: XCUIApplication) {
+        let top = app.navigationBars.firstMatch.frame.maxY + 8
+        let bottom = app.frame.maxY - 110
+        for _ in 0..<24 {
+            if element.exists && element.frame.minY >= top && element.frame.maxY <= bottom { return }
+            let upward = !element.exists || element.frame.maxY > bottom
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.72 : 0.4))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.4 : 0.72))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTFail("Unreachable wallpaper control \(element.identifier): \(element.frame)")
+    }
+
     func testArabicPages() { run(lang: "ar") }
     func testEnglishPages() { run(lang: "en") }
 }
