@@ -46,3 +46,35 @@ The "patched on iOS 27.2 beta 3 and later" wording comes from the old in-repo
 text (ContentView.swift before 3036e03: "iOS 18.0 - 27.2 beta 2, 27.2 b3+ patched",
 commit 40640c4 docs: update iOS compatibility matrix). No other version claim is made.
 Restored on 163e740 (identity fix 5.58.1, verification.json). 3866abb2 was a mistaken id.
+
+## Photo / layered maker (isolated feature branch, not a release)
+
+The maker stays inside the existing Video Wallpaper screen. Photos and Files pickers
+accept up to eight downsampled photos; Files also accepts a single movie. Existing
+VideoWallpaper conversion is unchanged. Generate creates a temporary real .tendies
+ZIP. Share/Save and Import are separate explicit actions, neither applies wallpaper.
+
+PhotoWallpaper renders each user's photo into its OWN RGBA PNG and CALayer, never
+one flattened composite. Back-to-front order is editable by drag. Background/middle
+are Background CA sublayers. Experimental foreground-over-clock opt-in routes
+foreground sublayers to the template's authentic Floating CA document. Off by
+default puts ALL layers in the Background document in manual order. Both documents
+and Wallpaper.plist routing are present. No automatic segmentation, generated
+images, or motion parallax. Transparent foreground PNGs must be provided by user.
+Clock overlap still requires device testing and depends on PosterBoard/iOS.
+
+Each photo has editable center-crop/fit, bounded zoom1..4 and x/y-1..1 controls.
+Preview uses the same transforms and ordering as exported PNGs, but is NOT a
+simulation of the actual system clock. Clock avoidance in a future text layout
+plan is a geometric downward shift, not subject recognition.
+
+WallpaperLayoutAI.enabled=false. Optional text-layout integration and strict parser
+are staged; see backend/wallpaper-layout/README.md. No production service/flag is
+changed. Only existing free text-model infrastructure may be connected after owner
+authorization, never image APIs or paid fallback. Photos never leave the device.
+Invalid/unavailable plans preserve the manual state. Nonzero parallax strength is
+rejected because actual parallax support has not been established.
+
+The original Pocket-Poster GPL notices and CAML source are unchanged. Any IPA
+distribution must include this exact branch's complete combined GPL corresponding
+source and dependency sources, not only a diff.

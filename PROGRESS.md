@@ -16,3 +16,22 @@ Nov13 primary followup: 00a1b9c all 3 failed. Logs read in full locally /tmp/vid
 - 1ceca81 runs: IPA 43494358295 smoke 43494362658 forge-val 43494366836 + cleanup19-tests dispatched once (SourceDeletion)
 - 1ceca81 also sources-libraries-validation 43494520905 (SourceDeletion); cleanup19 only triggers on kat/cleanup19
 - Fri Nov 13 14:21:12 PST 2026 new finisher took over head 13540a6; runs identity 43510021262 smoke 43510023002 IPA 43510020328 forge 43510026323 sources 43510029794 running. TODO: chat black/gradient toggle, download-resume merge, license row/FlekDeck, first-search identity wait. no dup dispatch.
+
+## Isolated tendies maker, 2026-11-14
+
+Owner scope: maker INSIDE existing Video Wallpaper. Separate photo layers,
+drag reorder, background/middle/foreground roles, preview, manual crop/zoom/position,
+save/share and explicit gallery import; never autoapply. Video pipeline reused.
+Default-OFF experimental foreground depth uses existing real Floating routing,
+not a fabricated motion-parallax feature. All new copy AR/EN/DE/kmr/ckb.
+Text-only AI layout route staged only, client gate OFF. Parser bounded/allowlisted;
+invalid/off/unavailable falls back to unchanged manual photos. No provider calls,
+no paid requests and no production/server/main/release/feed/latest changes.
+Offline Node contract tests passed 4/4. Actual simulator archive tests added to
+Forge workflow (real generated image/multilayer/video ZIP inspection + parser/
+manual fallback/locales). Local WEB has no Swift/Xcode; CI required before delivery.
+
+Tendies maker reference integration, 2026-11-14.
+All 140 gallery archives inventoried individually with SHA256 reconciliation; 1007 XML/CAML documents parsed, two malformed upstream Waves documents explicitly recorded. Exact animation keys, state setters/transitions, motion and timing evidence is in docs/tendies-inventory.json and docs/tendies-techniques.md. No reference artwork shipped.
+Photo output now simple one wallpaper.ca by default, or opt-in genuine Background/Floating/Foreground LayeredAnimation. Every bundle has separate own PNG assets, index.xml, main.caml and assetManifest.caml. Authored keyed metadata resources, fresh descriptor UUID and generated snapshot colour metadata. Optional system-state unlock zoom/slide, six-second floating and experimental gyro mappings default OFF. Preview remains layout-only. Runtime support on iOS 27 is unverified.
+Expanded actual generated-archive XCTest covers both modes, every referenced image, metadata, UUID freshness, all three optional effects and existing generated video. Tests remain explicitly selected in Forge workflow. CI required before delivery; no production or source feed changes.
