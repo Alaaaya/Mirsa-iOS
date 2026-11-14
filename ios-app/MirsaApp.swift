@@ -31,6 +31,7 @@ struct MirsaApp: App {
         // Apps tab: background refresh of sideloaded apps must be registered
         // before launch finishes.
         AppsStore.registerBackgroundTask()
+        MirsaNotifications.register()
         StoreWishlistNotifications.register()
         StoreWishlistNotifications.schedule()
         AppsStore.importHandoffIfNeeded()
@@ -58,6 +59,7 @@ struct MirsaApp: App {
             .task { if !MirsaUITestHarness.active { await AppStoreSectionModel.shared.refresh() } }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { OpenInProjectCoordinator.shared.presentNext() }
+                if phase == .active, !MirsaUITestHarness.active { Task { await MirsaNotifications.foreground() } }
                 if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
                 if phase == .active, !MirsaUITestHarness.active { Task { await ForgeStore.shared.syncFixInbox() } }
                 if phase == .active, !MirsaUITestHarness.active, !AppsStore.isSetupMode { MirsaDeviceIdentity.refreshUDIDIfPossible(vm) }

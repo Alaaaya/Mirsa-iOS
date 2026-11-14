@@ -52,6 +52,7 @@
 	<array>
 		<string>com.alaa.mirsa.apps.refresh</string>
 		<string>com.alaa.mirsa.store.wishlist.refresh</string>
+		<string>com.alaa.mirsa.announcements.refresh</string>
 	</array>
 	<!-- Apps tab Container: guest apps run inside Mirsa's process, so iOS
 	     reads their privacy prompts from Mirsa's Info.plist. Without these
