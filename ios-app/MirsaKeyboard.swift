@@ -29,7 +29,13 @@ struct MirsaKeyboardDismissal: UIViewRepresentable {
         }
 
         @objc private func dismissKeyboard() {
+            #if DEBUG
+            wallpaperFocusTrace("outsideTap-before-endEditing")
+            #endif
             attachedWindow?.endEditing(false)
+            #if DEBUG
+            wallpaperFocusTrace("outsideTap-after-endEditing")
+            #endif
         }
 
         static func isTextInteraction(_ view: UIView?) -> Bool {
@@ -44,8 +50,49 @@ struct MirsaKeyboardDismissal: UIViewRepresentable {
             return false
         }
 
+        #if DEBUG
+        private func wallpaperFocusTrace(_ event: String, touch: UITouch? = nil) {
+            guard ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture"),
+                  let window = attachedWindow else { return }
+            func chain(_ view: UIView?) -> String {
+                var result: [String] = []
+                var current = view
+                while let item = current {
+                    result.append("\(type(of: item)){first=\(item.isFirstResponder),enabled=\(item.isUserInteractionEnabled)}")
+                    current = item.superview
+                }
+                return result.joined(separator: " / ")
+            }
+            var fields: [String] = []
+            func visit(_ view: UIView) {
+                if view is UITextField || view is UITextView || view.isFirstResponder {
+                    fields.append("\(type(of: view)){frame=\(view.convert(view.bounds, to: window)),first=\(view.isFirstResponder),canFocus=\(view.canBecomeFirstResponder),hidden=\(view.isHidden),alpha=\(view.alpha)}")
+                }
+                view.subviews.forEach { visit($0) }
+            }
+            visit(window)
+            var hit = ""
+            if let touch = touch {
+                let point = touch.location(in: window)
+                hit = " point=\(point) touch=\(chain(touch.view)) hit=\(chain(window.hitTest(point, with: nil))) textInteraction=\(Self.isTextInteraction(touch.view))"
+            }
+            NSLog("WALLPAPER-FOCUS \(event)\(hit) fields=\(fields.joined(separator: "; "))")
+        }
+        #endif
+
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            !Self.isTextInteraction(touch.view)
+            #if DEBUG
+            wallpaperFocusTrace("touch", touch: touch)
+            // Observe only. Do not request focus, change gesture decisions, or log text.
+            if ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture") {
+              for delay in [0.0, 0.1, 0.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.wallpaperFocusTrace("after-touch-\(delay)")
+                }
+              }
+            }
+            #endif
+            return !Self.isTextInteraction(touch.view)
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
@@ -65,9 +112,19 @@ final class MirsaKeyboardVisibility: ObservableObject {
         self.center = center
         tokens = [
             center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture") {
+                    NSLog("WALLPAPER-FOCUS keyboardWillShow")
+                }
+                #endif
                 self?.isVisible = true
             },
             center.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak self] _ in
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture") {
+                    NSLog("WALLPAPER-FOCUS keyboardDidHide")
+                }
+                #endif
                 self?.isVisible = false
             }
         ]
