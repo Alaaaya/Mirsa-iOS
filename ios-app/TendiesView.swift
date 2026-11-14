@@ -209,7 +209,7 @@ struct TendiesView: View {
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 60)
             }
-            .navigationTitle(MirsaTr.lit("Wallpapers"))
+            .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
