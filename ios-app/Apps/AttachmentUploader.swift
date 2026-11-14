@@ -397,12 +397,12 @@ enum ChatAttachmentText {
 
     static func file(_ p: ChatAttachmentRules.FileProblem) -> String {
         switch p {
-        case .type where MirsaFeatures.binaryAttachmentsEnabled: return tr("Only .txt, .json, .zip, .deb and .dylib files.", "بس ملفات ‎.txt‎ و ‎.json‎ و ‎.zip‎ و ‎.deb‎ و ‎.dylib‎.", ckb: "تەنها فایلی ‎.txt‎، ‎.json‎، ‎.zip‎، ‎.deb‎ و ‎.dylib‎.", kmr: "Tenê pelên .txt, .json, .zip, .deb û .dylib.")
+        case .type where MirsaFeatures.binaryAttachmentsEnabled: return storeText("Only .txt, .json, .zip, .deb and .dylib files.", "بس ملفات ‎.txt‎ و ‎.json‎ و ‎.zip‎ و ‎.deb‎ و ‎.dylib‎.", de: "Nur .txt-, .json-, .zip-, .deb- und .dylib-Dateien.", ckb: "تەنها فایلی ‎.txt‎، ‎.json‎، ‎.zip‎، ‎.deb‎ و ‎.dylib‎.", kmr: "Tenê pelên .txt, .json, .zip, .deb û .dylib.")
         case .type: return tr("Only .txt and .json files.", "بس ملفات ‎.txt‎ و ‎.json‎.", ckb: "تەنها فایلی ‎.txt‎ و ‎.json‎.", kmr: "Tenê pelên .txt û .json.")
         case .size: return tr("The file must be under 256 KB.", "لازم يكون الملف أقل من 256 KB.", ckb: "فایلەکە دەبێت کەمتر لە 256 KB بێت.", kmr: "Pel divê ji 256 KB kêmtir be.")
         case .utf8, .control: return ChatAttachmentError(status: 422, code: "attachment_utf8").message
         case .json: return ChatAttachmentError(status: 422, code: "attachment_json").message
-        case .binarySize: return tr("The file must be 5 MB or smaller.", "لازم يكون الملف 5 ميغا أو أقل.", ckb: "فایلەکە دەبێت 5 MB یان کەمتر بێت.", kmr: "Pel divê 5 MB an kêmtir be.")
+        case .binarySize: return storeText("The file must be 5 MB or smaller.", "لازم يكون الملف 5 ميغا أو أقل.", de: "Die Datei darf höchstens 5 MB groß sein.", ckb: "فایلەکە دەبێت 5 MB یان کەمتر بێت.", kmr: "Pel divê 5 MB an kêmtir be.")
         case .signature: return tr("This file doesn't look like a real .zip, .deb or .dylib.", "هالملف ما بيبين إنه ‎.zip‎ أو ‎.deb‎ أو ‎.dylib‎ حقيقي.", ckb: "ئەم فایلە وەک ‎.zip‎، ‎.deb‎ یان ‎.dylib‎ ی ڕاستەقینە دیار نییە.", kmr: "Ev pel wekî .zip, .deb an .dylib a rastîn xuya nake.")
         }
     }
