@@ -253,11 +253,21 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         let bottom = wallpaperVisibleBottom(in: app)
         for _ in 0..<24 {
             if element.exists && element.frame.minY >= top && element.frame.maxY <= bottom { return }
-            let upward = !element.exists || element.frame.maxY > bottom
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.72 : 0.4))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.4 : 0.72))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // Fixed 32%-screen swipes overshoot the compact safe viewport at
+            // accessibility sizes, alternating above/below the target forever.
+            // Move toward its measured center in bounded, non-flinging steps.
+            // Use the Form gutter, not a text field, slider or reorder handle.
+            let center = (top + bottom) / 2
+            let error = element.exists ? element.frame.midY - center : 80
+            let distance = min(80, max(-80, error))
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: app.frame.width - 5, dy: center + distance / 2))
+            let end = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: app.frame.width - 5, dy: center - distance / 2))
+            print("WALLPAPER-REVEAL \(element.identifier) frame=\(element.frame) safe=\(top)...\(bottom) distance=\(distance)")
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
+        shot(app, "unreachable_" + element.identifier)
         XCTFail("Unreachable wallpaper control \(element.identifier): \(element.frame)")
     }
 
