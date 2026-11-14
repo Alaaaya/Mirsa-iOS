@@ -250,15 +250,53 @@ enum HomeShortcut {
         return bid
     }
 
-    /// mirsa-container://launch?bundle=<id>
-    static func handle(_ url: URL) -> Bool {
-        guard let bid = containerID(from: url) else { return false }
+    private static let route = HomeShortcutLaunchRoute { bid in
         let store = AppsStore.shared
         guard let app = store.apps.first(where: { $0.id == bid }) else {
             store.error = tr("That app isn't in Mirsa anymore.", "هالتطبيق ما عاد موجود بـMirsa.")
-            return true
+            return
         }
         store.launch(app)
+    }
+
+    /// Loading the store is synchronous, but cold URL delivery can precede the root view.
+    static func applicationReady() {
+        _ = AppsStore.shared
+        route.markReady()
+    }
+
+    /// mirsa-container://launch?bundle=<id>
+    static func handle(_ url: URL) -> Bool {
+        guard let bid = containerID(from: url) else { return false }
+        route.receive(bid)
         return true
+    }
+}
+
+
+// The same one-shot queue is used by cold URL receipt and the already-running app.
+@MainActor
+final class HomeShortcutLaunchRoute {
+    private var ready = false
+    private var pending: [String] = []
+    private let launch: (String) -> Void
+
+    init(launch: @escaping (String) -> Void) { self.launch = launch }
+
+    func receive(_ containerID: String) {
+        pending.append(containerID)
+        drain()
+    }
+
+    func markReady() {
+        ready = true
+        drain()
+    }
+
+    private func drain() {
+        guard ready else { return }
+        let requests = pending
+        pending.removeAll()
+        for id in requests { launch(id) }
     }
 }

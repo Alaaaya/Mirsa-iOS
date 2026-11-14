@@ -671,7 +671,7 @@ struct ContentView: View {
                 return
             }
             if OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]); return }
-            // mirsa://launch?bundle=… from a Home Screen shortcut.
+            // New mirsa-container links and legacy mirsa links share the launch route.
             if HomeShortcut.handle(url) { vm.selectedTab = .apps; return }
             // Document handoff uses a private snapshot before the provider relinquishes access.
             guard url.isFileURL, url.pathExtension.lowercased() == "ipa" else { return }
@@ -747,6 +747,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            HomeShortcut.applicationReady()
             vm.showSuccessAlert = false
             vm.successAlertMessage = ""
 
