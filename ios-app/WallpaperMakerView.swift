@@ -94,6 +94,7 @@ struct WallpaperMakerSection: View {
                     .multilineTextAlignment(.leading)
                     .focused($descriptionFocused)
                     .accessibilityIdentifier("wallpaper-description")
+                    .id("wallpaper-description-row")
                     // Attach to the single input, not Group's many Form rows.
                     .preference(key: WallpaperMakerFocusKey.self, value: descriptionFocused)
                     .toolbar {
