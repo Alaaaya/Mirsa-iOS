@@ -201,11 +201,18 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 if !largeText {
                     field.tap()
                     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-                    shot(app, prefix + "_keyboard")
                     let done = app.buttons["wallpaper-keyboard-done"]
                     XCTAssertTrue(done.waitForExistence(timeout: 3))
+                    XCTAssertEqual(app.buttons.matching(identifier: "wallpaper-keyboard-done").count, 1,
+                                   "The Form must not duplicate the keyboard toolbar")
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForNonExistence(timeout: 5),
+                                  "The floating dock must not cover the focused multiline field")
+                    XCTAssertLessThanOrEqual(field.frame.maxY, app.keyboards.firstMatch.frame.minY,
+                                             "All input lines must stay above the keyboard")
+                    shot(app, prefix + "_keyboard")
                     done.tap()
                     XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForExistence(timeout: 5))
                 }
                 let generate = app.buttons["wallpaper-generate"]
                 revealWallpaperElement(generate, in: app)

@@ -3,6 +3,12 @@ import PhotosUI
 import UniformTypeIdentifiers
 import AVKit
 
+/// Focus is propagated separately from chat so only the dock, not the tools picker, steps aside.
+struct WallpaperMakerFocusKey: PreferenceKey {
+    static var defaultValue: Bool = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
 /// Embedded directly inside the existing Tendies section.
 struct WallpaperMakerSection: View {
     let applyRunning: Bool
@@ -88,6 +94,15 @@ struct WallpaperMakerSection: View {
                     .multilineTextAlignment(.leading)
                     .focused($descriptionFocused)
                     .accessibilityIdentifier("wallpaper-description")
+                    // Attach to the single input, not Group's many Form rows.
+                    .preference(key: WallpaperMakerFocusKey.self, value: descriptionFocused)
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button(MirsaTr.lit("Done")) { descriptionFocused = false }
+                                .accessibilityIdentifier("wallpaper-keyboard-done")
+                        }
+                    }
                     .onChange(of: description) { _, value in
                         if value.utf8.count > 2000 { description = String(value.prefix(500)) }
                     }
@@ -139,13 +154,6 @@ struct WallpaperMakerSection: View {
         }
         .sheet(isPresented: $showShare) {
             if let generated { ShareSheet(items: [generated]) }
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(MirsaTr.lit("Done")) { descriptionFocused = false }
-                    .accessibilityIdentifier("wallpaper-keyboard-done")
-            }
         }
         .onAppear {
             #if DEBUG
