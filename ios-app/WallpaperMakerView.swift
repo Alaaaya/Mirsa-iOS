@@ -7,7 +7,7 @@ import AVKit
 struct WallpaperMakerSection: View {
     let applyRunning: Bool
     let onImport: (URL) async -> Void
-    @State private var layers: [WallpaperPhotoLayer] = []
+    @State private var layers: [WallpaperPhotoLayer] = WallpaperMakerSection.fixtureLayers()
     @State private var video: URL?
     @State private var generated: URL?
     @State private var showPhotos = false
@@ -22,6 +22,33 @@ struct WallpaperMakerSection: View {
     @State private var message: String?
     @State private var description = ""
     @State private var planBusy = false
+    /// DEBUG + UI-test harness only: plain generated sample photos so screenshots show populated layers.
+    private static var fixtureAI: Bool {
+        #if DEBUG
+        return MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperAIFixture")
+        #else
+        return false
+        #endif
+    }
+    private static func fixtureLayers() -> [WallpaperPhotoLayer] {
+        #if DEBUG
+        guard MirsaUITestHarness.active, ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture") else { return [] }
+        let colors: [(UIColor, UIColor)] = [(.systemIndigo, .systemTeal), (.systemOrange, .systemPink), (.systemGreen, .systemYellow)]
+        let roles: [WallpaperPhotoLayer.Role] = [.background, .middle, .foreground]
+        return (0..<3).map { i in
+            let size = CGSize(width: 600, height: 1200)
+            let img = UIGraphicsImageRenderer(size: size).image { ctx in
+                let g = CGGradient(colorsSpace: nil, colors: [colors[i].0.cgColor, colors[i].1.cgColor] as CFArray, locations: [0, 1])!
+                ctx.cgContext.drawLinearGradient(g, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+                UIColor.white.withAlphaComponent(0.8).setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(x: 150 + CGFloat(i) * 40, y: 300 + CGFloat(i) * 200, width: 300, height: 300))
+            }
+            var l = WallpaperPhotoLayer(image: img, role: roles[i]); l.zoom = 1; return l
+        }
+        #else
+        return []
+        #endif
+    }
     private func t(_ key: WallpaperMakerStrings.Key) -> String { WallpaperMakerStrings.text(key) }
     private var aspect: CGFloat { UIScreen.main.bounds.width / UIScreen.main.bounds.height }
 
@@ -45,7 +72,7 @@ struct WallpaperMakerSection: View {
                 VideoPlayer(player: AVPlayer(url: video))
                     .frame(height: 220).accessibilityLabel(t(.preview))
             }
-            if WallpaperLayoutAI.enabled {
+            if WallpaperLayoutAI.enabled || Self.fixtureAI {
                 TextField(t(.describe), text: $description, axis: .vertical)
                     .lineLimit(2...4)
                     .onChange(of: description) { _, value in
