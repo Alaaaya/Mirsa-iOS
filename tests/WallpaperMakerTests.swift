@@ -322,7 +322,7 @@ final class WallpaperMakerTests: XCTestCase {
             var referenced = 0
             for name in [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName] {
                 let xml = String(decoding: try file(name + "/main.caml", in: files), as: UTF8.self)
-                referenced += xml.components(separatedBy: "src="assets/").count - 1
+                referenced += xml.components(separatedBy: #"src="assets/"#).count - 1
                 XCTAssertTrue(xml.contains("LKStateTransitionElement"))
             }
             XCTAssertEqual(referenced, n)
@@ -331,5 +331,50 @@ final class WallpaperMakerTests: XCTestCase {
             let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
             XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, true)
         }
+    }
+
+    /// Opaque full-frame photos: every file exists and is referenced, but later layers visually cover earlier ones.
+    /// Only transparent PNGs let a foreground layer show the background; no cutout is ever synthesised.
+    func testOpaqueNPhotosEveryAssetReferencedExplicitRolesHonoredAndNoCutoutClaim() throws {
+        let roles: [WallpaperPhotoLayer.Role] = [.foreground, .background, .middle, .foreground]
+        let colors: [UIColor] = [.red, .green, .blue, .yellow]
+        let opaque = zip(colors, roles).map { WallpaperPhotoLayer(image: photo($0), role: $1) }
+        for depth in [false, true] {
+            let url = try PhotoWallpaper.makeArchive(layers: opaque, screenAspect: 0.5, depth: depth, effects: .init())
+            defer { try? FileManager.default.removeItem(at: url) }
+            let files = try unpack(url)
+            XCTAssertEqual(files.keys.filter { $0.hasSuffix(".png") && $0.contains("/assets/") }.count, 4)
+            let names = depth ? [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName]
+                              : [PhotoWallpaper.simpleName]
+            var refs: [String: Int] = [:]
+            for name in names {
+                let xml = String(decoding: try file(name + "/main.caml", in: files), as: UTF8.self)
+                refs[name] = xml.components(separatedBy: #"src="assets/"#).count - 1
+            }
+            XCTAssertEqual(refs.values.reduce(0, +), 4)
+            if depth {
+                // Explicit user roles decide the bundle, not the default spread.
+                XCTAssertEqual(refs[PhotoWallpaper.backgroundName], 1)
+                XCTAssertEqual(refs[PhotoWallpaper.floatingName], 1)
+                XCTAssertEqual(refs[PhotoWallpaper.foregroundName], 2)
+            }
+        }
+        // A real alpha channel is preserved in the stored PNG (cutout input), opaque stays opaque.
+        let cut = [WallpaperPhotoLayer(image: photo(.red), role: .background),
+                   WallpaperPhotoLayer(image: photo(.blue, transparent: true), role: .foreground)]
+        let url = try PhotoWallpaper.makeArchive(layers: cut, screenAspect: 0.5, depth: true, effects: .init())
+        defer { try? FileManager.default.removeItem(at: url) }
+        let files = try unpack(url)
+        func alphaAtCorner(_ id: UUID) throws -> CGFloat {
+            let data = try XCTUnwrap(files.first { $0.key.hasSuffix(id.uuidString + ".png") }?.value)
+            let img = try XCTUnwrap(UIImage(data: data)?.cgImage)
+            var px = [UInt8](repeating: 0, count: 4)
+            let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.draw(img, in: CGRect(x: -img.width + 1, y: -img.height + 1, width: img.width, height: img.height))
+            return CGFloat(px[3]) / 255
+        }
+        XCTAssertEqual(try alphaAtCorner(cut[0].id), 1, accuracy: 0.01)
+        XCTAssertEqual(try alphaAtCorner(cut[1].id), 0, accuracy: 0.01)
     }
 }
