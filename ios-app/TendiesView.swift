@@ -107,7 +107,7 @@ struct TendiesView: View {
                                 .font(.caption.bold())
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Button(selectedAll ? "Deselect All" : "Select All") {
+                            Button(WallpaperMakerStrings.text(selectedAll ? .deselectAll : .selectAll)) {
                                 let target = !selectedAll
                                 for i in 0..<vm.tendieItems.count {
                                     vm.tendieItems[i].isSelected = target
@@ -214,19 +214,24 @@ struct TendiesView: View {
                             lines: vm.tendiesFlashLog,
                             onClear: { vm.tendiesFlashLog.removeAll() }
                         )
+                        .accessibilityIdentifier("wallpaper-flash-log")
                     }
                 }
             }
-            // Keep the final controls inside the scrollable area above Mirsa's dock.
-            // Unlike a fixed-height spacer, this also follows the shared dock metrics.
-            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
+            // Bound the actual Form viewport, not just its scrollable content.
+            // Classic/native tab bars and expanded Flash Log must not overlap actions.
+            // A focused multiline input also needs clearance above the keyboard toolbar.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: makerDescriptionFocused ? 56 : MirsaTabBarMetrics.clearance)
+                    .accessibilityHidden(true)
+            }
             .scrollDismissesKeyboard(.interactively)
             .onPreferenceChange(WallpaperMakerFocusKey.self) { makerDescriptionFocused = $0 }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
                 guard makerDescriptionFocused else { return }
-                // Align the bottom of the entire input above the keyboard accessory,
-                // rather than centering an intrinsically tall multiline row.
-                withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .bottom) }
+                // The keyboard toolbar is an extra obstruction. Center the complete
+                // input in the reduced viewport instead of aligning to the keyboard edge.
+                withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .center) }
             }
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
@@ -257,6 +262,15 @@ struct TendiesView: View {
                 vm.showSuccessAlert = false
                 vm.successAlertMessage = ""
                 vm.scanDocumentsForTendies()
+                #if DEBUG
+                if MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFlashLogFixture") {
+                    // Layout-only data. Never select, save, apply or respring a fixture.
+                    vm.tendieItems = [TendieItem(name: "Layout fixture", fileName: "layout-fixture.tendies",
+                                               relativePath: "layout-fixture.tendies", posterType: .suggestedPhotos,
+                                               isSelected: false)]
+                    vm.tendiesFlashLog = (1...24).map { "Layout fixture log line \($0), no device action performed." }
+                }
+                #endif
             }
             .task {
                 if vm.posterBoardContainer.isEmpty {
@@ -313,7 +327,7 @@ struct TendieRowView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    Text(item.posterType.rawValue)
+                    Text(item.posterType.displayName)
                         .font(.caption2.bold())
                         .foregroundColor(item.posterType.badgeColor)
 
@@ -377,7 +391,7 @@ struct TendieDetailSheet: View {
                 Section(MirsaTr.lit("Information")) {
                     detailRow(title: "Name", value: item.name)
                     detailRow(title: "File Name", value: item.fileName)
-                    detailRow(title: "Type", value: item.posterType.rawValue)
+                    detailRow(title: "Type", value: item.posterType.displayName)
                     detailRow(title: "Descriptors", value: "\(item.descriptorCount)")
                     detailRow(title: "Target Extension", value: item.posterType.extensionBundleId)
                     detailRow(title: "Format", value: item.isContainer ? "App Container" : "Descriptor Archive")
