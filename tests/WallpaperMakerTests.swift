@@ -579,6 +579,32 @@ private func posterAccessRestore(_ caches: UnsafePointer<CChar>, _ backup: Unsaf
                                  _ existed: Int32, _ target: UnsafePointer<CChar>) -> Int32
 
 final class PosterBoardAccessSafetyTests: XCTestCase {
+    func testClass7AliasRequiresExactTargetAndRejectsNestedLinks() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let target = root.appendingPathComponent("PosterBoard")
+        let alias = root.appendingPathComponent("Caches")
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let metadata = ".com.apple.mobile_container_manager.metadata.plist"
+        let store = target.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore")
+        try fm.createDirectory(at: store, withIntermediateDirectories: true)
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: ["MCMMetadataIdentifier": "com.apple.PosterBoard"],
+            format: .binary, options: 0)
+        try data.write(to: target.appendingPathComponent(metadata))
+        try fm.createSymbolicLink(at: alias, withDestinationURL: target)
+        XCTAssertTrue(PosterBoardStore.permitsLeasePath(alias.appendingPathComponent(metadata), effective: alias, target: target))
+        XCTAssertFalse(PosterBoardStore.permitsLeasePath(alias.appendingPathComponent(metadata), effective: alias, target: root))
+        XCTAssertFalse(PosterBoardStore.permitsLeasePath(root.appendingPathComponent("Caches-other"), effective: alias, target: target))
+        try fm.createSymbolicLink(at: target.appendingPathComponent("redirect"), withDestinationURL: root)
+        XCTAssertFalse(PosterBoardStore.permitsLeasePath(alias.appendingPathComponent("redirect/file"), effective: alias, target: target))
+        try PosterBoardStore.validateIdentity(target)
+        try PropertyListSerialization.data(fromPropertyList: ["MCMMetadataIdentifier": "other.app"],
+                                           format: .binary, options: 0).write(to: target.appendingPathComponent(metadata))
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(target))
+    }
+
     func testOnlyDataRootsOrUUIDChildrenAllowed() {
         let root = "/var/mobile/Containers/Data/Application"
         for path in [root, root + "/" + UUID().uuidString] {

@@ -42,12 +42,7 @@ final class PosterBoardLease {
     /// Any additional symlink within Library, providers or descriptors is rejected.
     func permits(_ url: URL) -> Bool {
         guard handle != nil else { return false }
-        let base = effectiveURL.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        guard path == base || path.hasPrefix(base + "/") else { return false }
-        let suffix = String(path.dropFirst(base.count))
-        return PosterBoardStore.normalizedPath(url.resolvingSymlinksInPath().path) ==
-            PosterBoardStore.normalizedPath(targetURL.path + suffix)
+        return PosterBoardStore.permitsLeasePath(url, effective: effectiveURL, target: targetURL)
     }
     func close() throws {
         guard let current = handle else { return }
@@ -89,6 +84,41 @@ enum PosterBoardStore {
     static func unredirected(_ url: URL, lease: PosterBoardLease? = nil) -> Bool {
         if let lease { return lease.permits(url) }
         return normalizedPath(url.resolvingSymlinksInPath().path) == normalizedPath(url.standardizedFileURL.path)
+    }
+    /// Resolve the known class-7 alias explicitly. Foundation's realpath-style
+    /// resolution can leave that alias unchanged when the sandbox grants access
+    /// through Caches but not through the canonical container pathname.
+    /// Never resolve (or trust) an additional link beneath that alias.
+    static func permitsLeasePath(_ url: URL, effective: URL, target: URL) -> Bool {
+        let fm = FileManager.default
+        let base = effective.standardizedFileURL
+        let path = url.standardizedFileURL.path
+        guard path == base.path || path.hasPrefix(base.path + "/") else { return false }
+        let expected = normalizedPath(target.standardizedFileURL.path)
+        if normalizedPath(base.path) != expected {
+            guard let link = try? fm.destinationOfSymbolicLink(atPath: base.path) else { return false }
+            let resolved = link.hasPrefix("/") ? URL(fileURLWithPath: link) :
+                base.deletingLastPathComponent().appendingPathComponent(link)
+            guard normalizedPath(resolved.standardizedFileURL.path) == expected else { return false }
+        } else {
+            guard unredirected(base) else { return false }
+        }
+        var current = base
+        let suffix = String(path.dropFirst(base.path.count))
+        for component in suffix.split(separator: "/") {
+            current.appendPathComponent(String(component))
+            do {
+                let attributes = try fm.attributesOfItem(atPath: current.path)
+                guard attributes[.type] as? FileAttributeType != .typeSymbolicLink else { return false }
+            } catch {
+                // New destinations may not exist yet. Permission/read failures
+                // are never interpreted as proof of a safe missing path.
+                let failure = error as NSError
+                guard failure.domain == NSCocoaErrorDomain,
+                      failure.code == NSFileNoSuchFileError || failure.code == NSFileReadNoSuchFileError else { return false }
+            }
+        }
+        return true
     }
     static func validateIdentity(_ container: URL, lease: PosterBoardLease? = nil) throws {
         for name in [".com.apple.mobile_container_manager.metadata.plist", "com.apple.mobile_container_manager.metadata.plist"] {
