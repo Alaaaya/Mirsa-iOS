@@ -12,6 +12,25 @@ final class WallpaperMakerTests: XCTestCase {
             c.fill(transparent ? CGRect(x: 16, y: 16, width: 32, height: 32) : CGRect(x: 0, y: 0, width: 64, height: 96))
         }
     }
+    private func recordEvidence(_ archive: URL, name: String) throws {
+        let path = ProcessInfo.processInfo.environment["MIRSA_WALLPAPER_EVIDENCE"] ??
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("wallpaper-evidence").path
+        let root = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent(name + ".tendies")
+        if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+        try FileManager.default.copyItem(at: archive, to: destination)
+        let files = try unpack(archive)
+        var alpha: [String: Bool] = [:]
+        for (path, data) in files where path.hasSuffix(".png") {
+            alpha[path] = WallpaperForeground.hasTransparency(try XCTUnwrap(UIImage(data: data)?.cgImage))
+        }
+        let proof: [String: Any] = ["listing": files.keys.sorted(), "alpha": alpha,
+                                    "galleryRegistrationVerified": false, "realVisionSegmentation": false]
+        try JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
+            .write(to: root.appendingPathComponent(name + ".json"))
+    }
     private func unpack(_ url: URL) throws -> [String: Data] {
         let archive = try Archive(url: url, accessMode: .read)
         var output: [String: Data] = [:]
@@ -342,6 +361,7 @@ final class WallpaperMakerTests: XCTestCase {
         for depth in [false, true] {
             let url = try PhotoWallpaper.makeArchive(layers: opaque, screenAspect: 0.5, depth: depth, effects: .init())
             defer { try? FileManager.default.removeItem(at: url) }
+            try recordEvidence(url, name: depth ? "opaque-4-depth" : "opaque-4-flat")
             let files = try unpack(url)
             XCTAssertEqual(files.keys.filter { $0.hasSuffix(".png") && $0.contains("/assets/") }.count, 4)
             let names = depth ? [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName]
@@ -364,6 +384,7 @@ final class WallpaperMakerTests: XCTestCase {
                    WallpaperPhotoLayer(image: photo(.blue, transparent: true), role: .foreground)]
         let url = try PhotoWallpaper.makeArchive(layers: cut, screenAspect: 0.5, depth: true, effects: .init())
         defer { try? FileManager.default.removeItem(at: url) }
+        try recordEvidence(url, name: "transparent-2-depth")
         let files = try unpack(url)
         func alphaAtCorner(_ id: UUID) throws -> CGFloat {
             let data = try XCTUnwrap(files.first { $0.key.hasSuffix(id.uuidString + ".png") }?.value)
@@ -376,5 +397,128 @@ final class WallpaperMakerTests: XCTestCase {
         }
         XCTAssertEqual(try alphaAtCorner(cut[0].id), 1, accuracy: 0.01)
         XCTAssertEqual(try alphaAtCorner(cut[1].id), 0, accuracy: 0.01)
+    }
+}
+
+extension WallpaperMakerTests {
+    func testRealVisionForegroundFixtureWhenDeviceModelAvailable() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Real Vision foreground model is not provided by this simulator. Alpha/export tests are separate, not segmentation proof.")
+        #else
+        let url = try XCTUnwrap(Bundle(for: WallpaperMakerTests.self).url(forResource: "nasa-eileen-collins", withExtension: "jpg"))
+        let original = try PhotoWallpaper.loadImage(url)
+        let outcome = try WallpaperForeground.process(original)
+        switch outcome {
+        case .unavailable: throw XCTSkip("Foreground model unavailable on this device.")
+        case .noSubject: XCTFail("NASA portrait should yield a subject.")
+        case .masked(let mask):
+            XCTAssertTrue(WallpaperForeground.hasTransparency(try XCTUnwrap(mask.cgImage)))
+            XCTAssertEqual(mask.size, original.size)
+            XCTAssertFalse(WallpaperForeground.hasTransparency(try XCTUnwrap(original.cgImage)))
+        }
+        #endif
+    }
+    func testEmptyDescriptorSearchNeverPretendsAnArbitraryDirectoryIsWallpaper() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        XCTAssertTrue(TendiesEngine.shared.findDescriptorsWithExtensions(in: folder, defaultExt: "com.apple.WallpaperKit.CollectionsPoster").isEmpty)
+    }
+    func testTwoPhotosDefaultToBackgroundAndForeground() {
+        XCTAssertEqual(PhotoWallpaper.defaultRoles(existing: 0, adding: 2), [.background, .foreground])
+        XCTAssertEqual(PhotoWallpaper.defaultRoles(existing: 1, adding: 1), [.foreground])
+    }
+    func testLocalCutoutPreservesAlphaAndToggleRestoresOpaqueOriginal() throws {
+        let original = photo(.red), alpha = photo(.red, transparent: true)
+        guard case .masked(let mask) = try WallpaperForeground.process(alpha) else {
+            return XCTFail("Existing alpha must be preserved without Vision")
+        }
+        XCTAssertTrue(WallpaperForeground.hasTransparency(try XCTUnwrap(mask.cgImage)))
+        var layer = WallpaperPhotoLayer(image: original, role: .foreground)
+        XCTAssertTrue(layer.cutoutEnabled)
+        layer.cutoutImage = mask; layer.cutoutStatus = .ready
+        for enabled in [true, false] {
+            layer.cutoutEnabled = enabled
+            let archive = try PhotoWallpaper.makeArchive(layers: [WallpaperPhotoLayer(image: photo(.blue)), layer], screenAspect: 0.5, depth: true)
+            defer { try? FileManager.default.removeItem(at: archive) }
+            let files = try unpack(archive)
+            let png = try file(PhotoWallpaper.foregroundName + "/assets/\(layer.id.uuidString).png", in: files)
+            XCTAssertEqual(WallpaperForeground.hasTransparency(try XCTUnwrap(UIImage(data: png)?.cgImage)), enabled)
+            XCTAssertEqual(files.keys.filter { $0.hasSuffix(".png") }.count, 2)
+            _ = try checkBundle(PhotoWallpaper.foregroundName, count: 1, files: files)
+            try recordEvidence(archive, name: enabled ? "foreground-cutout-enabled" : "foreground-original-restored")
+        }
+        XCTAssertFalse(WallpaperForeground.hasTransparency(try XCTUnwrap(layer.image.cgImage)))
+        layer.cutoutImage = nil
+        XCTAssertTrue(layer.renderedImage === original, "A failed mask must fall back to the original")
+    }
+    func testGeneratedMotionHasBothDirectionsAndNonfinalStateAssignments() throws {
+        let archive = try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: 0.5,
+                                                      effects: .init(unlock: .zoom, gyro: true, floating: true))
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let files = try unpack(archive)
+        let caml = try checkBundle(PhotoWallpaper.simpleName, count: 1, files: files)
+        for state in ["Locked", "Unlock", "Sleep"] {
+            XCTAssertTrue(caml.contains("fromState=\"*\" toState=\"\(state)\""))
+            XCTAssertTrue(caml.contains("fromState=\"\(state)\" toState=\"*\""))
+        }
+        XCTAssertTrue(caml.contains("final=\"false\""))
+    }
+    func testOnlyRecognizedConnectionTimeoutGetsFriendlyHint() {
+        XCTAssertTrue(TendiesConnectionHint.matches("MIRSA_CONNECTION: RSD connection timed out"))
+        XCTAssertTrue(TendiesConnectionHint.matches("lockdown tunnel timeout"))
+        XCTAssertTrue(TendiesConnectionHint.matches("RemoteXPC connection timed out"))
+        XCTAssertFalse(TendiesConnectionHint.matches("RemoteXPC permission denied"))
+        XCTAssertFalse(TendiesConnectionHint.matches("download timeout"))
+        XCTAssertFalse(TendiesConnectionHint.matches("MIRSA_CONNECTION: permission denied"))
+        for key in [WallpaperMakerStrings.Key.cutout, .cutoutHelp, .cutoutReady, .cutoutNoSubject, .cutoutUnavailable, .cutoutPreparing, .connectionHint, .containerUnavailable, .copyVerified, .applyFailed] {
+            XCTAssertEqual(WallpaperMakerStrings.values[key]?.count, 5)
+            XCTAssertTrue(WallpaperMakerStrings.values[key]?.allSatisfy { !$0.isEmpty } == true)
+        }
+    }
+    func testPosterStoreCopiesReadbacksPreservesMetadataAndUnrelatedPreferences() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("mirsa-pb-test-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let container = root.appendingPathComponent("container")
+        let provider = "com.apple.WallpaperKit.CollectionsPoster"
+        let target = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore/73/Extensions/" + provider + "/descriptors")
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        let identity = try PropertyListSerialization.data(fromPropertyList: ["MCMMetadataIdentifier": "com.apple.PosterBoard"], format: .binary, options: 0)
+        try identity.write(to: container.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist"))
+        let prefs = container.appendingPathComponent("Library/Preferences/com.apple.PosterBoard.unprotectedUserDefaults.plist")
+        try fm.createDirectory(at: prefs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let previous = try PropertyListSerialization.data(fromPropertyList: ["unrelated": "keep", "PersistedPosterContainerBundleIdentifiers": ["com.apple.Existing"]], format: .binary, options: 0)
+        try previous.write(to: prefs)
+        let id = "5M800000-0000-0000-0000-5QU41R000000"
+        let source = root.appendingPathComponent(id)
+        try fm.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("fixture \(id)".utf8).write(to: source.appendingPathComponent("metadata"))
+        let backup = root.appendingPathComponent("backups")
+        let count = try PosterBoardStore.install([(url: source, ext: provider)], container: container, resetProtections: false, backupRoot: backup, log: { _ in })
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(try PosterBoardStore.manifest(source), try PosterBoardStore.manifest(target.appendingPathComponent(id)))
+        let dict = try XCTUnwrap(try PropertyListSerialization.propertyList(from: Data(contentsOf: prefs), format: nil) as? [String: Any])
+        XCTAssertEqual(dict["unrelated"] as? String, "keep")
+        XCTAssertEqual(dict["PBF_LOCALE_DID_CHANGE"] as? Bool, false)
+        XCTAssertNil(dict["PBF_RESET_FILE_PROTECTIONS"])
+        XCTAssertEqual(Set(dict["PersistedPosterContainerBundleIdentifiers"] as? [String] ?? []), Set([provider, "com.apple.Existing"]))
+        let saved = try XCTUnwrap(try fm.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil).first)
+        XCTAssertEqual(try Data(contentsOf: saved.appendingPathComponent("unprotectedUserDefaults.original.plist")), previous)
+        let proof = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: saved.appendingPathComponent("verified-copy.json"))) as? [String: Any])
+        XCTAssertEqual(proof["galleryRegistrationVerified"] as? Bool, false)
+        XCTAssertEqual(proof["version"] as? String, "73")
+        XCTAssertThrowsError(try PosterBoardStore.install([(url: source, ext: provider)], container: container, resetProtections: false, backupRoot: backup, log: { _ in }))
+        XCTAssertEqual(try PosterBoardStore.manifest(source), try PosterBoardStore.manifest(target.appendingPathComponent(id)))
+    }
+    func testPosterStoreRejectsInvalidPathsUnknownProvidersAndSymlinkSource() throws {
+        XCTAssertThrowsError(try PosterBoardStore.canonicalContainer("/var/mobile/Library"))
+        XCTAssertThrowsError(try PosterBoardStore.canonicalContainer("/var/mobile/Containers/Data/Application/../" + UUID().uuidString))
+        XCTAssertThrowsError(try PosterBoardStore.providers(for: "com.apple.Unknown", available: ["com.apple.Existing"]))
+        let fm = FileManager.default, root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: URL(fileURLWithPath: "/etc/hosts"))
+        XCTAssertThrowsError(try PosterBoardStore.manifest(root))
     }
 }

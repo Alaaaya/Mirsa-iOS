@@ -1282,15 +1282,6 @@ final class AppViewModel: ObservableObject {
 
     func autoDetectPosterBoardContainer(silent: Bool = false) async {
         let pairingPath = PairingController.pairingFilePath()
-        guard FileManager.default.fileExists(atPath: pairingPath) else {
-            if !silent {
-                await MainActor.run {
-                    self.errorMessage = "No pairing file active. Pair your device first in the Pairing tab."
-                }
-            }
-            return
-        }
-
         await MainActor.run { self.isDetectingContainer = true }
         defer {
             Task { @MainActor in self.isDetectingContainer = false }
@@ -1305,7 +1296,8 @@ final class AppViewModel: ObservableObject {
         } catch {
             if !silent {
                 await MainActor.run {
-                    self.errorMessage = "Auto-detect failed: \(error.localizedDescription)\nEnsure LocalDevVPN is connected and device is unlocked."
+                    self.tendiesFlashLog.append(error.localizedDescription)
+                    self.errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .containerUnavailable)
                 }
             }
         }
@@ -1319,11 +1311,6 @@ final class AppViewModel: ObservableObject {
         }
 
         let pairingPath = PairingController.pairingFilePath()
-        guard FileManager.default.fileExists(atPath: pairingPath) else {
-            errorMessage = "No pairing file active. Please pair your device first."
-            return
-        }
-
         var container = posterBoardContainer.trimmingCharacters(in: .whitespacesAndNewlines)
         if container.isEmpty {
             do {
@@ -1331,7 +1318,8 @@ final class AppViewModel: ObservableObject {
                 self.posterBoardContainer = container
                 UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
             } catch {
-                errorMessage = "PosterBoard container could not be found automatically. Ensure LocalDevVPN is connected and iPhone is unlocked."
+                tendiesFlashLog.append(error.localizedDescription)
+                errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .containerUnavailable)
                 return
             }
         }
@@ -1359,7 +1347,8 @@ final class AppViewModel: ObservableObject {
             )
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
-            tendiesFlashLog.append("🎉 Wallpapers applied successfully!")
+            tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))
+            errorMessage = WallpaperMakerStrings.text(.copyVerified)
             tendiesFlashLog.append("⚡ Triggering NeoSpring respring...")
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
@@ -1369,6 +1358,7 @@ final class AppViewModel: ObservableObject {
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
             tendiesFlashPhase = .done(ok: false)
+            errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .applyFailed)
         }
     }
 

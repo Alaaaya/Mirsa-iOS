@@ -224,9 +224,9 @@ struct TendiesView: View {
             .onPreferenceChange(WallpaperMakerFocusKey.self) { makerDescriptionFocused = $0 }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
                 guard makerDescriptionFocused else { return }
-                // TextField scrolls only the caret into view. Center the whole multiline
-                // row after the keyboard and its accessory toolbar finish changing size.
-                withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .center) }
+                // Align the bottom of the entire input above the keyboard accessory,
+                // rather than centering an intrinsically tall multiline row.
+                withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .bottom) }
             }
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
