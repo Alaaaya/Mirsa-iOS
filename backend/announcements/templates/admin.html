@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mirsa · Announcements</title>
+<style>
+:root{color-scheme:dark;font-family:ui-sans-serif,system-ui,sans-serif;background:#101312;color:#f0f1e8}*{box-sizing:border-box}body{margin:0;padding:40px 24px}main{max-width:740px;margin:auto}.brand{letter-spacing:.24em;color:#b7d6a1;font-weight:750;font-size:13px}.top{border-bottom:1px solid #353d34;padding-bottom:28px;margin-bottom:32px}h1{font-size:clamp(30px,6vw,48px);letter-spacing:-.04em;margin:12px 0}p{color:#b7beb2;line-height:1.6;max-width:60ch}label{display:block;font-size:14px;font-weight:650;margin:24px 0 9px}input,textarea,select{width:100%;background:#1b211c;color:#f0f1e8;border:1px solid #4d5848;border-radius:8px;padding:14px;font:inherit}textarea{resize:vertical;min-height:150px}input:focus-visible,textarea:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid #c0e698;outline-offset:3px}.row{display:grid;grid-template-columns:1fr 1fr;gap:18px}button{background:#c0e698;color:#15200e;border:0;padding:14px 24px;border-radius:7px;font:inherit;font-weight:750;cursor:pointer;margin-top:28px}.quiet{background:transparent;color:#b7beb2;border:1px solid #4d5848}.notice{border-left:3px solid #c0e698;padding:16px 20px;background:#1b211c}.note{font-size:13px}.footer{margin-top:40px;padding-top:20px;border-top:1px solid #353d34}@media(max-width:500px){.row{grid-template-columns:1fr}}
+</style></head><body><main>
+<header class="top"><div class="brand">MIRSA / OWNER</div><h1>Announcements</h1><p>A small message, directly from you. Mirsa checks for announcements in the background and when opened.</p></header>
+{% if authenticated %}
+{% if sent %}<div class="notice" role="status">Message saved. Delivery depends on iOS background refresh and each person's notification settings.</div>{% endif %}
+<form action="/admin" method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label for="title">Title</label><input id="title" name="title" required maxlength="100" autocomplete="off">
+<label for="message">Message</label><textarea id="message" name="message" required maxlength="2000"></textarea>
+<div class="row"><div><label for="language">Language</label><select id="language" name="language"><option value="all">All languages</option><option value="ar">العربية</option><option value="en">English</option><option value="de">Deutsch</option><option value="kmr">Kurmancî</option><option value="ckb">کوردیی سۆرانی</option></select></div>
+<div><label for="target">Audience</label><select id="target" name="target"><option value="owner">Only my verified device · test</option><option value="all">Everyone in this language</option></select></div></div>
+<p class="note">Plain text only. Choose “Everyone” only when you intend to send a real announcement. Messages remain available for 30 days.</p><button type="submit">Send announcement</button></form>
+<form action="/admin/logout" method="post" class="footer"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="quiet">Sign out</button></form>
+{% else %}
+<form action="/admin/login" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="password">Owner password</label><input id="password" name="password" type="password" required maxlength="256" autocomplete="current-password"><button>Sign in</button></form>
+<p class="note footer">Private owner access. No Apple ID or app password is needed here.</p>
+{% endif %}</main></body></html>
