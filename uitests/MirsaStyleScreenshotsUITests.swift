@@ -207,8 +207,9 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                                    "The Form must not duplicate the keyboard toolbar")
                     XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForNonExistence(timeout: 5),
                                   "The floating dock must not cover the focused multiline field")
-                    XCTAssertLessThanOrEqual(field.frame.maxY, app.keyboards.firstMatch.frame.minY,
-                                             "All input lines must stay above the keyboard")
+                    let inputVisible = NSPredicate { _, _ in field.frame.maxY <= done.frame.minY }
+                    XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: inputVisible, object: nil)], timeout: 5), .completed,
+                                  "All input lines must stay above the keyboard accessory, not just the keys")
                     shot(app, prefix + "_keyboard")
                     done.tap()
                     XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
@@ -228,21 +229,28 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 // Disabled (no selection) is correct, but the full label must be visible.
                 if !largeText {
                     XCTAssertGreaterThan(flash.frame.minY, 130)
-                    XCTAssertLessThan(flash.frame.maxY, app.frame.maxY - 90)
+                    XCTAssertLessThan(flash.frame.maxY, wallpaperVisibleBottom(in: app))
                 }
                 shot(app, prefix + "_actions")
                 let help = app.staticTexts["wallpaper-flash-help"]
                 revealWallpaperElement(help, in: app)
-                XCTAssertLessThanOrEqual(help.frame.maxY, app.frame.maxY - 90)
+                XCTAssertLessThanOrEqual(help.frame.maxY, wallpaperVisibleBottom(in: app))
                 shot(app, prefix + "_screen_bottom")
                 app.terminate()
             }
         }
     }
 
+    private func wallpaperVisibleBottom(in app: XCUIApplication) -> CGFloat {
+        let dock = app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
+        // Assert against the actual obstruction, not a guessed 110pt inset that
+        // incorrectly rejects a fully visible footer on the compact simulator.
+        return dock.exists ? dock.frame.minY - 8 : app.frame.maxY - 8
+    }
+
     private func revealWallpaperElement(_ element: XCUIElement, in app: XCUIApplication) {
         let top = app.navigationBars.firstMatch.frame.maxY + 8
-        let bottom = app.frame.maxY - 110
+        let bottom = wallpaperVisibleBottom(in: app)
         for _ in 0..<24 {
             if element.exists && element.frame.minY >= top && element.frame.maxY <= bottom { return }
             let upward = !element.exists || element.frame.maxY > bottom

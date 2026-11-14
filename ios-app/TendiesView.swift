@@ -14,6 +14,7 @@ struct TendiesView: View {
     @State private var showFilePicker = false
     @State private var selectedDetailItem: TendieItem? = nil
     @State private var isNeoSpringing = false
+    @State private var makerDescriptionFocused = false
 
     private var videoApplyRunning: Bool {
         if case .running = vm.tendiesFlashPhase { return true }
@@ -30,6 +31,7 @@ struct TendiesView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroll in
             MirsaForm {
                 // Notice Banners
                 if let err = vm.errorMessage {
@@ -216,6 +218,13 @@ struct TendiesView: View {
             // Unlike a fixed-height spacer, this also follows the shared dock metrics.
             .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
+            .onPreferenceChange(WallpaperMakerFocusKey.self) { makerDescriptionFocused = $0 }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                guard makerDescriptionFocused else { return }
+                // TextField scrolls only the caret into view. Center the whole multiline
+                // row after the keyboard and its accessory toolbar finish changing size.
+                withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .center) }
+            }
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -261,6 +270,7 @@ struct TendiesView: View {
                     }
                 }
             }
+            } // ScrollViewReader
         }
     }
 }
