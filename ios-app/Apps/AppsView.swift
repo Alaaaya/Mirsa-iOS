@@ -1195,6 +1195,8 @@ struct AppsSettingsSheet: View {
                     .disabled(installMode != "certificate" && store.account == nil && !store.hasSavedLogin)
                 } footer: { Text(L.t("settings.selfInstallFoot")) }
 
+                MirsaNotificationSettings()
+
                 Section(L.t("settings.anisette")) {
                     TextField("https://ani.sidestore.io", text: $store.anisetteURL)
                         .textInputAutocapitalization(.never)
