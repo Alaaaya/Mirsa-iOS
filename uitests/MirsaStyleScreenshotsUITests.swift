@@ -194,7 +194,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 let prefix = "\(lang)_tendies_\(largeText ? "large" : "standard")"
                 shot(app, prefix + "_top")
                 let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
-                revealWallpaperElement(field, in: app)
+                revealWallpaperElement(field, identifier: "wallpaper-description", in: app)
                 XCTAssertTrue(field.isHittable)
                 XCTAssertGreaterThan(field.frame.height, 65, "Multiline text needs intrinsic height")
                 shot(app, prefix + "_multiline")
@@ -216,13 +216,13 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                     XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForExistence(timeout: 5))
                 }
                 let generate = app.buttons["wallpaper-generate"]
-                revealWallpaperElement(generate, in: app)
+                revealWallpaperElement(generate, identifier: "wallpaper-generate", in: app)
                 XCTAssertTrue(generate.isHittable)
                 let compatibility = app.staticTexts["wallpaper-compatibility"]
-                revealWallpaperElement(compatibility, in: app)
+                revealWallpaperElement(compatibility, identifier: "wallpaper-compatibility", in: app)
                 shot(app, prefix + "_maker_bottom")
                 let respring = app.buttons["wallpaper-respring"]
-                revealWallpaperElement(respring, in: app)
+                revealWallpaperElement(respring, identifier: "wallpaper-respring", in: app)
                 XCTAssertTrue(respring.isHittable, "Respring must stay above the dock")
                 let flash = app.buttons["wallpaper-flash"]
                 XCTAssertTrue(flash.exists)
@@ -233,7 +233,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 }
                 shot(app, prefix + "_actions")
                 let help = app.staticTexts["wallpaper-flash-help"]
-                revealWallpaperElement(help, in: app)
+                revealWallpaperElement(help, identifier: "wallpaper-flash-help", in: app)
                 XCTAssertLessThanOrEqual(help.frame.maxY, wallpaperVisibleBottom(in: app))
                 shot(app, prefix + "_screen_bottom")
                 app.terminate()
@@ -248,27 +248,31 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         return dock.exists ? dock.frame.minY - 8 : app.frame.maxY - 8
     }
 
-    private func revealWallpaperElement(_ element: XCUIElement, in app: XCUIApplication) {
+    private func revealWallpaperElement(_ element: XCUIElement, identifier: String, in app: XCUIApplication) {
         let top = app.navigationBars.firstMatch.frame.maxY + 8
         let bottom = wallpaperVisibleBottom(in: app)
         for _ in 0..<24 {
-            if element.exists && element.frame.minY >= top && element.frame.maxY <= bottom { return }
+            // Form virtualizes off-screen rows. Neither frame nor identifier is
+            // safe to request until the query matches a materialized element.
+            let frame: CGRect? = element.exists ? element.frame : nil
+            if let frame, frame.minY >= top && frame.maxY <= bottom { return }
             // Fixed 32%-screen swipes overshoot the compact safe viewport at
             // accessibility sizes, alternating above/below the target forever.
             // Move toward its measured center in bounded, non-flinging steps.
             // Use the Form gutter, not a text field, slider or reorder handle.
             let center = (top + bottom) / 2
-            let error = element.exists ? element.frame.midY - center : 80
+            let error = frame.map { $0.midY - center } ?? 80
             let distance = min(80, max(-80, error))
             let start = app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: app.frame.width - 5, dy: center + distance / 2))
             let end = app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: app.frame.width - 5, dy: center - distance / 2))
-            print("WALLPAPER-REVEAL \(element.identifier) frame=\(element.frame) safe=\(top)...\(bottom) distance=\(distance)")
+            print("WALLPAPER-REVEAL \(identifier) frame=\(String(describing: frame)) safe=\(top)...\(bottom) distance=\(distance)")
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
-        shot(app, "unreachable_" + element.identifier)
-        XCTFail("Unreachable wallpaper control \(element.identifier): \(element.frame)")
+        shot(app, "unreachable_" + identifier)
+        let finalFrame = element.exists ? String(describing: element.frame) : "not materialized"
+        XCTFail("Unreachable wallpaper control \(identifier): \(finalFrame)")
     }
 
     func testArabicPages() { run(lang: "ar") }
