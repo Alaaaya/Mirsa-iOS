@@ -181,7 +181,14 @@ final class WallpaperMakerTests: XCTestCase {
                     XCTAssertTrue(caml.contains("keyPath=\"\(effect.unlock == .slide ? "position" : "transform")\""))
                 }
                 XCTAssertEqual(caml.contains("CAKeyframeAnimation"), effect.floating)
-                if effect.floating { XCTAssertTrue(caml.contains("duration=\"6\"")); XCTAssertTrue(caml.contains("repeatCount=\"inf\"")) }
+                if effect.floating {
+                    XCTAssertTrue(caml.contains("duration=\"15\""))
+                    XCTAssertTrue(caml.contains("repeatCount=\"inf\""))
+                    XCTAssertTrue(caml.contains("autoreverses=\"1\""))
+                    XCTAssertTrue(caml.contains("bounds=\"0 0 390 844\""))
+                    XCTAssertTrue(caml.contains("bounds=\"0 0 470 924\""))
+                    XCTAssertFalse(caml.contains("keyPath=\"opacity\""))
+                }
                 XCTAssertEqual(caml.contains("transform.translation.x"), effect.gyro)
                 if effect.gyro { XCTAssertTrue(caml.contains("value=\"motion-0\"")); XCTAssertTrue(caml.contains("transform.translation.y")) }
                 let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
@@ -189,6 +196,36 @@ final class WallpaperMakerTests: XCTestCase {
             }
         }
     }
+    func testContinuousPresetsKeepRoleSpecificSpeedsAndTwoRealEndpoints() throws {
+        for preset in PhotoWallpaper.Effects.Motion.allCases {
+            var animations = Set<String>()
+            for role in WallpaperPhotoLayer.Role.allCases {
+                let xml = PhotoWallpaper.continuousAnimation(role: role, preset: preset)
+                XCTAssertTrue(XMLParser(data: Data(xml.utf8)).parse())
+                XCTAssertTrue(xml.contains("repeatDuration=\"inf\""))
+                XCTAssertFalse(xml.contains("opacity"))
+                let axes = preset == .float ? 2 : 1
+                XCTAssertEqual(xml.components(separatedBy: "<real value=").count - 1, axes * 2)
+                XCTAssertTrue(animations.insert(xml).inserted, "Each depth role must have distinct motion")
+            }
+        }
+        let layers: [WallpaperPhotoLayer] = [
+            .init(image: photo(.blue), role: .background),
+            .init(image: photo(.green, transparent: true), role: .middle),
+            .init(image: photo(.red, transparent: true), role: .foreground)]
+        let url = try PhotoWallpaper.makeArchive(layers: layers, screenAspect: 0.5,
+                                                depth: true, effects: .init(floating: true))
+        defer { try? FileManager.default.removeItem(at: url) }
+        try recordEvidence(url, name: "confirmed-recipe-three-layer")
+        let files = try unpack(url)
+        for name in [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName] {
+            let xml = try checkBundle(name, count: 1, files: files)
+            XCTAssertTrue(xml.contains("beginTimeMode=\"absolute\""))
+            XCTAssertTrue(xml.contains("position.x"))
+            XCTAssertTrue(xml.contains("position.y"))
+        }
+    }
+
     func testInvalidPhotoRequestsAndTransformsRejected() throws {
         XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [], screenAspect: 0.5))
         XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: .nan))
@@ -511,6 +548,16 @@ extension WallpaperMakerTests {
         XCTAssertThrowsError(try PosterBoardStore.install([(url: source, ext: provider)], container: container, resetProtections: false, backupRoot: backup, log: { _ in }))
         XCTAssertEqual(try PosterBoardStore.manifest(source), try PosterBoardStore.manifest(target.appendingPathComponent(id)))
     }
+    func testCollectionsUseOnlyCanonicalProviderEvenWhenLegacyExists() throws {
+        let canonical = "com.apple.WallpaperKit.CollectionsPoster"
+        let legacy = "com.apple.Posters.CollectionsPosterApp"
+        for importedProvider in [canonical, legacy] {
+            XCTAssertEqual(try PosterBoardStore.providers(for: importedProvider, available: [canonical, legacy]), [canonical])
+            XCTAssertEqual(try PosterBoardStore.providers(for: importedProvider, available: [canonical]), [canonical])
+            XCTAssertThrowsError(try PosterBoardStore.providers(for: importedProvider, available: [legacy]))
+        }
+    }
+
     func testPosterStoreRejectsInvalidPathsUnknownProvidersAndSymlinkSource() throws {
         XCTAssertThrowsError(try PosterBoardStore.canonicalContainer("/var/mobile/Library"))
         XCTAssertThrowsError(try PosterBoardStore.canonicalContainer("/var/mobile/Containers/Data/Application/../" + UUID().uuidString))

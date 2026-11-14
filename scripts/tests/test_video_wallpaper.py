@@ -22,6 +22,17 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn('"galleryRegistrationVerified": false', store)
         self.assertNotIn("removeItem(at: container)", store)
 
+    def test_local_discovery_never_falls_back_to_remote_transport(self):
+        engine = (R / "ios-app/TendiesEngine.swift").read_text()
+        discovery = engine.split("public func detectPosterBoardContainer", 1)[1].split("// MARK:", 1)[0]
+        self.assertIn("PosterBoardStore.discover", discovery)
+        for forbidden in ["al_find_app_container", "withCheckedThrowingContinuation", "withCString", "Wi-Fi/LocalDevVPN"]:
+            self.assertNotIn(forbidden, discovery)
+        store = (R / "ios-app/PosterBoardStore.swift").read_text()
+        collections = store.split('case "com.apple.WallpaperKit.CollectionsPoster"', 1)[1].split('case "com.apple.MercuryPoster"', 1)[0]
+        self.assertIn('aliases = ["com.apple.WallpaperKit.CollectionsPoster"]', collections)
+        self.assertNotIn('aliases = ["com.apple.WallpaperKit.CollectionsPoster",', collections)
+
     def test_scoped_strategies_never_enable_library_parent_rename(self):
         source = (R / "ios-app/PosterBoardAccess.m").read_text()
         for label in ["class13-traversal", "class7-symlink", "class2-stage", "class2-subpath", "class12-geod-traversal"]:
@@ -46,6 +57,16 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn('respring.frame.maxY, wallpaperVisibleBottom', tests)
         self.assertIn('MirsaWallpaperFlashLogFixture', tests)
         self.assertIn('PosterBoardAccessSafetyTests', (R / ".github/workflows/forge-validation.yml").read_text())
+
+    def test_local_apply_is_once_only_and_respring_explicit(self):
+        model = (R / "ios-app/AppViewModel.swift").read_text().split("func flashSelectedTendies()", 1)[1].split("func respringDevice()", 1)[0]
+        self.assertIn("guard tendiesFlashPhase != .running", model)
+        self.assertLess(model.index("tendiesFlashPhase = .running"), model.index("try await"))
+        self.assertNotIn("triggerNeoSpring", model)
+        engine = (R / "ios-app/TendiesEngine.swift").read_text()
+        self.assertIn("checksum == entry.checksum", engine)
+        self.assertNotIn("al_zip_extract_all", engine)
+        self.assertIn("extractValidatedArchive", engine)
 
     def test_upgrade_advances_live_25(self):
         guard = (R / "scripts/verify_release_upgrade.py").read_text()

@@ -50,6 +50,13 @@ struct MirsaKeyboardDismissal: UIViewRepresentable {
             return false
         }
 
+        /// SwiftUI can retarget touches to its hosting view even though UIKit's
+        /// current hit-test resolves to a native editor. Exclude either path;
+        /// never force first responder from the window dismiss recognizer.
+        static func isTextTouch(deliveredView: UIView?, hitView: UIView?) -> Bool {
+            isTextInteraction(deliveredView) || isTextInteraction(hitView)
+        }
+
         #if DEBUG
         private func wallpaperFocusTrace(_ event: String, touch: UITouch? = nil) {
             guard ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture"),
@@ -71,12 +78,23 @@ struct MirsaKeyboardDismissal: UIViewRepresentable {
                 view.subviews.forEach { visit($0) }
             }
             visit(window)
-            var hit = ""
-            if let touch = touch {
+            // Separate short records avoid NSLog's line-size clipping and contain no text.
+            NSLog("WALLPAPER-FOCUS %@ state=%ld fields=%@", event, outsideTap.state.rawValue,
+                  fields.joined(separator: "; "))
+            if let touch {
                 let point = touch.location(in: window)
-                hit = " point=\(point) touch=\(chain(touch.view)) hit=\(chain(window.hitTest(point, with: nil))) textInteraction=\(Self.isTextInteraction(touch.view))"
+                let hit = window.hitTest(point, with: nil)
+                NSLog("WALLPAPER-FOCUS classification sameWindow=%d phase=%ld deliveredText=%d hitText=%d x=%.1f y=%.1f",
+                      touch.window === window, touch.phase.rawValue,
+                      Self.isTextInteraction(touch.view), Self.isTextInteraction(hit), point.x, point.y)
+                NSLog("WALLPAPER-FOCUS delivered %@", chain(touch.view))
+                NSLog("WALLPAPER-FOCUS hit %@", chain(hit))
+                for recognizer in touch.gestureRecognizers ?? [] {
+                    NSLog("WALLPAPER-FOCUS recognizer %@ state=%ld view=%@",
+                          String(describing: type(of: recognizer)), recognizer.state.rawValue,
+                          String(describing: recognizer.view.map { type(of: $0) }))
+                }
             }
-            NSLog("WALLPAPER-FOCUS \(event)\(hit) fields=\(fields.joined(separator: "; "))")
         }
         #endif
 
@@ -92,12 +110,25 @@ struct MirsaKeyboardDismissal: UIViewRepresentable {
               }
             }
             #endif
-            return !Self.isTextInteraction(touch.view)
+            let hitView: UIView?
+            if let window = attachedWindow {
+                hitView = window.hitTest(touch.location(in: window), with: nil)
+            } else {
+                hitView = nil
+            }
+            return !Self.isTextTouch(deliveredView: touch.view, hitView: hitView)
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            true
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture") {
+                NSLog("WALLPAPER-FOCUS simultaneous %@ state=%ld other=%@ state=%ld",
+                      String(describing: type(of: gestureRecognizer)), gestureRecognizer.state.rawValue,
+                      String(describing: type(of: otherGestureRecognizer)), otherGestureRecognizer.state.rawValue)
+            }
+            #endif
+            return true
         }
     }
 }
