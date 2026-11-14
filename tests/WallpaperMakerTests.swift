@@ -271,7 +271,7 @@ final class WallpaperMakerTests: XCTestCase {
                         track.markAsFinished(); writer.cancelWriting(); continuation.resume(throwing: CocoaError(.fileWriteUnknown)); return
                     }
                     CVPixelBufferLockBaseAddress(pixel, [])
-                    memset(CVPixelBufferGetBaseAddress(pixel), frame * 12, CVPixelBufferGetDataSize(pixel))
+                    memset(CVPixelBufferGetBaseAddress(pixel), Int32(frame * 12), CVPixelBufferGetDataSize(pixel))
                     CVPixelBufferUnlockBaseAddress(pixel, [])
                     guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 24)) else {
                         track.markAsFinished(); writer.cancelWriting(); continuation.resume(throwing: writer.error ?? CocoaError(.fileWriteUnknown)); return
