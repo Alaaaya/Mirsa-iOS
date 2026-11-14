@@ -3,6 +3,7 @@ import XCTest
 @testable import Mirsa
 
 final class HomeShortcutSchemeTests: XCTestCase {
+    @MainActor
     func testLaunchURLUsesMirsaOnlySchemeAndRoundTrips() {
         for id in ["com.alaa.player", "اختبار.app", "x%20y"] {
             let url = HomeShortcut.launchURL(for: id)
@@ -11,6 +12,7 @@ final class HomeShortcutSchemeTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testInvalidOrMissingIDIsRejected() {
         XCTAssertNil(HomeShortcut.containerID(from: URL(string: "mirsa-container://launch")!))
         XCTAssertNil(HomeShortcut.containerID(from: URL(string: "mirsa-container://launch?bundle=")!))
@@ -20,6 +22,7 @@ final class HomeShortcutSchemeTests: XCTestCase {
         XCTAssertFalse(HomeShortcut.handle(URL(string: "mirsa-container://launch")!))
     }
 
+    @MainActor
     func testLegacySchemeStillParsesAndNeverRunsPathsAsCommands() {
         XCTAssertEqual(HomeShortcut.containerID(from: URL(string: "mirsa://launch?app=com.x")!), "com.x")
         for raw in [

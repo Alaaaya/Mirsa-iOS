@@ -623,6 +623,7 @@ struct ContentView: View {
     /// The single-bar App Store (main dock hidden there) belongs to the New store style only.
     private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
     @State private var chatComposerFocused = false
+    @State private var wallpaperMakerFocused = false
 
     var body: some View {
         TabView(selection: $vm.selectedTab) {
@@ -637,7 +638,7 @@ struct ContentView: View {
                 .tag(AppTab.sources)
 
             ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
+                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
                 .modifier(ForgeChatUnreadTabBadge())
                 .tag(AppTab.pairing)
@@ -657,13 +658,14 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             // In the New store style the App Store tab draws its own single bottom bar (its
             // sections plus a Mirsa menu back to the other tabs), so the main dock steps aside there.
-            if liquidTheme && !chatComposerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
+            if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
                 LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
                 .ignoresSafeArea(.keyboard)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in vm.selectedTab = .encrypted }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
+        .onPreferenceChange(WallpaperMakerFocusKey.self) { wallpaperMakerFocused = $0 }
         .onOpenURL { url in
             if url.scheme == "mirsa", url.host == "wishlist" {
                 vm.selectedTab = .encrypted
