@@ -28,18 +28,19 @@ final class WallpaperMakerTests: XCTestCase {
         return try XCTUnwrap(matches.first?.value)
     }
     func testRealPhotoArchiveHasDescriptorAndPNG() throws {
-        let url = try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: 0.5)
+        let layer = WallpaperPhotoLayer(image: photo())
+        let url = try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5)
         defer { try? FileManager.default.removeItem(at: url) }
         XCTAssertEqual(url.pathExtension, "tendies")
         let files = try unpack(url)
         XCTAssertTrue(files.keys.allSatisfy { $0.hasPrefix("Extensions/com.apple.WallpaperKit.CollectionsPoster/descriptors/") })
         XCTAssertNotNil(try file("providerInfo.plist", in: files))
-        let caml = String(decoding: try file(PhotoWallpaper.backgroundName + "/main.caml", in: files), as: UTF8.self)
+        let caml = String(decoding: try file(PhotoWallpaper.simpleName + "/main.caml", in: files), as: UTF8.self)
         XCTAssertTrue(caml.contains("layer-0-background"))
-        let png = try file(PhotoWallpaper.backgroundName + "/assets/layer-0.png", in: files)
+        let png = try file(PhotoWallpaper.simpleName + "/assets/\(layer.id.uuidString).png", in: files)
         XCTAssertNotNil(UIImage(data: png))
-        XCTAssertTrue(caml.contains("assets/layer-0.png"))
-        let index = try PropertyListSerialization.propertyList(from: file(PhotoWallpaper.backgroundName + "/index.xml", in: files), format: nil) as? [String: Any]
+        XCTAssertTrue(caml.contains("assets/\(layer.id.uuidString).png"))
+        let index = try PropertyListSerialization.propertyList(from: file(PhotoWallpaper.simpleName + "/index.xml", in: files), format: nil) as? [String: Any]
         XCTAssertEqual(index?["documentWidth"] as? Int, 1080)
         XCTAssertEqual(index?["documentHeight"] as? Int, 2160)
     }
@@ -51,11 +52,13 @@ final class WallpaperMakerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         let files = try unpack(url)
         let bg = String(decoding: try file(PhotoWallpaper.backgroundName + "/main.caml", in: files), as: UTF8.self)
+        let mid = String(decoding: try file(PhotoWallpaper.floatingName + "/main.caml", in: files), as: UTF8.self)
         let fg = String(decoding: try file(PhotoWallpaper.foregroundName + "/main.caml", in: files), as: UTF8.self)
-        XCTAssertTrue(bg.contains("layer-0-background")); XCTAssertTrue(bg.contains("layer-1-middle"))
+        XCTAssertTrue(bg.contains("layer-0-background")); XCTAssertTrue(mid.contains("layer-1-middle"))
+        XCTAssertFalse(bg.contains("layer-1-middle"))
         XCTAssertFalse(bg.contains("layer-2-foreground")); XCTAssertTrue(fg.contains("layer-2-foreground"))
         XCTAssertEqual(files.keys.filter { $0.hasSuffix(".png") }.count, 3)
-        let png = try file(PhotoWallpaper.foregroundName + "/assets/layer-2.png", in: files)
+        let png = try file(PhotoWallpaper.foregroundName + "/assets/\(photos[2].id.uuidString).png", in: files)
         let image = try XCTUnwrap(UIImage(data: png)?.cgImage)
         XCTAssertNotEqual(image.alphaInfo, .none)
         let bytes = try XCTUnwrap(image.dataProvider?.data) as Data
@@ -66,19 +69,106 @@ final class WallpaperMakerTests: XCTestCase {
         let both = try XCTUnwrap(assets["lockAndHome"] as? [String: Any])
         let spec = try XCTUnwrap(both["default"] as? [String: Any])
         XCTAssertEqual(spec["backgroundAnimationFileName"] as? String, PhotoWallpaper.backgroundName)
-        XCTAssertEqual(spec["floatingAnimationFileNameKey"] as? String, PhotoWallpaper.foregroundName)
+        XCTAssertEqual(spec["floatingAnimationFileNameKey"] as? String, PhotoWallpaper.floatingName)
+        XCTAssertEqual(spec["foregroundAnimationFileName"] as? String, PhotoWallpaper.foregroundName)
         XCTAssertEqual(spec["type"] as? String, "LayeredAnimation")
     }
-    func testDepthDefaultOffKeepsEveryLayerInBackgroundInManualOrder() throws {
+    func testDepthDefaultOffKeepsEveryLayerInSingleBundleInManualOrder() throws {
         let layers: [WallpaperPhotoLayer] = [.init(image: photo(), role: .foreground), .init(image: photo(.blue))]
         let url = try PhotoWallpaper.makeArchive(layers: layers, screenAspect: 0.5)
         defer { try? FileManager.default.removeItem(at: url) }
         let files = try unpack(url)
-        let bg = String(decoding: try file(PhotoWallpaper.backgroundName + "/main.caml", in: files), as: UTF8.self)
-        let fg = String(decoding: try file(PhotoWallpaper.foregroundName + "/main.caml", in: files), as: UTF8.self)
-        XCTAssertTrue(bg.contains("layer-0-foreground")); XCTAssertTrue(bg.contains("layer-1-background"))
-        XCTAssertFalse(fg.contains("assets/layer-"))
+        let caml = String(decoding: try file(PhotoWallpaper.simpleName + "/main.caml", in: files), as: UTF8.self)
+        XCTAssertTrue(caml.contains("layer-0-foreground")); XCTAssertTrue(caml.contains("layer-1-background"))
+        XCTAssertFalse(files.keys.contains { $0.contains(PhotoWallpaper.foregroundName) })
         XCTAssertEqual(PhotoWallpaper.ordered(layers, depth: false).map(\.id), layers.map(\.id))
+    }
+    private func checkBundle(_ name: String, count: Int, files: [String: Data]) throws -> String {
+        let caml = try file(name + "/main.caml", in: files)
+        XCTAssertTrue(XMLParser(data: caml).parse())
+        let manifest = try file(name + "/assetManifest.caml", in: files)
+        XCTAssertTrue(XMLParser(data: manifest).parse())
+        XCTAssertTrue(String(decoding: manifest, as: UTF8.self).contains("MicaAssetManifest"))
+        let index = try PropertyListSerialization.propertyList(from: file(name + "/index.xml", in: files), format: nil) as! [String: Any]
+        XCTAssertEqual(index["rootDocument"] as? String, "main.caml")
+        let assets = files.filter { $0.key.contains(name + "/assets/") }
+        XCTAssertEqual(assets.count, count)
+        let xml = String(decoding: caml, as: UTF8.self)
+        for (path, bytes) in assets {
+            XCTAssertNotNil(UIImage(data: bytes))
+            XCTAssertTrue(xml.contains("src=\"assets/\(URL(fileURLWithPath: path).lastPathComponent)\""))
+        }
+        for state in ["Locked", "Unlock", "Sleep"] { XCTAssertTrue(xml.contains("LKState name=\"\(state)\"")) }
+        return xml
+    }
+    func testBothVariantsCompleteMetadataEveryReferencedAssetAndFreshIDs() throws {
+        let photos: [WallpaperPhotoLayer] = [.init(image: photo()), .init(image: photo(.blue), role: .middle),
+                                            .init(image: photo(.green, transparent: true), role: .foreground)]
+        var identifiers = Set<String>()
+        for depth in [false, true] {
+            let url = try PhotoWallpaper.makeArchive(layers: photos, screenAspect: 0.5, depth: depth)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let files = try unpack(url)
+            XCTAssertFalse(files.keys.contains { $0.contains("__MACOSX") || $0.hasSuffix(".DS_Store") || URL(fileURLWithPath: $0).lastPathComponent.hasPrefix("._") })
+            let component = try XCTUnwrap(files.keys.first).split(separator: "/")[3]
+            let uuid = String(component)
+            XCTAssertNotNil(UUID(uuidString: uuid)); XCTAssertTrue(identifiers.insert(uuid).inserted)
+            for path in [
+                "providerInfo.plist", "com.apple.posterkit.role.identifier", "com.apple.posterkit.provider.descriptor.identifier",
+                "com.apple.posterkit.provider.identifierURL.suggestionMetadata.plist",
+                "versions/1/com.apple.posterkit.provider.instance.complicationLayout.plist",
+                "versions/1/com.apple.posterkit.provider.instance.titleStyleConfiguration.plist",
+                "versions/1/supplements/0/com.apple.posterkit.provider.supplementURL.homescreenConfiguration.plist",
+                "versions/1/contents/com.apple.posterkit.provider.contents.otherMetadata.plist",
+                "versions/1/contents/.com.apple.posterkit.provider.contents.configurableOptions.plist"
+            ] { XCTAssertNotNil(try file(path, in: files)) }
+            let suggestion = try PropertyListSerialization.propertyList(from: file("com.apple.posterkit.provider.identifierURL.suggestionMetadata.plist", in: files), format: nil) as! [String: Any]
+            XCTAssertTrue((suggestion["$objects"] as! [Any]).contains { ($0 as? String) == uuid })
+            let info = try PropertyListSerialization.propertyList(from: file("com.apple.posterkit.provider.contents.userInfo", in: files), format: nil) as! [String: Any]
+            XCTAssertEqual(info["wallpaperRepresentingFileName"] as? String, PhotoWallpaper.wallpaperName)
+            let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
+            XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, false)
+            let route = ((plist["assets"] as! [String: Any])["lockAndHome"] as! [String: Any])["default"] as! [String: Any]
+            if depth {
+                XCTAssertEqual(route["type"] as? String, "LayeredAnimation")
+                for name in [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName] {
+                    _ = try checkBundle(name, count: 1, files: files)
+                }
+            } else {
+                XCTAssertEqual(route["type"] as? String, "ParameterizedCA")
+                XCTAssertEqual(route["assetFileName"] as? String, PhotoWallpaper.simpleName)
+                let caml = try checkBundle(PhotoWallpaper.simpleName, count: 3, files: files)
+                XCTAssertFalse(caml.contains("LKStateTransitionElement"))
+                XCTAssertFalse(caml.contains("CAKeyframeAnimation"))
+                XCTAssertFalse(caml.contains("<NSDictionary>"))
+            }
+        }
+    }
+    func testEveryEffectInBothGeneratedArchiveVariants() throws {
+        for depth in [false, true] {
+            for effect in [PhotoWallpaper.Effects(unlock: .zoom),
+                           PhotoWallpaper.Effects(unlock: .slide),
+                           PhotoWallpaper.Effects(gyro: true),
+                           PhotoWallpaper.Effects(floating: true),
+                           PhotoWallpaper.Effects(unlock: .zoom, gyro: true, floating: true)] {
+                let layer = WallpaperPhotoLayer(image: photo(), role: .middle)
+                let url = try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5, depth: depth, effects: effect)
+                defer { try? FileManager.default.removeItem(at: url) }
+                let files = try unpack(url)
+                let caml = try checkBundle(depth ? PhotoWallpaper.floatingName : PhotoWallpaper.simpleName, count: 1, files: files)
+                XCTAssertEqual(caml.contains("CASpringAnimation"), effect.unlock != .none)
+                if effect.unlock != .none {
+                    XCTAssertTrue(caml.contains("targetId=\"#1\"")); XCTAssertTrue(caml.contains("duration=\"0.8\""))
+                    XCTAssertTrue(caml.contains("keyPath=\"\(effect.unlock == .slide ? "position" : "transform")\""))
+                }
+                XCTAssertEqual(caml.contains("CAKeyframeAnimation"), effect.floating)
+                if effect.floating { XCTAssertTrue(caml.contains("duration=\"6\"")); XCTAssertTrue(caml.contains("repeatCount=\"inf\"")) }
+                XCTAssertEqual(caml.contains("transform.translation.x"), effect.gyro)
+                if effect.gyro { XCTAssertTrue(caml.contains("value=\"motion-0\"")); XCTAssertTrue(caml.contains("transform.translation.y")) }
+                let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
+                XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, effect.gyro)
+            }
+        }
     }
     func testInvalidPhotoRequestsAndTransformsRejected() throws {
         XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [], screenAspect: 0.5))
@@ -201,7 +291,7 @@ final class WallpaperMakerTests: XCTestCase {
         let output = try await VideoWallpaper.makeArchive(from: input, screenAspect: 0.5) { _ in }
         defer { try? FileManager.default.removeItem(at: output) }
         let files = try unpack(output)
-        let caml = String(decoding: try file(PhotoWallpaper.backgroundName + "/main.caml", in: files), as: UTF8.self)
+        let caml = String(decoding: try file("9183.Custom_Background-810w-1080h@2x~ipad.ca/main.caml", in: files), as: UTF8.self)
         XCTAssertTrue(caml.contains("CAKeyframeAnimation"))
         XCTAssertGreaterThan(files.keys.filter { $0.hasSuffix(".jpg") }.count, 1)
         XCTAssertNotNil(try file("providerInfo.plist", in: files))

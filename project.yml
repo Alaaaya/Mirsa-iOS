@@ -34,7 +34,11 @@ targets:
       - path: ios-app
         excludes:
           - VideoCAML
+          - WallpaperMakerMetadata
       - path: ios-app/VideoCAML
+        type: folder
+        buildPhase: resources
+      - path: ios-app/WallpaperMakerMetadata
         type: folder
         buildPhase: resources
       - path: LiveActivityShared
