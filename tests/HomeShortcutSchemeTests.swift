@@ -4,7 +4,7 @@ import XCTest
 
 final class HomeShortcutSchemeTests: XCTestCase {
     func testLaunchURLUsesMirsaOnlySchemeAndRoundTrips() {
-        for id in ["com.alaa.player", "com.a b/c&d=e?f#g", "اختبار.app", "x%20y"] {
+        for id in ["com.alaa.player", "اختبار.app", "x%20y"] {
             let url = HomeShortcut.launchURL(for: id)
             XCTAssertEqual(url.scheme, "mirsa-container")
             XCTAssertEqual(HomeShortcut.containerID(from: url), id)
@@ -22,7 +22,20 @@ final class HomeShortcutSchemeTests: XCTestCase {
 
     func testLegacySchemeStillParsesAndNeverRunsPathsAsCommands() {
         XCTAssertEqual(HomeShortcut.containerID(from: URL(string: "mirsa://launch?app=com.x")!), "com.x")
-        XCTAssertEqual(HomeShortcut.containerID(from: URL(string: "mirsa-container://launch?bundle=../../etc/passwd")!), "../../etc/passwd")
+        for raw in [
+            "mirsa-container://launch?bundle=../../etc/passwd",
+            "mirsa-container://user@launch?bundle=com.x",
+            "mirsa-container://launch:123?bundle=com.x",
+            "mirsa-container://launch/path?bundle=com.x",
+            "mirsa-container://launch?bundle=com.x#fragment",
+            "mirsa-container://launch?app=com.x&bundle=com.y",
+            "mirsa-container://launch?bundle=com.x&bundle=com.x",
+            "mirsa-container://launch?bundle=com%2Fx",
+            "mirsa-container://launch?bundle=%00",
+            "mirsa-container://launch?bundle=..",
+            "mirsa-container://launch?bundle=com%5Cx",
+            "mirsa-container://launch?bundle=com.x&unknown=1"
+        ] { XCTAssertNil(HomeShortcut.containerID(from: URL(string: raw)!), raw) }
         // handle() only looks the id up among installed containers; unknown ids just show an error.
     }
 
