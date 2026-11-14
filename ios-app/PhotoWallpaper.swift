@@ -42,6 +42,16 @@ enum PhotoWallpaper {
         return layers.filter { $0.role == .background } + layers.filter { $0.role == .middle } + layers.filter { $0.role == .foreground }
     }
 
+    /// First photo is the background, the last is the foreground, everything between is middle.
+    static func defaultRoles(existing: Int, adding: Int) -> [WallpaperPhotoLayer.Role] {
+        let total = existing + adding
+        return (0..<adding).map { i in
+            let index = existing + i
+            if index == 0 { return .background }
+            return index == total - 1 && total > 2 ? .foreground : .middle
+        }
+    }
+
     static func render(_ image: UIImage, size: CGSize, crop: Bool, zoom: Double = 1, x: Double = 0, y: Double = 0) throws -> Data {
         guard zoom.isFinite, x.isFinite, y.isFinite, (1...4).contains(zoom), (-1...1).contains(x), (-1...1).contains(y),
               image.size.width > 0, image.size.height > 0 else { throw CocoaError(.fileReadCorruptFile) }
