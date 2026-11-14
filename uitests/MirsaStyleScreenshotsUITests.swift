@@ -251,7 +251,12 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     private func revealWallpaperElement(_ element: XCUIElement, identifier: String, in app: XCUIApplication) {
         let top = app.navigationBars.firstMatch.frame.maxY + 8
         let bottom = wallpaperVisibleBottom(in: app)
-        for _ in 0..<24 {
+        // Accessibility text makes the populated three-layer form much taller.
+        // The f37 run advanced normally (~69pt per drag) but exhausted 24
+        // drags before even passing the layer list. Keep the precise 80pt pans
+        // and full-frame assertions; allow enough travel for the large form.
+        let maximumPans = 80
+        for attempt in 0..<maximumPans {
             // Form virtualizes off-screen rows. Neither frame nor identifier is
             // safe to request until the query matches a materialized element.
             let frame: CGRect? = element.exists ? element.frame : nil
@@ -281,8 +286,13 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             let origin = app.coordinate(withNormalizedOffset: .zero)
             let start = origin.withOffset(CGVector(dx: point.x, dy: point.y))
             let end = origin.withOffset(CGVector(dx: point.x, dy: point.y - distance))
-            print("WALLPAPER-REVEAL \(identifier) frame=\(String(describing: frame)) safe=\(top)...\(bottom) distance=\(distance) contentAnchor=\(point)")
+            print("WALLPAPER-REVEAL \(identifier) pan=\(attempt + 1)/\(maximumPans) frame=\(String(describing: frame)) safe=\(top)...\(bottom) distance=\(distance) contentAnchor=\(point)")
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        // The last bounded pan may have revealed the target. Evaluate it too.
+        if element.exists {
+            let frame = element.frame
+            if frame.minY >= top && frame.maxY <= bottom { return }
         }
         shot(app, "unreachable_" + identifier)
         let finalFrame = element.exists ? String(describing: element.frame) : "not materialized"
