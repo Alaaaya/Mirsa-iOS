@@ -2,6 +2,7 @@ import Foundation
 
 enum WallpaperMakerStrings {
     enum Key: String, CaseIterable {
+        case chooseTendies, importMore, importHint
         case unlock, off, unlockZoom, unlockSlide, gyro, floating, effectsHelp
         case middle, zoom, horizontal, vertical, describe, plan, manualFallback
         case title, steps, photos, video, files, crop, layers, background, foreground, reorder, depth, depthHelp
@@ -19,6 +20,10 @@ enum WallpaperMakerStrings {
         return values[key]![column]
     }
     static let values: [Key: [String]] = [
+        .chooseTendies: ["Choose .tendies from Files…", "اختار .tendies من الملفات…", ".tendies aus Dateien wählen…", ".tendies ji Pelan hilbijêre…", ".tendies لە فایلەکان هەڵبژێرە…"],
+        .importMore: ["Import more wallpapers…", "ضيف خلفيات تانية…", "Weitere Hintergründe importieren…", "Dîwarên din bîne hundir…", "هاوردەکردنی پاشبنەمای زیاتر…"],
+        .importHint: ["Choose a .tendies file, or copy wallpapers into On My iPhone › Mirsa.", "اختار ملف .tendies، أو انسخ الخلفيات إلى على الـ iPhone الخاص بي › Mirsa.", "Wähle eine .tendies-Datei oder kopiere Hintergründe nach Auf meinem iPhone › Mirsa.", "Pelekî .tendies hilbijêre an dîwaran li ser Li ser iPhone-a min › Mirsa kopî bike.", "فایلێکی .tendies هەڵبژێرە، یان پاشبنەماکان کۆپی بکە بۆ لەسەر iPhoneی من › Mirsa."],
+
         .unlock: ["Unlock animation", "حركة فتح القفل", "Entsperr-Animation", "Anîmasyona vekirina kilîtê", "جووڵەی کردنەوەی قوفڵ"],
         .off: ["Off", "مطفي", "Aus", "Girtî", "ناچالاک"],
         .unlockZoom: ["Zoom", "تكبير", "Vergrößern", "Mezinkirin", "گەورەکردن"],
@@ -55,7 +60,7 @@ enum WallpaperMakerStrings {
         .remove: ["Remove layer", "شيل الطبقة", "Ebene entfernen", "Tebeqeyê rake", "سڕینەوەی چین"],
         .clear: ["Clear selection", "فضّي الاختيار", "Auswahl leeren", "Hilbijartinê paqij bike", "بەتاڵکردنی هەڵبژاردە"],
         .videoHelp: ["Video: first 10 seconds, center-cropped to screen. Photos: up to 8 separate layers; crop off fits the entire image.", "الفيديو أول ١٠ ثواني وبينقصّ من النص ليعبّي الشاشة. الصور لحد ٨ طبقات منفصلة؛ طفي القصّ لتظهر الصورة كاملة.", "Video: erste 10 Sekunden, mittiger Bildschirmzuschnitt. Fotos: bis zu 8 separate Ebenen; ohne Zuschnitt wird das ganze Bild eingepasst.", "Vîdyo: 10 çirkeyên pêşîn, ji navendê li gor ekranê. Wêne: heta 8 tebeqeyên cuda; birînê bigire da ku tevahiya wêneyê xuya bibe.", "ڤیدیۆ یەکەم ١٠ چرکەیە و ناوەڕاست بەپێی شاشە دەبڕدرێت. وێنە تا ٨ چینی جیاواز؛ بڕین ناچالاک بکە بۆ بینینی تەواوی وێنە."],
-        .compatibility: ["Experimental. Applying is patched on iOS 27.2 beta 3 and later. Wallpaper behavior depends on iOS.", "تجريبي. طريقة التطبيق مسدودة على iOS 27.2 beta 3 والأحدث. شكل وحركة الخلفية حسب النظام.", "Experimentell. Anwenden ist ab iOS 27.2 Beta 3 gesperrt. Verhalten hängt von iOS ab.", "Ceribandin e. Sepandin ji iOS 27.2 beta 3 û paşê hatiye girtin. Reftara dîwarê bi iOS ve girêdayî ye.", "تاقیکردنەوەیە. شێوازی جێبەجێکردن لە iOS 27.2 beta 3 و نوێتر داخراوە. ڕەفتاری پاشبنەما بە iOS بەستراوە."],
+        .compatibility: ["iOS (18.0 – 27.2 beta 2)", "iOS (18.0 – 27.2 beta 2)", "iOS (18.0 – 27.2 beta 2)", "iOS (18.0 – 27.2 beta 2)", "iOS (18.0 – 27.2 beta 2)"],
         .limit: ["Choose up to 8 photos, or one video on its own.", "اختار لحد ٨ صور، أو فيديو واحد لحاله.", "Bis zu 8 Fotos oder ein einzelnes Video wählen.", "Heta 8 wêne an tenê vîdyoyekê hilbijêre.", "تا ٨ وێنە یان تەنها یەک ڤیدیۆ هەڵبژێرە."]
     ]
 }
