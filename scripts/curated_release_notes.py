@@ -9,8 +9,8 @@ def metadata(path, target):
         return {'releaseNotes': {}}
     entries = json.loads(path.read_text())
     notes = entries.get(target, {})
-    if not isinstance(notes, dict) or any(k not in ('ar', 'en', 'ckb', 'kmr') or not isinstance(v, str) for k, v in notes.items()):
-        raise ValueError('Expected curated ar/en/ckb/kmr release notes for exact target')
+    if not isinstance(notes, dict) or any(k not in ('ar', 'en', 'de', 'ckb', 'kmr') or not isinstance(v, str) for k, v in notes.items()):
+        raise ValueError('Expected curated ar/en/de/ckb/kmr release notes for exact target')
     return {'releaseNotes': notes}
 
 
