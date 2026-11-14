@@ -132,6 +132,13 @@ jobs:
               data["CFBundleVersion"] = plistlib.loads(parent.read_bytes())["CFBundleVersion"]
               info.write_bytes(plistlib.dumps(data))
           PYSETUP
+          # Setup must never claim the Mirsa-only container launch scheme.
+          python3 - "$P" <<'PYURL'
+          import pathlib, plistlib, sys
+          p = pathlib.Path(sys.argv[1]); d = plistlib.loads(p.read_bytes())
+          d["CFBundleURLTypes"] = [t for t in d.get("CFBundleURLTypes", []) if "mirsa-container" not in t.get("CFBundleURLSchemes", [])]
+          p.write_bytes(plistlib.dumps(d))
+          PYURL
           $PB -c "Set :CFBundleIdentifier com.alaa.mirsa.setup" "$P"
           $PB -c "Set :CFBundleDisplayName Mirsa Setup" "$P" || $PB -c "Add :CFBundleDisplayName string Mirsa Setup" "$P"
           $PB -c "Set :CFBundleName Mirsa Setup" "$P"
