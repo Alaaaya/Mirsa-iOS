@@ -31,4 +31,17 @@ final class TendiesSectionNameTests: XCTestCase {
             XCTAssertFalse(src.contains("Video wallpaper"), rel)
         }
     }
+    func testWallpaperHelpRetainsLimitsWithoutUntestedStatus() {
+        for language in AppLanguage.allCases {
+            let help = WallpaperMakerStrings.text(.effectsHelp, language: language)
+            for wording in ["has not been verified", "مو مجرّب", "nicht geprüft", "nehatiye ceribandin", "تاقی نەکراوەتەوە"] {
+                XCTAssertFalse(help.contains(wording), language.rawValue)
+            }
+            XCTAssertFalse(help.isEmpty)
+            XCTAssertTrue(WallpaperMakerStrings.text(.compatibility, language: language).contains("18.0"))
+            XCTAssertTrue(WallpaperMakerStrings.text(.compatibility, language: language).contains("27.2"))
+        }
+        XCTAssertTrue(WallpaperMakerStrings.text(.effectsHelp, language: .english).contains("Preview shows layout only, not system effects"))
+    }
+
 }
