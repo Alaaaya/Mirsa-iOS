@@ -353,7 +353,7 @@ final class WallpaperMakerTests: XCTestCase {
     }
 
     /// Opaque full-frame photos: every file exists and is referenced, but later layers visually cover earlier ones.
-    /// Only transparent PNGs let a foreground layer show the background; no cutout is ever synthesised.
+    /// This exporter-only fixture intentionally does not run automatic foreground segmentation.
     func testOpaqueNPhotosEveryAssetReferencedExplicitRolesHonoredAndNoCutoutClaim() throws {
         let roles: [WallpaperPhotoLayer.Role] = [.foreground, .background, .middle, .foreground]
         let colors: [UIColor] = [.red, .green, .blue, .yellow]
