@@ -3,7 +3,7 @@ import PhotosUI
 import UniformTypeIdentifiers
 import AVKit
 
-/// Embedded directly inside the existing Video Wallpaper / Tendies import section.
+/// Embedded directly inside the existing Tendies section.
 struct WallpaperMakerSection: View {
     let applyRunning: Bool
     let onImport: (URL) async -> Void
