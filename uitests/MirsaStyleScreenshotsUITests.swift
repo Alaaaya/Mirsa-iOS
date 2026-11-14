@@ -241,18 +241,20 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
-    /// Original video wallpaper tab (restored from 2.4) next to the separate Tendies tab.
-    func testVideoWallpaperTabSeparateFromTendies() {
+    /// Original video wallpaper block sits at the TOP of the same tab, Tendies maker below it.
+    func testVideoWallpaperTopThenTendiesBelow() {
         continueAfterFailure = false
-        for (lang, title) in [("ar", "خلفية فيديو"), ("en", "Video wallpaper")] {
-            let app = launch("tools", lang: lang, extra: [])
-            XCTAssertTrue(tap(app, [title]))
-            let fromPhotos = app.buttons[lang == "ar" ? "فيديو من الاستوديو" : "Video from Photos"]
-            XCTAssertTrue(fromPhotos.waitForExistence(timeout: 10))
-            shot(app, "\(lang)_videowallpaper_tab")
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"])
             XCTAssertTrue(tap(app, ["Tendies"]))
-            XCTAssertFalse(fromPhotos.exists)
-            shot(app, "\(lang)_tendies_separate")
+            let video = app.descendants(matching: .any).matching(identifier: "video-wallpaper-from-photos").firstMatch
+            XCTAssertTrue(video.waitForExistence(timeout: 10))
+            let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
+            revealWallpaperElement(field, identifier: "wallpaper-description", in: app)
+            XCTAssertLessThan(video.frame.minY, field.frame.minY)
+            app.swipeDown(); app.swipeDown(); app.swipeDown()
+            XCTAssertTrue(video.isHittable)
+            shot(app, "\(lang)_videowallpaper_top")
             app.terminate()
         }
     }

@@ -4,7 +4,7 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        case tweaks, create, videoWallpaper, wallpapers, device, pairing
+        case tweaks, create, wallpapers, device, pairing
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -12,8 +12,7 @@ struct ToolsTab: View {
             case .device: return "iphone.gen3"
                 case .tweaks: return "wand.and.stars"
             case .create: return "bubble.left.and.bubble.right"
-            case .videoWallpaper: return "play.rectangle.fill"
-            case .wallpapers: return "photo.on.rectangle.angled"
+            case .wallpapers: return "play.rectangle.fill"
             }
         }
     }
@@ -42,7 +41,6 @@ struct ToolsTab: View {
                 case .pairing: SetupPairingSheet(showsClose: false)
                 case .device: DeviceToolsView()
                 case .create: ForgeChatRoot(embedded: true).environment(\.layoutDirection, .leftToRight)
-                case .videoWallpaper: VideoWallpaperView()
                 case .wallpapers: TendiesView()
                 case .tweaks: NavigationView { ForgeView() }.navigationViewStyle(.stack)
                 }
@@ -64,7 +62,7 @@ struct ToolsTab: View {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
                             .overlay(alignment: .topTrailing) { if s == .create { ForgeChatUnreadDot(count: unread).offset(x: 12, y: -8) } }
-                        Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .videoWallpaper ? VideoWallpaperSection.text(.tab) : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity)
