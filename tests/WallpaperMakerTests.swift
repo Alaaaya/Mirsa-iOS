@@ -307,4 +307,29 @@ final class WallpaperMakerTests: XCTestCase {
         XCTAssertGreaterThan(files.keys.filter { $0.hasSuffix(".jpg") }.count, 1)
         XCTAssertNotNil(try file("providerInfo.plist", in: files))
     }
+    func testDefaultRolesSpreadAcrossDepthAndEveryPickedLayerIsOutput() throws {
+        XCTAssertEqual(PhotoWallpaper.defaultRoles(existing: 0, adding: 1), [.background])
+        XCTAssertEqual(PhotoWallpaper.defaultRoles(existing: 0, adding: 4), [.background, .middle, .middle, .foreground])
+        for n in 2...5 {
+            let roles = PhotoWallpaper.defaultRoles(existing: 0, adding: n)
+            let photos = roles.map { WallpaperPhotoLayer(image: photo(.blue, transparent: $0 == .foreground), role: $0) }
+            let url = try PhotoWallpaper.makeArchive(layers: photos, screenAspect: 0.5, depth: true,
+                                                     effects: .init(unlock: .zoom, gyro: true, floating: false))
+            defer { try? FileManager.default.removeItem(at: url) }
+            let files = try unpack(url)
+            let pngs = files.keys.filter { $0.hasSuffix(".png") && $0.contains("/assets/") }
+            XCTAssertEqual(pngs.count, n)
+            var referenced = 0
+            for name in [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName] {
+                let xml = String(decoding: try file(name + "/main.caml", in: files), as: UTF8.self)
+                referenced += xml.components(separatedBy: "src="assets/").count - 1
+                XCTAssertTrue(xml.contains("LKStateTransitionElement"))
+            }
+            XCTAssertEqual(referenced, n)
+            let fg = String(decoding: try file(PhotoWallpaper.foregroundName + "/main.caml", in: files), as: UTF8.self)
+            XCTAssertTrue(fg.contains(photos.last!.id.uuidString))
+            let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
+            XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, true)
+        }
+    }
 }
