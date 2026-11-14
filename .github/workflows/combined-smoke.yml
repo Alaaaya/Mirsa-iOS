@@ -86,6 +86,10 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
+          # Keep fixture-gated UIKit focus evidence even when an assertion fails.
+          xcrun simctl spawn "$DEVICE" log stream --level debug --style compact --predicate 'process == "Mirsa"' > build/focus-runtime.log 2>&1 &
+          FOCUS_LOG_PID=$!
+          trap 'kill "$FOCUS_LOG_PID" 2>/dev/null || true' EXIT
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerLayout -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testVideoWallpaperTopThenTendiesBelow test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
       - name: Export named screenshots
         if: always()
@@ -116,4 +120,5 @@ jobs:
             build/shots
             build/crashes
             build/style-ui.log
+            build/focus-runtime.log
           if-no-files-found: warn
