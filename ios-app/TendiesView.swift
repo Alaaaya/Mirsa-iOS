@@ -12,37 +12,6 @@ import UniformTypeIdentifiers
 struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
-    @State private var showVideoPicker = false
-    @State private var preparingVideo = false
-    @State private var videoProgress: Double = 0
-
-    private var arabic: Bool { L.isArabic }
-    private func videoPicked(_ result: Result<URL, Error>?) {
-        showVideoPicker = false
-        guard let result = result else { return }
-        switch result {
-        case .failure(let error): vm.errorMessage = error.localizedDescription
-        case .success(let source):
-            preparingVideo = true
-            videoProgress = 0
-            let aspect = UIScreen.main.bounds.width / UIScreen.main.bounds.height
-            Task {
-                defer {
-                    preparingVideo = false
-                    try? FileManager.default.removeItem(at: source)
-                }
-                do {
-                    let archive = try await Task.detached(priority: .userInitiated) {
-                        try await VideoWallpaper.makeArchive(from: source, screenAspect: aspect) { value in
-                            Task { @MainActor in videoProgress = value }
-                        }
-                    }.value
-                    defer { try? FileManager.default.removeItem(at: archive) }
-                    await vm.importTendieFiles(urls: [archive])
-                } catch { vm.errorMessage = error.localizedDescription }
-            }
-        }
-    }
     @State private var selectedDetailItem: TendieItem? = nil
     @State private var isNeoSpringing = false
 
@@ -90,7 +59,7 @@ struct TendiesView: View {
                         HStack(spacing: 8) {
                             Spacer()
                             Image(systemName: "doc.badge.plus")
-                            Text(vm.tendieItems.isEmpty ? "Choose .tendies from Files…" : "Import More Wallpapers…")
+                            Text(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore))
                             Spacer()
                         }
                         .font(.headline)
@@ -100,25 +69,9 @@ struct TendiesView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
 
-                    Button {
-                        showVideoPicker = true
-                    } label: {
-                        Label(arabic ? "فيديو من الاستوديو" : "Video from Photos", systemImage: "video.badge.plus")
+                    WallpaperMakerSection(applyRunning: videoApplyRunning) { archive in
+                        await vm.importTendieFiles(urls: [archive])
                     }
-                    .disabled(preparingVideo || videoApplyRunning)
-                    if preparingVideo {
-                        ProgressView(value: videoProgress) {
-                            Text(arabic ? "عم نجهّز الفيديو…" : "Preparing video…")
-                        }
-                    }
-                    Text(arabic
-                        ? "أول ١٠ ثواني، قصّ للملء بحسب الشاشة. بعد التحضير اختار تطبيق الخلفيات كالمعتاد."
-                        : "Uses the first 10 seconds, center-cropped to your screen. Apply through the existing wallpaper flow when ready.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(arabic
-                        ? "ميزة تجريبية. طريقة التطبيق مسدودة على iOS 27.2 beta 3 والأحدث. ممكن إصدار النظام يأثر على حركة الخلفية."
-                        : "Experimental. The apply method is patched on iOS 27.2 beta 3 and later. Animation behavior may vary by iOS version.")
-                        .font(.caption).foregroundStyle(.orange)
                 } footer: {
                     if vm.posterBoardContainer.isEmpty {
                         Text(MirsaTr.lit("PosterBoard container will be auto-detected automatically on flash."))
@@ -176,7 +129,7 @@ struct TendiesView: View {
                             Text(MirsaTr.lit("No .tendies wallpapers loaded yet"))
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
-                            Text(MirsaTr.lit("Tap 'Choose .tendies from Files' or copy wallpapers into On My iPhone › Mirsa."))
+                            Text(WallpaperMakerStrings.text(.importHint))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -274,10 +227,6 @@ struct TendiesView: View {
                         await vm.importTendieFiles(urls: urls)
                     }
                 }
-            }
-            .sheet(isPresented: $showVideoPicker) {
-                WallpaperVideoPicker(completion: videoPicked)
-                    .interactiveDismissDisabled()
             }
             .sheet(item: $selectedDetailItem) { item in
                 TendieDetailSheet(item: item)
