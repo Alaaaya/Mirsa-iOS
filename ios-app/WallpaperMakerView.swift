@@ -130,6 +130,9 @@ struct WallpaperMakerSection: View {
             Text(t(.videoHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text(t(.compatibility)).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("wallpaper-compatibility")
+            // Keeps the last (destructive) button clear of the floating dock, keyboard and large text.
+            Color.clear.frame(height: MirsaTabBarMetrics.clearance).listRowBackground(Color.clear)
+                .accessibilityHidden(true)
         }
         .sheet(isPresented: $showPhotos) {
             WallpaperPhotosPicker { result in
@@ -253,7 +256,13 @@ struct WallpaperMakerSection: View {
             guard layers.count + images.count <= PhotoWallpaper.maximumLayers else { message = t(.limit); return }
             if let video { try? FileManager.default.removeItem(at: video) }; video = nil
             invalidate()
-            layers += images.map { WallpaperPhotoLayer(image: $0, role: layers.isEmpty ? .background : .middle) }
+            let roles = PhotoWallpaper.defaultRoles(existing: layers.count, adding: images.count)
+            layers += zip(images, roles).map { WallpaperPhotoLayer(image: $0, role: $1) }
+            // Several photos only read as separate layers with depth and motion; opaque full-screen
+            // photos otherwise hide each other and look like a single image.
+            if layers.count > 1 && !depth && effects == PhotoWallpaper.Effects() {
+                depth = true; effects.gyro = true; effects.unlock = .zoom
+            }
         }
     }
     private func receiveFiles(_ urls: [URL]) {
