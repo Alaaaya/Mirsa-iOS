@@ -249,10 +249,18 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(tap(app, ["Tendies"]))
             let video = app.descendants(matching: .any).matching(identifier: "video-wallpaper-from-photos").firstMatch
             XCTAssertTrue(video.waitForExistence(timeout: 10))
+            XCTAssertTrue(video.isHittable, "Original video wallpaper must be visible before scrolling")
+            let initialVideoFrame = video.frame
             let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
+            // Compare frames only before scrolling; Form virtualizes upper rows.
+            if field.exists && field.frame.minY > 0 {
+                XCTAssertLessThan(initialVideoFrame.minY, field.frame.minY)
+            }
             revealWallpaperElement(field, identifier: "wallpaper-description", in: app)
-            XCTAssertLessThan(video.frame.minY, field.frame.minY)
-            app.swipeDown(); app.swipeDown(); app.swipeDown()
+            XCTAssertTrue(field.isHittable)
+            // Return using the same bounded visibility helper, not three guessed
+            // swipes that depend on Dynamic Type and localized row heights.
+            revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app)
             XCTAssertTrue(video.isHittable)
             shot(app, "\(lang)_videowallpaper_top")
             app.terminate()

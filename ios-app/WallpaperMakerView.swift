@@ -29,6 +29,12 @@ struct WallpaperMakerSection: View {
     @State private var message: String?
     @State private var description = ""
     @State private var planBusy = false
+    @State private var cutoutBusy = false
+    @State private var cutoutRunID = UUID()
+    @State private var generationID = UUID()
+    @State private var generationTask: Task<Void, Never>?
+    @State private var planTask: Task<Void, Never>?
+
     /// DEBUG + UI-test harness only: plain generated sample photos so screenshots show populated layers.
     private static var fixtureAI: Bool {
         #if DEBUG
@@ -115,7 +121,7 @@ struct WallpaperMakerSection: View {
                 Button(t(.generate)) { descriptionFocused = false; generate() }
                     .accessibilityIdentifier("wallpaper-generate")
                     .buttonStyle(.borderedProminent)
-                    .disabled(busy || planBusy || applyRunning)
+                    .disabled(busy || cutoutBusy || planBusy || applyRunning)
                 Button(t(.clear), role: .destructive) { clear() }
                     .disabled(busy || planBusy)
             }
@@ -169,6 +175,9 @@ struct WallpaperMakerSection: View {
             }
             #endif
         }
+        .task(id: layers.map { "\($0.id):\($0.role.rawValue):\($0.cutoutEnabled)" }.joined()) {
+            await prepareForegrounds()
+        }
         .onDisappear { clear() }
     }
 
@@ -178,7 +187,7 @@ struct WallpaperMakerSection: View {
                 Color.black
                 ForEach(PhotoWallpaper.ordered(layers, depth: depth)) { layer in
                     GeometryReader { geometry in
-                        Image(uiImage: layer.image).resizable()
+                        Image(uiImage: layer.renderedImage).resizable()
                             .aspectRatio(contentMode: crop && layer.crop ? .fill : .fit)
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .scaleEffect(layer.zoom)
@@ -210,6 +219,14 @@ struct WallpaperMakerSection: View {
                         Text(t(.middle)).tag(WallpaperPhotoLayer.Role.middle)
                         Text(t(.foreground)).tag(WallpaperPhotoLayer.Role.foreground)
                     }.pickerStyle(.segmented)
+                    if layer.role == .foreground {
+                        Toggle(t(.cutout), isOn: $layer.cutoutEnabled)
+                        Text(t(.cutoutHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if layer.cutoutEnabled {
+                            Text(t(layer.cutoutStatus == .ready ? .cutoutReady : layer.cutoutStatus == .noSubject ? .cutoutNoSubject : layer.cutoutStatus == .unavailable ? .cutoutUnavailable : .cutoutPreparing))
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     Toggle(t(.crop), isOn: $layer.crop)
                     Text(t(.zoom)).font(.caption)
                     Slider(value: $layer.zoom, in: 1...4)
@@ -220,7 +237,7 @@ struct WallpaperMakerSection: View {
                     Button(t(.remove), role: .destructive) { layers.removeAll { $0.id == layer.id }; invalidate() }
                 } label: {
                     HStack {
-                        Image(uiImage: layer.image).resizable().scaledToFit().frame(width: 40, height: 48)
+                        Image(uiImage: layer.renderedImage).resizable().scaledToFit().frame(width: 40, height: 48)
                         Text(t(layer.role == .foreground ? .foreground : layer.role == .middle ? .middle : .background))
                         Spacer()
                         Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
@@ -235,7 +252,7 @@ struct WallpaperMakerSection: View {
         .onChange(of: crop) { _, _ in invalidate() }
         .onChange(of: effects) { _, _ in invalidate() }
         // Any manual edit invalidates the previous archive, preventing stale export.
-        .onChange(of: layers.map { "\($0.id):\($0.role.rawValue):\($0.zoom):\($0.x):\($0.y):\($0.crop)" }) { _, _ in invalidate() }
+        .onChange(of: layers.map { "\($0.id):\($0.role.rawValue):\($0.zoom):\($0.x):\($0.y):\($0.crop):\($0.cutoutEnabled)" }) { _, _ in invalidate() }
     }
 
     private func invalidate() {
@@ -244,6 +261,9 @@ struct WallpaperMakerSection: View {
         message = nil
     }
     private func clear() {
+        generationID = UUID(); cutoutRunID = UUID(); cutoutBusy = false
+        generationTask?.cancel(); planTask?.cancel()
+        generationTask = nil; planTask = nil; busy = false; planBusy = false
         invalidate(); layers = []; autoEffectsApplied = false
         if let video { try? FileManager.default.removeItem(at: video) }
         video = nil
@@ -290,34 +310,59 @@ struct WallpaperMakerSection: View {
             }
         } catch { message = t(.error) }
     }
-    private func generate() {
-        invalidate(); busy = true; progress = 0
-        let snapshot = layers, source = video, ratio = aspect, cropPhotos = crop, useDepth = depth, chosenEffects = effects
-        Task {
-            defer { busy = false }
+    @MainActor private func prepareForegrounds() async {
+        let runID = UUID(); cutoutRunID = runID
+        cutoutBusy = true
+        defer { if cutoutRunID == runID { cutoutBusy = false } }
+        for layer in layers where layer.role == .foreground && layer.cutoutEnabled && layer.cutoutImage == nil && layer.cutoutStatus == .pending {
+            let worker = Task.detached(priority: .userInitiated) { try WallpaperForeground.process(layer.image) }
             do {
-                generated = try await Task.detached(priority: .userInitiated) {
-                    if let source {
-                        return try await VideoWallpaper.makeArchive(from: source, screenAspect: ratio) { value in
-                            Task { @MainActor in progress = value }
-                        }
+                let result = try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
+                try Task.checkCancellation()
+                guard cutoutRunID == runID else { return }
+                guard let index = layers.firstIndex(where: { $0.id == layer.id && $0.role == .foreground && $0.cutoutEnabled }) else { continue }
+                switch result {
+                case .masked(let image): layers[index].cutoutImage = image; layers[index].cutoutStatus = .ready
+                case .noSubject: layers[index].cutoutStatus = .noSubject
+                case .unavailable: layers[index].cutoutStatus = .unavailable
+                }
+                invalidate()
+            } catch { return }
+        }
+    }
+    private func generate() {
+        guard !cutoutBusy else { return }
+        invalidate(); busy = true; progress = 0
+        let id = UUID(); generationID = id
+        let snapshot = layers, source = video, ratio = aspect, cropPhotos = crop, useDepth = depth, chosenEffects = effects
+        generationTask = Task { @MainActor in
+            let worker = Task.detached(priority: .userInitiated) {
+                if let source {
+                    return try await VideoWallpaper.makeArchive(from: source, screenAspect: ratio) { value in
+                        Task { @MainActor in if generationID == id { progress = value } }
                     }
-                    return try PhotoWallpaper.makeArchive(layers: snapshot, screenAspect: ratio, crop: cropPhotos, depth: useDepth, effects: chosenEffects)
-                }.value
-                progress = 1
-            } catch { message = t(.error) }
+                }
+                return try PhotoWallpaper.makeArchive(layers: snapshot, screenAspect: ratio, crop: cropPhotos, depth: useDepth, effects: chosenEffects)
+            }
+            do {
+                let output = try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
+                guard !Task.isCancelled, generationID == id else { try? FileManager.default.removeItem(at: output); return }
+                generated = output; progress = 1
+            } catch { if !Task.isCancelled && generationID == id { message = t(.error) } }
+            if generationID == id { busy = false }
         }
     }
     private func requestPlan() {
         planBusy = true
         let snapshot = layers
-        Task {
+        planTask = Task { @MainActor in
             defer { planBusy = false }
             do {
                 let plan = try await WallpaperLayoutAI.request(description: description, layers: snapshot)
+                try Task.checkCancellation()
                 layers = try plan.apply(to: snapshot)
                 invalidate()
-            } catch { message = t(.manualFallback) }
+            } catch { if !Task.isCancelled { message = t(.manualFallback) } }
         }
     }
 }

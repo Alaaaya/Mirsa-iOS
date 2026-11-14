@@ -41,6 +41,8 @@ targets:
       - path: ios-app/WallpaperMakerMetadata
         type: folder
         buildPhase: resources
+      - path: LICENSES/Gester-MIT.txt
+        buildPhase: resources
       - path: LiveActivityShared
     dependencies:
       - package: ApplePackage
@@ -91,6 +93,10 @@ targets:
     platform: iOS
     sources:
       - path: tests
+        excludes:
+          - fixtures/foreground
+      - path: tests/fixtures/foreground/nasa-eileen-collins.jpg
+        buildPhase: resources
       - path: rust-core/tests/fixtures/tweak-import/OwnerTikTokV4.zip
         buildPhase: resources
     dependencies:

@@ -23,9 +23,9 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
             assert ext["CFBundleShortVersionString"] == current["CFBundleShortVersionString"]
             assert ext["CFBundleVersion"] == current["CFBundleVersion"]
 old = baseline["ipa"]["info"]["CFBundleVersion"]
-previous = "5.88.1"  # Verified production 2.4 IPA, MirsaBuild 388
+previous = "6.1.1"  # Verified production 2.5 IPA, MirsaBuild 401
 new = current["CFBundleVersion"]
-assert int(current["MirsaBuild"]) > 388, "actual MirsaBuild must advance past production 2.4"
+assert int(current["MirsaBuild"]) > 401, "actual MirsaBuild must advance past production 2.5"
 # JSON-encoded numeric versions are also valid Swift string literals.
 with tempfile.TemporaryDirectory() as tmp:
     script = pathlib.Path(tmp) / "Upgrade243.swift"
