@@ -36,6 +36,28 @@ class AnnouncementTests(unittest.TestCase):
         self.assertEqual(self.post("/admin/login", {"password":"unit-test-password"}).status_code,303)
     def send(self, **kwargs):
         return self.post("/admin", dict(title="Hello", message="Body", language="all", target="owner", **kwargs))
+    def test_same_origin_referrer_policy_and_friendly_rejections(self):
+        page = self.client.get("/admin", base_url=ORIGIN)
+        self.assertEqual(page.headers["Referrer-Policy"], "same-origin")
+        self.assertIn("Secure", page.headers["Set-Cookie"])
+        missing_ref = self.client.post("/admin/login",
+            data={"csrf_token": self.csrf(), "password": "unit-test-password"},
+            base_url=ORIGIN, headers={"Origin": ORIGIN})
+        self.assertEqual(missing_ref.status_code, 400)
+        self.assertIn('lang="ar"', missing_ref.text)
+        self.assertNotIn("<h1>Bad Request</h1>", missing_ref.text)
+        null_origin = self.client.post("/admin/login",
+            data={"csrf_token": self.csrf(), "password": "unit-test-password"},
+            base_url=ORIGIN, headers={"Origin": "null", "Referer": ORIGIN+"/admin"})
+        self.assertEqual(null_origin.status_code,403)
+        self.assertIn('lang="ar"', null_origin.text)
+        self.assertNotIn("<h1>Forbidden</h1>", null_origin.text)
+        wrong = self.post("/admin/login", {"password": "wrong"})
+        self.assertEqual(wrong.status_code,401)
+        self.assertIn('lang="ar"',wrong.text)
+        self.login()
+        self.assertIn('name="message"',self.client.get("/admin",base_url=ORIGIN).text)
+
     def test_real_identity_verifier_requires_signed_account_and_bound_device(self):
         token = "a-secure-unit-test-token-long-enough-for-binding"
         uid = "80dfdf2a-542c-4143-be94-5925aa805906"
