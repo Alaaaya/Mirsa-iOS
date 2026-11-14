@@ -243,9 +243,19 @@ enum HomeShortcut {
 
     /// Returns the container id only for a well-formed launch link.
     static func containerID(from url: URL) -> String? {
-        guard let s = url.scheme?.lowercased(), s == launchScheme || s == "mirsa", url.host == "launch",
-              let bid = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "app" || $0.name == "bundle" })?.value,
-              !bid.isEmpty, bid.count <= 255
+        guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = c.scheme?.lowercased(), scheme == launchScheme || scheme == "mirsa",
+              c.host == "launch", c.user == nil, c.password == nil, c.port == nil,
+              c.path.isEmpty, c.fragment == nil,
+              let items = c.queryItems, items.count == 1,
+              let item = items.first, item.name == "bundle" || item.name == "app",
+              let bid = item.value, !bid.isEmpty, bid.count <= 255,
+              bid != ".", bid != "..",
+              !bid.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0) ||
+                  CharacterSet.whitespacesAndNewlines.contains($0) ||
+                  "/\\:?&#=".unicodeScalars.contains($0)
+              })
         else { return nil }
         return bid
     }
