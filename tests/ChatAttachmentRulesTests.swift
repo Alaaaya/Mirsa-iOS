@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 import UIKit
 import CryptoKit
+import UniformTypeIdentifiers
 @testable import Mirsa
 
 /// Mirsa 2.1 attachments contract: client-side rules (URL validation, text files, image normalisation).
@@ -96,7 +97,44 @@ final class ChatAttachmentRulesTests: XCTestCase {
         XCTAssertEqual(ChatAttachmentRules.binaryMime(forName: "x.dylib"), "application/x-mach-binary")
         XCTAssertEqual(ChatAttachmentRules.textMaxBytes, 262_144)
         XCTAssertEqual(ChatAttachmentRules.imageMaxBytes, 1_048_576)
-        XCTAssertFalse(MirsaFeatures.binaryAttachmentsEnabled)
+        XCTAssertTrue(MirsaFeatures.binaryAttachmentsEnabled)
+    }
+
+    func testPickerAllowsDylibDebZipAndKeepsTextTypes() {
+        let on = ChatAttachmentPickers.fileTypes(binaryEnabled: true)
+        XCTAssertTrue(on.contains(.plainText)); XCTAssertTrue(on.contains(.json)); XCTAssertTrue(on.contains(.zip))
+        XCTAssertTrue(on.contains(.data), "fallback keeps unknown extensions selectable")
+        for ext in ["deb", "dylib"] {
+            let t = UTType(filenameExtension: ext, conformingTo: .data)
+            XCTAssertNotNil(t, ext)
+            XCTAssertTrue(on.contains(where: { t?.conforms(to: $0) == true }), ext)
+        }
+        XCTAssertEqual(ChatAttachmentPickers.fileTypes(binaryEnabled: false), [.plainText, .json])
+    }
+
+    func testBinaryExactFiveMiBAcceptedAndOneByteOverRejected() {
+        let head = Data([0x50, 0x4B, 0x03, 0x04])
+        let exact = head + Data(count: ChatAttachmentRules.binaryMaxBytes - head.count)
+        XCTAssertEqual(exact.count, 5 * 1024 * 1024)
+        XCTAssertFalse(ChatAttachmentRules.binaryTooLarge(5 * 1024 * 1024))
+        XCTAssertTrue(ChatAttachmentRules.binaryTooLarge(5 * 1024 * 1024 + 1))
+        XCTAssertNil(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: exact))
+        XCTAssertEqual(ChatAttachmentRules.binaryFileProblem(name: "a.zip", data: exact + Data([0])), .binarySize)
+    }
+
+    func testBinaryErrorsAreLocalizedInAllFiveLanguages() {
+        let old = AppLanguageStore.shared.current
+        defer { AppLanguageStore.shared.set(old) }
+        var seen = Set<String>()
+        for lang in [AppLanguage.arabic, .english, .german, .kurmanji, .sorani] {
+            AppLanguageStore.shared.set(lang)
+            for p in [ChatAttachmentRules.FileProblem.binarySize, .type, .signature] {
+                let s = ChatAttachmentText.file(p)
+                XCTAssertFalse(s.isEmpty)
+                if p == .binarySize { seen.insert(s) }
+            }
+        }
+        XCTAssertEqual(seen.count, 5, "oversize error differs per language")
     }
 
     func testSendIDsAreUniqueAndAtMostThree() {

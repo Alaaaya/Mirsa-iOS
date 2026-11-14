@@ -107,6 +107,9 @@ enum ChatAttachmentRules {
 
     // MARK: Binary files (.zip / .deb / .dylib)
 
+    /// True when a picked file is over the 5 MiB limit (5_242_880 is accepted, +1 is not).
+    static func binaryTooLarge(_ size: Int) -> Bool { size > binaryMaxBytes }
+
     /// MIME for a binary attachment by extension, or nil when the extension is not one of the three.
     static func binaryMime(forName name: String) -> String? { binaryMimes[(name as NSString).pathExtension.lowercased()] }
 
