@@ -241,6 +241,22 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Original video wallpaper tab (restored from 2.4) next to the separate Tendies tab.
+    func testVideoWallpaperTabSeparateFromTendies() {
+        continueAfterFailure = false
+        for (lang, title) in [("ar", "خلفية فيديو"), ("en", "Video wallpaper")] {
+            let app = launch("tools", lang: lang, extra: [])
+            XCTAssertTrue(tap(app, [title]))
+            let fromPhotos = app.buttons[lang == "ar" ? "فيديو من الاستوديو" : "Video from Photos"]
+            XCTAssertTrue(fromPhotos.waitForExistence(timeout: 10))
+            shot(app, "\(lang)_videowallpaper_tab")
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            XCTAssertFalse(fromPhotos.exists)
+            shot(app, "\(lang)_tendies_separate")
+            app.terminate()
+        }
+    }
+
     private func wallpaperVisibleBottom(in app: XCUIApplication) -> CGFloat {
         let dock = app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
         // Assert against the actual obstruction, not a guessed 110pt inset that
