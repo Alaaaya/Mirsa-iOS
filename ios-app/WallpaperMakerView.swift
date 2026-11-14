@@ -23,6 +23,7 @@ struct WallpaperMakerSection: View {
     @State private var busy = false
     @State private var progress: Double = 0
     @State private var depth = false
+    @State private var autoEffectsApplied = false
     @State private var effects = PhotoWallpaper.Effects()
     @State private var crop = true
     @State private var message: String?
@@ -243,7 +244,7 @@ struct WallpaperMakerSection: View {
         message = nil
     }
     private func clear() {
-        invalidate(); layers = []
+        invalidate(); layers = []; autoEffectsApplied = false
         if let video { try? FileManager.default.removeItem(at: video) }
         video = nil
     }
@@ -260,7 +261,8 @@ struct WallpaperMakerSection: View {
             layers += zip(images, roles).map { WallpaperPhotoLayer(image: $0, role: $1) }
             // Several photos only read as separate layers with depth and motion; opaque full-screen
             // photos otherwise hide each other and look like a single image.
-            if layers.count > 1 && !depth && effects == PhotoWallpaper.Effects() {
+            if layers.count > 1 && !autoEffectsApplied && !depth && effects == PhotoWallpaper.Effects() {
+                autoEffectsApplied = true
                 depth = true; effects.gyro = true; effects.unlock = .zoom
             }
         }
