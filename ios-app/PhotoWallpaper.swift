@@ -79,6 +79,8 @@ enum PhotoWallpaper {
         var unlock: Unlock = .none
         var gyro = false
         var floating = false
+        enum Motion: String, CaseIterable { case left, right, up, down, float }
+        var motion: Motion = .float
     }
 
     static func makeArchive(layers: [WallpaperPhotoLayer], screenAspect: CGFloat,
@@ -133,8 +135,13 @@ enum PhotoWallpaper {
 
         let wallpaper = contents.appendingPathComponent(wallpaperName)
         try fm.createDirectory(at: wallpaper, withIntermediateDirectories: true)
-        let width = 1080, height = Int((CGFloat(width) / screenAspect / 2).rounded()) * 2
-        let size = CGSize(width: width, height: height)
+        // Continuous presets use the on-device-confirmed envelope and point geometry.
+        // Static export keeps its original variable-aspect route.
+        let width = effects.floating ? 390 : 1080
+        let height = effects.floating ? 844 : Int((CGFloat(width) / screenAspect / 2).rounded()) * 2
+        let overscan = effects.floating ? 40 : 0
+        let size = CGSize(width: effects.floating ? 1410 : width,
+                          height: effects.floating ? 2772 : height)
         let sorted = ordered(layers, depth: depth)
         // Compute descriptor snapshot colour metadata from the user's own rendered composition.
         let thumbnail = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
@@ -181,16 +188,12 @@ enum PhotoWallpaper {
                         .write(to: assets.appendingPathComponent(filename))
                 }
                 let layerName = "layer-\(index)-\(layer.role.rawValue)"
-                let floatAnimation = effects.floating ? """
-                <animations><animation type="CAKeyframeAnimation" keyPath="position.y" beginTime="1e-100" duration="6" fillMode="both" removedOnCompletion="0" repeatCount="inf">
-                <keyTimes><integer value="0"/><real value="0.5"/><integer value="1"/></keyTimes>
-                <values><real value="\(height / 2)"/><real value="\(height / 2 - 12)"/><real value="\(height / 2)"/></values>
-                </animation></animations>
-                """ : ""
+                let floatAnimation = effects.floating
+                    ? continuousAnimation(role: layer.role, preset: effects.motion) : ""
                 // Separate motion wrapper keeps timed floating independent of gyro translation.
                 nodes += """
                 <CALayer name="motion-\(index)" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)">
-                <sublayers><CALayer name="\(layerName)" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)" contentsFormat="RGBA8">
+                <sublayers><CALayer name="\(layerName)" bounds="0 0 \(width + overscan * 2) \(height + overscan * 2)" position="\(width/2) \(height/2)" contentsFormat="RGBA8">
                 <contents type="CGImage" src="assets/\(filename)"/>\(floatAnimation)
                 </CALayer></sublayers></CALayer>
                 """
@@ -222,8 +225,9 @@ enum PhotoWallpaper {
             <caml xmlns="http://www.apple.com/CoreAnimation/1.0"><MicaAssetManifest><modules type="NSArray"/></MicaAssetManifest></caml>
             """.utf8).write(to: ca.appendingPathComponent("assetManifest.caml"))
             try plist(["rootDocument": "main.caml", "documentWidth": width, "documentHeight": height,
-                       "documentResizesToView": true, "geometryFlipped": true,
-                       "scalesToFitInPlayer": true, "unitsInPixelsInPlayer": true], to: ca.appendingPathComponent("index.xml"))
+                       "documentResizesToView": !effects.floating, "geometryFlipped": !effects.floating,
+                       "loopingEnabled": effects.floating,
+                       "scalesToFitInPlayer": true, "unitsInPixelsInPlayer": !effects.floating], to: ca.appendingPathComponent("index.xml"))
         }
         var route: [String: Any] = ["identifier": 7400, "name": "Mirsa"]
         if depth {
@@ -233,7 +237,7 @@ enum PhotoWallpaper {
             route.merge(["type": "ParameterizedCA", "assetFileName": simpleName]) { _, new in new }
         }
         try plist(["assets": ["lockAndHome": ["default": route]], "family": depth ? "WWDC22" : "Marble",
-                   "logicalScreenClass": "any", "appearanceAware": false, "identifier": 7400,
+                   "logicalScreenClass": effects.floating ? "390w-844h@3x~iphone" : "any", "appearanceAware": false, "identifier": 7400,
                    "version": depth ? 1 : 6, "contentVersion": "1.07", "name": "Mirsa",
                    "wantsDeviceMotion": effects.gyro], to: wallpaper.appendingPathComponent("Wallpaper.plist"))
         // Remove archive junk at every level before producing the package.
@@ -250,6 +254,32 @@ enum PhotoWallpaper {
         do { try PasscodeThemePackager.archiveDirectory(root, to: output) }
         catch { try? fm.removeItem(at: output); throw error }
         return output
+    }
+
+    /// Exact two-real endpoint axis layout from the confirmed Jellyfish-v2 recipe.
+    /// Foreground moves faster/further; no opacity animations or downloaded code.
+    static func continuousAnimation(role: WallpaperPhotoLayer.Role, preset: Effects.Motion) -> String {
+        let dx: Int, dy: Int, tx: Int, ty: Int
+        switch role {
+        case .background: (dx, dy, tx, ty) = (4, 3, 18, 23)
+        case .middle: (dx, dy, tx, ty) = (13, 7, 12, 15)
+        case .foreground: (dx, dy, tx, ty) = (28, 12, 8, 11)
+        }
+        func axis(_ key: String, center: Int, amplitude: Int, duration: Int, reverse: Bool = false) -> String {
+            let tag = key == "position.y" ? "animation" : "p"
+            let extra = tag == "animation" ? "" : " key=\"animation-1\" beginTimeMode=\"absolute\""
+            let start = center + (reverse ? amplitude : -amplitude)
+            let end = center + (reverse ? -amplitude : amplitude)
+            return """
+            <\(tag)\(extra) type="CAKeyframeAnimation" keyPath="\(key)" autoreverses="1" beginTime="1e-100" duration="\(duration)" removedOnCompletion="0" repeatCount="inf" repeatDuration="inf"><values><real value="\(start)"/><real value="\(end)"/></values></\(tag)>
+            """
+        }
+        let horizontal = preset == .float || preset == .left || preset == .right
+        let vertical = preset == .float || preset == .up || preset == .down
+        return "<animations>" +
+            (vertical ? axis("position.y", center: 422, amplitude: dy, duration: ty, reverse: preset == .up) : "") +
+            (horizontal ? axis("position.x", center: 195, amplitude: dx, duration: tx, reverse: preset == .left) : "") +
+            "</animations>"
     }
 
     private static func plist(_ value: [String: Any], to url: URL) throws {

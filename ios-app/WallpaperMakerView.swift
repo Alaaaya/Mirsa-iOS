@@ -210,6 +210,15 @@ struct WallpaperMakerSection: View {
             }
             Toggle(t(.gyro), isOn: $effects.gyro)
             Toggle(t(.floating), isOn: $effects.floating)
+            if effects.floating {
+                Picker(t(.motionPreset), selection: $effects.motion) {
+                    Text(t(.motionLeft)).tag(PhotoWallpaper.Effects.Motion.left)
+                    Text(t(.motionRight)).tag(PhotoWallpaper.Effects.Motion.right)
+                    Text(t(.motionUp)).tag(PhotoWallpaper.Effects.Motion.up)
+                    Text(t(.motionDown)).tag(PhotoWallpaper.Effects.Motion.down)
+                    Text(t(.motionFloat)).tag(PhotoWallpaper.Effects.Motion.float)
+                }
+            }
             Text(t(.effectsHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text(t(.reorder)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach($layers) { $layer in

@@ -153,7 +153,9 @@ enum PosterBoardStore {
         let aliases: [String]
         switch original {
         case "com.apple.WallpaperKit.CollectionsPoster", "com.apple.Posters.CollectionsPosterApp":
-            aliases = ["com.apple.WallpaperKit.CollectionsPoster", "com.apple.Posters.CollectionsPosterApp"]
+            // Collections packages must be applied exactly once. Never mirror a
+            // descriptor into the legacy provider, even if both are present.
+            aliases = ["com.apple.WallpaperKit.CollectionsPoster"]
         case "com.apple.MercuryPoster", "com.apple.Posters.MercuryPosterApp":
             aliases = ["com.apple.MercuryPoster", "com.apple.Posters.MercuryPosterApp"]
         default: aliases = [original]

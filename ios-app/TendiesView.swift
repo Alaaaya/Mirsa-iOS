@@ -197,11 +197,12 @@ struct TendiesView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
+                        .disabled(videoApplyRunning)
                         .accessibilityIdentifier("wallpaper-respring")
                     }
                     .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                 } footer: {
-                    Text(MirsaTr.lit("Flashing will automatically trigger NeoSpring to respring the device and apply your new wallpapers."))
+                    Text(WallpaperMakerStrings.text(.respringHelp))
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("wallpaper-flash-help")
                 }
