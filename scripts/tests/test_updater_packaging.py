@@ -39,6 +39,19 @@ class UpdaterPackagingTests(unittest.TestCase):
             p.write_text(json.dumps({'1.3.89': {'ar':'تحسين التثبيت', 'en':'Installation improvements'}}))
             self.assertEqual(module.metadata(p, '1.3.90'), {'releaseNotes':{}})
             self.assertEqual(module.metadata(p, '1.3.89')['releaseNotes']['ar'], 'تحسين التثبيت')
+    def test_release25_has_all_five_languages(self):
+        notes = load('curated_release_notes').metadata(ROOT / 'docs/release-notes.json', '2.5')['releaseNotes']
+        self.assertEqual(set(notes), {'ar', 'en', 'de', 'kmr', 'ckb'})
+        for text in notes.values():
+            self.assertGreater(len(text), 800)
+            self.assertIn('Tendies', text)
+            self.assertIn('Setup', text)
+            self.assertIn('iOS (18.0 – 27.2 beta 2)', text)
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / 'notes.json'
+            p.write_text(json.dumps({'2.5': {'tr': 'Wrong language'}}))
+            with self.assertRaises(ValueError):
+                load('curated_release_notes').metadata(p, '2.5')
     def test_bounded_pinned_verification_wiring(self):
         source = (ROOT / 'ios-app/Apps/AppsExtras.swift').read_text().split('// MARK: - Mirsa updates itself')[1]
         verification = source.split('private func actualBuild')[1].split('/// "Later"')[0]
@@ -50,17 +63,20 @@ class UpdaterPackagingTests(unittest.TestCase):
         for bound in ['maxTotalUncompressed = 512 * 1024 * 1024', 'maxEntries = 10_000',
                       'maxPathDepth = 32', 'rejectSymlinks = true', 'maxPlist = 1024 * 1024']:
             self.assertIn(bound, verification)
-        self.assertIn('defer { try? FileManager.default.removeItem(at: file) }', verification)
+        self.assertIn('defer { MirsaManagedTmp.end(file.deletingLastPathComponent()) }', verification)
         self.assertEqual(source.count('cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30'), 2)
         self.assertIn('let verified = try await Self.verifiedUpdate(ipa)', source)
 
-    def test_no_commit_fallback_or_wifi_requirement(self):
+    def test_no_commit_fallback_and_existing_network_requirement(self):
         workflow = (ROOT / '.github/workflows/unsigned-ipa.yml').read_text()
         self.assertNotIn('git log', workflow)
         updater = (ROOT / 'ios-app/Apps/AppsExtras.swift').read_text().split('// MARK: - Mirsa updates itself')[1]
         self.assertNotIn('Wi-Fi', updater)
-        self.assertIn('Enable LocalDevVPN and check your pairing file.', updater)
-        self.assertIn('فعّل LocalDevVPN وتأكد من صحة ملف الاقتران.', updater)
+        network = (ROOT / 'ios-app/Apps/UpdateNetworkPath.swift').read_text()
+        self.assertIn('guard UpdateNetworkPath.shared.permitsUpdate', updater)
+        self.assertIn('Text(UpdateNetworkPath.requirement)', updater)
+        self.assertIn('enable LocalDevVPN and check your pairing file.', network)
+        self.assertIn('فعّل LocalDevVPN وتأكد من صحة ملف الاقتران', network)
         self.assertNotIn('filter(\\.isNumber)', updater)
         self.assertIn('CFBundleVersion', updater)
 
