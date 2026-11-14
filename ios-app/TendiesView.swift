@@ -223,6 +223,9 @@ struct TendiesView: View {
             // A focused multiline input also needs clearance above the keyboard toolbar.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Color.clear.frame(height: makerDescriptionFocused ? 56 : MirsaTabBarMetrics.clearance)
+                    // Decorative clearance must not intercept taps on Form rows
+                    // that SwiftUI scrolls into its transparent hosting region.
+                    .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
             .scrollDismissesKeyboard(.interactively)
