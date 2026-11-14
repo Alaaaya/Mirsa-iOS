@@ -93,7 +93,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     func testWallpaperMaker() {
         for lang in ["ar", "en"] {
             let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"])
-            if tap(app, ["Video wallpaper", "خلفية فيديو", "خلفية الفيديو"]) {
+            if tap(app, ["Tendies", "تيندیز", "تندیز", "Video wallpaper", "خلفية فيديو", "خلفية الفيديو"]) {
                 shot(app, "\(lang)_wallpaper-maker-top")
                 for i in 1...4 where alive(app) { app.swipeUp(velocity: .slow); Thread.sleep(forTimeInterval: 0.8); shot(app, "\(lang)_wallpaper-maker-scroll\(i)") }
             } else { shot(app, "\(lang)_wallpaper-maker-NOTFOUND") }
