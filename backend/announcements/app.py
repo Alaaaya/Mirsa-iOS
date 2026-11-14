@@ -15,7 +15,7 @@ import urllib.request
 import uuid
 
 from flask import Flask, abort, redirect, render_template, request, session, url_for
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.security import check_password_hash
 
 ORIGIN = "https://mirsa-app.mooo.com"
@@ -119,10 +119,40 @@ def create_app(config=None, verify=verified_owner, clock=time.time):
     def security(response):
         response.headers.update({
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-            "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+            "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin",
             "Content-Security-Policy": "default-src 'none'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         })
         return response
+
+    @app.errorhandler(CSRFError)
+    def csrf_error(error):
+        # Never log tokens, credentials, cookies, IPs or submitted content.
+        reason = {
+            "The CSRF token is missing.": "csrf_missing",
+            "The CSRF session token is missing.": "csrf_session_missing",
+            "The CSRF token has expired.": "csrf_expired",
+            "The CSRF tokens do not match.": "csrf_mismatch",
+            "The referrer header is missing.": "referrer_missing",
+            "The referrer does not match the host.": "referrer_mismatch",
+        }.get(error.description, "csrf_invalid")
+        app.logger.warning("admin_request_rejected reason=%s", reason)
+        return render_template("error.html", title="خلّينا نفتح الصفحة من جديد",
+            message="انتهت جلسة الدخول أو المتصفح ما أرسل بيانات الحماية. افتح صفحة الدخول من جديد وحاول مرة تانية."), 400
+
+    def friendly_error(error):
+        status = error.code
+        titles = {400: "ما قدرنا نكمل الطلب", 401: "ما قدرنا نسجّل الدخول",
+                  403: "ما قدرنا نتحقق من الطلب", 429: "محاولات كتيرة بوقت قصير"}
+        messages = {
+            400: "تأكد من البيانات وافتح الصفحة من جديد إذا استمرت المشكلة.",
+            401: "تأكد من كلمة المرور. إذا كنت داخل من قبل، افتح صفحة الدخول من جديد.",
+            403: "افتح صفحة الدخول من رابط مرسى وحاول مرة تانية.",
+            429: "استنى شوي قبل ما تحاول تسجيل الدخول مرة تانية.",
+        }
+        app.logger.warning("admin_request_rejected reason=http_%s", status)
+        return render_template("error.html", title=titles[status], message=messages[status]), status
+    for status in (400, 401, 403, 429):
+        app.register_error_handler(status, friendly_error)
 
     @app.route("/admin", methods=["GET", "POST"])
     def admin():
