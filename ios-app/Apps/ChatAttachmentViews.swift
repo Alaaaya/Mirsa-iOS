@@ -253,9 +253,11 @@ struct ChatAttachmentPickers: ViewModifier {
         var types: [UTType] = [.plainText, .json]
         guard MirsaFeatures.binaryAttachmentsEnabled else { return types }
         types.append(.zip)
-        let extra = ["deb", "dylib"].map { UTType(filenameExtension: $0) }
-        types.append(contentsOf: extra.compactMap { $0 })
-        if extra.contains(where: { $0 == nil }) { types.append(.data) }
+        for ext in ["deb", "dylib"] {
+            types.append(UTType(filenameExtension: ext, conformingTo: .data) ?? UTType(filenameExtension: ext) ?? .data)
+        }
+        // iOS can mark files "unknown" in Files; .data keeps them selectable, extension + size + magic are still checked.
+        if !types.contains(.data) { types.append(.data) }
         return types
     }
 
