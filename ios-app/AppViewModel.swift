@@ -1304,12 +1304,17 @@ final class AppViewModel: ObservableObject {
     }
 
     func flashSelectedTendies() async {
+        guard tendiesFlashPhase != .running else { return }
         let selected = tendieItems.filter { $0.isSelected }
         guard !selected.isEmpty else {
             errorMessage = "No wallpapers selected to flash."
             return
         }
 
+        // Set the shared operation gate before discovery can suspend.
+        tendiesFlashPhase = .running
+        tendiesFlashProgress = 0
+        tendiesFlashLog = []
         let pairingPath = PairingController.pairingFilePath()
         var container = posterBoardContainer.trimmingCharacters(in: .whitespacesAndNewlines)
         if container.isEmpty {
@@ -1318,15 +1323,12 @@ final class AppViewModel: ObservableObject {
                 self.posterBoardContainer = container
                 UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
             } catch {
+                tendiesFlashPhase = .done(ok: false)
                 tendiesFlashLog.append(error.localizedDescription)
                 errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .containerUnavailable)
                 return
             }
         }
-
-        tendiesFlashPhase = .running
-        tendiesFlashProgress = 0
-        tendiesFlashLog = []
 
         do {
             try await TendiesEngine.shared.flashTendies(
@@ -1349,12 +1351,8 @@ final class AppViewModel: ObservableObject {
             tendiesFlashProgress = 1.0
             tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))
             errorMessage = WallpaperMakerStrings.text(.copyVerified)
-            tendiesFlashLog.append("⚡ Triggering NeoSpring respring...")
+            // Respring remains an explicit user action via the existing button.
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.isNeoSpringing = true
-                RespringHelper.triggerNeoSpring()
-            }
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
             tendiesFlashPhase = .done(ok: false)
