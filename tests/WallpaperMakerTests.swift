@@ -579,6 +579,26 @@ private func posterAccessRestore(_ caches: UnsafePointer<CChar>, _ backup: Unsaf
                                  _ existed: Int32, _ target: UnsafePointer<CChar>) -> Int32
 
 final class PosterBoardAccessSafetyTests: XCTestCase {
+    func testIdentityDiagnosticsReportMissingMetadataAndNeverTrustBareDatastore() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore"),
+                               withIntermediateDirectories: true)
+        var messages: [String] = []
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root, log: { messages.append($0) }))
+        XCTAssertTrue(messages.contains { $0.contains("resolved path:") })
+        XCTAssertTrue(messages.contains { $0.contains("top-level names:") && $0.contains("Library") })
+        XCTAssertTrue(messages.contains { $0.contains("exists=false readable=false") })
+        XCTAssertTrue(messages.contains { $0.contains("read/parse error:") })
+        let metadata = root.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist")
+        try PropertyListSerialization.data(fromPropertyList: ["MCMMetadataIdentifier": "other.app"],
+                                           format: .binary, options: 0).write(to: metadata)
+        messages.removeAll()
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root, log: { messages.append($0) }))
+        XCTAssertTrue(messages.contains { $0.contains("MCMMetadataIdentifier=other.app") })
+    }
+
     func testClass7AliasRequiresExactTargetAndRejectsNestedLinks() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
