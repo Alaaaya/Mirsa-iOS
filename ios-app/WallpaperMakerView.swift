@@ -17,6 +17,7 @@ struct WallpaperMakerSection: View {
     @State private var busy = false
     @State private var progress: Double = 0
     @State private var depth = false
+    @State private var effects = PhotoWallpaper.Effects()
     @State private var crop = true
     @State private var message: String?
     @State private var description = ""
@@ -122,6 +123,14 @@ struct WallpaperMakerSection: View {
             Toggle(t(.crop), isOn: $crop)
             Toggle(t(.depth), isOn: $depth)
             Text(t(.depthHelp)).font(.caption).foregroundStyle(.secondary)
+            Picker(t(.unlock), selection: $effects.unlock) {
+                Text(t(.off)).tag(PhotoWallpaper.Effects.Unlock.none)
+                Text(t(.unlockZoom)).tag(PhotoWallpaper.Effects.Unlock.zoom)
+                Text(t(.unlockSlide)).tag(PhotoWallpaper.Effects.Unlock.slide)
+            }
+            Toggle(t(.gyro), isOn: $effects.gyro)
+            Toggle(t(.floating), isOn: $effects.floating)
+            Text(t(.effectsHelp)).font(.caption).foregroundStyle(.secondary)
             Text(t(.reorder)).font(.caption).foregroundStyle(.secondary)
             ForEach($layers) { $layer in
                 DisclosureGroup {
@@ -153,6 +162,7 @@ struct WallpaperMakerSection: View {
         .disabled(busy || planBusy)
         .onChange(of: depth) { _, _ in invalidate() }
         .onChange(of: crop) { _, _ in invalidate() }
+        .onChange(of: effects) { _, _ in invalidate() }
         // Any manual edit invalidates the previous archive, preventing stale export.
         .onChange(of: layers.map { "\($0.id):\($0.role.rawValue):\($0.zoom):\($0.x):\($0.y):\($0.crop)" }) { _, _ in invalidate() }
     }
@@ -204,7 +214,7 @@ struct WallpaperMakerSection: View {
     }
     private func generate() {
         invalidate(); busy = true; progress = 0
-        let snapshot = layers, source = video, ratio = aspect, cropPhotos = crop, useDepth = depth
+        let snapshot = layers, source = video, ratio = aspect, cropPhotos = crop, useDepth = depth, chosenEffects = effects
         Task {
             defer { busy = false }
             do {
@@ -214,7 +224,7 @@ struct WallpaperMakerSection: View {
                             Task { @MainActor in progress = value }
                         }
                     }
-                    return try PhotoWallpaper.makeArchive(layers: snapshot, screenAspect: ratio, crop: cropPhotos, depth: useDepth)
+                    return try PhotoWallpaper.makeArchive(layers: snapshot, screenAspect: ratio, crop: cropPhotos, depth: useDepth, effects: chosenEffects)
                 }.value
                 progress = 1
             } catch { message = t(.error) }

@@ -30,3 +30,8 @@ no paid requests and no production/server/main/release/feed/latest changes.
 Offline Node contract tests passed 4/4. Actual simulator archive tests added to
 Forge workflow (real generated image/multilayer/video ZIP inspection + parser/
 manual fallback/locales). Local WEB has no Swift/Xcode; CI required before delivery.
+
+Tendies maker reference integration, 2026-11-14.
+All 140 gallery archives inventoried individually with SHA256 reconciliation; 1007 XML/CAML documents parsed, two malformed upstream Waves documents explicitly recorded. Exact animation keys, state setters/transitions, motion and timing evidence is in docs/tendies-inventory.json and docs/tendies-techniques.md. No reference artwork shipped.
+Photo output now simple one wallpaper.ca by default, or opt-in genuine Background/Floating/Foreground LayeredAnimation. Every bundle has separate own PNG assets, index.xml, main.caml and assetManifest.caml. Authored keyed metadata resources, fresh descriptor UUID and generated snapshot colour metadata. Optional system-state unlock zoom/slide, six-second floating and experimental gyro mappings default OFF. Preview remains layout-only. Runtime support on iOS 27 is unverified.
+Expanded actual generated-archive XCTest covers both modes, every referenced image, metadata, UUID freshness, all three optional effects and existing generated video. Tests remain explicitly selected in Forge workflow. CI required before delivery; no production or source feed changes.
