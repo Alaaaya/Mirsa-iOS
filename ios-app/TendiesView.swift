@@ -64,7 +64,7 @@ struct TendiesView: View {
                         }
                         .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 48)
+                        .frame(minHeight: 48)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
@@ -89,6 +89,7 @@ struct TendiesView: View {
                             Text(MirsaTr.lit("Resets file protections so iOS re-indexes wallpapers immediately"))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -133,6 +134,7 @@ struct TendiesView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -165,11 +167,12 @@ struct TendiesView: View {
                                 }
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 48)
+                                .frame(minHeight: 48)
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.blue)
                             .disabled(selectedCount == 0)
+                            .accessibilityIdentifier("wallpaper-flash")
                         }
 
                         Button(role: .destructive) {
@@ -185,14 +188,17 @@ struct TendiesView: View {
                             }
                             .font(.headline)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 48)
+                            .frame(minHeight: 48)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
+                        .accessibilityIdentifier("wallpaper-respring")
                     }
                     .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                 } footer: {
                     Text(MirsaTr.lit("Flashing will automatically trigger NeoSpring to respring the device and apply your new wallpapers."))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("wallpaper-flash-help")
                 }
 
                 // Section 5: Flash Log (CompactLogView)
@@ -206,9 +212,11 @@ struct TendiesView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 60)
-            }
+            // Keep the final controls inside the scrollable area above Mirsa's dock.
+            // Unlike a fixed-height spacer, this also follows the shared dock metrics.
+            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
+            .scrollDismissesKeyboard(.interactively)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -7,7 +7,7 @@ import AVKit
 struct WallpaperMakerSection: View {
     let applyRunning: Bool
     let onImport: (URL) async -> Void
-    @State private var layers: [WallpaperPhotoLayer] = []
+    @State private var layers: [WallpaperPhotoLayer] = WallpaperMakerSection.fixtureLayers()
     @State private var video: URL?
     @State private var generated: URL?
     @State private var showPhotos = false
@@ -22,6 +22,38 @@ struct WallpaperMakerSection: View {
     @State private var message: String?
     @State private var description = ""
     @State private var planBusy = false
+    /// DEBUG + UI-test harness only: plain generated sample photos so screenshots show populated layers.
+    private static var fixtureAI: Bool {
+        #if DEBUG
+        return MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperAIFixture")
+        #else
+        return false
+        #endif
+    }
+    private static func fixtureLayers() -> [WallpaperPhotoLayer] {
+        #if DEBUG
+        guard MirsaUITestHarness.active, ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperFixture") else { return [] }
+        let colors: [(UIColor, UIColor)] = [(.systemIndigo, .systemTeal), (.systemOrange, .systemPink), (.systemGreen, .systemYellow)]
+        let roles: [WallpaperPhotoLayer.Role] = [.background, .middle, .foreground]
+        return (0..<3).map { i in
+            let size = CGSize(width: 600, height: 1200)
+            let img = UIGraphicsImageRenderer(size: size).image { ctx in
+                let g = CGGradient(colorsSpace: nil, colors: [colors[i].0.cgColor, colors[i].1.cgColor] as CFArray, locations: [0, 1])!
+                ctx.cgContext.drawLinearGradient(g, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+                UIColor.white.withAlphaComponent(0.8).setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(x: 150 + CGFloat(i) * 40, y: 300 + CGFloat(i) * 200, width: 300, height: 300))
+            }
+            var l = WallpaperPhotoLayer(image: img, role: roles[i]); l.zoom = 1; return l
+        }
+        #else
+        return []
+        #endif
+    }
+    @FocusState private var descriptionFocused: Bool
+    private var textDirection: LayoutDirection {
+        let language = AppLanguageStore.snapshot
+        return language == .arabic || language == .sorani ? .rightToLeft : .leftToRight
+    }
     private func t(_ key: WallpaperMakerStrings.Key) -> String { WallpaperMakerStrings.text(key) }
     private var aspect: CGFloat { UIScreen.main.bounds.width / UIScreen.main.bounds.height }
 
@@ -29,7 +61,7 @@ struct WallpaperMakerSection: View {
         Group {
             Label(t(.title), systemImage: "square.3.layers.3d")
                 .font(.headline)
-            Text(t(.steps)).font(.caption).foregroundStyle(.secondary)
+            Text(t(.steps)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button { showPhotos = true } label: { Label(t(.photos), systemImage: "photo.stack") }
                 Spacer()
@@ -45,9 +77,17 @@ struct WallpaperMakerSection: View {
                 VideoPlayer(player: AVPlayer(url: video))
                     .frame(height: 220).accessibilityLabel(t(.preview))
             }
-            if WallpaperLayoutAI.enabled {
+            if WallpaperLayoutAI.enabled || Self.fixtureAI {
                 TextField(t(.describe), text: $description, axis: .vertical)
-                    .lineLimit(2...4)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .lineLimit(3...)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 10)
+                    .environment(\.layoutDirection, textDirection)
+                    .multilineTextAlignment(.leading)
+                    .focused($descriptionFocused)
+                    .accessibilityIdentifier("wallpaper-description")
                     .onChange(of: description) { _, value in
                         if value.utf8.count > 2000 { description = String(value.prefix(500)) }
                     }
@@ -55,23 +95,25 @@ struct WallpaperMakerSection: View {
                     .disabled(busy || planBusy || layers.isEmpty || description.isEmpty || applyRunning)
             }
             if !layers.isEmpty || video != nil {
-                Button(t(.generate)) { generate() }
+                Button(t(.generate)) { descriptionFocused = false; generate() }
+                    .accessibilityIdentifier("wallpaper-generate")
                     .buttonStyle(.borderedProminent)
                     .disabled(busy || planBusy || applyRunning)
                 Button(t(.clear), role: .destructive) { clear() }
                     .disabled(busy || planBusy)
             }
             if busy || planBusy { ProgressView(value: busy ? progress : nil) { Text(t(.preparing)) } }
-            if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+            if let message { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             if let generated {
-                Text(t(.ready)).font(.caption).foregroundStyle(.secondary)
+                Text(t(.ready)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button { showShare = true } label: { Label(t(.share), systemImage: "square.and.arrow.up") }
                 Button(t(.importFile)) {
                     Task { await onImport(generated) }
                 }.disabled(applyRunning || busy)
             }
-            Text(t(.videoHelp)).font(.caption).foregroundStyle(.secondary)
-            Text(t(.compatibility)).font(.caption).foregroundStyle(.orange)
+            Text(t(.videoHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(t(.compatibility)).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("wallpaper-compatibility")
         }
         .sheet(isPresented: $showPhotos) {
             WallpaperPhotosPicker { result in
@@ -98,6 +140,22 @@ struct WallpaperMakerSection: View {
         .sheet(isPresented: $showShare) {
             if let generated { ShareSheet(items: [generated]) }
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(MirsaTr.lit("Done")) { descriptionFocused = false }
+                    .accessibilityIdentifier("wallpaper-keyboard-done")
+            }
+        }
+        .onAppear {
+            #if DEBUG
+            if Self.fixtureAI {
+                description = textDirection == .rightToLeft
+                    ? "رتّب الصور بطبقات واضحة\nخلّي الصورة الأمامية فوق الخلفية\nوحافظ على التفاصيل والألوان"
+                    : "Arrange the photos in clear layers\nKeep the foreground above the background\nPreserve details and colours"
+            }
+            #endif
+        }
         .onDisappear { clear() }
     }
 
@@ -122,7 +180,7 @@ struct WallpaperMakerSection: View {
             .accessibilityLabel(t(.preview))
             Toggle(t(.crop), isOn: $crop)
             Toggle(t(.depth), isOn: $depth)
-            Text(t(.depthHelp)).font(.caption).foregroundStyle(.secondary)
+            Text(t(.depthHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker(t(.unlock), selection: $effects.unlock) {
                 Text(t(.off)).tag(PhotoWallpaper.Effects.Unlock.none)
                 Text(t(.unlockZoom)).tag(PhotoWallpaper.Effects.Unlock.zoom)
@@ -130,8 +188,8 @@ struct WallpaperMakerSection: View {
             }
             Toggle(t(.gyro), isOn: $effects.gyro)
             Toggle(t(.floating), isOn: $effects.floating)
-            Text(t(.effectsHelp)).font(.caption).foregroundStyle(.secondary)
-            Text(t(.reorder)).font(.caption).foregroundStyle(.secondary)
+            Text(t(.effectsHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(t(.reorder)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach($layers) { $layer in
                 DisclosureGroup {
                     Picker(t(.layers), selection: $layer.role) {
