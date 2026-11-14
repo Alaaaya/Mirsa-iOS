@@ -1,6 +1,8 @@
 name: Wallpaper maker screenshots
 on:
   workflow_dispatch:
+  push:
+    branches: [mirsa/wallpaper-shots]
 permissions:
   contents: read
 jobs:
