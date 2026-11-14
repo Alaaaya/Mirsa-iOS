@@ -8,6 +8,7 @@
 import UIKit
 import Foundation
 import AirliftFFI
+import ZIPFoundation
 
 public final class TendiesEngine {
     public static let shared = TendiesEngine()
@@ -31,6 +32,7 @@ public final class TendiesEngine {
             }
         }
 
+        try validateArchive(sourceURL)
         let fileName = sourceURL.lastPathComponent
         let baseName = (fileName as NSString).deletingPathExtension
         let destinationURL = Self.tendiesStorageDirectory.appendingPathComponent(fileName)
@@ -126,7 +128,8 @@ public final class TendiesEngine {
 
         // Use findDescriptorsWithExtensions to get accurate descriptor count and poster type
         let foundDescriptors = findDescriptorsWithExtensions(in: tempExtractDir, defaultExt: "com.apple.WallpaperKit.CollectionsPoster")
-        descriptorCount = max(foundDescriptors.count, 1)
+        guard !foundDescriptors.isEmpty else { throw PosterBoardStore.failure("Archive contains no wallpaper descriptors.") }
+        descriptorCount = foundDescriptors.count
 
         if let first = foundDescriptors.first {
             if first.ext == "com.apple.MercuryPoster" || first.ext == "com.apple.Posters.MercuryPosterApp" {
@@ -168,6 +171,29 @@ public final class TendiesEngine {
         )
     }
 
+    /// Validate before either import or flash invokes the native ZIP extractor.
+    func validateArchive(_ url: URL) throws {
+        let archive = try Archive(url: url, accessMode: .read)
+        var total: UInt64 = 0, count = 0
+        var paths = Set<String>()
+        for entry in archive {
+            count += 1
+            let size = UInt64(entry.uncompressedSize)
+            guard size <= 536_870_912, total <= 536_870_912 - size else {
+                throw PosterBoardStore.failure("Oversized wallpaper archive.")
+            }
+            total += size
+            let parts = entry.path.split(separator: "/", omittingEmptySubsequences: false)
+            guard !entry.path.isEmpty, !entry.path.hasPrefix("/"), !entry.path.contains("\\"),
+                  !entry.path.contains("\0"), !parts.contains(".."), !parts.contains("."),
+                  entry.type == .file || entry.type == .directory,
+                  paths.insert(entry.path).inserted, count <= 8192 else {
+                throw PosterBoardStore.failure("Unsafe wallpaper archive.")
+            }
+        }
+        guard count > 0 else { throw PosterBoardStore.failure("Empty wallpaper archive.") }
+    }
+
     // MARK: - Downsample Thumbnail
 
     private func downsample(image: UIImage, maxDimension: CGFloat) -> UIImage {
@@ -187,6 +213,12 @@ public final class TendiesEngine {
     // MARK: - Auto-detect PosterBoard Container
 
     public func detectPosterBoardContainer(pairingPath: String) async throws -> String {
+        if let direct = try? await Task.detached(priority: .userInitiated, operation: {
+            try PosterBoardStore.discover(cached: UserDefaults.standard.string(forKey: "aircard.posterboard_container"))
+        }).value { return direct }
+        guard FileManager.default.fileExists(atPath: pairingPath) else {
+            throw PosterBoardStore.failure("Direct container access unavailable. Pair the device for tunnel discovery; this does not prove wallpaper installation support.")
+        }
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 var outContainer: UnsafeMutablePointer<CChar>? = nil
@@ -245,148 +277,46 @@ public final class TendiesEngine {
         log: @escaping (String) -> Void,
         progress: @escaping (Double) -> Void
     ) async throws {
-        guard !items.isEmpty else {
-            log("⚠️ No wallpapers selected to flash")
-            return
-        }
-
-        var normalizedContainer = containerPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalizedContainer.hasSuffix("/") {
-            normalizedContainer = String(normalizedContainer.dropLast())
-        }
-        if normalizedContainer.isEmpty {
-            throw NSError(
-                domain: "TendiesEngine",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "PosterBoard Container path is required."]
-            )
-        }
-
-        let majorVer = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        let structVersion = (majorVer <= 16) ? 59 : 61
-
-        log("🚀 Starting PosterBoard injection into \(normalizedContainer)")
-        log("ℹ️ Target PosterBoard structure version: \(structVersion) (iOS \(majorVer))")
-
-        let totalItems = Double(items.count)
-
-        for (itemIndex, item) in items.enumerated() {
-            log("\n📦 [\(itemIndex + 1)/\(items.count)] Processing '\(item.name)'…")
-
-            let tempStageDir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("tendie_flash_\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: tempStageDir, withIntermediateDirectories: true)
-            defer {
-                try? FileManager.default.removeItem(at: tempStageDir)
+        // Completion means byte-for-byte verified copy, not unobserved gallery registration.
+        guard !items.isEmpty else { throw PosterBoardStore.failure("No wallpapers selected.") }
+        let normalized = try PosterBoardStore.canonicalContainer(containerPath)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let lease = try PosterBoardLease(path: normalized)
+                    try withExtendedLifetime(lease) {
+                        let container = URL(fileURLWithPath: normalized)
+                        try PosterBoardStore.validateIdentity(container)
+                        let fm = FileManager.default
+                        let stage = fm.temporaryDirectory.appendingPathComponent("tendie_flash_" + UUID().uuidString)
+                        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+                        defer { try? fm.removeItem(at: stage) }
+                        var all: [(url: URL, ext: String)] = []
+                        for (index, item) in items.enumerated() {
+                            try self.validateArchive(item.fileURL)
+                            let folder = stage.appendingPathComponent(String(index))
+                            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                            let rc = item.fileURL.path.withCString { source in
+                                folder.path.withCString { al_zip_extract_all(source, $0) }
+                            }
+                            guard rc == 0 else { throw PosterBoardStore.failure("Wallpaper extraction failed (\(rc)).") }
+                            let found = self.findDescriptorsWithExtensions(in: folder, defaultExt: item.posterType.extensionBundleId)
+                            guard !found.isEmpty else { throw PosterBoardStore.failure("Archive contains no wallpaper descriptors.") }
+                            // Keep descriptor IDs and suggestion metadata mutually consistent.
+                            // Existing destination identifiers are rejected, never replaced.
+                            all.append(contentsOf: found.map { (url: $0.url, ext: $0.ext) })
+                            progress(Double(index + 1) / Double(items.count + 1))
+                        }
+                        let backupRoot = fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("TendiesBackups")
+                        let copies = try PosterBoardStore.install(all, container: container, resetProtections: resetProtections,
+                                                                 backupRoot: backupRoot, log: log)
+                        log("Verified \(copies) descriptor copies. Gallery registration is not yet verified on this device.")
+                        progress(1)
+                    }
+                    continuation.resume()
+                } catch { continuation.resume(throwing: error) }
             }
-
-            let extractRC = item.fileURL.path.withCString { arcC in
-                tempStageDir.path.withCString { dstC in
-                    al_zip_extract_all(arcC, dstC)
-                }
-            }
-            guard extractRC == 0 else {
-                log("❌ Failed to extract '\(item.name)'")
-                continue
-            }
-
-            log("  🖼 Locating wallpaper descriptors…")
-            let descriptors = findDescriptorsWithExtensions(in: tempStageDir, defaultExt: item.posterType.extensionBundleId)
-            log("  ✨ Found \(descriptors.count) descriptor(s) to install")
-
-            for (descIndex, descItem) in descriptors.enumerated() {
-                let targetUUID = UUID().uuidString.uppercased()
-                let randomizedID = Int.random(in: 10000...99999)
-                log("  [\(descIndex + 1)/\(descriptors.count)] Descriptor \(targetUUID) for \(descItem.ext)…")
-
-                // Update plist identifiers for templates/videos without suggestionMetadata
-                updatePlistIdentifiers(in: descItem.url, randomizedID: randomizedID)
-
-                // 1. Primary destination: matches descriptor extension bundle ID
-                let primaryParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(descItem.ext)/descriptors"
-                try await injectDescriptorFolder(
-                    folderURL: descItem.url,
-                    targetParentDir: primaryParentDir,
-                    destName: targetUUID,
-                    pairingPath: pairingPath,
-                    log: log
-                )
-
-                // 2. On iOS 18+, also dual-inject to modern .Posters.<Name>App container if applicable
-                var modernExt: String? = nil
-                if descItem.ext == "com.apple.WallpaperKit.CollectionsPoster" {
-                    modernExt = "com.apple.Posters.CollectionsPosterApp"
-                } else if descItem.ext == "com.apple.MercuryPoster" {
-                    modernExt = "com.apple.Posters.MercuryPosterApp"
-                }
-
-                if let modernExt = modernExt, majorVer >= 18 {
-                    let modernParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(modernExt)/descriptors"
-                    try? await injectDescriptorFolder(
-                        folderURL: descItem.url,
-                        targetParentDir: modernParentDir,
-                        destName: targetUUID,
-                        pairingPath: pairingPath,
-                        log: log
-                    )
-                }
-            }
-
-            progress(Double(itemIndex + 1) / (totalItems + 1))
         }
-
-        // Always force PosterBoard cache refresh and file protections reset
-        log("\n🔄 Forcing PosterBoard cache refresh and file protections reset…")
-        let stagePrefDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tendie_pref_\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: stagePrefDir, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: stagePrefDir)
-        }
-
-        let prefPlistURL = stagePrefDir.appendingPathComponent("com.apple.PosterBoard.unprotectedUserDefaults.plist")
-        let prefDict: [String: Any] = [
-            "PBF_RESET_FILE_PROTECTIONS": true,
-            "PBF_LOCALE_DID_CHANGE": true,
-            "PersistedPosterContainerBundleIdentifiers": [
-                "com.apple.Posters.CollectionsPosterApp",
-                "com.apple.WallpaperKit.CollectionsPoster",
-                "com.apple.MercuryPoster",
-                "com.apple.Posters.MercuryPosterApp",
-                "com.apple.PhotosUIPrivate.PhotosPosterProvider"
-            ],
-            "CompletedPosterBundleIdentifierMigrations": [
-                "com.apple.Posters.UnityPosterApp.ExtragalacticPoster",
-                "com.apple.Posters.WeatherPosterApp.WeatherPoster",
-                "com.apple.Posters.UnityPosterApp.Unity2025Poster",
-                "com.apple.Posters.UnityPosterApp.UnityPosterExtension",
-                "com.apple.Posters.UnityPosterApp.RhizomePoster",
-                "com.apple.Posters.KaleidoscopePosterApp.KaleidoscopePoster"
-            ]
-        ]
-        let plistData = try PropertyListSerialization.data(fromPropertyList: prefDict, format: .binary, options: 0)
-        try plistData.write(to: prefPlistURL)
-
-        let targetPrefDir = "\(normalizedContainer)/Library/Preferences"
-        try await writeDirectoryTree(
-            sourceBaseDir: stagePrefDir,
-            targetBaseDir: targetPrefDir,
-            pairingPath: pairingPath,
-            log: log
-        )
-
-        // Also write to mobile global preferences for system daemon lookup
-        let mobilePrefDir = "/var/mobile/Library/Preferences"
-        try? await writeDirectoryTree(
-            sourceBaseDir: stagePrefDir,
-            targetBaseDir: mobilePrefDir,
-            pairingPath: pairingPath,
-            log: log
-        )
-        log("✅ PosterBoard preferences staged for reload")
-
-        progress(1.0)
-        log("\n🎉 All wallpapers injected successfully! Open Lock Screen settings or long-press lockscreen to choose your new wallpaper.")
     }
 
     // MARK: - Tree Writer Helper
@@ -702,7 +632,7 @@ public final class TendiesEngine {
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return [(ext: defaultExt, url: rootURL)] }
+        ) else { return [] }
 
         while let itemURL = enumerator.nextObject() as? URL {
             var isDir: ObjCBool = false
@@ -719,6 +649,6 @@ public final class TendiesEngine {
             }
         }
 
-        return results.isEmpty ? [(ext: defaultExt, url: rootURL)] : results
+        return results
     }
 }

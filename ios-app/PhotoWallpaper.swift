@@ -1,12 +1,17 @@
 import UIKit
 import ImageIO
 
-/// User-supplied cutouts are preserved as RGBA PNGs. No segmentation is performed.
+/// Original images are immutable; the optional local mask is reversible.
 struct WallpaperPhotoLayer: Identifiable {
     enum Role: String, CaseIterable { case background, middle, foreground }
     let id: UUID
     let image: UIImage
     var role: Role
+    enum CutoutStatus: String { case pending, ready, noSubject, unavailable }
+    var cutoutEnabled = true
+    var cutoutImage: UIImage?
+    var cutoutStatus: CutoutStatus = .pending
+    var renderedImage: UIImage { role == .foreground && cutoutEnabled ? (cutoutImage ?? image) : image }
     var zoom: Double = 1
     var x: Double = 0
     var y: Double = 0
@@ -48,7 +53,7 @@ enum PhotoWallpaper {
         return (0..<adding).map { i in
             let index = existing + i
             if index == 0 { return .background }
-            return index == total - 1 && total > 2 ? .foreground : .middle
+            return index == total - 1 && total > 1 ? .foreground : .middle
         }
     }
 
@@ -135,7 +140,7 @@ enum PhotoWallpaper {
         let thumbnail = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
             UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
             for layer in sorted {
-                if let data = try? render(layer.image, size: CGSize(width: 32, height: 64),
+                if let data = try? render(layer.renderedImage, size: CGSize(width: 32, height: 64),
                                           crop: crop && layer.crop, zoom: layer.zoom, x: layer.x, y: layer.y),
                    let image = UIImage(data: data) { image.draw(in: CGRect(x: 0, y: 0, width: 1, height: 1)) }
             }
@@ -172,7 +177,7 @@ enum PhotoWallpaper {
                 try Task.checkCancellation()
                 let filename = layer.id.uuidString + ".png"
                 try autoreleasepool {
-                    try render(layer.image, size: size, crop: crop && layer.crop, zoom: layer.zoom, x: layer.x, y: layer.y)
+                    try render(layer.renderedImage, size: size, crop: crop && layer.crop, zoom: layer.zoom, x: layer.x, y: layer.y)
                         .write(to: assets.appendingPathComponent(filename))
                 }
                 let layerName = "layer-\(index)-\(layer.role.rawValue)"
@@ -260,15 +265,17 @@ enum PhotoWallpaper {
         }
         let states = ["Locked", "Unlock", "Sleep"].map { state in
             "<LKState name=\"\(state)\"><elements>" +
-            (effect == .none ? "" : "<LKStateSetValue targetId=\"#1\" keyPath=\"\(key)\">\(value(unlock: state == "Unlock"))</LKStateSetValue>") +
+            (effect == .none ? "" : "<LKStateSetValue targetId=\"#1\" keyPath=\"\(key)\" final=\"false\">\(value(unlock: state == "Unlock"))</LKStateSetValue>") +
             "</elements></LKState>"
         }.joined()
-        let transitions = effect == .none ? "" : ["Locked", "Unlock", "Sleep"].map { state in
-            """
-            <LKStateTransition fromState="*" toState="\(state)"><elements>
-            <LKStateTransitionElement targetId="#1" key="\(key)"><animation type="CASpringAnimation" damping="50" mass="2" stiffness="300" velocity="0" duration="0.8" fillMode="backwards"/></LKStateTransitionElement>
-            </elements></LKStateTransition>
-            """
+        let transitions = effect == .none ? "" : ["Locked", "Unlock", "Sleep"].flatMap { state in
+            [("*", state), (state, "*")].map { from, to in
+                """
+                <LKStateTransition fromState="\(from)" toState="\(to)"><elements>
+                <LKStateTransitionElement targetId="#1" key="\(key)"><animation type="CASpringAnimation" damping="50" mass="2" stiffness="300" velocity="0" duration="0.8" fillMode="backwards"/></LKStateTransitionElement>
+                </elements></LKStateTransition>
+                """
+            }
         }.joined()
         return "<states>\(states)</states><stateTransitions>\(transitions)</stateTransitions>"
     }
