@@ -238,6 +238,17 @@ final class WallpaperMakerTests: XCTestCase {
         } catch {}
         XCTAssertEqual(photos.count, 1); XCTAssertEqual(photos[0].zoom, 1)
     }
+    func testSupportedRangeAndImportCopyInAllFiveLanguages() {
+        for language in AppLanguage.allCases {
+            XCTAssertEqual(WallpaperMakerStrings.text(.compatibility, language: language), "iOS (18.0 – 27.2 beta 2)")
+            XCTAssertTrue(WallpaperMakerStrings.text(.chooseTendies, language: language).contains(".tendies"))
+            XCTAssertTrue(WallpaperMakerStrings.text(.importHint, language: language).contains("Mirsa"))
+            if language != .english {
+                XCTAssertFalse(WallpaperMakerStrings.text(.importHint, language: language).contains("On My iPhone"))
+                XCTAssertFalse(WallpaperMakerStrings.text(.chooseTendies, language: language).contains("Choose"))
+            }
+        }
+    }
     func testEveryMakerStringInAllFiveLanguages() {
         for language in AppLanguage.allCases {
             for key in WallpaperMakerStrings.Key.allCases {

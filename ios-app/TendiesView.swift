@@ -59,7 +59,7 @@ struct TendiesView: View {
                         HStack(spacing: 8) {
                             Spacer()
                             Image(systemName: "doc.badge.plus")
-                            Text(vm.tendieItems.isEmpty ? "Choose .tendies from Files…" : "Import More Wallpapers…")
+                            Text(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore))
                             Spacer()
                         }
                         .font(.headline)
@@ -129,7 +129,7 @@ struct TendiesView: View {
                             Text(MirsaTr.lit("No .tendies wallpapers loaded yet"))
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
-                            Text(MirsaTr.lit("Tap 'Choose .tendies from Files' or copy wallpapers into On My iPhone › Mirsa."))
+                            Text(WallpaperMakerStrings.text(.importHint))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
