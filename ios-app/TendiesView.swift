@@ -13,8 +13,13 @@ struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
     @State private var selectedDetailItem: TendieItem? = nil
-    @State private var showInstallConfirm = false
-    @State private var showRespringConfirm = false
+    // One presenter owns install and respring. Separate chained alerts can
+    // dismiss each other when published copy/list state changes.
+    private enum WallpaperPrompt: String, Identifiable {
+        case install, respring
+        var id: String { rawValue }
+    }
+    @State private var wallpaperPrompt: WallpaperPrompt?
     @State private var showRespringOverlay = false
     /// Current-session gate: set only by a successful copy or owned delete, consumed on accept/decline.
     @State private var respringArmed = false
@@ -176,7 +181,7 @@ struct TendiesView: View {
                             .padding(.vertical, 4)
                         } else {
                             Button {
-                                showInstallConfirm = true
+                                wallpaperPrompt = .install
                             } label: {
                                 HStack(spacing: 8) {
                                     Spacer()
@@ -204,7 +209,7 @@ struct TendiesView: View {
                 MirsaWallpaperManagementSection(
                     externalBusy: videoApplyRunning,
                     log: { vm.tendiesFlashLog.append($0) },
-                    onDeleted: { respringArmed = true; showRespringConfirm = true }
+                    onDeleted: { offerRespring() }
                 )
 
                 // Section 5: Flash Log (CompactLogView)
@@ -260,30 +265,38 @@ struct TendiesView: View {
             .sheet(item: $selectedDetailItem) { item in
                 TendieDetailSheet(item: item)
             }
-            .alert(ws(.installTitle), isPresented: $showInstallConfirm) {
-                Button(ws(.installConfirm)) {
-                    installStartedThisSession = true
-                    Task { await vm.flashSelectedTendies() }
+            .alert(item: $wallpaperPrompt) { prompt in
+                switch prompt {
+                case .install:
+                    return Alert(title: Text(ws(.installTitle)), message: Text(ws(.installBody)),
+                                 primaryButton: .default(Text(ws(.installConfirm))) {
+                                     vm.errorMessage = nil
+                                     installStartedThisSession = true
+                                     Task { await vm.flashSelectedTendies() }
+                                 },
+                                 secondaryButton: .cancel(Text(ws(.cancel))))
+                case .respring:
+                    return Alert(title: Text(ws(.respringTitle)), message: Text(ws(.respringBody)),
+                                 primaryButton: .destructive(Text(ws(.respringConfirm))) {
+                                     vm.tendiesFlashLog.append("REFRESH TAP restart confirmation")
+                                     let ok = respringArmed
+                                     respringArmed = false
+                                     if ok {
+                                         vm.tendiesFlashLog.append("REFRESH confirmed by user; starting single-overlay respring.")
+                                         showRespringOverlay = true
+                                     }
+                                 },
+                                 secondaryButton: .cancel(Text(ws(.respringLater))) {
+                                     vm.tendiesFlashLog.append("REFRESH declined by user; no restart requested.")
+                                     respringArmed = false
+                                 })
                 }
-                Button(ws(.cancel), role: .cancel) {}
-            } message: { Text(ws(.installBody)) }
-            .alert(ws(.respringTitle), isPresented: $showRespringConfirm) {
-                Button(ws(.respringConfirm), role: .destructive) {
-                    let ok = respringArmed
-                    respringArmed = false
-                    if ok {
-                        vm.tendiesFlashLog.append("REFRESH confirmed by user; starting single-overlay respring.")
-                        showRespringOverlay = true
-                    }
-                }
-                Button(ws(.respringLater), role: .cancel) { respringArmed = false }
-            } message: { Text(ws(.respringBody)) }
+            }
             .onChange(of: vm.tendiesFlashPhase) { _, phase in
                 // Only a copy that finished successfully in this session offers a respring.
                 if installStartedThisSession, case .done(ok: true) = phase {
                     installStartedThisSession = false
-                    respringArmed = true
-                    showRespringConfirm = true
+                    offerRespring()
                 } else if case .done = phase { installStartedThisSession = false }
             }
             .onAppear {
@@ -315,6 +328,12 @@ struct TendiesView: View {
             }
             } // ScrollViewReader
         }
+    }
+
+    private func offerRespring() {
+        respringArmed = true
+        vm.tendiesFlashLog.append("REFRESH PROMPT offered; awaiting explicit restart or not-now choice.")
+        wallpaperPrompt = .respring
     }
 }
 
