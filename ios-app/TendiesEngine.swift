@@ -7,6 +7,7 @@
 
 import UIKit
 import Foundation
+import Darwin
 import AirliftFFI
 import ZIPFoundation
 
@@ -195,8 +196,29 @@ public final class TendiesEngine {
     static func archiveDestination(_ target: URL, isStrictlyInside root: URL) -> Bool {
         guard root.isFileURL, target.isFileURL,
               !root.pathComponents.contains(".."), !target.pathComponents.contains("..") else { return false }
-        let base = root.resolvingSymlinksInPath().standardizedFileURL.pathComponents
-        let child = target.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        // Foundation may leave symlinks unresolved when a descendant does not
+        // exist yet. Resolve the nearest existing ancestor with realpath, then
+        // append only the missing components. Never treat a dangling symlink
+        // or an inaccessible existing ancestor as a missing directory.
+        func canonicalComponents(_ url: URL) -> [String]? {
+            var cursor = url.standardizedFileURL
+            var missing: [String] = []
+            while true {
+                if let resolved = realpath(cursor.path, nil) {
+                    defer { free(resolved) }
+                    let ancestor = URL(fileURLWithPath: String(cString: resolved)).pathComponents
+                    return ancestor + Array(missing.reversed())
+                }
+                guard errno == ENOENT else { return nil }
+                var info = stat()
+                guard lstat(cursor.path, &info) != 0, errno == ENOENT else { return nil }
+                let component = cursor.lastPathComponent
+                guard !component.isEmpty, cursor.path != "/" else { return nil }
+                missing.append(component)
+                cursor.deleteLastPathComponent()
+            }
+        }
+        guard let base = canonicalComponents(root), let child = canonicalComponents(target) else { return false }
         return child.count > base.count && Array(child.prefix(base.count)) == base
     }
 
