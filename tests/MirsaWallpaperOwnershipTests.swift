@@ -195,4 +195,151 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         try fm.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: root)
         XCTAssertThrowsError(try MirsaPosterCopy.typedPaths(root))
     }
+
+    private func customSnapshot(_ hashes: [String: String], paths: [String]? = nil) -> MirsaCustomWallpapers.Snapshot {
+        .init(expected: hashes, paths: paths ?? hashes.keys.map { "F:" + $0 }.sorted(), device: 7, inode: 19)
+    }
+    func testCustomTitleSharedIdentityAndKnownUUIDAreNotProvenance() {
+        let stock = customSnapshot(["versions/1/contents/7400.DYNAMIC/Wallpaper.plist": "stock",
+                                    "versions/1/contents/7400.DYNAMIC/Apple.ca/main.caml": "stock"])
+        XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(stock, title: "Anime Squad"))
+        XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(stock, title: "My custom title"))
+        for id in ["CB418767-0B46-4AB0-AF8C-0AB711DB04CB", "642869F5-1FF2-45AD-8062-EA9DD38804DC", UUID().uuidString] {
+            XCTAssertNil(MirsaCustomWallpapers.completedJournal([], id: id, container: record().container,
+                          relative: record().relative, snapshot: stock))
+        }
+    }
+    func testFullImmutableAnimePayloadRequiredAndUnknownAdditionsHidden() {
+        var hashes = MirsaCustomWallpapers.animeImmutable
+        for path in MirsaCustomWallpapers.animeVariable { hashes[path] = "normalized fixture" }
+        XCTAssertTrue(MirsaCustomWallpapers.recognizedAnime(customSnapshot(hashes), title: "Anime Squad"))
+        XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(customSnapshot(hashes), title: "Stock Wallpaper"))
+        for path in MirsaCustomWallpapers.animeImmutable.keys {
+            var changed = hashes; changed[path] = "mutated"
+            XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(customSnapshot(changed), title: "Anime Squad"), path)
+            changed.removeValue(forKey: path)
+            XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(customSnapshot(changed), title: "Anime Squad"), path)
+        }
+        var extra = hashes; extra["unrecognized/system-file"] = "preserve"
+        XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(customSnapshot(extra), title: "Anime Squad"))
+        let emptyDirectory = customSnapshot(hashes, paths: customSnapshot(hashes).paths + ["D:unknown-empty"])
+        XCTAssertFalse(MirsaCustomWallpapers.recognizedAnime(emptyDirectory, title: "Anime Squad"))
+        extra = hashes; extra["versions/1/RuntimeSnapshot-lock.png"] = "iOS generated"
+        XCTAssertTrue(MirsaCustomWallpapers.recognizedAnime(customSnapshot(extra), title: "Anime Squad"))
+    }
+    func testCompletedJournalAdmitsUnrelatedCustomPackageButPinsEveryField() throws {
+        var journal = record()
+        journal.expected = ["unrelated/custom.asset": "custom hash"]
+        journal.paths = ["D:unrelated", "F:unrelated/custom.asset"]
+        journal.copied = true; journal.device = 7; journal.inode = 19
+        let snap = customSnapshot(journal.expected, paths: journal.paths)
+        func accepted(_ records: [MirsaWallpaperJournal.Record], _ snapshot: MirsaCustomWallpapers.Snapshot? = nil) -> Bool {
+            MirsaCustomWallpapers.completedJournal(records, id: journal.id, container: journal.container,
+                                                   relative: journal.relative, snapshot: snapshot ?? snap) != nil
+        }
+        XCTAssertTrue(accepted([journal]))
+        XCTAssertFalse(accepted([])); XCTAssertFalse(accepted([journal, journal]))
+        var wrong = journal; wrong.copied = false; XCTAssertFalse(accepted([wrong]))
+        wrong = journal; wrong.device = 8; XCTAssertFalse(accepted([wrong]))
+        wrong = journal; wrong.inode = 20; XCTAssertFalse(accepted([wrong]))
+        wrong = journal; wrong.container = record().container; XCTAssertFalse(accepted([wrong]))
+        wrong = journal; wrong.paths = nil; XCTAssertFalse(accepted([wrong]))
+        wrong = journal; wrong.expected["unrelated/custom.asset"] = "mutation"; XCTAssertFalse(accepted([wrong]))
+        wrong = journal; wrong.relative = "../" + wrong.relative; XCTAssertFalse(accepted([wrong]))
+        XCTAssertFalse(accepted([journal], customSnapshot(journal.expected))) // empty directory disappeared
+    }
+    private func bespokeFixture() -> (MirsaCustomWallpapers.BespokePayload, MirsaCustomWallpapers.Snapshot, MirsaCustomWallpapers.AppleBaseline) {
+        let root = "versions/1/contents/CometGarden.wallpaper/"
+        let paths = [root + "Wallpaper.plist", root + "CometMotion.ca/main.caml", root + "CometMotion.ca/index.xml",
+                     root + "CometMotion.ca/assetManifest.caml", root + "CometMotion.ca/assets/comet-petals.png"]
+        return (.init(title: "Comet Garden", identifier: "my-comet-garden", assetNames: ["comet-petals.png"],
+                      animations: ["CometMotion.ca"], wallpaperPath: root + "Wallpaper.plist"),
+                customSnapshot(Dictionary(uniqueKeysWithValues: paths.map { ($0, "fixture") })),
+                .init(complete: true, immutableSystemSource: true, titles: ["Earth"], identifiers: ["7400"], assetNames: ["Earth.png"]))
+    }
+    func testGenericUnrelatedTendiesRequiresCompleteIndependentAppleBaseline() {
+        let (payload, snap, baseline) = bespokeFixture()
+        XCTAssertTrue(MirsaCustomWallpapers.bespoke(payload, snapshot: snap, baseline: baseline))
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(payload, snapshot: snap, baseline: nil))
+        let partial = MirsaCustomWallpapers.AppleBaseline(complete: false, immutableSystemSource: true,
+                            titles: baseline.titles, identifiers: baseline.identifiers, assetNames: baseline.assetNames)
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(payload, snapshot: snap, baseline: partial))
+        let circular = MirsaCustomWallpapers.AppleBaseline(complete: true, immutableSystemSource: false,
+                            titles: baseline.titles, identifiers: baseline.identifiers, assetNames: baseline.assetNames)
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(payload, snapshot: snap, baseline: circular))
+        let empty = MirsaCustomWallpapers.AppleBaseline(complete: true, immutableSystemSource: true,
+                            titles: [], identifiers: [], assetNames: [])
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(payload, snapshot: snap, baseline: empty))
+    }
+    func testGenericStockTitleIdentityOrAssetCollisionEachIndependentlyRejects() {
+        let (p, s, b) = bespokeFixture()
+        let title = MirsaCustomWallpapers.AppleBaseline(complete: true, immutableSystemSource: true,
+                           titles: [" COMET GARDEN "], identifiers: b.identifiers, assetNames: b.assetNames)
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(p, snapshot: s, baseline: title))
+        let identity = MirsaCustomWallpapers.AppleBaseline(complete: true, immutableSystemSource: true,
+                           titles: b.titles, identifiers: [p.identifier], assetNames: b.assetNames)
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(p, snapshot: s, baseline: identity))
+        let assets = MirsaCustomWallpapers.AppleBaseline(complete: true, immutableSystemSource: true,
+                           titles: b.titles, identifiers: b.identifiers, assetNames: ["COMET-PETALS.PNG"])
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(p, snapshot: s, baseline: assets))
+        var missing = s.expected
+        missing.removeValue(forKey: p.wallpaperPath.replacingOccurrences(of: "Wallpaper.plist", with: "CometMotion.ca/main.caml"))
+        XCTAssertFalse(MirsaCustomWallpapers.bespoke(p, snapshot: customSnapshot(missing), baseline: b))
+    }
+    func testBoundedSnapshotTracksBytesEmptyDirectoriesAndRootReplacement() throws {
+        let root = try temporaryRoot(), fm = FileManager.default
+        try fm.createDirectory(at: root.appendingPathComponent("empty"), withIntermediateDirectories: false)
+        let file = root.appendingPathComponent("asset")
+        try Data("first".utf8).write(to: file)
+        let first = try MirsaCustomWallpapers.snapshot(root)
+        XCTAssertEqual(first.paths, ["D:empty", "F:asset"])
+        try Data("second".utf8).write(to: file)
+        let second = try MirsaCustomWallpapers.snapshot(root)
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(first.inode, second.inode)
+        try fm.removeItem(at: root.appendingPathComponent("empty"))
+        XCTAssertNotEqual(try MirsaCustomWallpapers.snapshot(root), second)
+        try fm.createSymbolicLink(at: root.appendingPathComponent("redirect"), withDestinationURL: file)
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root))
+    }
+    func testSnapshotNodeDepthReadLimitsAndTraversalRejectWithoutWriting() throws {
+        for path in ["", "../asset", "a//b", "/asset", "a/./b", "a/../b", "a\\b", "a\0b"] {
+            XCTAssertFalse(MirsaCustomWallpapers.validRelative(path), path)
+        }
+        XCTAssertTrue(MirsaCustomWallpapers.validRelative("versions/1/contents/asset.png"))
+        let root = try temporaryRoot(), fm = FileManager.default
+        try Data([1, 2, 3]).write(to: root.appendingPathComponent("file"))
+        XCTAssertThrowsError(try MirsaCustomWallpapers.read(root.appendingPathComponent("file"), limit: 2))
+        for n in 0..<MirsaCustomWallpapers.maxNodes {
+            try fm.createDirectory(at: root.appendingPathComponent("d" + String(n)), withIntermediateDirectories: false)
+        }
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root))
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("file")), Data([1, 2, 3]))
+        let deep = try temporaryRoot()
+        let nesting = (0..<22).map { "d" + String($0) }.joined(separator: "/")
+        try fm.createDirectory(at: deep.appendingPathComponent(nesting), withIntermediateDirectories: true)
+        try Data([1]).write(to: deep.appendingPathComponent("keep"))
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(deep))
+    }
+
+    func testAppleCatalogEnumerationRejectsMissingPartialMalformedAndLinkedPackages() throws {
+        let root = try temporaryRoot(), fm = FileManager.default
+        XCTAssertThrowsError(try MirsaCustomWallpapers.scanAppleCatalog(root))
+        let first = root.appendingPathComponent("Stock.wallpaper")
+        try plist(["name": "Earth", "identifier": 7400], at: first.appendingPathComponent("Wallpaper.plist"))
+        try Data([1]).write(to: first.appendingPathComponent("Earth.png"))
+        let complete = try MirsaCustomWallpapers.scanAppleCatalog(root)
+        XCTAssertTrue(complete.complete)
+        XCTAssertEqual(complete.identifiers, ["7400"])
+        XCTAssertTrue(complete.assetNames.contains("Earth.png"))
+        let missing = root.appendingPathComponent("Missing.wallpaper")
+        try fm.createDirectory(at: missing, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try MirsaCustomWallpapers.scanAppleCatalog(root))
+        try plist(["identifier": 7500], at: missing.appendingPathComponent("Wallpaper.plist"))
+        XCTAssertThrowsError(try MirsaCustomWallpapers.scanAppleCatalog(root))
+        try plist(["name": "Stripes", "identifier": 7500], at: missing.appendingPathComponent("Wallpaper.plist"))
+        XCTAssertEqual(try MirsaCustomWallpapers.scanAppleCatalog(root).identifiers, ["7400", "7500"])
+        try fm.createSymbolicLink(at: root.appendingPathComponent("alias"), withDestinationURL: first)
+        XCTAssertThrowsError(try MirsaCustomWallpapers.scanAppleCatalog(root))
+    }
 }
