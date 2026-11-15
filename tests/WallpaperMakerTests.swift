@@ -542,6 +542,10 @@ extension WallpaperMakerTests {
         XCTAssertTrue(TendiesEngine.archiveDestination(root.appendingPathComponent("new/file"), isStrictlyInside: alias))
         XCTAssertTrue(TendiesEngine.archiveDestination(alias.appendingPathComponent("new/file"), isStrictlyInside: root))
         XCTAssertFalse(TendiesEngine.archiveDestination(root.appendingPathComponent("redirect/file"), isStrictlyInside: root))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("dangling"),
+                                  withDestinationURL: fixture.appendingPathComponent("nonexistent"))
+        XCTAssertFalse(TendiesEngine.archiveDestination(root.appendingPathComponent("dangling/file"), isStrictlyInside: root))
+        XCTAssertFalse(TendiesEngine.archiveDestination(root.appendingPathComponent("redirect/missing/deeper/file"), isStrictlyInside: root))
     }
 
     func testArchiveContainmentResolvesActualVarPrivateVarAlias() throws {
