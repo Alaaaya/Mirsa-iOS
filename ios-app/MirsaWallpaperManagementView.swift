@@ -14,6 +14,10 @@ struct MirsaWallpaperManagementSection: View {
     @State private var confirmCleanup = false
     @State private var message: String?
     @State private var failed = false
+    @State private var journal: [MirsaWallpaperJournal.Record] = []
+    @State private var pendingReconcile: MirsaWallpaperJournal.Record?
+    @State private var presentRecord: MirsaWallpaperJournal.Record?
+    @State private var pendingJournalDelete: MirsaWallpaperJournal.Record?
 
     private func t(_ k: MirsaWallpaperActionStrings.Key) -> String { MirsaWallpaperActionStrings.text(k) }
     private var disabled: Bool { busy || externalBusy }
@@ -41,6 +45,7 @@ struct MirsaWallpaperManagementSection: View {
                     .disabled(disabled)
                 }
             }
+            journalRows
             Button { reload() } label: { Label(t(.refresh), systemImage: "arrow.clockwise") }
                 .disabled(disabled)
             Button { confirmCleanup = true } label: { Label(t(.cleanup), systemImage: "sparkles") }
@@ -59,7 +64,20 @@ struct MirsaWallpaperManagementSection: View {
                 Text(t(.importRemoveHint))
             }
         }
-        .onAppear { reload() }
+        .onAppear { reload(); reloadJournal() }
+        .onChange(of: externalBusy) { _, nowBusy in if !nowBusy { reload() } }
+        .alert(t(.reconcileTitle), isPresented: Binding(get: { pendingReconcile != nil }, set: { if !$0 { pendingReconcile = nil } })) {
+            Button(t(.reconcileConfirm)) { if let r = pendingReconcile { reconcile(r) }; pendingReconcile = nil }
+            Button(t(.cancel), role: .cancel) { pendingReconcile = nil }
+        } message: { Text(t(.reconcileBody)) }
+        .alert(t(.reconcilePresentTitle), isPresented: Binding(get: { presentRecord != nil }, set: { if !$0 { presentRecord = nil } })) {
+            Button(t(.deleteConfirm), role: .destructive) { pendingJournalDelete = presentRecord; presentRecord = nil }
+            Button(t(.keepIt), role: .cancel) { presentRecord = nil }
+        } message: { Text(t(.reconcilePresentBody)) }
+        .alert(t(.deleteTitle), isPresented: Binding(get: { pendingJournalDelete != nil }, set: { if !$0 { pendingJournalDelete = nil } })) {
+            Button(t(.deleteConfirm), role: .destructive) { if let r = pendingJournalDelete { deleteJournalItem(r) }; pendingJournalDelete = nil }
+            Button(t(.cancel), role: .cancel) { pendingJournalDelete = nil }
+        } message: { Text(t(.deleteBody)) }
         .alert(t(.deleteTitle), isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
             Button(t(.deleteConfirm), role: .destructive) {
                 if let rec = pendingDelete { delete(rec) }
@@ -73,66 +91,109 @@ struct MirsaWallpaperManagementSection: View {
         } message: { Text(t(.cleanupBody)) }
     }
 
-    private func reload() {
-        guard !busy else { return }
-        busy = true
+    @ViewBuilder private var journalRows: some View {
+        Text(t(.journalTitle)).font(.footnote.bold()).padding(.top, 6)
+        if journal.isEmpty {
+            Text(t(.journalEmpty)).font(.caption).foregroundColor(.secondary)
+        }
+        ForEach(journal) { rec in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(rec.title.isEmpty ? rec.id : rec.title).font(.subheadline.bold()).lineLimit(1)
+                    Spacer()
+                    Text(rec.copied ? t(.journalCopied) : t(.journalPending)).font(.caption2).foregroundColor(.secondary)
+                }
+                Text(rec.id).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
+                Button { pendingReconcile = rec } label: { Text(t(.reconcile)).font(.caption.bold()) }
+                    .buttonStyle(.bordered).disabled(disabled)
+            }
+        }
+        Text(t(.journalFooter)).font(.caption2).foregroundColor(.secondary)
+    }
+
+    /// Runs blocking work off the main actor. busy stays set until the operation actually finishes,
+    /// so a second operation can never start while a destructive one is still running and a late
+    /// success is never discarded.
+    private func run(_ work: @escaping @Sendable (LogBox) throws -> Void, done: @escaping (Error?) -> Void) {
+        busy = true; message = nil
         Task.detached {
             let lines = LogBox()
-            var found: [MirsaCustomWallpapers.Item] = []
             var err: Error?
-            do { found = try MirsaCustomWallpapers.list(log: { lines.add($0) }) } catch { err = error }
+            do { try work(lines) } catch { err = error }
             let out = lines.all
             await MainActor.run {
                 out.forEach(log)
                 busy = false
-                if let err { report(err, "") } else { items = found; failed = false }
+                done(err)
             }
         }
     }
 
+    private func reloadJournal() {
+        Task.detached {
+            let recs = (try? MirsaWallpaperJournal.records()) ?? []
+            await MainActor.run { journal = recs }
+        }
+    }
+
+    private func reconcile(_ rec: MirsaWallpaperJournal.Record) {
+        guard !disabled else { return }
+        let box = StateBox()
+        run({ lines in
+            box.state = try MirsaWallpaperJournal.inspect(rec, log: { lines.add($0) })
+            if box.state == .absent { try MirsaWallpaperJournal.archive(rec, log: { lines.add($0) }) }
+        }, done: { err in
+            reloadJournal()
+            if let err { report(err, "") }
+            else if box.state == .absent { failed = false; message = t(.reconcileClearedDone); reload() }
+            else { failed = false; presentRecord = rec }
+        })
+    }
+
+    private func deleteJournalItem(_ rec: MirsaWallpaperJournal.Record) {
+        guard !disabled else { return }
+        run({ lines in try MirsaWallpaperJournal.delete(rec, log: { lines.add($0) }) }, done: { err in
+            reloadJournal(); reload()
+            if let err { report(err, "") } else { failed = false; message = t(.deleteDone); onDeleted() }
+        })
+    }
+
+    private func reload() {
+        guard !busy, !externalBusy else { return }
+        let box = ItemsBox()
+        run({ lines in box.items = try MirsaCustomWallpapers.list(log: { lines.add($0) }) }, done: { err in
+            reloadJournal()
+            if let err { report(err, "") } else { items = box.items; failed = false }
+        })
+    }
+
     private func report(_ error: Error, _ prefix: String) {
         failed = true
-        message = t(.failedPrefix) + error.localizedDescription
+        message = t(.failedPrefix) + MirsaWallpaperActionStrings.localizedError(error.localizedDescription)
         log("MANAGEMENT ERROR " + error.localizedDescription)
     }
 
     private func delete(_ rec: MirsaCustomWallpapers.Item) {
         guard !disabled else { return }
-        busy = true; message = nil
-        Task.detached {
-            let lines = LogBox()
-            var err: Error?
-            do { try MirsaCustomWallpapers.delete(rec, log: { lines.add($0) }) } catch { err = error }
-            let out = lines.all
-            await MainActor.run {
-                out.forEach(log)
-                busy = false
-                reload()
-                if let err { report(err, "") }
-                else { failed = false; message = t(.deleteDone); onDeleted() }
-            }
-        }
+        run({ lines in try MirsaCustomWallpapers.delete(rec, log: { lines.add($0) }) }, done: { err in
+            reload()
+            if let err { report(err, "") }
+            else { failed = false; message = t(.deleteDone); onDeleted() }
+        })
     }
 
     private func cleanup() {
         guard !disabled else { return }
-        busy = true; message = nil
-        Task.detached {
-            let lines = LogBox()
-            var err: Error?
-            do { try MirsaWallpaperJournal.cleanup(log: { lines.add($0) }) } catch { err = error }
-            let out = lines.all
-            await MainActor.run {
-                out.forEach(log)
-                busy = false
-                reload()
-                if let err { report(err, "") }
-                else { failed = false; message = t(.cleanupDone) }
-            }
-        }
+        run({ lines in try MirsaWallpaperJournal.cleanup(log: { lines.add($0) }) }, done: { err in
+            reloadJournal(); reload()
+            if let err { report(err, "") }
+            else { failed = false; message = t(.cleanupDone) }
+        })
     }
 }
 
+private final class ItemsBox: @unchecked Sendable { var items: [MirsaCustomWallpapers.Item] = [] }
+private final class StateBox: @unchecked Sendable { var state = MirsaWallpaperJournal.JournalState.present }
 private final class LogBox: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
