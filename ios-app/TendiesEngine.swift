@@ -188,6 +188,18 @@ public final class TendiesEngine {
         guard count > 0 else { throw PosterBoardStore.failure("Empty wallpaper archive.") }
     }
 
+    /// Compare canonical path components, not slash-suffixed URL strings.
+    /// Foundation can retain a trailing directory slash or a /var alias on one
+    /// URL but not its child. Resolve both sides identically without accepting
+    /// an equal root, sibling prefix, traversal, or a symlink out of the root.
+    static func archiveDestination(_ target: URL, isStrictlyInside root: URL) -> Bool {
+        guard root.isFileURL, target.isFileURL,
+              !root.pathComponents.contains(".."), !target.pathComponents.contains("..") else { return false }
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        let child = target.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        return child.count > base.count && Array(child.prefix(base.count)) == base
+    }
+
     /// The validated parser also extracts, so native parser disagreements cannot
     /// turn a checked pathname into an unchecked filesystem write.
     func extractValidatedArchive(_ url: URL, to root: URL) throws {
@@ -209,7 +221,7 @@ public final class TendiesEngine {
             }
             if hiddenJunk { continue }
             let target = root.appendingPathComponent(entry.path)
-            guard target.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/") else {
+            guard Self.archiveDestination(target, isStrictlyInside: root) else {
                 throw PosterBoardStore.failure("Archive destination escaped its private root.")
             }
             if entry.type == .directory {
