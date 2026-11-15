@@ -1,0 +1,169 @@
+import Foundation
+import Darwin
+
+/// One serialized access owner, shared by discovery, copy, delete and cleanup.
+/// Journals are app-private and bind exact UUID, canonical container and root inode.
+enum MirsaWallpaperJournal {
+    static let lock = NSRecursiveLock()
+    static func exclusive<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock(); defer { lock.unlock() }; return try body()
+    }
+    struct Record: Codable, Identifiable {
+        var id: String
+        var title: String
+        var container: String
+        var relative: String
+        var expected: [String: String]
+        var device: UInt64?
+        var inode: UInt64?
+        var copied: Bool = false
+        var paths: [String]? = nil
+    }
+    static var root: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MirsaWallpaperJournals", isDirectory: true)
+    }
+    static var work: URL { root.appendingPathComponent("Extraction", isDirectory: true) }
+    static func safeLocal(_ url: URL) throws {
+        guard PosterBoardStore.unredirected(url) else { throw PosterBoardStore.failure("Redirected Mirsa journal path.") }
+    }
+    static func save(_ record: Record) throws {
+        try safeLocal(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent(record.id + ".json")
+        try safeLocal(url)
+        try JSONEncoder().encode(record).write(to: url, options: .atomic)
+    }
+    static func records() throws -> [Record] {
+        try safeLocal(root)
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }.map { url in
+                try safeLocal(url)
+                guard UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil else {
+                    throw PosterBoardStore.failure("Unknown journal filename; preserved.")
+                }
+                let record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: url))
+                guard record.id == url.deletingPathExtension().lastPathComponent else {
+                    throw PosterBoardStore.failure("Journal filename mismatch.")
+                }
+                try validatePath(record)
+                return record
+            }
+    }
+    static func validatePath(_ record: Record) throws {
+        let components = record.relative.split(separator: "/").map(String.init)
+        guard record.relative == components.joined(separator: "/"), components.count == 8, components[0] == "Library", components[1] == "Application Support",
+              components[2] == "PRBPosterExtensionDataStore",
+              !components[3].isEmpty, components[3].utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+              Int(components[3]).map({ $0 > 0 }) == true,
+              components[4] == "Extensions", components[5] == MirsaPosterCopy.provider,
+              components[6] == "descriptors", components[7] == record.id,
+              UUID(uuidString: record.id) != nil,
+              try PosterBoardStore.canonicalContainer(record.container) == record.container,
+              !record.expected.isEmpty,
+              record.expected.keys.allSatisfy({ !$0.isEmpty && !$0.hasPrefix("/") && !$0.contains("\\") && !$0.contains("\0") && !$0.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) }) else {
+            throw PosterBoardStore.failure("Invalid exact owned descriptor path.")
+        }
+    }
+    static func grantTree(_ record: Record, lease: PosterBoardLease) throws -> URL {
+        try validatePath(record)
+        guard lease.targetURL.path == record.container else { throw PosterBoardStore.failure("Journal container changed.") }
+        var relative = ""
+        for part in record.relative.split(separator: "/") {
+            relative += (relative.isEmpty ? "" : "/") + part
+            guard lease.grant(relative), lease.permits(lease.effectiveURL.appendingPathComponent(relative)) else {
+                throw PosterBoardStore.failure("Owned descriptor access denied.")
+            }
+        }
+        for file in record.expected.keys {
+            var path = record.relative
+            for part in file.split(separator: "/") {
+                path += "/" + part
+                guard lease.grant(path), lease.permits(lease.effectiveURL.appendingPathComponent(path)) else {
+                    throw PosterBoardStore.failure("Owned file access denied.")
+                }
+            }
+        }
+        return lease.effectiveURL.appendingPathComponent(record.relative)
+    }
+    static func absent(_ target: URL) throws -> Bool {
+        var info = stat()
+        if lstat(target.path, &info) == 0 { return false }
+        guard errno == ENOENT else { throw PosterBoardStore.failure("Absence is not proven; journal retained.") }
+        // Require the exact existing parent, not absence of a whole datastore.
+        let parent = try target.deletingLastPathComponent().resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard parent.isDirectory == true, parent.isSymbolicLink != true else {
+            throw PosterBoardStore.failure("Descriptor parent unavailable.")
+        }
+        return true
+    }
+    static func removeJournal(_ record: Record) throws {
+        let url = root.appendingPathComponent(record.id + ".json")
+        try safeLocal(url)
+        let current = try JSONDecoder().decode(Record.self, from: Data(contentsOf: url))
+        guard current.id == record.id, current.relative == record.relative,
+              current.container == record.container, current.expected == record.expected,
+              current.device == record.device, current.inode == record.inode,
+              current.copied == record.copied, current.paths == record.paths else { throw PosterBoardStore.failure("Journal changed.") }
+        try FileManager.default.removeItem(at: url)
+    }
+    /// Called only from the per-item destructive confirmation, never on launch.
+    static func delete(_ requested: Record, log: @escaping (String) -> Void) throws {
+        try exclusive {
+            guard let record = try records().first(where: { $0.id == requested.id }),
+                  record.container == requested.container, record.relative == requested.relative,
+                  record.copied, record.device != nil, record.inode != nil, record.paths != nil else {
+                throw PosterBoardStore.failure("No completed owned installation journal.")
+            }
+            let lease = try PosterBoardLease(path: record.container, log: log)
+            do {
+                try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+                let target = try grantTree(record, lease: lease)
+                var info = stat()
+                guard lstat(target.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+                      UInt64(info.st_dev) == record.device, UInt64(info.st_ino) == record.inode else {
+                    throw PosterBoardStore.failure("Owned descriptor root changed or absent; nothing deleted.")
+                }
+                let actual = try PosterBoardStore.manifest(target)
+                // Fail closed if iOS has changed/added files. Never erase unknown bytes.
+                guard actual == record.expected, try MirsaPosterCopy.typedPaths(target) == record.paths else {
+                    throw PosterBoardStore.failure("Descriptor content changed after installation; preserved for review.")
+                }
+                var final = stat()
+                guard lstat(target.path, &final) == 0, final.st_dev == info.st_dev, final.st_ino == info.st_ino,
+                      lease.permits(target) else { throw PosterBoardStore.failure("Owned descriptor changed before delete.") }
+                try FileManager.default.removeItem(at: target)
+                guard try absent(target) else { throw PosterBoardStore.failure("Deletion readback failed.") }
+                try lease.close()
+                try removeJournal(record)
+                log("DELETE VERIFIED exact Mirsa descriptor UUID " + record.id + "; lease closed; gallery refresh pending.")
+            } catch { try? lease.close(); throw error }
+        }
+    }
+    /// No system deletion here. Only absent-entry journals and our extraction root.
+    static func cleanup(log: @escaping (String) -> Void) throws {
+        try exclusive {
+            for record in try records() {
+                let lease = try PosterBoardLease(path: record.container, log: log)
+                do {
+                    try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+                    let target = try grantTree(record, lease: lease)
+                    let missing = try absent(target)
+                    try lease.close()
+                    if missing { try removeJournal(record); log("Removed absent owned journal " + record.id) }
+                } catch { try? lease.close(); throw error }
+            }
+            try safeLocal(work)
+            if FileManager.default.fileExists(atPath: work.path) {
+                for url in try FileManager.default.contentsOfDirectory(at: work, includingPropertiesForKeys: nil) {
+                    guard UUID(uuidString: url.lastPathComponent) != nil else { continue }
+                    try safeLocal(url)
+                    _ = try MirsaPosterCopy.relativePaths(url) // reject nested redirects
+                    try FileManager.default.removeItem(at: url)
+                }
+            }
+            log("CLEANUP COMPLETE Mirsa-only extraction files and proven-absent journals; no system descriptors removed.")
+        }
+    }
+}

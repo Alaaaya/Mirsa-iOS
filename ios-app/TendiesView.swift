@@ -13,7 +13,13 @@ struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
     @State private var selectedDetailItem: TendieItem? = nil
-    @State private var isNeoSpringing = false
+    @State private var showInstallConfirm = false
+    @State private var showRespringConfirm = false
+    @State private var showRespringOverlay = false
+    /// Current-session gate: set only by a successful copy or owned delete, consumed on accept/decline.
+    @State private var respringArmed = false
+    @State private var installStartedThisSession = false
+    private func ws(_ k: MirsaWallpaperActionStrings.Key) -> String { MirsaWallpaperActionStrings.text(k) }
     @State private var makerDescriptionFocused = false
 
     private var videoApplyRunning: Bool {
@@ -160,9 +166,7 @@ struct TendiesView: View {
                             .padding(.vertical, 4)
                         } else {
                             Button {
-                                Task {
-                                    await vm.flashSelectedTendies()
-                                }
+                                showInstallConfirm = true
                             } label: {
                                 HStack(spacing: 8) {
                                     Spacer()
@@ -179,26 +183,6 @@ struct TendiesView: View {
                             .disabled(selectedCount == 0)
                             .accessibilityIdentifier("wallpaper-flash")
                         }
-
-                        Button(role: .destructive) {
-                            vm.isNeoSpringing = true
-                            isNeoSpringing = true
-                            RespringHelper.triggerNeoSpring()
-                        } label: {
-                            HStack(spacing: 8) {
-                                Spacer()
-                                Image(systemName: "bolt.fill")
-                                Text(MirsaTr.lit("Respring (NeoSpring)"))
-                                Spacer()
-                            }
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: 48)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .disabled(videoApplyRunning)
-                        .accessibilityIdentifier("wallpaper-respring")
                     }
                     .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                 } footer: {
@@ -206,6 +190,12 @@ struct TendiesView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("wallpaper-flash-help")
                 }
+
+                MirsaWallpaperManagementSection(
+                    externalBusy: videoApplyRunning,
+                    log: { vm.tendiesFlashLog.append($0) },
+                    onDeleted: { respringArmed = true; showRespringConfirm = true }
+                )
 
                 // Section 5: Flash Log (CompactLogView)
                 if !vm.tendiesFlashLog.isEmpty {
@@ -260,9 +250,33 @@ struct TendiesView: View {
             .sheet(item: $selectedDetailItem) { item in
                 TendieDetailSheet(item: item)
             }
+            .alert(ws(.installTitle), isPresented: $showInstallConfirm) {
+                Button(ws(.installConfirm)) {
+                    installStartedThisSession = true
+                    Task { await vm.flashSelectedTendies() }
+                }
+                Button(ws(.cancel), role: .cancel) {}
+            } message: { Text(ws(.installBody)) }
+            .alert(ws(.respringTitle), isPresented: $showRespringConfirm) {
+                Button(ws(.respringConfirm), role: .destructive) {
+                    let ok = respringArmed
+                    respringArmed = false
+                    if ok {
+                        vm.tendiesFlashLog.append("REFRESH confirmed by user; starting single-overlay respring.")
+                        showRespringOverlay = true
+                    }
+                }
+                Button(ws(.respringLater), role: .cancel) { respringArmed = false }
+            } message: { Text(ws(.respringBody)) }
+            .onChange(of: vm.tendiesFlashPhase) { _, phase in
+                // Only a copy that finished successfully in this session offers a respring.
+                if installStartedThisSession, case .done(ok: true) = phase {
+                    installStartedThisSession = false
+                    respringArmed = true
+                    showRespringConfirm = true
+                } else if case .done = phase { installStartedThisSession = false }
+            }
             .onAppear {
-                vm.isNeoSpringing = false
-                isNeoSpringing = false
                 vm.showSuccessAlert = false
                 vm.successAlertMessage = ""
                 vm.scanDocumentsForTendies()
@@ -282,13 +296,11 @@ struct TendiesView: View {
                 }
             }
             .overlay {
-                if isNeoSpringing || vm.isNeoSpringing {
-                    ZStack {
-                        Color.black.ignoresSafeArea()
-                        NeoSpringView()
-                            .brightness(-1.0)
-                            .ignoresSafeArea()
-                    }
+                if showRespringOverlay {
+                    MirsaWallpaperRespringView(event: { line in
+                        DispatchQueue.main.async { vm.tendiesFlashLog.append(line) }
+                    })
+                    .ignoresSafeArea()
                 }
             }
             } // ScrollViewReader
