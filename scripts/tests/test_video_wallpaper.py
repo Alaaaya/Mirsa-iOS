@@ -76,12 +76,28 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertNotIn("https://", source)
         view = (R / "ios-app/TendiesView.swift").read_text()
         self.assertEqual(view.count("MirsaWallpaperRespringView(event:"), 1)
-        confirmation = view.split(".alert(ws(.respringTitle)", 1)[1].split("} message:", 1)[0]
-        self.assertIn("Button(ws(.respringConfirm), role: .destructive)", confirmation)
+        self.assertEqual(view.count(".alert("), 1)
+        self.assertIn(".alert(item: $wallpaperPrompt) { prompt in", view)
+        confirmation = view.split("case .respring:", 1)[1].split(".onChange(of: vm.tendiesFlashPhase)", 1)[0]
+        self.assertIn("message: Text(ws(.respringBody))", confirmation)
+        self.assertIn(".destructive(Text(ws(.respringConfirm)))", confirmation)
         self.assertIn("let ok = respringArmed", confirmation)
         self.assertIn("respringArmed = false", confirmation)
+        self.assertIn("if ok {", confirmation)
         self.assertIn("showRespringOverlay = true", confirmation)
-        self.assertIn("Button(ws(.respringLater), role: .cancel)", confirmation)
+        self.assertIn(".cancel(Text(ws(.respringLater)))", confirmation)
+        self.assertIn("REFRESH TAP", confirmation)
+        self.assertIn("REFRESH PROMPT offered", view)
+        self.assertNotIn("showRespringConfirm", view)
+        self.assertNotIn("showInstallConfirm", view)
+        # Successful copy must not summon the ancestor's Notice alert while
+        # this view is presenting the explicit restart warning.
+        model = (R / "ios-app/AppViewModel.swift").read_text().split("func flashSelectedTendies()", 1)[1].split("func respringDevice()", 1)[0]
+        success = model.split("tendiesFlashPhase = .done(ok: true)", 1)[1].split("} catch", 1)[0]
+        self.assertNotIn("errorMessage =", success)
+        self.assertNotIn("errorMessage = WallpaperMakerStrings.text(.copyVerified)", success)
+        self.assertIn('tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))', success)
+
 
     def test_scoped_strategies_never_enable_library_parent_rename(self):
         source = (R / "ios-app/PosterBoardAccess.m").read_text()
