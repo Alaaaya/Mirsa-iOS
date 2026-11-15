@@ -5,8 +5,14 @@ import Darwin
 /// Journals are app-private and bind exact UUID, canonical container and root inode.
 enum MirsaWallpaperJournal {
     static let lock = NSRecursiveLock()
-    static func exclusive<T>(_ body: () throws -> T) rethrows -> T {
-        lock.lock(); defer { lock.unlock() }; return try body()
+    static func exclusive<T>(_ body: () throws -> T) throws -> T {
+        // Recursive callers on this thread remain valid; competing operations
+        // fail immediately instead of leaving an install spinner queued forever.
+        guard lock.try() else {
+            throw PosterBoardStore.failure("Another wallpaper operation is already running. Wait for its log to finish, then retry.")
+        }
+        defer { lock.unlock() }
+        return try body()
     }
     struct Record: Codable, Identifiable {
         var id: String
@@ -66,7 +72,7 @@ enum MirsaWallpaperJournal {
             throw PosterBoardStore.failure("Invalid exact owned descriptor path.")
         }
     }
-    static func grantTree(_ record: Record, lease: PosterBoardLease) throws -> URL {
+    static func grantExact(_ record: Record, lease: PosterBoardLease) throws -> URL {
         try validatePath(record)
         guard lease.targetURL.path == record.container else { throw PosterBoardStore.failure("Journal container changed.") }
         var relative = ""
@@ -76,6 +82,10 @@ enum MirsaWallpaperJournal {
                 throw PosterBoardStore.failure("Owned descriptor access denied.")
             }
         }
+        return lease.effectiveURL.appendingPathComponent(record.relative)
+    }
+    static func grantTree(_ record: Record, lease: PosterBoardLease) throws -> URL {
+        let target = try grantExact(record, lease: lease)
         for file in record.expected.keys {
             var path = record.relative
             for part in file.split(separator: "/") {
@@ -85,7 +95,7 @@ enum MirsaWallpaperJournal {
                 }
             }
         }
-        return lease.effectiveURL.appendingPathComponent(record.relative)
+        return target
     }
     static func absent(_ target: URL) throws -> Bool {
         var info = stat()
@@ -107,6 +117,56 @@ enum MirsaWallpaperJournal {
               current.device == record.device, current.inode == record.inode,
               current.copied == record.copied, current.paths == record.paths else { throw PosterBoardStore.failure("Journal changed.") }
         try FileManager.default.removeItem(at: url)
+    }
+    enum JournalState { case absent, present }
+    static func sameRecord(_ lhs: Record, _ rhs: Record) -> Bool {
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.container == rhs.container &&
+        lhs.relative == rhs.relative && lhs.expected == rhs.expected &&
+        lhs.device == rhs.device && lhs.inode == rhs.inode &&
+        lhs.copied == rhs.copied && lhs.paths == rhs.paths
+    }
+    private static func current(_ requested: Record) throws -> Record {
+        guard let record = try records().first(where: { $0.id == requested.id }),
+              sameRecord(record, requested) else { throw PosterBoardStore.failure("Journal changed; refresh before continuing.") }
+        return record
+    }
+    /// Fresh exact path check only. Never traverses payload files.
+    static func inspect(_ requested: Record, log: @escaping (String) -> Void) throws -> JournalState {
+        try exclusive {
+            let record = try current(requested)
+            let lease = try PosterBoardLease(path: record.container, log: log)
+            defer { try? lease.close() }
+            try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+            let target = try grantExact(record, lease: lease)
+            let missing = try absent(target)
+            try lease.close()
+            log("JOURNAL INSPECT " + record.id + (missing ? " exact path absent; lease closed." : " present; journal retained; lease closed."))
+            return missing ? .absent : .present
+        }
+    }
+    /// Confirmation action. Rechecks absence independently of any prior inspect.
+    /// Closing scoped access must succeed BEFORE any local journal is archived.
+    static func archive(_ requested: Record, log: @escaping (String) -> Void) throws {
+        try exclusive {
+            let record = try current(requested)
+            let lease = try PosterBoardLease(path: record.container, log: log)
+            defer { try? lease.close() }
+            try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+            let target = try grantExact(record, lease: lease)
+            guard try absent(target) else {
+                throw PosterBoardStore.failure("This exact wallpaper is still present. Journal retained; use its separate confirmed delete action.")
+            }
+            try lease.close()
+            _ = try current(record)
+            let history = root.appendingPathComponent("Archived", isDirectory: true)
+            try safeLocal(history)
+            try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+            let destination = history.appendingPathComponent(record.id + "-" + UUID().uuidString + ".json")
+            try safeLocal(destination)
+            // Move is local and exclusive, preserving all original evidence.
+            try FileManager.default.moveItem(at: root.appendingPathComponent(record.id + ".json"), to: destination)
+            log("JOURNAL ARCHIVED " + record.id + " fresh exact absence; lease closed; no PosterBoard files modified.")
+        }
     }
     /// Called only from the per-item destructive confirmation, never on launch.
     static func delete(_ requested: Record, log: @escaping (String) -> Void) throws {
@@ -148,7 +208,7 @@ enum MirsaWallpaperJournal {
                 let lease = try PosterBoardLease(path: record.container, log: log)
                 do {
                     try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
-                    let target = try grantTree(record, lease: lease)
+                    let target = try grantExact(record, lease: lease)
                     let missing = try absent(target)
                     try lease.close()
                     if missing { try removeJournal(record); log("Removed absent owned journal " + record.id) }

@@ -11,6 +11,19 @@ private func freeProbeString(_ value: UnsafeMutablePointer<CChar>)
 
 
 enum MirsaPosterDiscovery {
+    private static let cacheLock = NSLock()
+    private static var verifiedPath: String?
+    static func rememberVerified(_ path: String) {
+        guard let canonical = try? PosterBoardStore.canonicalContainer(path) else { return }
+        cacheLock.lock(); verifiedPath = canonical; cacheLock.unlock()
+    }
+    private static func forgetVerified(_ path: String) {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        if verifiedPath == path { verifiedPath = nil }
+    }
+    private static func cachedPath() -> String? {
+        cacheLock.lock(); defer { cacheLock.unlock() }; return verifiedPath
+    }
     static func identifiesPosterBoard(_ path: String, log: (String) -> Void) throws -> Bool {
         guard let pointer = path.withCString({ copyTargetIdentity($0) }) else {
             throw PosterBoardStore.failure("Metadata identity report missing.")
@@ -23,9 +36,35 @@ enum MirsaPosterDiscovery {
         if identity["restoreFailure"] as? Bool == true {
             throw PosterBoardStore.failure("Own Caches restore failed. Stop; backup retained.")
         }
-        return identity["matched"] as? Bool == true
+        let matched = identity["matched"] as? Bool == true
+        if matched { rememberVerified(path) } else { forgetVerified(path) }
+        return matched
     }
     static func discover(log: @escaping (String) -> Void) throws -> String {
+        // Session/cache/journal paths are HINTS only. Revalidate metadata through
+        // fresh scoped access each time. Never repeat the inode scan unnecessarily.
+        let hints = [cachedPath(), UserDefaults.standard.string(forKey: "aircard.posterboard_container")] +
+            ((try? MirsaWallpaperJournal.records()) ?? []).map { Optional($0.container) }
+        var seen = Set<String>()
+        for hint in hints {
+            guard let hint, let path = try? PosterBoardStore.canonicalContainer(hint),
+                  seen.insert(path).inserted else { continue }
+            let lease = try PosterBoardLease(path: path, log: log)
+            do {
+                try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+            } catch {
+                // Restore failure must propagate, never open another lease.
+                try lease.close()
+                forgetVerified(path)
+                log("DISCOVERY known path rejected; session cache invalidated: " + error.localizedDescription)
+                continue
+            }
+            // Do not catch this cleanup error as a rejected hint.
+            try lease.close()
+            rememberVerified(path)
+            log("DISCOVERY known path freshly metadata-verified; no inode scan.")
+            return path
+        }
         log("DISCOVERY BEFORE own-group query")
         var details: UnsafeMutablePointer<CChar>?
         let groupCount = hasOwnGroup(&details)

@@ -27,6 +27,16 @@ struct TendiesView: View {
         return false
     }
 
+    /// Specific localized cause for a failed install (journal exists / incomplete install), so the generic banner is not all the user sees.
+    private var journalCause: String? {
+        guard case .done(ok: false) = vm.tendiesFlashPhase else { return nil }
+        for line in vm.tendiesFlashLog.reversed() {
+            let mapped = MirsaWallpaperActionStrings.localizedError(line)
+            if mapped != line { return mapped }
+        }
+        return nil
+    }
+
     private var selectedCount: Int {
         vm.tendieItems.filter { $0.isSelected }.count
     }
@@ -45,7 +55,7 @@ struct TendiesView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.red)
-                            Text(err)
+                            Text(journalCause ?? err)
                                 .font(.caption)
                                 .foregroundColor(.red)
                             Spacer()

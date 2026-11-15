@@ -342,4 +342,72 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         try fm.createSymbolicLink(at: root.appendingPathComponent("alias"), withDestinationURL: first)
         XCTAssertThrowsError(try MirsaCustomWallpapers.scanAppleCatalog(root))
     }
+    func testWallpaperOperationLockRejectsConcurrentWorkWithoutWaiting() {
+        let finished = expectation(description: "contending operation returned")
+        MirsaWallpaperJournal.lock.lock()
+        defer { MirsaWallpaperJournal.lock.unlock() }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let start = ProcessInfo.processInfo.systemUptime
+            XCTAssertThrowsError(try MirsaWallpaperJournal.exclusive { XCTFail("Contending mutation ran") }) { error in
+                XCTAssertTrue(error.localizedDescription.contains("already running"))
+            }
+            XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 1.0)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 2)
+    }
+
+    func testWallpaperOperationLockRemainsRecursiveAndReleasesAfterThrow() throws {
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusive {
+            try MirsaWallpaperJournal.exclusive { 42 }
+        }, 42)
+        XCTAssertThrowsError(try MirsaWallpaperJournal.exclusive {
+            throw PosterBoardStore.failure("fixture")
+        })
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusive { 7 }, 7)
+    }
+
+    func testLightweightJournalRowRequiresCompletedExactRootIdentity() throws {
+        var rec = record()
+        XCTAssertNil(MirsaCustomWallpapers.journalItem(rec, device: 5, inode: 12))
+        rec.copied = true; rec.device = 5; rec.inode = 12
+        XCTAssertNil(MirsaCustomWallpapers.journalItem(rec, device: 5, inode: 12))
+        rec.paths = ["F:versions/1/contents/asset"]
+        let item = try XCTUnwrap(MirsaCustomWallpapers.journalItem(rec, device: 5, inode: 12))
+        XCTAssertEqual(item.expected, rec.expected)
+        XCTAssertNil(MirsaCustomWallpapers.journalItem(rec, device: 6, inode: 12))
+        XCTAssertNil(MirsaCustomWallpapers.journalItem(rec, device: 5, inode: 13))
+        // Listing can retain a row for review while exact-delete validation
+        // MUST still reject mutated/added bytes and root replacements.
+        let mutated = MirsaCustomWallpapers.Snapshot(expected: rec.expected.merging(["ios-added": "unknown"]) { _, new in new },
+            paths: rec.paths! + ["F:ios-added"], device: 5, inode: 12)
+        XCTAssertNil(MirsaCustomWallpapers.completedJournal([rec], id: rec.id,
+            container: rec.container, relative: rec.relative, snapshot: mutated))
+        var invalid = rec; invalid.relative += "/../" + rec.id
+        XCTAssertNil(MirsaCustomWallpapers.journalItem(invalid, device: 5, inode: 12))
+    }
+
+    func testReconcileRecordBindingIncludesEveryField() {
+        let original = record()
+        XCTAssertTrue(MirsaWallpaperJournal.sameRecord(original, original))
+        var changed = original; changed.title += "changed"
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.container += "/changed"
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.relative += "/changed"
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.expected["new"] = "unknown"
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.copied = true
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.device = 1
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.inode = 1
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.paths = []
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+        changed = original; changed.id = UUID().uuidString
+        XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
+    }
+
 }

@@ -389,32 +389,66 @@ enum MirsaCustomWallpapers {
                     container: container, relative: relative, expected: first.expected,
                     device: first.device, inode: first.inode, paths: first.paths)
     }
-    private static func list(lease: PosterBoardLease, records: [MirsaWallpaperJournal.Record], baseline: AppleBaseline?) throws -> [Item] {
+    /// Listing is identity-only. Payload hashing is reserved for the exact
+    /// confirmed delete, not repeated for every descriptor/asset on refresh.
+    static func journalItem(_ record: MirsaWallpaperJournal.Record, device: UInt64, inode: UInt64) -> Item? {
+        guard (try? MirsaWallpaperJournal.validatePath(record)) != nil,
+              record.copied, record.device == device, record.inode == inode,
+              let paths = record.paths else { return nil }
+        return Item(title: record.title.isEmpty ? "Mirsa wallpaper" : String(record.title.prefix(120)),
+                    id: record.id, container: record.container, relative: record.relative,
+                    expected: record.expected, device: device, inode: inode, paths: paths)
+    }
+    private static func list(lease: PosterBoardLease, records: [MirsaWallpaperJournal.Record], log: (String) -> Void) throws -> [Item] {
         try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
         let parent = try MirsaPosterCopy.destination(lease: lease)
         let root = try grant(parent, lease: lease)
         let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
         guard names.count <= 256 else { throw PosterBoardStore.failure("Too many wallpaper descriptors; no deletion allowed.") }
         var found: [Item] = []
-        let deadline = ProcessInfo.processInfo.systemUptime + 20
-        for id in names.sorted() where UUID(uuidString: id) != nil {
-            guard ProcessInfo.processInfo.systemUptime < deadline else {
-                throw PosterBoardStore.failure("Custom wallpaper listing reached its time budget; refresh later.")
+        var processed = 0, unavailable = 0
+        let deadline = ProcessInfo.processInfo.systemUptime + 30
+        // Include exact recorded older versions as well as the current provider.
+        let candidates = records.filter { $0.container == lease.targetURL.path }.sorted { $0.id < $1.id }
+        for record in candidates {
+            if ProcessInfo.processInfo.systemUptime >= deadline {
+                log("CUSTOM LIST budget reached; returning " + String(found.count) + " partial rows.")
+                break
             }
-            // Per-item uncertainty is hidden, never converted to a deletion candidate.
-            if let item = try? classify(id: id, container: lease.targetURL.path, relative: parent + "/" + id,
-                                        lease: lease, records: records, baseline: baseline) { found.append(item) }
+            processed += 1
+            do {
+                let target = try MirsaWallpaperJournal.grantExact(record, lease: lease)
+                let node = try identity(target, kind: S_IFDIR)
+                if let item = journalItem(record, device: UInt64(node.st_dev), inode: UInt64(node.st_ino)) {
+                    found.append(item)
+                } else {
+                    unavailable += 1
+                    log("CUSTOM LIST journal root incomplete or replaced " + record.id + "; retained for management review.")
+                }
+            } catch {
+                unavailable += 1
+                log("CUSTOM LIST exact journal row unavailable " + record.id + ": " + error.localizedDescription)
+                continue // uncertainty never becomes absence or deletion authority
+            }
         }
+        let recordedCurrent = Set(candidates.filter { $0.relative.hasPrefix(parent + "/") }.map { $0.id })
+        let unjournaled = names.filter { UUID(uuidString: $0) != nil && !recordedCurrent.contains($0) }.count
+        log("CUSTOM LIST SUMMARY currentDescriptors=" + String(names.count) +
+            " journalCandidates=" + String(candidates.count) + " shown=" + String(found.count) +
+            " unavailable=" + String(unavailable) + " unprocessed=" + String(candidates.count - processed) +
+            " unjournaledHidden=" + String(unjournaled) +
+            "; unjournaled classification temporarily deferred, not an empty-gallery assertion.")
         return found
     }
     static func list(log: @escaping (String) -> Void) throws -> [Item] {
         try MirsaWallpaperJournal.exclusive {
             let container = try MirsaPosterDiscovery.discover(log: log)
             let lease = try PosterBoardLease(path: container, log: log)
+            defer { try? lease.close() }
             do {
-                let items = try list(lease: lease, records: journals(), baseline: systemBaseline(log: log))
+                let items = try list(lease: lease, records: journals(), log: log)
                 try lease.close()
-                log("CUSTOM LIST VERIFIED \(items.count); unknown and system wallpapers hidden.")
+                log("CUSTOM LIST identity-checked journal rows \(items.count); payload validation deferred until confirmed delete. Unjournaled/unknown/system entries hidden in lightweight mode; partial results retained.")
                 return items
             } catch { try? lease.close(); throw error }
         }
@@ -425,10 +459,15 @@ enum MirsaCustomWallpapers {
             let container = try MirsaPosterDiscovery.discover(log: log)
             guard container == requested.container else { throw PosterBoardStore.failure("PosterBoard container changed; refresh the list.") }
             let lease = try PosterBoardLease(path: container, log: log)
+            defer { try? lease.close() }
             do {
                 let records = try journals()
-                let baseline = systemBaseline(log: log)
-                guard let fresh = try list(lease: lease, records: records, baseline: baseline).first(where: { $0.id == requested.id }),
+                // Lightweight rows currently require an exact completed journal;
+                // no broad immutable stock-catalog scan is needed for ownership.
+                let baseline: AppleBaseline? = nil
+                guard let fresh = try classify(id: requested.id, container: requested.container,
+                                              relative: requested.relative, lease: lease,
+                                              records: records, baseline: baseline),
                       fresh == requested else { throw PosterBoardStore.failure("Wallpaper changed or is no longer proven custom. Nothing deleted.") }
                 let target = try grant(fresh.relative, lease: lease)
                 let final = try snapshot(target, lease: lease)
