@@ -1,0 +1,453 @@
+import Foundation
+import Darwin
+import CryptoKit
+
+/// Intentionally narrow. Unknown, ambiguous and stock descriptors are invisible.
+/// A title, UUID or Apple's shared 7400 identity is never provenance by itself.
+enum MirsaCustomWallpapers {
+    struct Item: Identifiable, Equatable {
+        let thumbnail: Data? = nil
+        let title: String
+        let id: String
+        let container: String
+        let relative: String
+        let expected: [String: String]
+        let device: UInt64
+        let inode: UInt64
+        let paths: [String]
+    }
+    struct Snapshot: Equatable {
+        let expected: [String: String]
+        let paths: [String]
+        let device: UInt64
+        let inode: UInt64
+    }
+    static let maxNodes = 512
+    static let maxFileBytes = 16 * 1024 * 1024
+    static let maxTreeBytes = 64 * 1024 * 1024
+    static let animeWallpaper = "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/Wallpaper.plist"
+    // Generated from the approved Anime-Squad.tendies, not from an installed
+    // descriptor. Excludes ONLY the three known normalized identity files.
+    static let animeImmutable: [String: String] = [
+        "com.apple.posterkit.provider.identifierURL.suggestionMetadata.plist": "b359d11cdb7eaabd1878ce935edecfb7e98ac38c1c78e8394518b57f5e3f2c65",
+        "com.apple.posterkit.role.identifier": "ce6a53a6eef62fe767aaa54a33ca9dcc29cce6f84f471d71f1d0167abe087ce7",
+        "providerInfo.plist": "697dc3b7a7d93849757f664fea1b830d3bdc661a9fcdad43b71870fd602083f1",
+        "versions/1/RuntimeSnapshotMetadata-home.plist": "78c6651211d4abdde0e987f3420a3102e113361201c78331e9aa50d3b6db1d99",
+        "versions/1/RuntimeSnapshotMetadata-lock.plist": "1e971720e91261d9369a4029b70081ccf33ce6ce9b1945c3319dbeeb465dda48",
+        "versions/1/com.apple.posterkit.provider.instance.complicationLayout.plist": "6f70cdde0e28fec881f8e3fb1712d5b72d892bd4f885a53bc6d93174da03d745",
+        "versions/1/com.apple.posterkit.provider.instance.titleStyleConfiguration.plist": "2bc4be91f199c2c5db7acfb7ae8f9581eb292498ecd0cddbe8d1ac3edf43e92a",
+        "versions/1/contents/.com.apple.posterkit.provider.contents.configurableOptions.plist": "2b5decfc32306577b28df137eed469628f02307c3caed18ee3bc4a141e1caf55",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Background-390w-844h@3x~iphone.ca/assetManifest.caml": "6a2ce34b3c37b6c49f6081f98fd274838c50bf88ac4b5a6afadacbd61212f11f",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Background-390w-844h@3x~iphone.ca/assets/back.png": "789da70a0436e23a8dbe938afe7d949d9913048b79c5bcdc7cf01dbe2768c847",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Background-390w-844h@3x~iphone.ca/assets/gojo.png": "19952ff5568d115c643a5f61b07c4d93c96580a13f310c5c4859de98ffab15bb",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Background-390w-844h@3x~iphone.ca/index.xml": "6a0870d93f39195c9e5e5652ad1e8447e90efbc0615b2d03f3ee4bd3ee40c60d",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Background-390w-844h@3x~iphone.ca/main.caml": "7e8fb9e413cf81db584eb1fad2f963dd7e6030c8fc72d4bd4375ba9079e774ee",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Floating-390w-844h@3x~iphone.ca/assetManifest.caml": "6a2ce34b3c37b6c49f6081f98fd274838c50bf88ac4b5a6afadacbd61212f11f",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Floating-390w-844h@3x~iphone.ca/assets/boruto.png": "31bb6435d02f4559d9425e39608d24b1de28f04e186f1f27b140b17b8b8b03df",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Floating-390w-844h@3x~iphone.ca/index.xml": "6a0870d93f39195c9e5e5652ad1e8447e90efbc0615b2d03f3ee4bd3ee40c60d",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Floating-390w-844h@3x~iphone.ca/main.caml": "61ae56f631d4e272191bcb725607cd28bf73d83d35e5f03440ab586d03f733e3",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Foreground-390w-844h@3x~iphone.ca/assetManifest.caml": "6a2ce34b3c37b6c49f6081f98fd274838c50bf88ac4b5a6afadacbd61212f11f",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Foreground-390w-844h@3x~iphone.ca/assets/naruto.png": "a9d6615f7a5418e8a515af419291e60d5cd21d9ec64c2e7a61dcde945e64c26a",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Foreground-390w-844h@3x~iphone.ca/index.xml": "6a0870d93f39195c9e5e5652ad1e8447e90efbc0615b2d03f3ee4bd3ee40c60d",
+        "versions/1/contents/7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/7400.WWDC_2022_Foreground-390w-844h@3x~iphone.ca/main.caml": "741018e92c81238f428298d076944d723c81220541e0d6a761c3d433711a74df",
+        "versions/1/contents/com.apple.posterkit.provider.contents.otherMetadata.plist": "415d32c8a0461649b1dce0e6463959d65997a261c1e95f1995b075863201f11d",
+        "versions/1/supplements/0/com.apple.posterkit.provider.supplementURL.homescreenConfiguration.plist": "92ffd3ddccc732421f5219e006cae6d08aefb583076124ba31821d365e3a87ad",
+    ]
+    static let animeVariable: Set<String> = [MirsaPosterNormalize.rawName,
+        "versions/1/contents/" + MirsaPosterNormalize.userInfoName, animeWallpaper]
+
+    static func validRelative(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return !parts.isEmpty && path.utf8.count <= 1024 && !path.contains("\\") && !path.contains("\0") &&
+            parts.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+    private static func identity(_ url: URL, kind: mode_t) throws -> stat {
+        var value = stat()
+        guard lstat(url.path, &value) == 0, value.st_mode & S_IFMT == kind else {
+            throw PosterBoardStore.failure("Custom wallpaper has a missing, linked or special node.")
+        }
+        return value
+    }
+    /// Open without following final links, bound reads, and compare fd identity
+    /// before/after. Ancestors are checked by the caller for every node.
+    static func read(_ url: URL, limit: Int) throws -> Data {
+        let before = try identity(url, kind: S_IFREG)
+        guard before.st_nlink == 1, before.st_size >= 0, before.st_size <= Int64(limit) else {
+            throw PosterBoardStore.failure("Oversized or hard-linked wallpaper file.")
+        }
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { throw PosterBoardStore.failure("Cannot open wallpaper file safely.") }
+        defer { Darwin.close(fd) }
+        var opened = stat()
+        guard fstat(fd, &opened) == 0, opened.st_dev == before.st_dev, opened.st_ino == before.st_ino,
+              opened.st_mode & S_IFMT == S_IFREG, opened.st_size == before.st_size, opened.st_nlink == 1 else {
+            throw PosterBoardStore.failure("Wallpaper file changed while opening.")
+        }
+        var result = Data(), buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress!, $0.count) }
+            guard count >= 0 else { throw PosterBoardStore.failure("Wallpaper read failed.") }
+            if count == 0 { break }
+            guard count <= limit - result.count else { throw PosterBoardStore.failure("Wallpaper file grew past limit.") }
+            result.append(contentsOf: buffer.prefix(count))
+        }
+        var after = stat(), final = stat()
+        guard fstat(fd, &after) == 0, lstat(url.path, &final) == 0,
+              after.st_size == opened.st_size, result.count == Int(after.st_size),
+              final.st_ino == after.st_ino, final.st_dev == after.st_dev,
+              final.st_mode & S_IFMT == S_IFREG, final.st_nlink == 1,
+              after.st_mtimespec.tv_sec == opened.st_mtimespec.tv_sec,
+              after.st_mtimespec.tv_nsec == opened.st_mtimespec.tv_nsec,
+              after.st_ctimespec.tv_sec == opened.st_ctimespec.tv_sec,
+              after.st_ctimespec.tv_nsec == opened.st_ctimespec.tv_nsec else {
+            throw PosterBoardStore.failure("Wallpaper file mutated during read.")
+        }
+        return result
+    }
+    /// Bounded manual traversal, no Foundation recursive enumerator following
+    /// aliases. The lease's one intended alias is permitted, nothing below it.
+    static func snapshot(_ root: URL, lease: PosterBoardLease? = nil) throws -> Snapshot {
+        func safe(_ url: URL) throws {
+            if let lease {
+                let prefix = lease.effectiveURL.path + "/"
+                guard url.path.hasPrefix(prefix) else { throw PosterBoardStore.failure("Wallpaper escaped lease.") }
+                let relative = String(url.path.dropFirst(prefix.count))
+                _ = try grant(relative, lease: lease)
+            }
+            guard PosterBoardStore.unredirected(url, lease: lease) else {
+                throw PosterBoardStore.failure("Redirected custom wallpaper path.")
+            }
+        }
+        try safe(root)
+        let before = try identity(root, kind: S_IFDIR)
+        var expected: [String: String] = [:], paths: [String] = [], total = 0
+        func walk(_ directory: URL, prefix: String, depth: Int) throws {
+            guard depth <= 20 else { throw PosterBoardStore.failure("Wallpaper tree too deep.") }
+            try safe(directory)
+            _ = try identity(directory, kind: S_IFDIR)
+            let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            guard names.count <= maxNodes, names.count <= maxNodes - paths.count else {
+                throw PosterBoardStore.failure("Wallpaper tree exceeds node limit.")
+            }
+            for name in names.sorted() {
+                guard !name.contains("/"), validRelative(name) else { throw PosterBoardStore.failure("Invalid wallpaper filename.") }
+                let relative = prefix + name, url = directory.appendingPathComponent(name)
+                guard validRelative(relative), paths.count < maxNodes else { throw PosterBoardStore.failure("Invalid or excessive wallpaper paths.") }
+                try safe(url)
+                var node = stat()
+                guard lstat(url.path, &node) == 0, node.st_dev == before.st_dev else { throw PosterBoardStore.failure("Wallpaper node changed volume.") }
+                switch node.st_mode & S_IFMT {
+                case S_IFDIR:
+                    paths.append("D:" + relative)
+                    try walk(url, prefix: relative + "/", depth: depth + 1)
+                case S_IFREG:
+                    paths.append("F:" + relative)
+                    let data = try read(url, limit: min(maxFileBytes, maxTreeBytes - total))
+                    total += data.count
+                    expected[relative] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                default: throw PosterBoardStore.failure("Special wallpaper node rejected.")
+                }
+            }
+        }
+        try walk(root, prefix: "", depth: 0)
+        try safe(root)
+        let after = try identity(root, kind: S_IFDIR)
+        guard !expected.isEmpty, before.st_dev == after.st_dev, before.st_ino == after.st_ino else {
+            throw PosterBoardStore.failure("Wallpaper root changed or is empty.")
+        }
+        return Snapshot(expected: expected, paths: paths.sorted(), device: UInt64(after.st_dev), inode: UInt64(after.st_ino))
+    }
+    private static func scratch(_ path: String) -> Bool {
+        // Known iOS-generated snapshots only. Unknown additions remain hidden.
+        ["versions/1/RuntimeSnapshot-home.png", "versions/1/RuntimeSnapshot-lock.png",
+         "versions/1/RuntimeSnapshot-home.heic", "versions/1/RuntimeSnapshot-lock.heic"].contains(path)
+    }
+    static func recognizedAnime(_ snapshot: Snapshot, title: String?) -> Bool {
+        guard title == "Anime Squad", animeImmutable.allSatisfy({ snapshot.expected[$0.key] == $0.value }),
+              animeVariable.isSubset(of: Set(snapshot.expected.keys)),
+              snapshot.expected.keys.allSatisfy({ animeImmutable[$0] != nil || animeVariable.contains($0) || scratch($0) }) else { return false }
+        let allowedFiles = Set(snapshot.expected.keys)
+        // Empty unknown directories cannot be silently swept into deletion.
+        return snapshot.paths.allSatisfy { typed in
+            let path = String(typed.dropFirst(2))
+            if typed.hasPrefix("F:") { return allowedFiles.contains(path) }
+            return typed.hasPrefix("D:") && allowedFiles.contains { $0.hasPrefix(path + "/") }
+        }
+    }
+    /// An Apple baseline is useful ONLY when an authoritative stock inventory
+    /// was fully read from the immutable system volume, not from PRB descriptors.
+    /// Existing device descriptors are a mixed stock/custom subset and cannot
+    /// establish either Apple's full inventory or negative provenance.
+    struct AppleBaseline {
+        let complete: Bool
+        let immutableSystemSource: Bool
+        let titles: Set<String>
+        let identifiers: Set<String>
+        let assetNames: Set<String>
+    }
+    struct BespokePayload {
+        let title: String
+        let identifier: String
+        let assetNames: Set<String>
+        let animations: Set<String>
+        let wallpaperPath: String
+    }
+    static func bespoke(_ payload: BespokePayload, snapshot: Snapshot, baseline: AppleBaseline?) -> Bool {
+        guard let baseline, baseline.complete, baseline.immutableSystemSource,
+              !baseline.titles.isEmpty, !baseline.identifiers.isEmpty, !baseline.assetNames.isEmpty,
+              validRelative(payload.wallpaperPath), snapshot.expected[payload.wallpaperPath] != nil,
+              !payload.title.isEmpty, payload.title.count <= 120,
+              !payload.identifier.isEmpty, payload.identifier.count <= 120,
+              !payload.identifier.hasPrefix("com.apple."),
+              !payload.title.lowercased().contains("apple"),
+              !payload.animations.isEmpty, payload.animations.count <= 8,
+              !payload.assetNames.isEmpty, payload.assetNames.count <= 32 else { return false }
+        let normalized: (String) -> String = { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        let stockTitles = Set(baseline.titles.map(normalized))
+        let stockIDs = Set(baseline.identifiers.map(normalized))
+        let stockAssets = Set(baseline.assetNames.map(normalized))
+        // Three independent negative comparisons, PLUS positive tendies-shaped
+        // CA payload. A renamed title or unknown UUID alone never passes.
+        guard !stockTitles.contains(normalized(payload.title)),
+              !stockIDs.contains(normalized(payload.identifier)),
+              payload.assetNames.allSatisfy({ !stockAssets.contains(normalized($0)) }),
+              payload.animations.allSatisfy({ validRelative($0) && !$0.contains("/") && $0.hasSuffix(".ca") }) else { return false }
+        let parent = String(payload.wallpaperPath.dropLast("Wallpaper.plist".count))
+        guard parent.hasSuffix(".wallpaper/") else { return false }
+        for animation in payload.animations {
+            let prefix = parent + animation + "/"
+            guard snapshot.expected[prefix + "main.caml"] != nil,
+                  snapshot.expected[prefix + "index.xml"] != nil,
+                  snapshot.expected[prefix + "assetManifest.caml"] != nil,
+                  snapshot.expected.keys.contains(where: { $0.hasPrefix(prefix + "assets/") }) else { return false }
+        }
+        return payload.assetNames.allSatisfy { name in
+            validRelative(name) && !name.contains("/") &&
+            snapshot.expected.keys.contains { $0.hasPrefix(parent) && $0.hasSuffix("/assets/" + name) }
+        }
+    }
+    /// CollectionsPoster stock resources ship in /Library/Wallpaper/Collections.
+    /// Never derive Apple provenance from the mutable PosterBoard datastore.
+    /// The entire accessible on-device Collections catalog must enumerate cleanly
+    /// on the same read-only system mount, with every .wallpaper metadata parsed.
+    /// Missing/model-specific inaccessible resources, alternate schema or mutable
+    /// mounts disable generic classification rather than reducing the baseline.
+    private static func systemBaseline(log: (String) -> Void) -> AppleBaseline? {
+        do {
+            let root = URL(fileURLWithPath: "/Library/Wallpaper/Collections", isDirectory: true)
+            guard PosterBoardStore.unredirected(root) else { throw PosterBoardStore.failure("Stock catalog redirected.") }
+            var volume = statfs(), system = statfs()
+            guard statfs(root.path, &volume) == 0, statfs("/System/Library", &system) == 0,
+                  volume.f_flags & UInt32(MNT_RDONLY) != 0,
+                  system.f_flags & UInt32(MNT_RDONLY) != 0,
+                  volume.f_fsid.val.0 == system.f_fsid.val.0,
+                  volume.f_fsid.val.1 == system.f_fsid.val.1 else {
+                throw PosterBoardStore.failure("Stock catalog is not on the verified read-only system mount.")
+            }
+            let baseline = try scanAppleCatalog(root)
+            log("CUSTOM BASELINE complete on-device read-only Collections catalog: \(baseline.identifiers.count) IDs, \(baseline.assetNames.count) asset names.")
+            log("CUSTOM PROBE JOURNAL unavailable: Mirsa cannot authenticate a journal in Probe's sandbox; no guessed access.")
+            return baseline
+        } catch {
+            log("CUSTOM BASELINE unavailable or partial; generic tendies hidden: " + error.localizedDescription)
+            log("CUSTOM PROBE JOURNAL unavailable: no authenticated Probe journal accessible in Mirsa.")
+            return nil
+        }
+    }
+    /// Read-only bounded parser shared with offline fixtures. Caller MUST verify
+    /// immutable system-volume provenance before using this result in production.
+    static func scanAppleCatalog(_ root: URL) throws -> AppleBaseline {
+        var titles = Set<String>(), identifiers = Set<String>(), assets = Set<String>()
+        var nodes = 0, packages = 0, metadata = 0, metadataBytes = 0
+        func walk(_ directory: URL, depth: Int) throws {
+            guard depth <= 24, PosterBoardStore.unredirected(directory) else {
+                throw PosterBoardStore.failure("Stock catalog depth or redirect rejected.")
+            }
+            _ = try identity(directory, kind: S_IFDIR)
+            let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            guard names.count <= 12_000 - nodes else { throw PosterBoardStore.failure("Stock catalog exceeds bounded inventory.") }
+            nodes += names.count
+            let packagesBefore = packages
+            if directory.pathExtension == "wallpaperCollection" {
+                guard names.contains("Wallpapers") else { throw PosterBoardStore.failure("Stock collection inventory missing.") }
+            }
+            if directory.pathExtension == "wallpaper" {
+                packages += 1
+                guard names.contains("Wallpaper.plist") else { throw PosterBoardStore.failure("Stock wallpaper metadata missing.") }
+            }
+            for name in names.sorted() {
+                guard validRelative(name), !name.contains("/") else { throw PosterBoardStore.failure("Invalid stock catalog filename.") }
+                let url = directory.appendingPathComponent(name)
+                guard PosterBoardStore.unredirected(url) else { throw PosterBoardStore.failure("Linked stock catalog entry.") }
+                var node = stat()
+                guard lstat(url.path, &node) == 0 else { throw PosterBoardStore.failure("Stock catalog entry unreadable.") }
+                switch node.st_mode & S_IFMT {
+                case S_IFDIR: try walk(url, depth: depth + 1)
+                case S_IFREG:
+                    assets.insert(name)
+                    if name == "Wallpaper.plist" {
+                        guard directory.pathExtension == "wallpaper" else { throw PosterBoardStore.failure("Unexpected stock metadata placement.") }
+                        let data = try read(url, limit: 524_288)
+                        metadataBytes += data.count
+                        guard metadataBytes <= 8 * 1024 * 1024,
+                              let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                              let title = info["name"] as? String, !title.isEmpty,
+                              let identifier = info["identifier"], !String(describing: identifier).isEmpty else {
+                            throw PosterBoardStore.failure("Incomplete or unknown stock wallpaper metadata schema.")
+                        }
+                        titles.insert(title); identifiers.insert(String(describing: identifier)); metadata += 1
+                    }
+                default: throw PosterBoardStore.failure("Special stock catalog node rejected.")
+                }
+            }
+            if directory.pathExtension == "wallpaperCollection", packages == packagesBefore {
+                throw PosterBoardStore.failure("Stock collection has no readable wallpaper packages.")
+            }
+        }
+        try walk(root, depth: 0)
+        guard packages > 0, metadata == packages, !titles.isEmpty, !identifiers.isEmpty, !assets.isEmpty else {
+            throw PosterBoardStore.failure("Stock catalog is empty or partial.")
+        }
+        return AppleBaseline(complete: true, immutableSystemSource: true, titles: titles, identifiers: identifiers, assetNames: assets)
+    }
+    private static func payload(_ target: URL, snapshot: Snapshot) throws -> BespokePayload? {
+        let wallpapers = snapshot.expected.keys.filter { $0.hasSuffix("/Wallpaper.plist") }
+        guard wallpapers.count == 1, let wallpaper = wallpapers.first else { return nil }
+        let bytes = try read(target.appendingPathComponent(wallpaper), limit: 262_144)
+        guard let object = try PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any],
+              let title = object["name"] as? String, let rawID = object["identifier"] else { return nil }
+        let parent = String(wallpaper.dropLast("Wallpaper.plist".count))
+        let raw = try read(target.appendingPathComponent(MirsaPosterNormalize.rawName), limit: 128)
+        let infoPath = wallpaper.split(separator: "/").dropLast(2).joined(separator: "/") + "/" + MirsaPosterNormalize.userInfoName
+        guard snapshot.expected[infoPath] != nil else { return nil }
+        let infoBytes = try read(target.appendingPathComponent(infoPath), limit: 262_144)
+        guard let rawIdentity = String(data: raw, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawIdentity == String(describing: rawID),
+              let userInfo = try PropertyListSerialization.propertyList(from: infoBytes, format: nil) as? [String: Any],
+              let userIdentity = userInfo["wallpaperRepresentingIdentifier"],
+              String(describing: userIdentity) == rawIdentity,
+              userInfo["wallpaperRepresentingFileName"] as? String == target.appendingPathComponent(wallpaper).deletingLastPathComponent().lastPathComponent else { return nil }
+        let animations = Set(snapshot.paths.filter { $0.hasPrefix("D:" + parent) && $0.hasSuffix(".ca") }
+            .map { String($0.dropFirst(2 + parent.count)) }.filter { !$0.contains("/") })
+        let assets = Set(snapshot.expected.keys.filter { $0.hasPrefix(parent) && $0.contains(".ca/assets/") }
+            .map { URL(fileURLWithPath: $0).lastPathComponent })
+        return BespokePayload(title: title, identifier: String(describing: rawID), assetNames: assets,
+                              animations: animations, wallpaperPath: wallpaper)
+    }
+    static func completedJournal(_ records: [MirsaWallpaperJournal.Record], id: String,
+                                 container: String, relative: String, snapshot: Snapshot) -> MirsaWallpaperJournal.Record? {
+        let matches = records.filter { $0.id == id }
+        guard matches.count == 1, let record = matches.first,
+              (try? MirsaWallpaperJournal.validatePath(record)) != nil,
+              record.copied, record.container == container, record.relative == relative,
+              record.device == snapshot.device, record.inode == snapshot.inode,
+              record.paths == snapshot.paths, record.expected == snapshot.expected else { return nil }
+        return record
+    }
+    private static func journals() throws -> [MirsaWallpaperJournal.Record] {
+        let root = MirsaWallpaperJournal.root
+        try MirsaWallpaperJournal.safeLocal(root)
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        _ = try identity(root, kind: S_IFDIR)
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        guard names.count <= 256 else { throw PosterBoardStore.failure("Too many wallpaper journals; preserved.") }
+        return names.filter { $0.hasSuffix(".json") }.compactMap { name in
+            let id = String(name.dropLast(5)), url = root.appendingPathComponent(name)
+            guard UUID(uuidString: id) != nil, PosterBoardStore.unredirected(url),
+                  let data = try? read(url, limit: 1024 * 1024),
+                  let record = try? JSONDecoder().decode(MirsaWallpaperJournal.Record.self, from: data),
+                  record.id == id, (try? MirsaWallpaperJournal.validatePath(record)) != nil else { return nil }
+            return record
+        }
+    }
+    private static func grant(_ relative: String, lease: PosterBoardLease) throws -> URL {
+        guard validRelative(relative) else { throw PosterBoardStore.failure("Invalid wallpaper path.") }
+        var prefix = ""
+        for part in relative.split(separator: "/") {
+            prefix += (prefix.isEmpty ? "" : "/") + part
+            guard lease.grant(prefix), lease.permits(lease.effectiveURL.appendingPathComponent(prefix)) else {
+                throw PosterBoardStore.failure("Custom wallpaper path access denied.")
+            }
+        }
+        return lease.effectiveURL.appendingPathComponent(relative)
+    }
+    private static func classify(id: String, container: String, relative: String, lease: PosterBoardLease,
+                                 records: [MirsaWallpaperJournal.Record], baseline: AppleBaseline?) throws -> Item? {
+        let record = MirsaWallpaperJournal.Record(id: id, title: "", container: container, relative: relative,
+                                                  expected: ["placeholder": "placeholder"])
+        try MirsaWallpaperJournal.validatePath(record)
+        let target = try grant(relative, lease: lease)
+        let first = try snapshot(target, lease: lease)
+        let owned = completedJournal(records, id: id, container: container, relative: relative, snapshot: first)
+        let candidate = try? payload(target, snapshot: first)
+        guard owned != nil || recognizedAnime(first, title: candidate?.title) ||
+              candidate.map({ bespoke($0, snapshot: first, baseline: baseline) }) == true else { return nil }
+        // Metadata read and full classification must refer to one stable tree.
+        guard try snapshot(target, lease: lease) == first else { throw PosterBoardStore.failure("Custom wallpaper changed while classifying.") }
+        let label = owned?.title ?? candidate?.title ?? "Custom wallpaper"
+        return Item(title: label.isEmpty ? "Mirsa wallpaper" : String(label.prefix(120)), id: id,
+                    container: container, relative: relative, expected: first.expected,
+                    device: first.device, inode: first.inode, paths: first.paths)
+    }
+    private static func list(lease: PosterBoardLease, records: [MirsaWallpaperJournal.Record], baseline: AppleBaseline?) throws -> [Item] {
+        try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+        let parent = try MirsaPosterCopy.destination(lease: lease)
+        let root = try grant(parent, lease: lease)
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        guard names.count <= 256 else { throw PosterBoardStore.failure("Too many wallpaper descriptors; no deletion allowed.") }
+        var found: [Item] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 20
+        for id in names.sorted() where UUID(uuidString: id) != nil {
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw PosterBoardStore.failure("Custom wallpaper listing reached its time budget; refresh later.")
+            }
+            // Per-item uncertainty is hidden, never converted to a deletion candidate.
+            if let item = try? classify(id: id, container: lease.targetURL.path, relative: parent + "/" + id,
+                                        lease: lease, records: records, baseline: baseline) { found.append(item) }
+        }
+        return found
+    }
+    static func list(log: @escaping (String) -> Void) throws -> [Item] {
+        try MirsaWallpaperJournal.exclusive {
+            let container = try MirsaPosterDiscovery.discover(log: log)
+            let lease = try PosterBoardLease(path: container, log: log)
+            do {
+                let items = try list(lease: lease, records: journals(), baseline: systemBaseline(log: log))
+                try lease.close()
+                log("CUSTOM LIST VERIFIED \(items.count); unknown and system wallpapers hidden.")
+                return items
+            } catch { try? lease.close(); throw error }
+        }
+    }
+    /// UI must obtain separate per-item destructive confirmation before calling.
+    static func delete(_ requested: Item, log: @escaping (String) -> Void) throws {
+        try MirsaWallpaperJournal.exclusive {
+            let container = try MirsaPosterDiscovery.discover(log: log)
+            guard container == requested.container else { throw PosterBoardStore.failure("PosterBoard container changed; refresh the list.") }
+            let lease = try PosterBoardLease(path: container, log: log)
+            do {
+                let records = try journals()
+                let baseline = systemBaseline(log: log)
+                guard let fresh = try list(lease: lease, records: records, baseline: baseline).first(where: { $0.id == requested.id }),
+                      fresh == requested else { throw PosterBoardStore.failure("Wallpaper changed or is no longer proven custom. Nothing deleted.") }
+                let target = try grant(fresh.relative, lease: lease)
+                let final = try snapshot(target, lease: lease)
+                guard final.expected == fresh.expected, final.paths == fresh.paths,
+                      final.device == fresh.device, final.inode == fresh.inode,
+                      let classified = try classify(id: fresh.id, container: fresh.container, relative: fresh.relative,
+                                                    lease: lease, records: try journals(), baseline: baseline), classified == fresh,
+                      lease.permits(target) else { throw PosterBoardStore.failure("Wallpaper changed before deletion; preserved.") }
+                let last = try identity(target, kind: S_IFDIR)
+                guard UInt64(last.st_dev) == fresh.device, UInt64(last.st_ino) == fresh.inode else {
+                    throw PosterBoardStore.failure("Wallpaper root changed before deletion.")
+                }
+                try FileManager.default.removeItem(at: target)
+                guard try MirsaWallpaperJournal.absent(target) else { throw PosterBoardStore.failure("Custom deletion absence not proven.") }
+                try lease.close()
+                // Existing owned-journal deletion remains untouched. Cleanup can
+                // later reconcile this now-absent entry through its normal path.
+                log("CUSTOM DELETE VERIFIED exact UUID " + fresh.id + "; lease closed; refresh pending.")
+            } catch { try? lease.close(); throw error }
+        }
+    }
+}
