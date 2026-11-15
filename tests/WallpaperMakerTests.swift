@@ -513,6 +513,97 @@ extension WallpaperMakerTests {
             XCTAssertTrue(WallpaperMakerStrings.values[key]?.allSatisfy { !$0.isEmpty } == true)
         }
     }
+    func testArchiveContainmentNormalizesDirectorySlashesAndRejectsEqualSiblingTraversal() throws {
+        let root = URL(fileURLWithPath: "/tmp/mirsa-archive-root", isDirectory: true)
+        let slashRoot = URL(fileURLWithPath: root.path + "/", isDirectory: true)
+        let child = root.appendingPathComponent("nested/file")
+        for base in [root, slashRoot] {
+            XCTAssertTrue(TendiesEngine.archiveDestination(child, isStrictlyInside: base))
+            XCTAssertFalse(TendiesEngine.archiveDestination(root, isStrictlyInside: base))
+            XCTAssertFalse(TendiesEngine.archiveDestination(
+                URL(fileURLWithPath: root.path + "-sibling/file"), isStrictlyInside: base))
+            XCTAssertFalse(TendiesEngine.archiveDestination(
+                URL(fileURLWithPath: root.path + "/../escape"), isStrictlyInside: base))
+        }
+    }
+
+    func testArchiveContainmentResolvesAliasAndRejectsSymlinkEscape() throws {
+        let fm = FileManager.default
+        let fixture = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: fixture, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: fixture) }
+        let root = fixture.appendingPathComponent("root", isDirectory: true)
+        let alias = fixture.appendingPathComponent("alias", isDirectory: true)
+        let outside = fixture.appendingPathComponent("outside", isDirectory: true)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: root)
+        try fm.createSymbolicLink(at: root.appendingPathComponent("redirect"), withDestinationURL: outside)
+        XCTAssertTrue(TendiesEngine.archiveDestination(root.appendingPathComponent("new/file"), isStrictlyInside: alias))
+        XCTAssertTrue(TendiesEngine.archiveDestination(alias.appendingPathComponent("new/file"), isStrictlyInside: root))
+        XCTAssertFalse(TendiesEngine.archiveDestination(root.appendingPathComponent("redirect/file"), isStrictlyInside: root))
+    }
+
+    func testArchiveContainmentResolvesActualVarPrivateVarAlias() throws {
+        let alias = URL(fileURLWithPath: "/var", isDirectory: true)
+        let canonical = URL(fileURLWithPath: "/private/var", isDirectory: true)
+        XCTAssertEqual(alias.resolvingSymlinksInPath().pathComponents,
+                       canonical.resolvingSymlinksInPath().pathComponents)
+        XCTAssertTrue(TendiesEngine.archiveDestination(canonical.appendingPathComponent("tmp/new"),
+                                                       isStrictlyInside: alias))
+        XCTAssertTrue(TendiesEngine.archiveDestination(alias.appendingPathComponent("tmp/new"),
+                                                       isStrictlyInside: canonical))
+        XCTAssertFalse(TendiesEngine.archiveDestination(alias, isStrictlyInside: canonical))
+    }
+
+    func testValidatedArchiveExtractsWithDirectoryURLAndTrailingSlash() throws {
+        let fm = FileManager.default
+        let fixture = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: fixture, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: fixture) }
+        let zip = fixture.appendingPathComponent("fixture.zip")
+        let bytes = Data("archive containment fixture".utf8)
+        do {
+            let archive = try Archive(url: zip, accessMode: .create)
+            try archive.addEntry(with: "nested/", type: .directory, uncompressedSize: 0) { _, _ in Data() }
+            try archive.addEntry(with: "nested/file", type: .file, uncompressedSize: Int64(bytes.count)) { offset, count in
+                bytes.subdata(in: Int(offset)..<(Int(offset) + count))
+            }
+        }
+        for name in ["plain", "trailing/"] {
+            let destination = fixture.appendingPathComponent(name, isDirectory: true)
+            try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+            try TendiesEngine.shared.extractValidatedArchive(zip, to: destination)
+            XCTAssertEqual(try Data(contentsOf: destination.appendingPathComponent("nested/file")), bytes)
+        }
+    }
+
+    func testValidatedArchiveRejectsTraversalBeforeAnyWriteAndSymlinkRoot() throws {
+        let fm = FileManager.default
+        let fixture = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: fixture, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: fixture) }
+        let destination = fixture.appendingPathComponent("root", isDirectory: true)
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        let zip = fixture.appendingPathComponent("bad.zip")
+        do {
+            let archive = try Archive(url: zip, accessMode: .create)
+            try archive.addEntry(with: "../escaped", type: .file, uncompressedSize: 1) { _, _ in Data([1]) }
+        }
+        XCTAssertThrowsError(try TendiesEngine.shared.extractValidatedArchive(zip, to: destination))
+        XCTAssertTrue(try fm.contentsOfDirectory(atPath: destination.path).isEmpty)
+        XCTAssertFalse(fm.fileExists(atPath: fixture.appendingPathComponent("escaped").path))
+        let alias = fixture.appendingPathComponent("alias", isDirectory: true)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: destination)
+        let safeZip = fixture.appendingPathComponent("safe.zip")
+        do {
+            let archive = try Archive(url: safeZip, accessMode: .create)
+            try archive.addEntry(with: "file", type: .file, uncompressedSize: 1) { _, _ in Data([1]) }
+        }
+        XCTAssertThrowsError(try TendiesEngine.shared.extractValidatedArchive(safeZip, to: alias))
+        XCTAssertTrue(try fm.contentsOfDirectory(atPath: destination.path).isEmpty)
+    }
+
     /// Local filesystem evidence only, not proof of device grants or picker registration.
     func testExclusiveWholeRootCopyReadbackPreservesAttributesAndNeverMutatesPreferences() throws {
         let fm = FileManager.default
