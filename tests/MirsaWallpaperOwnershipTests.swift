@@ -348,7 +348,10 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         defer { MirsaWallpaperJournal.lock.unlock() }
         DispatchQueue.global(qos: .userInitiated).async {
             let start = ProcessInfo.processInfo.systemUptime
-            XCTAssertThrowsError(try MirsaWallpaperJournal.exclusive { XCTFail("Contending mutation ran") }) { error in
+            do {
+                try MirsaWallpaperJournal.exclusive { XCTFail("Contending mutation ran") }
+                XCTFail("Contending operation unexpectedly acquired the lock")
+            } catch {
                 XCTAssertTrue(error.localizedDescription.contains("already running"))
             }
             XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 1.0)
