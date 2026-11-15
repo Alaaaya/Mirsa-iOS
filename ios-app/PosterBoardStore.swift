@@ -11,6 +11,12 @@ private func releasePosterBoardAccess(_ handle: UnsafeMutableRawPointer) -> Unsa
 @_silgen_name("mirsa_pb_access_free_string")
 private func freePosterBoardAccessString(_ value: UnsafeMutablePointer<CChar>)
 
+@_silgen_name("mirsa_pb_access_grant_relative")
+private func grantRelativeAccess(_ handle: UnsafeMutableRawPointer, _ path: UnsafePointer<CChar>,
+                                 _ log: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
+@_silgen_name("mirsa_pb_container_identifier")
+private func containerIdentifier(_ path: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
+
 /// A scoped lease owns the effective access alias and restores its own signed
 /// group's original Caches on close. No guessed/foreign group entitlement.
 final class PosterBoardLease {
@@ -37,6 +43,33 @@ final class PosterBoardLease {
         effectiveURL = URL(fileURLWithPath: String(cString: pointer))
         freePosterBoardAccessString(pointer)
         handle = acquired
+    }
+    private var granted = Set<String>()
+    /// worse_query can grant an exact path without granting parent or child reads.
+    /// Ask separately for known wallpaper metadata/store paths and retain all
+    /// tokens until this lease ends. No arbitrary filesystem paths are accepted.
+    @discardableResult
+    func grant(_ relative: String) -> Bool {
+        guard let handle else { return false }
+        if granted.contains(relative) { return true }
+        var detail: UnsafeMutablePointer<CChar>?
+        let result = relative.withCString { grantRelativeAccess(handle, $0, &detail) }
+        if let detail {
+            let message = String(cString: detail)
+            if !message.isEmpty { log(message) }
+            freePosterBoardAccessString(detail)
+        }
+        if result == 1 { granted.insert(relative) }
+        return result == 1
+    }
+    func identityAttribute() -> String? {
+        guard let p = targetURL.path.withCString({ containerIdentifier($0) }) else { return nil }
+        defer { freePosterBoardAccessString(p) }
+        return String(cString: p)
+    }
+    func grantLayout() {
+        for path in ["Library", "Library/Application Support",
+                     "Library/Application Support/PRBPosterExtensionDataStore"] { grant(path) }
     }
     /// Only the lease's exact alias may resolve to the corresponding target.
     /// Any additional symlink within Library, providers or descriptors is rejected.
@@ -120,79 +153,31 @@ enum PosterBoardStore {
         }
         return true
     }
-    static func validateIdentity(_ container: URL, lease: PosterBoardLease? = nil,
-                                 log: (String) -> Void = { _ in }) throws {
-        let fm = FileManager.default
-        log("PosterBoard identity resolved path: " + container.resolvingSymlinksInPath().path)
-        if let lease {
-            log("PosterBoard lease target: " + lease.targetURL.path)
-            if let link = try? fm.destinationOfSymbolicLink(atPath: lease.effectiveURL.path) {
-                log("PosterBoard lease symlink target: " + link)
-            }
+    static func validateIdentity(_ container: URL, lease: PosterBoardLease? = nil, log: (String) -> Void = { _ in }) throws {
+        lease?.grantLayout()
+        let attribute = lease?.identityAttribute()
+        if let attribute, attribute != "com.apple.PosterBoard" {
+            throw failure("Container identity attribute contradicts com.apple.PosterBoard.")
         }
-        do {
-            let names = try fm.contentsOfDirectory(atPath: container.path).sorted()
-            log("PosterBoard top-level names: " + String(describing: names))
-        } catch { log("PosterBoard top-level listing error: " + error.localizedDescription) }
-        var metadataConfirmed = false
-        var conflictingIdentifier = false
+        var identified = attribute == "com.apple.PosterBoard"
         for name in [".com.apple.mobile_container_manager.metadata.plist", "com.apple.mobile_container_manager.metadata.plist"] {
+            lease?.grant(name)
             let file = container.appendingPathComponent(name)
-            log("PosterBoard " + name + " exists=" + String(fm.fileExists(atPath: file.path)) +
-                " readable=" + String(fm.isReadableFile(atPath: file.path)))
-            guard unredirected(file, lease: lease) else {
-                log("PosterBoard metadata path validation rejected: " + name)
-                continue
-            }
-            do {
-                let data = try Data(contentsOf: file)
-                let value = try PropertyListSerialization.propertyList(from: data, format: nil)
-                let identifier = (value as? [String: Any])?["MCMMetadataIdentifier"] as? String
-                log("PosterBoard " + name + " MCMMetadataIdentifier=" + (identifier ?? "<missing/non-string>"))
-                if identifier == "com.apple.PosterBoard" { metadataConfirmed = true }
-                else if identifier != nil { conflictingIdentifier = true }
-            } catch {
-                let detail = error as NSError
-                log("PosterBoard " + name + " read/parse error: " + detail.domain + " " +
-                    String(detail.code) + " " + detail.localizedDescription)
+            guard unredirected(file, lease: lease) else { continue }
+            if let data = try? Data(contentsOf: file) {
+                guard let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                      info["MCMMetadataIdentifier"] as? String == "com.apple.PosterBoard" else {
+                    throw failure("Readable metadata contradicts com.apple.PosterBoard.")
+                }
+                identified = true
             }
         }
-        guard !conflictingIdentifier else {
-            throw failure("Container metadata identifies a different app; refusing PosterBoard access.")
-        }
+        guard identified else { throw failure("Container identity could not be verified as com.apple.PosterBoard.") }
         let store = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore")
-        guard unredirected(store, lease: lease),
-              (try? store.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+        guard (try store.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])).isDirectory == true,
+              unredirected(store, lease: lease) else {
             throw failure("PosterBoard datastore is missing or redirected.")
         }
-        if metadataConfirmed {
-            log("PosterBoard identity verified by container metadata.")
-            return
-        }
-        // A scoped lease to an exact canonical container plus an existing,
-        // versioned Apple poster provider is required when MCM metadata is hidden.
-        // A directory name alone is not identity proof. Never override a readable
-        // conflicting identifier, and never create markers to satisfy this rule.
-        guard let lease,
-              (try? canonicalContainer(lease.targetURL.path)) != nil,
-              lease.permits(container) else {
-            throw failure("Container identity could not be verified as com.apple.PosterBoard.")
-        }
-        let existing = try layout(container)
-        let known = existing.providers.intersection([
-            "com.apple.WallpaperKit.CollectionsPoster", "com.apple.Posters.CollectionsPosterApp",
-            "com.apple.MercuryPoster", "com.apple.Posters.MercuryPosterApp"
-        ])
-        guard !known.isEmpty else { throw failure("No existing Apple poster provider proves container identity.") }
-        for provider in known {
-            let path = existing.extensions.appendingPathComponent(provider)
-            guard unredirected(path, lease: lease),
-                  (try? path.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
-                throw failure("PosterBoard provider is missing or redirected.")
-            }
-        }
-        log("PosterBoard identity verified by scoped canonical target and existing datastore version " +
-            existing.version + " providers " + String(describing: known.sorted()) + "; MCM metadata unavailable.")
     }
     private static func verifiedContainer(_ path: String) -> Bool {
         guard let lease = try? PosterBoardLease(path: path) else { return false }
@@ -223,33 +208,34 @@ enum PosterBoardStore {
         let extensions: URL
         let providers: Set<String>
     }
-    static func layout(_ container: URL) throws -> Layout {
+    static func layout(_ container: URL, lease: PosterBoardLease? = nil) throws -> Layout {
+        lease?.grantLayout()
         let store = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore")
         let versions = try FileManager.default.contentsOfDirectory(atPath: store.path)
             .compactMap { Int($0) }.filter { $0 > 0 }.sorted(by: >)
         for version in versions {
+            let base = "Library/Application Support/PRBPosterExtensionDataStore/\(version)"
+            lease?.grant(base)
+            lease?.grant(base + "/Extensions")
             let extensions = store.appendingPathComponent("\(version)/Extensions")
             if let entries = try? FileManager.default.contentsOfDirectory(atPath: extensions.path) {
                 let providers = Set(entries.filter { $0.hasPrefix("com.apple.") && !$0.contains("/") })
+                for provider in providers {
+                    lease?.grant(base + "/Extensions/" + provider)
+                    lease?.grant(base + "/Extensions/" + provider + "/descriptors")
+                }
                 if !providers.isEmpty { return Layout(version: String(version), extensions: extensions, providers: providers) }
             }
         }
         throw failure("No existing PosterBoard datastore version/provider was found; refusing to guess a target.")
     }
     static func providers(for original: String, available: Set<String>) throws -> [String] {
-        let aliases: [String]
-        switch original {
-        case "com.apple.WallpaperKit.CollectionsPoster", "com.apple.Posters.CollectionsPosterApp":
-            // Collections packages must be applied exactly once. Never mirror a
-            // descriptor into the legacy provider, even if both are present.
-            aliases = ["com.apple.WallpaperKit.CollectionsPoster"]
-        case "com.apple.MercuryPoster", "com.apple.Posters.MercuryPosterApp":
-            aliases = ["com.apple.MercuryPoster", "com.apple.Posters.MercuryPosterApp"]
-        default: aliases = [original]
+        guard original == "com.apple.WallpaperKit.CollectionsPoster" ||
+              original == "com.apple.Posters.CollectionsPosterApp",
+              available.contains("com.apple.WallpaperKit.CollectionsPoster") else {
+            throw failure("PB Probe only supports the installed CollectionsPoster provider.")
         }
-        let targets = aliases.filter { available.contains($0) }
-        guard !targets.isEmpty else { throw failure("No installed provider matches \(original).") }
-        return targets
+        return ["com.apple.WallpaperKit.CollectionsPoster"]
     }
     /// Checks all bytes, relative paths, nonempty contents and symlinks.
     /// A FileComplete transport acknowledgment is never considered proof.
@@ -258,7 +244,11 @@ enum PosterBoardStore {
         let rootInfo = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard rootInfo.isDirectory == true, rootInfo.isSymbolicLink != true else { throw failure("Descriptor root must be a real directory.") }
         var enumerationError: Error?
-        guard let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+        // Foundation may enumerate /var URLs as /private/var on Darwin.
+        // Use the same canonical root for enumeration and relative path slicing.
+        let root = directory.resolvingSymlinksInPath().standardizedFileURL
+        let prefix = root.path + "/"
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                                              errorHandler: { _, error in enumerationError = error; return false }) else {
             throw failure("Cannot enumerate descriptor.")
         }
@@ -267,93 +257,14 @@ enum PosterBoardStore {
             let info = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             guard info.isSymbolicLink != true else { throw failure("Symbolic links are not allowed in wallpaper descriptors.") }
             if info.isRegularFile == true {
-                let relative = String(url.path.dropFirst(directory.path.count + 1))
+                let entryPath = url.resolvingSymlinksInPath().standardizedFileURL.path
+                guard entryPath.hasPrefix(prefix) else { throw failure("Descriptor entry escaped canonical root. root=\(prefix) entry=\(entryPath) raw=\(url.path)") }
+                let relative = String(entryPath.dropFirst(prefix.count))
                 result[relative] = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
             }
         }
         if let enumerationError { throw enumerationError }
         guard !result.isEmpty else { throw failure("Empty wallpaper descriptor.") }
         return result
-    }
-    /// Copies only new descriptor directories, preserving package identity. Existing wallpapers and SQLite stay untouched.
-    /// Caller holds the validated container lease. Local fixture tests exercise this same path.
-    static func install(_ descriptors: [(url: URL, ext: String)], container: URL,
-                        resetProtections: Bool, backupRoot: URL, lease: PosterBoardLease? = nil, log: (String) -> Void) throws -> Int {
-        try validateIdentity(container, lease: lease, log: log)
-        guard !descriptors.isEmpty else { throw failure("Archive contains no wallpaper descriptors.") }
-        let fm = FileManager.default, target = try layout(container)
-        let backup = backupRoot.appendingPathComponent(UUID().uuidString)
-        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
-        let prefs = container.appendingPathComponent("Library/Preferences/com.apple.PosterBoard.unprotectedUserDefaults.plist")
-        guard unredirected(prefs, lease: lease) else { throw failure("Redirected preference path rejected.") }
-        let existed = fm.fileExists(atPath: prefs.path)
-        // A read failure is not an empty preference file. Never overwrite unreadable state.
-        let original = existed ? try Data(contentsOf: prefs) : nil
-        if let original { try original.write(to: backup.appendingPathComponent("unprotectedUserDefaults.original.plist"), options: .atomic) }
-        var preferences = try original.map {
-            guard let dict = try PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any] else {
-                throw failure("PosterBoard preferences are not a dictionary.")
-            }
-            return dict
-        } ?? [:]
-        var created: [URL] = [], installedProviders = Set<String>(), proof: [String: [String: String]] = [:]
-        var preferencesTouched = false
-        do {
-            for descriptor in descriptors {
-                let expected = try manifest(descriptor.url)
-                for provider in try providers(for: descriptor.ext, available: target.providers) {
-                    let parent = target.extensions.appendingPathComponent(provider + "/descriptors")
-                    guard unredirected(parent, lease: lease) else { throw failure("Redirected descriptor destination rejected.") }
-                    try fm.createDirectory(at: parent, withIntermediateDirectories: true)
-                    // References may use a non-UUID identifier (including imported SMB packages).
-                    // Preserve its exact spelling and reject invalid paths rather than renaming it.
-                    let id = descriptor.url.lastPathComponent
-                    guard !id.isEmpty, !id.hasPrefix("."), id != "..",
-                          !id.contains("/"), !id.contains("\\"), id.utf8.count <= 255 else {
-                        throw failure("Invalid descriptor identifier.")
-                    }
-                    let destination = parent.appendingPathComponent(id)
-                    guard !fm.fileExists(atPath: destination.path) else { throw failure("New descriptor collision.") }
-                    created.append(destination) // remove even a partially copied new directory on failure
-                    try fm.copyItem(at: descriptor.url, to: destination)
-                    guard try manifest(destination) == expected else { throw failure("Descriptor readback SHA-256 mismatch.") }
-                    let verifiedPath = lease.map {
-                        $0.targetURL.path + String(destination.path.dropFirst(container.path.count))
-                    } ?? destination.path
-                    proof[verifiedPath] = expected
-                    installedProviders.insert(provider)
-                    log("Verified \(expected.count) files at v\(target.version)/\(provider)/descriptors/\(id)")
-                }
-            }
-            if resetProtections { preferences["PBF_RESET_FILE_PROTECTIONS"] = true }
-            // Preserve every other key; unlike the old applier never request locale reset.
-            preferences["PBF_LOCALE_DID_CHANGE"] = false
-            let oldProviders = preferences["PersistedPosterContainerBundleIdentifiers"] as? [String] ?? []
-            preferences["PersistedPosterContainerBundleIdentifiers"] = Set(oldProviders).union(installedProviders).sorted()
-            let bytes = try PropertyListSerialization.data(fromPropertyList: preferences, format: .binary, options: 0)
-            try fm.createDirectory(at: prefs.deletingLastPathComponent(), withIntermediateDirectories: true)
-            preferencesTouched = true
-            try bytes.write(to: prefs, options: .atomic)
-            guard try Data(contentsOf: prefs) == bytes else { throw failure("Preference readback failed.") }
-            let report: [String: Any] = ["container": lease?.targetURL.path ?? container.path, "accessPath": container.path, "version": target.version, "files": proof,
-                                        "preferencesExisted": existed, "galleryRegistrationVerified": false]
-            try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
-                .write(to: backup.appendingPathComponent("verified-copy.json"), options: .atomic)
-            log("Backup and SHA-256 readback report saved in Mirsa/TendiesBackups/\(backup.lastPathComponent).")
-            return created.count
-        } catch {
-            var rollbackFailures: [String] = []
-            for destination in created where fm.fileExists(atPath: destination.path) {
-                do { try fm.removeItem(at: destination) } catch { rollbackFailures.append(destination.path) }
-            }
-            if preferencesTouched {
-                do {
-                    if let original { try original.write(to: prefs, options: .atomic) }
-                    else if fm.fileExists(atPath: prefs.path) { try fm.removeItem(at: prefs) }
-                } catch { rollbackFailures.append(prefs.path) }
-            }
-            if !rollbackFailures.isEmpty { log("Rollback incomplete: \(rollbackFailures.joined(separator: ", ")). Original preference backup retained.") }
-            throw error
-        }
     }
 }
