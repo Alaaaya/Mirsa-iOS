@@ -1350,8 +1350,9 @@ final class AppViewModel: ObservableObject {
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
             tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))
-            errorMessage = WallpaperMakerStrings.text(.copyVerified)
-            // Respring remains an explicit user action via the existing button.
+            // Copy success is already in the log. Do not open ContentView's
+            // Notice alert over the separate respring confirmation.
+            // Respring remains an explicit user action via TendiesView's prompt.
 
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
