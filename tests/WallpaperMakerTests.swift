@@ -513,40 +513,53 @@ extension WallpaperMakerTests {
             XCTAssertTrue(WallpaperMakerStrings.values[key]?.allSatisfy { !$0.isEmpty } == true)
         }
     }
-    func testPosterStoreCopiesReadbacksPreservesMetadataAndUnrelatedPreferences() throws {
+    /// Local filesystem evidence only, not proof of device grants or picker registration.
+    func testExclusiveWholeRootCopyReadbackPreservesAttributesAndNeverMutatesPreferences() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("mirsa-pb-test-" + UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: root) }
-        let container = root.appendingPathComponent("container")
-        let provider = "com.apple.WallpaperKit.CollectionsPoster"
-        let target = container.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore/73/Extensions/" + provider + "/descriptors")
-        try fm.createDirectory(at: target, withIntermediateDirectories: true)
-        let identity = try PropertyListSerialization.data(fromPropertyList: ["MCMMetadataIdentifier": "com.apple.PosterBoard"], format: .binary, options: 0)
-        try identity.write(to: container.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist"))
-        let prefs = container.appendingPathComponent("Library/Preferences/com.apple.PosterBoard.unprotectedUserDefaults.plist")
-        try fm.createDirectory(at: prefs.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let previous = try PropertyListSerialization.data(fromPropertyList: ["unrelated": "keep", "PersistedPosterContainerBundleIdentifiers": ["com.apple.Existing"]], format: .binary, options: 0)
+        let source = root.appendingPathComponent("source")
+        let nested = source.appendingPathComponent("versions/1/contents")
+        try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+        try fm.createDirectory(at: source.appendingPathComponent("empty"), withIntermediateDirectories: true)
+        try Data("fixture metadata".utf8).write(to: source.appendingPathComponent("metadata"))
+        try Data([0, 1, 2, 255]).write(to: nested.appendingPathComponent("asset"))
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        // Include the root, nested directories and an empty directory in metadata verification.
+        let paths = try MirsaPosterCopy.relativePaths(source).union([""])
+        for path in paths {
+            let url = source.appendingPathComponent(path)
+            let directory = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+            try fm.setAttributes([.posixPermissions: directory ? 0o750 : 0o640, .modificationDate: old], ofItemAtPath: url.path)
+        }
+        let prefs = root.appendingPathComponent("com.apple.PosterBoard.unprotectedUserDefaults.plist")
+        let previous = try PropertyListSerialization.data(fromPropertyList:
+            ["unrelated": "keep", "PersistedPosterContainerBundleIdentifiers": ["com.apple.Existing"]],
+            format: .binary, options: 0)
         try previous.write(to: prefs)
-        let id = "5M800000-0000-0000-0000-5QU41R000000"
-        let source = root.appendingPathComponent(id)
-        try fm.createDirectory(at: source, withIntermediateDirectories: true)
-        try Data("fixture \(id)".utf8).write(to: source.appendingPathComponent("metadata"))
-        let backup = root.appendingPathComponent("backups")
-        let count = try PosterBoardStore.install([(url: source, ext: provider)], container: container, resetProtections: false, backupRoot: backup, log: { _ in })
-        XCTAssertEqual(count, 1)
-        XCTAssertEqual(try PosterBoardStore.manifest(source), try PosterBoardStore.manifest(target.appendingPathComponent(id)))
-        let dict = try XCTUnwrap(try PropertyListSerialization.propertyList(from: Data(contentsOf: prefs), format: nil) as? [String: Any])
-        XCTAssertEqual(dict["unrelated"] as? String, "keep")
-        XCTAssertEqual(dict["PBF_LOCALE_DID_CHANGE"] as? Bool, false)
-        XCTAssertNil(dict["PBF_RESET_FILE_PROTECTIONS"])
-        XCTAssertEqual(Set(dict["PersistedPosterContainerBundleIdentifiers"] as? [String] ?? []), Set([provider, "com.apple.Existing"]))
-        let saved = try XCTUnwrap(try fm.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil).first)
-        XCTAssertEqual(try Data(contentsOf: saved.appendingPathComponent("unprotectedUserDefaults.original.plist")), previous)
-        let proof = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: saved.appendingPathComponent("verified-copy.json"))) as? [String: Any])
-        XCTAssertEqual(proof["galleryRegistrationVerified"] as? Bool, false)
-        XCTAssertEqual(proof["version"] as? String, "73")
-        XCTAssertThrowsError(try PosterBoardStore.install([(url: source, ext: provider)], container: container, resetProtections: false, backupRoot: backup, log: { _ in }))
-        XCTAssertEqual(try PosterBoardStore.manifest(source), try PosterBoardStore.manifest(target.appendingPathComponent(id)))
+        let expected = try PosterBoardStore.manifest(source)
+        let target = root.appendingPathComponent(UUID().uuidString)
+        try MirsaPosterCopy.copyExclusive(source: source, target: target, expected: expected, log: { _ in })
+        XCTAssertEqual(try PosterBoardStore.manifest(target), expected)
+        XCTAssertEqual(try MirsaPosterCopy.relativePaths(target), try MirsaPosterCopy.relativePaths(source))
+        try MirsaPosterCopy.verifyCopyAttributes(source: source, target: target)
+        for path in paths {
+            let attrs = try fm.attributesOfItem(atPath: target.appendingPathComponent(path).path)
+            let original = try fm.attributesOfItem(atPath: source.appendingPathComponent(path).path)
+            XCTAssertEqual(attrs[.posixPermissions] as? NSNumber, original[.posixPermissions] as? NSNumber)
+            XCTAssertEqual(try XCTUnwrap(attrs[.modificationDate] as? Date).timeIntervalSince1970,
+                           old.timeIntervalSince1970, accuracy: 0.001)
+        }
+        XCTAssertEqual(try Data(contentsOf: prefs), previous)
+        XCTAssertThrowsError(try MirsaPosterCopy.copyExclusive(source: source, target: target, expected: expected, log: { _ in }))
+        XCTAssertEqual(try PosterBoardStore.manifest(target), expected)
+        // A different source cannot overwrite an existing destination either.
+        try Data("changed source".utf8).write(to: source.appendingPathComponent("metadata"))
+        XCTAssertThrowsError(try MirsaPosterCopy.copyExclusive(source: source, target: target,
+            expected: PosterBoardStore.manifest(source), log: { _ in }))
+        XCTAssertEqual(try PosterBoardStore.manifest(target), expected)
+        XCTAssertEqual(try Data(contentsOf: prefs), previous)
     }
     func testCollectionsUseOnlyCanonicalProviderEvenWhenLegacyExists() throws {
         let canonical = "com.apple.WallpaperKit.CollectionsPoster"
@@ -579,24 +592,28 @@ private func posterAccessRestore(_ caches: UnsafePointer<CChar>, _ backup: Unsaf
                                  _ existed: Int32, _ target: UnsafePointer<CChar>) -> Int32
 
 final class PosterBoardAccessSafetyTests: XCTestCase {
-    func testIdentityDiagnosticsReportMissingMetadataAndNeverTrustBareDatastore() throws {
+    func testIdentityRejectsBareDatastoreAndContradictoryReadableMetadata() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? fm.removeItem(at: root) }
         try fm.createDirectory(at: root.appendingPathComponent("Library/Application Support/PRBPosterExtensionDataStore"),
                                withIntermediateDirectories: true)
-        var messages: [String] = []
-        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root, log: { messages.append($0) }))
-        XCTAssertTrue(messages.contains { $0.contains("resolved path:") })
-        XCTAssertTrue(messages.contains { $0.contains("top-level names:") && $0.contains("Library") })
-        XCTAssertTrue(messages.contains { $0.contains("exists=false readable=false") })
-        XCTAssertTrue(messages.contains { $0.contains("read/parse error:") })
-        let metadata = root.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist")
-        try PropertyListSerialization.data(fromPropertyList: ["MCMMetadataIdentifier": "other.app"],
-                                           format: .binary, options: 0).write(to: metadata)
-        messages.removeAll()
-        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root, log: { messages.append($0) }))
-        XCTAssertTrue(messages.contains { $0.contains("MCMMetadataIdentifier=other.app") })
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root))
+        let dotted = root.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist")
+        let plain = root.appendingPathComponent("com.apple.mobile_container_manager.metadata.plist")
+        func metadata(_ value: String, at url: URL) throws {
+            try PropertyListSerialization.data(fromPropertyList: ["MCMMetadataIdentifier": value],
+                                               format: .binary, options: 0).write(to: url)
+        }
+        try metadata("other.app", at: dotted)
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root))
+        try metadata("com.apple.PosterBoard", at: dotted)
+        XCTAssertNoThrow(try PosterBoardStore.validateIdentity(root))
+        try metadata("other.app", at: plain)
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root), "A valid first identity must not hide contradictory second metadata")
+        try metadata("com.apple.PosterBoard", at: plain)
+        try Data("not a plist".utf8).write(to: dotted)
+        XCTAssertThrowsError(try PosterBoardStore.validateIdentity(root), "Malformed readable metadata must fail closed")
     }
 
     func testClass7AliasRequiresExactTargetAndRejectsNestedLinks() throws {
