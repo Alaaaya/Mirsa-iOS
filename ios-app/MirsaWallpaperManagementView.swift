@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Lists wallpapers Mirsa itself installed (exact journal records) with per-item delete and cleanup.
-/// Nothing here runs on appear except a read-only journal listing.
+/// Lists positively identified custom wallpapers (Mirsa, Placard, Probe) with per-item delete; unknown/Apple items are hidden.
+/// Nothing here runs on appear except a read-only listing.
 struct MirsaWallpaperManagementSection: View {
     let externalBusy: Bool
     let log: (String) -> Void
     /// Called on main only after a current-session owned delete succeeded.
     let onDeleted: () -> Void
 
-    @State private var records: [MirsaWallpaperJournal.Record] = []
+    @State private var items: [MirsaCustomWallpapers.Item] = []
     @State private var busy = false
-    @State private var pendingDelete: MirsaWallpaperJournal.Record?
+    @State private var pendingDelete: MirsaCustomWallpapers.Item?
     @State private var confirmCleanup = false
     @State private var message: String?
     @State private var failed = false
@@ -20,12 +20,18 @@ struct MirsaWallpaperManagementSection: View {
 
     var body: some View {
         Section {
-            if records.isEmpty {
+            if items.isEmpty {
                 Text(t(.ownedEmpty)).font(.subheadline).foregroundColor(.secondary)
             }
-            ForEach(records.filter { $0.copied }) { rec in
+            ForEach(items) { rec in
                 HStack(spacing: 10) {
-                    Image(systemName: "photo.on.rectangle").foregroundColor(.secondary)
+                    if let data = rec.thumbnail, let img = UIImage(data: data) {
+                        Image(uiImage: img).resizable().scaledToFill()
+                            .frame(width: 32, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
+                    } else {
+                        Image(systemName: "photo.on.rectangle").foregroundColor(.secondary)
+                            .frame(width: 32, height: 44)
+                    }
                     Text(rec.title.isEmpty ? rec.id : rec.title).font(.subheadline.bold()).lineLimit(1)
                     Spacer()
                     Button(role: .destructive) { pendingDelete = rec } label: {
@@ -60,7 +66,7 @@ struct MirsaWallpaperManagementSection: View {
                 pendingDelete = nil
             }
             Button(t(.cancel), role: .cancel) { pendingDelete = nil }
-        } message: { Text(t(.deleteBody)) }
+        } message: { Text(pendingDelete.map { "“" + ($0.title.isEmpty ? $0.id : $0.title) + "”\n\n" } .map { $0 + t(.deleteBody) } ?? t(.deleteBody)) }
         .alert(t(.cleanupTitle), isPresented: $confirmCleanup) {
             Button(t(.cleanupConfirm)) { cleanup() }
             Button(t(.cancel), role: .cancel) {}
@@ -68,8 +74,20 @@ struct MirsaWallpaperManagementSection: View {
     }
 
     private func reload() {
-        do { records = try MirsaWallpaperJournal.records() }
-        catch { report(error, "") }
+        guard !busy else { return }
+        busy = true
+        Task.detached {
+            let lines = LogBox()
+            var found: [MirsaCustomWallpapers.Item] = []
+            var err: Error?
+            do { found = try MirsaCustomWallpapers.list(log: { lines.add($0) }) } catch { err = error }
+            let out = lines.all
+            await MainActor.run {
+                out.forEach(log)
+                busy = false
+                if let err { report(err, "") } else { items = found; failed = false }
+            }
+        }
     }
 
     private func report(_ error: Error, _ prefix: String) {
@@ -78,13 +96,13 @@ struct MirsaWallpaperManagementSection: View {
         log("MANAGEMENT ERROR " + error.localizedDescription)
     }
 
-    private func delete(_ rec: MirsaWallpaperJournal.Record) {
+    private func delete(_ rec: MirsaCustomWallpapers.Item) {
         guard !disabled else { return }
         busy = true; message = nil
         Task.detached {
             let lines = LogBox()
             var err: Error?
-            do { try MirsaWallpaperJournal.delete(rec, log: { lines.add($0) }) } catch { err = error }
+            do { try MirsaCustomWallpapers.delete(rec, log: { lines.add($0) }) } catch { err = error }
             let out = lines.all
             await MainActor.run {
                 out.forEach(log)
