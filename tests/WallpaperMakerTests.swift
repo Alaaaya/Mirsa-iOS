@@ -565,7 +565,7 @@ extension WallpaperMakerTests {
         let bytes = Data("archive containment fixture".utf8)
         do {
             let archive = try Archive(url: zip, accessMode: .create)
-            try archive.addEntry(with: "nested/", type: .directory, uncompressedSize: 0) { _, _ in Data() }
+            try archive.addEntry(with: "nested/", type: .directory, uncompressedSize: Int64(0)) { _, _ in Data() }
             try archive.addEntry(with: "nested/file", type: .file, uncompressedSize: Int64(bytes.count)) { offset, count in
                 bytes.subdata(in: Int(offset)..<(Int(offset) + count))
             }
@@ -588,7 +588,7 @@ extension WallpaperMakerTests {
         let zip = fixture.appendingPathComponent("bad.zip")
         do {
             let archive = try Archive(url: zip, accessMode: .create)
-            try archive.addEntry(with: "../escaped", type: .file, uncompressedSize: 1) { _, _ in Data([1]) }
+            try archive.addEntry(with: "../escaped", type: .file, uncompressedSize: Int64(1)) { _, _ in Data([1]) }
         }
         XCTAssertThrowsError(try TendiesEngine.shared.extractValidatedArchive(zip, to: destination))
         XCTAssertTrue(try fm.contentsOfDirectory(atPath: destination.path).isEmpty)
@@ -598,7 +598,7 @@ extension WallpaperMakerTests {
         let safeZip = fixture.appendingPathComponent("safe.zip")
         do {
             let archive = try Archive(url: safeZip, accessMode: .create)
-            try archive.addEntry(with: "file", type: .file, uncompressedSize: 1) { _, _ in Data([1]) }
+            try archive.addEntry(with: "file", type: .file, uncompressedSize: Int64(1)) { _, _ in Data([1]) }
         }
         XCTAssertThrowsError(try TendiesEngine.shared.extractValidatedArchive(safeZip, to: alias))
         XCTAssertTrue(try fm.contentsOfDirectory(atPath: destination.path).isEmpty)
