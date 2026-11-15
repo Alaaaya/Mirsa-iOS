@@ -178,6 +178,7 @@ enum PosterBoardStore {
               unredirected(store, lease: lease) else {
             throw failure("PosterBoard datastore is missing or redirected.")
         }
+        if let lease { MirsaPosterDiscovery.rememberVerified(lease.targetURL.path) }
     }
     private static func verifiedContainer(_ path: String) -> Bool {
         guard let lease = try? PosterBoardLease(path: path) else { return false }
