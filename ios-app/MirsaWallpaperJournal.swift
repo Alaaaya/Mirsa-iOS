@@ -97,16 +97,45 @@ enum MirsaWallpaperJournal {
         }
         return target
     }
-    static func absent(_ target: URL) throws -> Bool {
-        var info = stat()
-        if lstat(target.path, &info) == 0 { return false }
-        guard errno == ENOENT else { throw PosterBoardStore.failure("Absence is not proven; journal retained.") }
-        // Require the exact existing parent, not absence of a whole datastore.
-        let parent = try target.deletingLastPathComponent().resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-        guard parent.isDirectory == true, parent.isSymbolicLink != true else {
-            throw PosterBoardStore.failure("Descriptor parent unavailable.")
+    /// Only genuine ENOENT is absence. ENOTDIR, denied and unknown reads fail closed.
+    static func absenceResult(_ result: Int32, error: Int32) throws -> Bool {
+        if result == 0 { return false } // includes symlinks and special nodes
+        guard result == -1, error == ENOENT else {
+            throw PosterBoardStore.failure("Absence is not proven; journal retained.")
         }
         return true
+    }
+    static func sameParent(_ before: stat, _ after: stat) -> Bool {
+        (before.st_mode & S_IFMT) == S_IFDIR && (after.st_mode & S_IFMT) == S_IFDIR &&
+        before.st_dev == after.st_dev && before.st_ino == after.st_ino
+    }
+    static func absent(_ target: URL) throws -> Bool {
+        var info = stat()
+        let result = lstat(target.path, &info)
+        let error = errno
+        guard try absenceResult(result, error: error) else { return false }
+        // Pin a readable real parent. A missing ancestor or linked parent is not proof.
+        let parent = target.deletingLastPathComponent()
+        var before = stat()
+        guard lstat(parent.path, &before) == 0, (before.st_mode & S_IFMT) == S_IFDIR else {
+            throw PosterBoardStore.failure("Descriptor parent unavailable.")
+        }
+        let fd = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard fd >= 0 else { throw PosterBoardStore.failure("Descriptor parent unreadable; journal retained.") }
+        defer { Darwin.close(fd) }
+        var pinned = stat(), after = stat()
+        guard fstat(fd, &pinned) == 0, pinned.st_dev == before.st_dev, pinned.st_ino == before.st_ino else {
+            throw PosterBoardStore.failure("Descriptor parent changed; journal retained.")
+        }
+        var child = stat()
+        let childResult = fstatat(fd, target.lastPathComponent, &child, AT_SYMLINK_NOFOLLOW)
+        let childError = errno
+        let missing = try absenceResult(childResult, error: childError)
+        guard lstat(parent.path, &after) == 0, (after.st_mode & S_IFMT) == S_IFDIR,
+              after.st_dev == pinned.st_dev, after.st_ino == pinned.st_ino else {
+            throw PosterBoardStore.failure("Descriptor parent changed; journal retained.")
+        }
+        return missing
     }
     static func removeJournal(_ record: Record) throws {
         let url = root.appendingPathComponent(record.id + ".json")
@@ -158,14 +187,58 @@ enum MirsaWallpaperJournal {
             }
             try lease.close()
             _ = try current(record)
-            let history = root.appendingPathComponent("Archived", isDirectory: true)
-            try safeLocal(history)
-            try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
-            let destination = history.appendingPathComponent(record.id + "-" + UUID().uuidString + ".json")
-            try safeLocal(destination)
-            // Move is local and exclusive, preserving all original evidence.
-            try FileManager.default.moveItem(at: root.appendingPathComponent(record.id + ".json"), to: destination)
+            try archiveLocal(record, at: root, revalidate: {})
             log("JOURNAL ARCHIVED " + record.id + " fresh exact absence; lease closed; no PosterBoard files modified.")
+        }
+    }
+    /// Move ONLY app-private evidence. Revalidate immediately before and after
+    /// the move; a racing target appearance restores the original journal.
+    static func archiveLocal(_ record: Record, at journalRoot: URL,
+                             revalidate: () throws -> Void) throws {
+        let source = journalRoot.appendingPathComponent(record.id + ".json")
+        let history = journalRoot.appendingPathComponent("Archived", isDirectory: true)
+        try safeLocal(journalRoot)
+        try safeLocal(history)
+        try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+        let destination = history.appendingPathComponent(record.id + "-" + UUID().uuidString + ".json")
+        try safeLocal(source)
+        try safeLocal(destination)
+        let stored = try JSONDecoder().decode(Record.self, from: Data(contentsOf: source))
+        guard sameRecord(stored, record) else { throw PosterBoardStore.failure("Journal changed; retained.") }
+        try revalidate()
+        try FileManager.default.moveItem(at: source, to: destination)
+        do { try revalidate() }
+        catch {
+            // No overwrite and no system mutation, even when restoration fails.
+            // In that case original evidence remains in Archived and install stops.
+            try FileManager.default.moveItem(at: destination, to: source)
+            throw error
+        }
+    }
+    /// Called inside the install's exclusive operation using its SAME active lease.
+    /// A prior list/inspect result is deliberately never used as absence evidence.
+    static func archiveAbsentForReinstall(_ requested: Record, lease: PosterBoardLease,
+                                         log: @escaping (String) -> Void) throws {
+        try exclusive {
+            let record = try current(requested)
+            try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+            let target = try grantExact(record, lease: lease)
+            let parent = target.deletingLastPathComponent()
+            var originalParent = stat()
+            guard lstat(parent.path, &originalParent) == 0, (originalParent.st_mode & S_IFMT) == S_IFDIR else {
+                throw PosterBoardStore.failure("Descriptor parent unavailable; journal retained.")
+            }
+            func revalidate() throws {
+                var currentParent = stat()
+                guard lstat(parent.path, &currentParent) == 0, sameParent(originalParent, currentParent),
+                      lease.targetURL.path == record.container,
+                      lease.permits(parent), lease.permits(target), try absent(target) else {
+                    throw PosterBoardStore.failure("Exact wallpaper is present or uncertain; journal retained.")
+                }
+            }
+            try revalidate()
+            try archiveLocal(record, at: root, revalidate: revalidate)
+            log("JOURNAL REINSTALL ARCHIVED " + record.id + " fresh exact ENOENT under install lease; no PosterBoard files modified.")
         }
     }
     /// Called only from the per-item destructive confirmation, never on launch.

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Lists positively identified custom wallpapers (Mirsa, Placard, Probe) with per-item delete; unknown/Apple items are hidden.
+/// Diagnostic build: journal rows keep strict deletion; unclassified rows are inspect-only.
 /// Nothing here runs on appear except a read-only listing.
 struct MirsaWallpaperManagementSection: View {
     let externalBusy: Bool
@@ -36,13 +36,24 @@ struct MirsaWallpaperManagementSection: View {
                         Image(systemName: "photo.on.rectangle").foregroundColor(.secondary)
                             .frame(width: 32, height: 44)
                     }
-                    Text(rec.title.isEmpty ? rec.id : rec.title).font(.subheadline.bold()).lineLimit(1)
-                    Spacer()
-                    Button(role: .destructive) { pendingDelete = rec } label: {
-                        Text(t(.deleteItem)).font(.caption.bold())
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(rec.title.isEmpty ? rec.id : rec.title).font(.subheadline.bold()).lineLimit(1)
+                        if !rec.canDelete {
+                            Label(t(.unknownWarning), systemImage: "exclamationmark.triangle")
+                                .font(.caption2).foregroundColor(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
+                            .buttonStyle(.bordered).disabled(disabled)
                     }
-                    .buttonStyle(.bordered).tint(.red)
-                    .disabled(disabled)
+                    Spacer()
+                    if rec.canDelete {
+                        Button(role: .destructive) { pendingDelete = rec } label: {
+                            Text(t(.deleteItem)).font(.caption.bold())
+                        }
+                        .buttonStyle(.bordered).tint(.red)
+                        .disabled(disabled)
+                    }
                 }
             }
             journalRows
@@ -164,6 +175,14 @@ struct MirsaWallpaperManagementSection: View {
         run({ lines in box.items = try MirsaCustomWallpapers.list(log: { lines.add($0) }) }, done: { err in
             reloadJournal()
             if let err { report(err, "") } else { items = box.items; failed = false }
+        })
+    }
+
+    private func inspect(_ rec: MirsaCustomWallpapers.Item) {
+        guard !disabled else { return }
+        run({ lines in try MirsaWallpaperDiagnostics.inspect(rec, log: { lines.add($0) }) }, done: { err in
+            if let err { report(err, "") }
+            else { failed = false; message = t(.diagnosticDone) }
         })
     }
 

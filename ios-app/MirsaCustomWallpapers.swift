@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 import CryptoKit
 
-/// Intentionally narrow. Unknown, ambiguous and stock descriptors are invisible.
+/// Diagnostic listing. Unclassified entries remain visible but never deletable.
 /// A title, UUID or Apple's shared 7400 identity is never provenance by itself.
 enum MirsaCustomWallpapers {
     struct Item: Identifiable, Equatable {
@@ -15,6 +15,7 @@ enum MirsaCustomWallpapers {
         let device: UInt64
         let inode: UInt64
         let paths: [String]
+        var canDelete: Bool = true
     }
     struct Snapshot: Equatable {
         let expected: [String: String]
@@ -399,7 +400,7 @@ enum MirsaCustomWallpapers {
                     id: record.id, container: record.container, relative: record.relative,
                     expected: record.expected, device: device, inode: inode, paths: paths)
     }
-    private static func list(lease: PosterBoardLease, records: [MirsaWallpaperJournal.Record], log: (String) -> Void) throws -> [Item] {
+    private static func list(lease: PosterBoardLease, records: [MirsaWallpaperJournal.Record], log: @escaping (String) -> Void) throws -> [Item] {
         try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
         let parent = try MirsaPosterCopy.destination(lease: lease)
         let root = try grant(parent, lease: lease)
@@ -431,13 +432,34 @@ enum MirsaCustomWallpapers {
                 continue // uncertainty never becomes absence or deletion authority
             }
         }
-        let recordedCurrent = Set(candidates.filter { $0.relative.hasPrefix(parent + "/") }.map { $0.id })
-        let unjournaled = names.filter { UUID(uuidString: $0) != nil && !recordedCurrent.contains($0) }.count
+        let visible = Set(found.map { $0.relative })
+        let current = names.filter { UUID(uuidString: $0) != nil }.sorted()
+        var unknownCount = 0
+        // No historical UUIDs or provider/basename heuristics confer provenance.
+        for id in current.prefix(64) where !visible.contains(parent + "/" + id) {
+            unknownCount += 1
+            found.append(Item(title: id, id: id, container: lease.targetURL.path,
+                              relative: parent + "/" + id, expected: [:], device: 0, inode: 0,
+                              paths: [], canDelete: false))
+        }
+        let budget = MirsaWallpaperDiagnostics.Budget()
+        for id in current.prefix(16) {
+            do {
+                let reader = try MirsaWallpaperDiagnostics.reader(relative: parent + "/" + id, lease: lease, budget: budget)
+                log("DIAG CURRENT uuid=" + id + " provider=" + MirsaPosterCopy.provider + " relative=" +
+                    MirsaWallpaperDiagnostics.quoted(parent + "/" + id) + " device=" + String(reader.original.st_dev) +
+                    " inode=" + String(reader.original.st_ino) + " errno=0 provenance=unclassified-unless-journal")
+                MirsaWallpaperDiagnostics.shallow(reader, log: log)
+            } catch { log("DIAG CURRENT uuid=" + id + " partial errno=" + String((error as NSError).code)) }
+            if (try? budget.check()) == nil { log("DIAG LIST budget reached; remaining uninspected, not absent"); break }
+        }
+        MirsaWallpaperDiagnostics.catalogProbe(log: log)
         log("CUSTOM LIST SUMMARY currentDescriptors=" + String(names.count) +
             " journalCandidates=" + String(candidates.count) + " shown=" + String(found.count) +
             " unavailable=" + String(unavailable) + " unprocessed=" + String(candidates.count - processed) +
-            " unjournaledHidden=" + String(unjournaled) +
-            "; unjournaled classification temporarily deferred, not an empty-gallery assertion.")
+            " unknownVisible=" + String(unknownCount) + " notShownByRowCap=" + String(max(0, current.count - 64)) +
+            "; partial diagnostic build, not all-custom deletion. Unknown/possible Apple rows inspect only.")
+
         return found
     }
     static func list(log: @escaping (String) -> Void) throws -> [Item] {
@@ -448,7 +470,7 @@ enum MirsaCustomWallpapers {
             do {
                 let items = try list(lease: lease, records: journals(), log: log)
                 try lease.close()
-                log("CUSTOM LIST identity-checked journal rows \(items.count); payload validation deferred until confirmed delete. Unjournaled/unknown/system entries hidden in lightweight mode; partial results retained.")
+                log("CUSTOM LIST identity-checked journal rows \(items.count); payload validation deferred until confirmed delete. Unclassified rows visible with warnings and inspect only; no generic all-custom deletion.")
                 return items
             } catch { try? lease.close(); throw error }
         }
@@ -456,6 +478,7 @@ enum MirsaCustomWallpapers {
     /// UI must obtain separate per-item destructive confirmation before calling.
     static func delete(_ requested: Item, log: @escaping (String) -> Void) throws {
         try MirsaWallpaperJournal.exclusive {
+            guard requested.canDelete else { throw PosterBoardStore.failure("Unclassified wallpaper is inspect-only. Nothing deleted.") }
             let container = try MirsaPosterDiscovery.discover(log: log)
             guard container == requested.container else { throw PosterBoardStore.failure("PosterBoard container changed; refresh the list.") }
             let lease = try PosterBoardLease(path: container, log: log)
