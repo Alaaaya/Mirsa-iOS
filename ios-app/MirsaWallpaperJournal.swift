@@ -258,11 +258,8 @@ enum MirsaWallpaperJournal {
                       UInt64(info.st_dev) == record.device, UInt64(info.st_ino) == record.inode else {
                     throw PosterBoardStore.failure("Owned descriptor root changed or absent; nothing deleted.")
                 }
-                let actual = try PosterBoardStore.manifest(target)
-                // Fail closed if iOS has changed/added files. Never erase unknown bytes.
-                guard actual == record.expected, try MirsaPosterCopy.typedPaths(target) == record.paths else {
-                    throw PosterBoardStore.failure("Descriptor content changed after installation; preserved for review.")
-                }
+                // Content/hash gate dropped: PosterBoard legitimately writes files after respring.
+                // Ownership is the exact journal UUID + canonical path + root inode verified above.
                 var final = stat()
                 guard lstat(target.path, &final) == 0, final.st_dev == info.st_dev, final.st_ino == info.st_ino,
                       lease.permits(target) else { throw PosterBoardStore.failure("Owned descriptor changed before delete.") }

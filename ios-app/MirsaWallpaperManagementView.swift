@@ -163,9 +163,14 @@ struct MirsaWallpaperManagementSection: View {
 
     private func deleteJournalItem(_ rec: MirsaWallpaperJournal.Record) {
         guard !disabled else { return }
-        run({ lines in try MirsaWallpaperJournal.delete(rec, log: { lines.add($0) }) }, done: { err in
+        log("DELETE CONFIRMED by user for journal UUID " + rec.id)
+        run({ lines in
+            lines.add("DELETE IDENTITY CHECK exact journal UUID " + rec.id)
+            try MirsaWallpaperJournal.delete(rec, log: { lines.add($0) })
+        }, done: { err in
             reloadJournal(); reload()
-            if let err { report(err, "") } else { failed = false; message = t(.deleteDone); onDeleted() }
+            if let err { log("DELETE RESULT error " + err.localizedDescription); report(err, "") }
+            else { log("DELETE RESULT success; offering respring"); failed = false; message = t(.deleteDone); onDeleted() }
         })
     }
 
@@ -194,10 +199,14 @@ struct MirsaWallpaperManagementSection: View {
 
     private func delete(_ rec: MirsaCustomWallpapers.Item) {
         guard !disabled else { return }
-        run({ lines in try MirsaCustomWallpapers.delete(rec, log: { lines.add($0) }) }, done: { err in
+        log("DELETE CONFIRMED by user for UUID " + rec.id)
+        run({ lines in
+            lines.add("DELETE IDENTITY CHECK exact journal UUID " + rec.id)
+            try MirsaCustomWallpapers.delete(rec, log: { lines.add($0) })
+        }, done: { err in
             reload()
-            if let err { report(err, "") }
-            else { failed = false; message = t(.deleteDone); onDeleted() }
+            if let err { log("DELETE RESULT error " + err.localizedDescription); report(err, "") }
+            else { log("DELETE RESULT success; offering respring"); failed = false; message = t(.deleteDone); onDeleted() }
         })
     }
 

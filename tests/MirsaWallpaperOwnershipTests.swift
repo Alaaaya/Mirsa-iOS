@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import Darwin
+import UIKit
 @testable import Mirsa
 
 /// These fixtures call production package/path helpers on private temporary files.
@@ -244,10 +245,10 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         wrong = journal; wrong.device = 8; XCTAssertFalse(accepted([wrong]))
         wrong = journal; wrong.inode = 20; XCTAssertFalse(accepted([wrong]))
         wrong = journal; wrong.container = record().container; XCTAssertFalse(accepted([wrong]))
-        wrong = journal; wrong.paths = nil; XCTAssertFalse(accepted([wrong]))
-        wrong = journal; wrong.expected["unrelated/custom.asset"] = "mutation"; XCTAssertFalse(accepted([wrong]))
+        // Content/hash is not an ownership gate: PosterBoard rewrites files after respring.
+        XCTAssertTrue(accepted([journal], customSnapshot(["unrelated/custom.asset": "rewritten by iOS", "added.png": "x"])))
+        XCTAssertFalse(accepted([], customSnapshot(["added.png": "x"]))) // no journal => never deletable
         wrong = journal; wrong.relative = "../" + wrong.relative; XCTAssertFalse(accepted([wrong]))
-        XCTAssertFalse(accepted([journal], customSnapshot(journal.expected))) // empty directory disappeared
     }
     private func bespokeFixture() -> (MirsaCustomWallpapers.BespokePayload, MirsaCustomWallpapers.Snapshot, MirsaCustomWallpapers.AppleBaseline) {
         let root = "versions/1/contents/CometGarden.wallpaper/"
@@ -385,8 +386,11 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         // MUST still reject mutated/added bytes and root replacements.
         let mutated = MirsaCustomWallpapers.Snapshot(expected: rec.expected.merging(["ios-added": "unknown"]) { _, new in new },
             paths: rec.paths! + ["F:ios-added"], device: 5, inode: 12)
-        XCTAssertNil(MirsaCustomWallpapers.completedJournal([rec], id: rec.id,
+        XCTAssertNotNil(MirsaCustomWallpapers.completedJournal([rec], id: rec.id,
             container: rec.container, relative: rec.relative, snapshot: mutated))
+        let replaced = MirsaCustomWallpapers.Snapshot(expected: rec.expected, paths: rec.paths!, device: 5, inode: 99)
+        XCTAssertNil(MirsaCustomWallpapers.completedJournal([rec], id: rec.id,
+            container: rec.container, relative: rec.relative, snapshot: replaced))
         var invalid = rec; invalid.relative += "/../" + rec.id
         XCTAssertNil(MirsaCustomWallpapers.journalItem(invalid, device: 5, inode: 12))
     }
@@ -554,5 +558,15 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         try fm.createSymbolicLink(at: alias, withDestinationURL: moved)
         XCTAssertThrowsError(try MirsaWallpaperDiagnostics.Reader(root: alias, budget: .init()))
         XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("file")), Data("payload".utf8))
+    }
+
+    func testThumbnailDecodeIsBoundedAndFallsBack() throws {
+        XCTAssertNil(MirsaCustomWallpapers.thumbnailData(from: Data("not an image".utf8)))
+        XCTAssertNil(MirsaCustomWallpapers.thumbnailData(from: Data(count: MirsaCustomWallpapers.thumbMaxFileBytes + 1)))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 900)).image { c in
+            UIColor.red.setFill(); c.fill(CGRect(x: 0, y: 0, width: 600, height: 900)) }
+        let jpeg = try XCTUnwrap(MirsaCustomWallpapers.thumbnailData(from: try XCTUnwrap(image.pngData())))
+        let small = try XCTUnwrap(UIImage(data: jpeg))
+        XCTAssertLessThanOrEqual(max(small.size.width * small.scale, small.size.height * small.scale), 128)
     }
 }
