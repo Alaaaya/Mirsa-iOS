@@ -395,34 +395,69 @@ enum MirsaCustomWallpapers {
         return nil
     }
 
-    /// Display name from the descriptor's own Wallpaper.plist ("name"), bounded and lease-checked. nil = unknown.
-    static func descriptorName(_ root: URL, lease: PosterBoardLease, log: (String) -> Void) -> String? {
+    struct DescriptorInfo: Equatable {
+        var name: String? = nil
+        var family: String? = nil
+        var identifier: String? = nil
+        var packageName: String? = nil
+        var apple = false
+    }
+    /// Pure Apple-catalog test: a CollectionsPoster stock descriptor carries "NNNN.Name.wallpaper" whose
+    /// numeric prefix equals the package's own Wallpaper.plist identifier and has a non-empty family.
+    /// Provider alone, UUIDs and names never decide. Mirsa envelopes lack this triple match.
+    static func isAppleCatalog(packageName: String, plistIdentifier: String?, family: String?, userInfoIdentifier: String? = nil) -> Bool {
+        guard packageName.hasSuffix(".wallpaper"), let dot = packageName.firstIndex(of: ".") else { return false }
+        let numeric = String(packageName[packageName.startIndex..<dot])
+        guard (3...6).contains(numeric.count), numeric.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+              let pid = plistIdentifier, pid == numeric,
+              let fam = family, !fam.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if let u = userInfoIdentifier, u != numeric { return false }
+        return true
+    }
+    /// Descriptor metadata from its own Wallpaper.plist, bounded and lease-checked (exact paths, no recursion).
+    static func descriptorInfo(_ root: URL, lease: PosterBoardLease, log: (String) -> Void) -> DescriptorInfo {
+        var info = DescriptorInfo()
         let prefix = lease.effectiveURL.path + "/"
-        guard root.path.hasPrefix(prefix) else { return nil }
+        guard root.path.hasPrefix(prefix) else { return info }
         let base = String(root.path.dropFirst(prefix.count))
         func names(_ rel: String) -> [String]? {
             guard let url = try? grant(rel, lease: lease), PosterBoardStore.unredirected(url, lease: lease),
                   let n = try? FileManager.default.contentsOfDirectory(atPath: url.path), n.count <= 64 else { return nil }
             return n.filter { validRelative($0) }.sorted()
         }
-        guard let versions = names(base + "/versions") else { log("CUSTOM NAME no versions dir"); return nil }
+        guard let versions = names(base + "/versions") else { log("CUSTOM NAME no versions dir"); return info }
         for v in versions.filter({ !$0.isEmpty && $0.utf8.allSatisfy { $0 >= 48 && $0 <= 57 } }).reversed().prefix(3) {
             let contents = base + "/versions/" + v + "/contents"
+            var userInfoId: String? = nil
+            let ui = contents + "/com.apple.posterkit.provider.contents.userInfo"
+            if let url = try? grant(ui, lease: lease), PosterBoardStore.unredirected(url, lease: lease),
+               let data = try? read(url, limit: 64 * 1024),
+               let d = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
+                userInfoId = d["wallpaperRepresentingIdentifier"] as? String
+            }
             for pkg in (names(contents) ?? []).filter({ $0.hasSuffix(".wallpaper") }).prefix(3) {
                 let rel = contents + "/" + pkg + "/Wallpaper.plist"
                 do {
                     let url = try grant(rel, lease: lease)
                     guard PosterBoardStore.unredirected(url, lease: lease) else { continue }
                     let data = try read(url, limit: 64 * 1024)
-                    if let d = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-                       let name = d["name"] as? String {
-                        let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !t.isEmpty { return String(t.prefix(80)) }
+                    if let d = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
+                        let clean = { (k: String) -> String? in
+                            let t = ((d[k] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                            return t.isEmpty ? nil : String(t.prefix(80))
+                        }
+                        info.name = clean("name"); info.family = clean("family"); info.identifier = clean("identifier")
+                        info.packageName = pkg
+                        info.apple = isAppleCatalog(packageName: pkg, plistIdentifier: info.identifier, family: info.family, userInfoIdentifier: userInfoId)
+                        if info.name != nil || info.apple { return info }
                     }
                 } catch { log("CUSTOM NAME unreadable " + rel + ": " + error.localizedDescription) }
             }
         }
-        return nil
+        return info
+    }
+    static func descriptorName(_ root: URL, lease: PosterBoardLease, log: (String) -> Void) -> String? {
+        descriptorInfo(root, lease: lease, log: log).name
     }
     /// ImageIO downsample with pixel-dimension caps; never a full decode of oversized images.
     static func thumbnailData(from data: Data) -> Data? {
@@ -536,14 +571,20 @@ enum MirsaCustomWallpapers {
         let current = names.filter { UUID(uuidString: $0) != nil }.sorted()
         var unknownCount = 0
         // No historical UUIDs or provider/basename heuristics confer provenance.
-        var unnamed = 0
+        var unnamed = 0, appleHidden = 0
         for id in current.prefix(64) where !visible.contains(parent + "/" + id) {
             unknownCount += 1
             let rel = parent + "/" + id
             var title = ""
             var thumb: Data? = nil
             if let target = try? grant(rel, lease: lease), ProcessInfo.processInfo.systemUptime < deadline - 5 {
-                title = descriptorName(target, lease: lease, log: log) ?? ""
+                let info = descriptorInfo(target, lease: lease, log: log)
+                if info.apple {
+                    appleHidden += 1
+                    log("CUSTOM LIST hidden Apple catalog descriptor " + id + " package=" + (info.packageName ?? "?"))
+                    continue
+                }
+                title = info.name ?? ""
                 if thumbs < 48 { thumbs += 1; thumb = previewThumbnail(target, lease: lease) }
                 if thumb == nil { log("CUSTOM THUMB none for " + id) }
             }
@@ -567,7 +608,7 @@ enum MirsaCustomWallpapers {
         log("CUSTOM LIST SUMMARY currentDescriptors=" + String(names.count) +
             " journalCandidates=" + String(candidates.count) + " shown=" + String(found.count) +
             " unavailable=" + String(unavailable) + " unprocessed=" + String(candidates.count - processed) +
-            " unknownVisible=" + String(unknownCount) + " notShownByRowCap=" + String(max(0, current.count - 64)) +
+            " appleHidden=" + String(appleHidden) + " unknownVisible=" + String(unknownCount - appleHidden) + " notShownByRowCap=" + String(max(0, current.count - 64)) +
             "; partial diagnostic build, not all-custom deletion. Unknown/possible Apple rows inspect only.")
 
         return found
