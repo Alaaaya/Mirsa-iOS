@@ -72,8 +72,6 @@ struct WallpaperMakerSection: View {
 
     var body: some View {
         Group {
-            Label(t(.title), systemImage: "square.3.layers.3d")
-                .font(.headline)
             Text(t(.steps)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button { showPhotos = true } label: { Label(t(.photos), systemImage: "photo.stack") }
