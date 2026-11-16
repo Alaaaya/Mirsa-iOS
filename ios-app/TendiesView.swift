@@ -20,8 +20,7 @@ struct TendiesView: View {
         var id: String { rawValue }
     }
     @State private var wallpaperPrompt: WallpaperPrompt?
-    @State private var showRespringOverlay = false
-    @State private var preparingRespring = false
+    @StateObject private var respringPresentation = MirsaWallpaperRespringPresentation()
     /// Explicit confirmation gate shared by successful copy/delete and the standalone action.
     @State private var respringArmed = false
     @State private var installStartedThisSession = false
@@ -204,7 +203,7 @@ struct TendiesView: View {
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(videoApplyRunning || preparingRespring || showRespringOverlay)
+                        .disabled(videoApplyRunning || respringPresentation.isPresented)
                         .accessibilityIdentifier("wallpaper-respring")
                     }
                     .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
@@ -290,9 +289,8 @@ struct TendiesView: View {
                                      let ok = respringArmed
                                      respringArmed = false
                                      if ok {
-                                         vm.tendiesFlashLog.append("REFRESH confirmed by user; preparing Placard respring (250ms).")
                                          wallpaperPrompt = nil
-                                         preparingRespring = true
+                                         respringPresentation.start { vm.tendiesFlashLog.append($0) }
                                      }
                                  },
                                  secondaryButton: .cancel(Text(ws(.respringLater))) {
@@ -329,43 +327,27 @@ struct TendiesView: View {
             }
             } // ScrollViewReader
         }
-        // Mount above the whole navigation/form hierarchy, not as a lazy form
-        // child. Placard stages the confirmed action for 250ms before mounting.
-        .task(id: preparingRespring) {
-            guard preparingRespring else { return }
-            do { try await Task.sleep(for: .milliseconds(250)) }
-            catch {
-                preparingRespring = false
-                vm.tendiesFlashLog.append("REFRESH staging cancelled; no payload mounted.")
-                return
-            }
-            guard !Task.isCancelled else { return }
-            vm.tendiesFlashLog.append("REFRESH staging complete; mounting Placard WebKit overlay.")
-            showRespringOverlay = true
-            preparingRespring = false
-        }
-        .overlay {
-            if showRespringOverlay {
+        // Same presentation and lifetime as the proven PB Probe v26 path.
+        // The confirmed action immediately sets one retained model flag. No
+        // delayed Task or lazy Form overlay can cancel/drop the WebKit mount.
+        .fullScreenCover(isPresented: $respringPresentation.isPresented, onDismiss: {
+            let line = "REFRESH AFTER cover dismissed · system respring and picker visibility require device confirmation"
+            MirsaWallpaperEvidence.record(line)
+            vm.tendiesFlashLog.append(line)
+        }) {
+            ZStack(alignment: .topTrailing) {
                 MirsaWallpaperRespringView(event: { line in
-                    // WebKit may interrupt this app before the next main-loop
-                    // turn. Save launch/navigation evidence synchronously.
                     MirsaWallpaperEvidence.record(line)
-                    DispatchQueue.main.async { vm.tendiesFlashLog.append(line) }
-                })
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .transition(.opacity)
-                .onAppear {
-                    vm.tendiesFlashLog.append("REFRESH overlay appeared; system respring not yet confirmed.")
-                }
-            } else if preparingRespring {
-                ProgressView(ws(.respringConfirm)).padding()
-            }
+                    vm.tendiesFlashLog.append(line)
+                }).ignoresSafeArea()
+                Button(ws(.cancel)) { respringPresentation.isPresented = false }
+                    .padding().background(.black.opacity(0.8)).foregroundStyle(.white)
+            }.interactiveDismissDisabled()
         }
     }
 
     private func offerRespring() {
-        guard !videoApplyRunning, !preparingRespring, !showRespringOverlay else { return }
+        guard !videoApplyRunning, !respringPresentation.isPresented else { return }
         respringArmed = true
         vm.tendiesFlashLog.append("REFRESH PROMPT offered; awaiting explicit restart or not-now choice.")
         wallpaperPrompt = .respring
