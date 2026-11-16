@@ -16,8 +16,6 @@ struct WallpaperMakerSection: View {
     @State private var layers: [WallpaperPhotoLayer] = WallpaperMakerSection.fixtureLayers()
     @State private var video: URL?
     @State private var generated: URL?
-    @StateObject private var customRequest = WallpaperRequestDraft()
-    @State private var showCustomRequest = false
     @State private var showPhotos = false
     @State private var showVideo = false
     @State private var showFiles = false
@@ -74,9 +72,6 @@ struct WallpaperMakerSection: View {
 
     var body: some View {
         Group {
-            Button { showCustomRequest = true } label: {
-                Label(WallpaperRequestText.title, systemImage: "sparkles.rectangle.stack")
-            }.disabled(busy || applyRunning)
             Label(t(.title), systemImage: "square.3.layers.3d")
                 .font(.headline)
             Text(t(.steps)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -145,9 +140,6 @@ struct WallpaperMakerSection: View {
             // Keeps the last (destructive) button clear of the floating dock, keyboard and large text.
             Color.clear.frame(height: MirsaTabBarMetrics.clearance).listRowBackground(Color.clear)
                 .accessibilityHidden(true)
-        }
-        .sheet(isPresented: $showCustomRequest) {
-            WallpaperRequestView(draft: customRequest)
         }
         .sheet(isPresented: $showPhotos) {
             WallpaperPhotosPicker { result in

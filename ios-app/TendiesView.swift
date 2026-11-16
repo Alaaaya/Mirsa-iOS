@@ -12,6 +12,11 @@ import UniformTypeIdentifiers
 struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
+    @State private var showCustomRequest = false
+    @StateObject private var customRequest = WallpaperRequestDraft()
+    @ObservedObject private var chatStore = ForgeChatStore.shared
+    @ObservedObject private var chatLocal = ForgeChatLocal.shared
+    private var requestUnread: Int { chatLocal.unreadCount(chatStore.threads) }
     @State private var selectedDetailItem: TendieItem? = nil
     // One presenter owns install and respring. Separate chained alerts can
     // dismiss each other when published copy/list state changes.
@@ -74,53 +79,57 @@ struct TendiesView: View {
                     }
                 }
 
-                // Original video wallpaper feature (2.4) at the top of the same tab
-                OriginalVideoWallpaperBlock(applyRunning: videoApplyRunning)
-
-                // Section 1: Import Wallpapers
+                // Two primary actions side by side.
                 Section {
-                    Button {
-                        showFilePicker = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Spacer()
-                            Image(systemName: "doc.badge.plus")
-                            Text(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore))
-                            Spacer()
+                    HStack(spacing: 10) {
+                        if case .running = vm.tendiesFlashPhase {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(MirsaTr.lit("Flashing Wallpapers…")).font(.subheadline.bold())
+                                    ProgressView(value: vm.tendiesFlashProgress)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Button { wallpaperPrompt = .install } label: {
+                                Label(TendiesPageText.text(.install), systemImage: "sparkles")
+                                    .font(.headline).lineLimit(2).minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(.borderedProminent).tint(.blue)
+                            .disabled(selectedCount == 0)
+                            .accessibilityIdentifier("wallpaper-flash")
                         }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 48)
+                        Button { showCustomRequest = true } label: {
+                            Label(TendiesPageText.text(.request), systemImage: "sparkles.rectangle.stack")
+                                .font(.headline).lineLimit(2).minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .overlay(alignment: .topTrailing) {
+                                    if requestUnread > 0 {
+                                        Text(String(requestUnread)).font(.caption2.bold()).foregroundColor(.white)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Capsule().fill(Color.red))
+                                            .offset(x: 6, y: -6)
+                                            .accessibilityIdentifier("wallpaper-request-badge")
+                                    }
+                                }
+                        }
+                        .buttonStyle(.borderedProminent).tint(.indigo)
+                        .disabled(videoApplyRunning)
+                        .accessibilityIdentifier("wallpaper-request")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-
-                    WallpaperMakerSection(applyRunning: videoApplyRunning) { archive in
-                        await vm.importTendieFiles(urls: [archive])
-                    }
+                    .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                 } footer: {
-                    if vm.posterBoardContainer.isEmpty {
-                        Text(MirsaTr.lit("PosterBoard container will be auto-detected automatically on flash."))
-                    } else {
-                        Text(MirsaTr.lit("Target: PosterBoard container detected ✅"))
+                    if !vm.tendiesSkippedTitles.isEmpty {
+                        Text(TendiesPageText.skipped(vm.tendiesSkippedTitles))
+                            .accessibilityIdentifier("wallpaper-skipped-note")
+                    } else if case .done(ok: true) = vm.tendiesFlashPhase, !vm.tendiesInstalledNew {
+                        Text(TendiesPageText.text(.nothingNew))
                     }
                 }
 
-                // Section 2: PosterBoard Options
-                Section {
-                    Toggle(isOn: $vm.resetPBProtections) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(MirsaTr.lit("Force PosterBoard Cache Refresh"))
-                                .font(.subheadline.weight(.medium))
-                            Text(MirsaTr.lit("Resets file protections so iOS re-indexes wallpapers immediately"))
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-
-                // Section 3: Wallpapers Gallery
+                // Imported files waiting to be installed (selection for the install button).
                 if !vm.tendieItems.isEmpty {
                     Section {
                         HStack {
@@ -136,7 +145,6 @@ struct TendiesView: View {
                             }
                             .font(.caption)
                         }
-
                         ForEach($vm.tendieItems) { $item in
                             TendieRowView(item: $item) {
                                 selectedDetailItem = item
@@ -145,91 +153,54 @@ struct TendiesView: View {
                             }
                         }
                     } header: {
-                        Text(MirsaTr.lit("Wallpapers Gallery"))
+                        Text(TendiesPageText.text(.ready))
                     }
-                } else {
-                    Section {
-                        VStack(spacing: 10) {
-                            Image(systemName: "photo.stack")
-                                .font(.system(size: 32))
-                                .foregroundColor(.secondary)
-                            Text(MirsaTr.lit("No .tendies wallpapers loaded yet"))
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Text(WallpaperMakerStrings.text(.importHint))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                    }
-                }
-
-                // Section 4: Flash Action & Respring
-                Section {
-                    VStack(spacing: 12) {
-                        if case .running = vm.tendiesFlashPhase {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(MirsaTr.lit("Flashing Wallpapers…")).font(.subheadline.bold())
-                                    ProgressView(value: vm.tendiesFlashProgress)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        } else {
-                            Button {
-                                wallpaperPrompt = .install
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Spacer()
-                                    Image(systemName: "sparkles")
-                                    Text(MirsaTr.p("flashWallpapers", selectedCount))
-                                    Spacer()
-                                }
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: 48)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.blue)
-                            .disabled(selectedCount == 0)
-                            .accessibilityIdentifier("wallpaper-flash")
-                        }
-                        Button { offerRespring() } label: {
-                            Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(videoApplyRunning || respringPresentation.isPresented)
-                        .accessibilityIdentifier("wallpaper-respring")
-                    }
-                    .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
-                } footer: {
-                    Text(WallpaperMakerStrings.text(.respringHelp))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("wallpaper-flash-help")
                 }
 
                 MirsaWallpaperManagementSection(
                     externalBusy: videoApplyRunning,
                     log: { vm.tendiesFlashLog.append($0) },
-                    onDeleted: { offerRespring() }
-                )
-
-                // Section 5: Flash Log (CompactLogView)
-                if !vm.tendiesFlashLog.isEmpty {
-                    Section {
-                        CompactLogView(
-                            title: "Flash Log (\(vm.tendiesFlashLog.count) lines)",
-                            lines: vm.tendiesFlashLog,
-                            onClear: { vm.tendiesFlashLog.removeAll() }
-                        )
-                        .accessibilityIdentifier("wallpaper-flash-log")
+                    onDeleted: { offerRespring() },
+                    extraTools: {
+                        Button { showFilePicker = true } label: {
+                            Label(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore), systemImage: "doc.badge.plus")
+                        }
+                        Text(WallpaperMakerStrings.text(.importHint)).font(.caption).foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(vm.posterBoardContainer.isEmpty
+                             ? MirsaTr.lit("PosterBoard container will be auto-detected automatically on flash.")
+                             : MirsaTr.lit("Target: PosterBoard container detected ✅"))
+                            .font(.caption).foregroundColor(.secondary)
+                        OriginalVideoWallpaperBlock(applyRunning: videoApplyRunning)
+                        WallpaperMakerSection(applyRunning: videoApplyRunning) { archive in
+                            await vm.importTendieFiles(urls: [archive])
+                        }
+                        Toggle(isOn: $vm.resetPBProtections) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(MirsaTr.lit("Force PosterBoard Cache Refresh")).font(.subheadline.weight(.medium))
+                                Text(MirsaTr.lit("Resets file protections so iOS re-indexes wallpapers immediately"))
+                                    .font(.caption2).foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Button { offerRespring() } label: {
+                            Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
+                        }
+                        .disabled(videoApplyRunning || respringPresentation.isPresented)
+                        .accessibilityIdentifier("wallpaper-respring")
+                        Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("wallpaper-flash-help")
+                        if !vm.tendiesFlashLog.isEmpty {
+                            CompactLogView(
+                                title: "Flash Log (\(vm.tendiesFlashLog.count) lines)",
+                                lines: vm.tendiesFlashLog,
+                                onClear: { vm.tendiesFlashLog.removeAll() }
+                            )
+                            .accessibilityIdentifier("wallpaper-flash-log")
+                        }
                     }
-                }
+                )
             }
             // Bound the actual Form viewport, not just its scrollable content.
             // Classic/native tab bars and expanded Flash Log must not overlap actions.
@@ -252,22 +223,15 @@ struct TendiesView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showFilePicker = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                    }
-                }
-            }
             .sheet(isPresented: $showFilePicker) {
                 TendiesDocumentPickerView { urls in
                     Task {
                         await vm.importTendieFiles(urls: urls)
                     }
                 }
+            }
+            .sheet(isPresented: $showCustomRequest) {
+                WallpaperRequestView(draft: customRequest)
             }
             .sheet(item: $selectedDetailItem) { item in
                 TendieDetailSheet(item: item)
@@ -301,7 +265,7 @@ struct TendiesView: View {
             }
             .onChange(of: vm.tendiesFlashPhase) { _, phase in
                 // Only a copy that finished successfully in this session offers a respring.
-                if installStartedThisSession, case .done(ok: true) = phase {
+                if installStartedThisSession, vm.tendiesInstalledNew, case .done(ok: true) = phase {
                     installStartedThisSession = false
                     offerRespring()
                 } else if case .done = phase { installStartedThisSession = false }
