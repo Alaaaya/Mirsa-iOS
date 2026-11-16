@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 @_silgen_name("mirsa_pb_access_acquire")
 private func acquirePosterBoardAccess(_ path: UnsafePointer<CChar>, _ error: UnsafeMutablePointer<Int64>,
@@ -24,7 +25,11 @@ final class PosterBoardLease {
     let targetURL: URL
     let effectiveURL: URL
     private let log: (String) -> Void
-    init(path: String, log: @escaping (String) -> Void = { _ in }) throws {
+    private let reuseReadableAccess: Bool
+    private(set) var grantRequests = 0
+    private(set) var reusedReads = 0
+    init(path: String, reuseReadableAccess: Bool = false, log: @escaping (String) -> Void = { _ in }) throws {
+        self.reuseReadableAccess = reuseReadableAccess
         self.log = log
         targetURL = URL(fileURLWithPath: path)
         var code: Int64 = 0
@@ -52,6 +57,18 @@ final class PosterBoardLease {
     func grant(_ relative: String) -> Bool {
         guard let handle else { return false }
         if granted.contains(relative) { return true }
+        // Read scans only. A directory token is NOT assumed recursive. Prove
+        // each exact child is already readable through this live lease, with
+        // all ancestor/link checks intact; otherwise request its exact token.
+        if reuseReadableAccess, PosterBoardStore.readReuseAllowed(relative) {
+            let url = effectiveURL.appendingPathComponent(relative)
+            if permits(url), PosterBoardStore.readableNode(url) {
+                reusedReads += 1
+                granted.insert(relative)
+                return true
+            }
+        }
+        grantRequests += 1
         var detail: UnsafeMutablePointer<CChar>?
         let result = relative.withCString { grantRelativeAccess(handle, $0, &detail) }
         if let detail {
@@ -92,6 +109,26 @@ final class PosterBoardLease {
 }
 
 enum PosterBoardStore {
+    static func readReuseAllowed(_ relative: String) -> Bool {
+        guard MirsaCustomWallpapers.validRelative(relative) else { return false }
+        let store = "Library/Application Support/PRBPosterExtensionDataStore"
+        return ["Library", "Library/Application Support", ".com.apple.mobile_container_manager.metadata.plist",
+                "com.apple.mobile_container_manager.metadata.plist"].contains(relative) ||
+            relative == store || relative.hasPrefix(store + "/")
+    }
+    /// Non-mutating exact-node access probe, never follows a final link or
+    /// opens devices/FIFOs. The caller must also verify all ancestors.
+    static func readableNode(_ url: URL) -> Bool {
+        var before = stat()
+        guard lstat(url.path, &before) == 0,
+              before.st_mode & S_IFMT == S_IFREG || before.st_mode & S_IFMT == S_IFDIR else { return false }
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+        var after = stat()
+        return fstat(fd, &after) == 0 && before.st_dev == after.st_dev &&
+            before.st_ino == after.st_ino && before.st_mode == after.st_mode
+    }
     static let roots = ["Application", "InternalDaemon", "PluginKitPlugin"].map {
         "/var/mobile/Containers/Data/" + $0
     }

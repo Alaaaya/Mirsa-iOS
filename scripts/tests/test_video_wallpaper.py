@@ -33,7 +33,9 @@ class VideoWallpaperTests(unittest.TestCase):
         engine = (R / "ios-app/TendiesEngine.swift").read_text()
         discovery = engine.split("public func detectPosterBoardContainer", 1)[1].split("// MARK:", 1)[0]
         self.assertIn("MirsaPosterDiscovery.discover", discovery)
-        self.assertIn("MirsaWallpaperJournal.exclusive", discovery)
+        self.assertIn("MirsaWallpaperJournal.queued", discovery)
+        journal = (R / "ios-app/MirsaWallpaperJournal.swift").read_text()
+        self.assertIn("try exclusiveWaiting(timeout: timeout, isCancelled:", journal)
         for forbidden in ["al_find_app_container", "withCheckedThrowingContinuation", "withCString", "Wi-Fi/LocalDevVPN"]:
             self.assertNotIn(forbidden, discovery)
         store = (R / "ios-app/PosterBoardStore.swift").read_text()
@@ -210,3 +212,21 @@ class VideoWallpaperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WallpaperListPerformanceTests(unittest.TestCase):
+    def test_list_does_not_decode_thumbnails_or_walk_diagnostic_assets(self):
+        source = (R / "ios-app/MirsaCustomWallpapers.swift").read_text()
+        listing = source.split("private static func list(", 1)[1].split("static func list(log:", 1)[0]
+        self.assertNotIn("previewThumbnail(", listing)
+        self.assertNotIn("MirsaWallpaperDiagnostics.shallow", listing)
+        self.assertNotIn("catalogProbe", listing)
+        self.assertIn("if info.apple", listing)
+        lazy = source.split("static func thumbnail(", 1)[1].split("/// UI must", 1)[0]
+        self.assertLess(lazy.index("descriptorInfo"), lazy.index("previewThumbnail"))
+        self.assertIn("queued(timeout: 2)", lazy)
+        self.assertIn("defer { try? lease.close() }", lazy)
+        self.assertIn('if name.hasPrefix(".") { continue }', source)
+        view = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
+        self.assertIn("!Task.isCancelled, generation == thumbnailGeneration", view)
+        self.assertIn(".task(id:", view)
