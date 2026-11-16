@@ -110,8 +110,9 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn('Button { offerRespring() } label:', view)
         self.assertLess(view.index('accessibilityIdentifier("wallpaper-flash")'),
                         view.index('accessibilityIdentifier("wallpaper-respring")'))
-        self.assertLess(view.index('accessibilityIdentifier("wallpaper-respring")'),
-                        view.index('MirsaWallpaperManagementSection('))
+        # Secondary respring now belongs inside the single closed tools group.
+        self.assertLess(view.index('extraTools: {'),
+                        view.index('accessibilityIdentifier("wallpaper-respring")'))
         self.assertIn('@StateObject private var respringPresentation', view)
         self.assertIn('.fullScreenCover(isPresented: $respringPresentation.isPresented', view)
         self.assertGreater(view.index('.fullScreenCover('), view.index('} // ScrollViewReader'))
@@ -164,7 +165,7 @@ class VideoWallpaperTests(unittest.TestCase):
         view = (R / "ios-app/TendiesView.swift").read_text()
         self.assertIn('onDeleted: { offerRespring() }', view)
         self.assertIn('Button { offerRespring() } label:', view)
-        self.assertIn('installStartedThisSession, case .done(ok: true)', view)
+        self.assertIn('installStartedThisSession, vm.tendiesInstalledNew, case .done(ok: true)', view)
         self.assertEqual(view.count('respringPresentation.start'), 1)
         self.assertEqual(view.count('MirsaWallpaperRespringView(event:'), 1)
 

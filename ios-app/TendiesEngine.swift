@@ -397,9 +397,11 @@ public final class TendiesEngine {
                             let matching = try MirsaWallpaperJournal.records().filter { record in
                                 items.contains(where: { $0.name == record.title })
                             }
-                            for record in matching {
-                                try MirsaWallpaperJournal.archiveAbsentForReinstall(record, lease: lease, log: log)
-                            }
+                            try MirsaWallpaperJournal.reconcileForInstall(matching, confirmed: {
+                                try MirsaWallpaperJournal.confirmedInstalled($0, lease: lease)
+                            }, archiveAbsent: {
+                                try MirsaWallpaperJournal.archiveAbsentForReinstall($0, lease: lease, log: log)
+                            })
                             let remaining = try MirsaWallpaperJournal.records()
                             guard !remaining.contains(where: { !$0.copied }) else {
                                 throw PosterBoardStore.failure("An incomplete Mirsa installation exists. Use owned cleanup after reviewing its log; do not blindly reinstall.")

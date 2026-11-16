@@ -891,4 +891,33 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: node(mode: S_IFLNK | 0o755)), "symlink")
         XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: node(mode: S_IFREG | 0o644)), "regular file")
     }
+    func testBatchReconciliationConfirmsBeforeArchivalAndContinues() throws {
+        let first = record(), second = record()
+        var events: [String] = []
+        try MirsaWallpaperJournal.reconcileForInstall([first, second], confirmed: {
+            events.append("check:" + $0.id); return $0.id == first.id
+        }, archiveAbsent: { events.append("archive:" + $0.id) })
+        XCTAssertEqual(events, ["check:" + first.id, "check:" + second.id, "archive:" + second.id])
+    }
+    func testAllInstalledNeverAttemptsAbsenceArchival() throws {
+        var archived = false
+        try MirsaWallpaperJournal.reconcileForInstall([record(), record()],
+            confirmed: { _ in true }, archiveAbsent: { _ in archived = true })
+        XCTAssertFalse(archived)
+    }
+    func testUncertainAndRealErrorsRemainFatalAndStopBatch() {
+        enum FixtureError: Error { case uncertain, real }
+        let records = [record(), record()]
+        var checked = 0
+        XCTAssertThrowsError(try MirsaWallpaperJournal.reconcileForInstall(records,
+            confirmed: { _ in checked += 1; return false },
+            archiveAbsent: { _ in throw FixtureError.uncertain }))
+        XCTAssertEqual(checked, 1)
+        var archived = false
+        XCTAssertThrowsError(try MirsaWallpaperJournal.reconcileForInstall(records,
+            confirmed: { _ in throw FixtureError.real },
+            archiveAbsent: { _ in archived = true }))
+        XCTAssertFalse(archived)
+    }
+
 }
