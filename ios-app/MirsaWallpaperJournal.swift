@@ -292,6 +292,16 @@ enum MirsaWallpaperJournal {
             log("JOURNAL REINSTALL ARCHIVED " + record.id + " fresh exact ENOENT under install lease; no PosterBoard files modified.")
         }
     }
+    /// Classify before attempting the existing absence-only archival. The production closures
+    /// share the active install lease. Any uncertainty or real error propagates unchanged.
+    static func reconcileForInstall(_ records: [Record],
+                                    confirmed: (Record) throws -> Bool,
+                                    archiveAbsent: (Record) throws -> Void) throws {
+        for record in records {
+            if try confirmed(record) { continue }
+            try archiveAbsent(record)
+        }
+    }
     /// Pure strict proof used by batch skip. Only a COMPLETED record whose exact root is a real
     /// directory (lstat, never a symlink) with the recorded device+inode counts as installed.
     /// Everything else (incomplete, missing identity, absent, replaced, symlink, unreadable)
