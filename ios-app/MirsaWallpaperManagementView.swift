@@ -2,12 +2,14 @@ import SwiftUI
 
 /// Diagnostic build: journal rows keep strict deletion; unclassified rows are inspect-only.
 /// Nothing here runs on appear except a read-only listing.
-struct MirsaWallpaperManagementSection<Extra: View>: View {
+struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
     let externalBusy: Bool
     let log: (String) -> Void
     /// Called on main only after a current-session owned delete succeeded.
     let onDeleted: () -> Void
-    /// Everything secondary from the page (import, video, maker, options, respring, log) lives in the same closed tools group.
+    /// Everyday creation/import cards stay visible between installed cards and maintenance.
+    @ViewBuilder let mainContent: () -> Main
+    /// Only logs, historical journals, unknown rows and target details remain collapsed.
     @ViewBuilder let extraTools: () -> Extra
     @State private var toolsOpen = false
 
@@ -79,7 +81,33 @@ struct MirsaWallpaperManagementSection<Extra: View>: View {
                 Text(TendiesPageText.text(.yours))
             }
 
-            // One closed tools group: nothing is removed, everything secondary lives here.
+            mainContent()
+
+            Section {
+                    ForEach(items.filter { $0.canDelete }) { rec in
+                        // Deletable rows keep their separate inspect action here too.
+                        HStack {
+                            Text(cardTitle(rec)).font(.caption).lineLimit(1)
+                            Spacer()
+                            Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
+                                .buttonStyle(.bordered).disabled(disabled)
+                        }
+                    }
+                    Button { reload() } label: { Label(t(.refresh), systemImage: "arrow.clockwise") }
+                        .disabled(disabled)
+                        .accessibilityIdentifier("wallpaper-refresh")
+                    Button { confirmCleanup = true } label: { Label(t(.cleanup), systemImage: "sparkles") }
+                        .disabled(disabled)
+                        .accessibilityIdentifier("wallpaper-cleanup")
+                    if busy { HStack { ProgressView(); Text(t(.busy)).font(.caption).foregroundColor(.secondary) } }
+                    else if externalBusy { Text(t(.busy)).font(.caption).foregroundColor(.secondary) }
+                    if let message {
+                        Text(message).font(.caption).foregroundColor(failed ? .red : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+            }
+
+            // One closed tools group: maintenance only.
             Section {
                 // Keep the header identifier on its own button. On iOS 26 a
                 // DisclosureGroup identifier propagates into the expanded rows,
@@ -115,26 +143,7 @@ struct MirsaWallpaperManagementSection<Extra: View>: View {
                         }
                         .background(thumbnailTask(rec))
                     }
-                    ForEach(items.filter { $0.canDelete }) { rec in
-                        // Deletable rows keep their separate inspect action here too.
-                        HStack {
-                            Text(cardTitle(rec)).font(.caption).lineLimit(1)
-                            Spacer()
-                            Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
-                                .buttonStyle(.bordered).disabled(disabled)
-                        }
-                    }
                     journalRows
-                    Button { reload() } label: { Label(t(.refresh), systemImage: "arrow.clockwise") }
-                        .disabled(disabled)
-                    Button { confirmCleanup = true } label: { Label(t(.cleanup), systemImage: "sparkles") }
-                        .disabled(disabled)
-                    if busy { HStack { ProgressView(); Text(t(.busy)).font(.caption).foregroundColor(.secondary) } }
-                    else if externalBusy { Text(t(.busy)).font(.caption).foregroundColor(.secondary) }
-                    if let message {
-                        Text(message).font(.caption).foregroundColor(failed ? .red : .secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(t(.ownedFooter))
                         Text(t(.importRemoveHint))

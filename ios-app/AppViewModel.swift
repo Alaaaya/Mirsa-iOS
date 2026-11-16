@@ -1265,8 +1265,10 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func importTendieFiles(urls: [URL]) async {
-        guard !urls.isEmpty else { return }
+    @discardableResult
+    func importTendieFiles(urls: [URL]) async -> [UUID] {
+        guard !urls.isEmpty else { return [] }
+        var importedIDs: [UUID] = []
         var importedCount = 0
         var lastImportedName = ""
         for url in urls {
@@ -1275,6 +1277,7 @@ final class AppViewModel: ObservableObject {
                 await MainActor.run {
                     self.tendieItems.removeAll(where: { $0.fileName == item.fileName })
                     self.tendieItems.append(item)
+                    importedIDs.append(item.id)
                     self.saveTendieItems()
                     importedCount += 1
                     lastImportedName = item.name
@@ -1285,6 +1288,7 @@ final class AppViewModel: ObservableObject {
                 }
             }
         }
+        return importedIDs
     }
 
     func deleteTendie(item: TendieItem) {

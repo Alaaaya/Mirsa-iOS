@@ -86,6 +86,45 @@ class DiagnosticContractTests(unittest.TestCase):
         self.assertIn('.accessibilityIdentifier("wallpaper-import")', tendies)
         self.assertIn('picker.view.accessibilityIdentifier = "wallpaper-document-picker"', tendies)
 
+    def test_creation_cards_are_main_content_not_maintenance(self):
+        ui = (R / "ios-app/TendiesView.swift").read_text()
+        main = ui.split('mainContent: {', 1)[1].split('extraTools: {', 1)[0]
+        tools = ui.split('extraTools: {', 1)[1].split('// Bound the actual Form viewport', 1)[0]
+        for token in ['ForEach($vm.tendieItems)', 'wallpaper-import', 'OriginalVideoWallpaperBlock(', 'WallpaperMakerSection(', 'wallpaper-respring']:
+            self.assertIn(token, main)
+            self.assertNotIn(token, tools)
+        for icon in ['"checklist"', '"square.3.layers.3d"']:
+            self.assertIn(icon, main)
+        self.assertIn('Text(vm.posterBoardContainer.isEmpty', tools)
+        management = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
+        self.assertLess(management.index('mainContent()'), management.index('if toolsOpen {'))
+        self.assertLess(management.index('Button { reload() }'), management.index('if toolsOpen {'))
+        self.assertLess(management.index('Button { confirmCleanup = true }'), management.index('if toolsOpen {'))
+        self.assertLess(management.index('Text(TendiesPageText.text(.yours))'), management.index('mainContent()'))
+
+    def test_primary_install_requires_successfully_picked_ids(self):
+        ui = (R / "ios-app/TendiesView.swift").read_text()
+        primary = ui.split('// Two primary actions side by side.', 1)[1].split('Button { showCustomRequest', 1)[0]
+        self.assertIn('installAfterPicking = true', primary)
+        self.assertIn('pickedInstallIDs = []', primary)
+        self.assertIn('showFilePicker = true', primary)
+        self.assertNotIn('wallpaperPrompt = .install', primary)
+        self.assertNotIn('.disabled(selectedCount == 0)', primary)
+        presenter = ui.split('private func presentPickedInstall()', 1)[1].split('private func offerRespring()', 1)[0]
+        self.assertIn('guard !showFilePicker, !pickedInstallIDs.isEmpty else { return }', presenter)
+        self.assertLess(presenter.index('selectPickedInstallOnly()'), presenter.index('wallpaperPrompt = .install'))
+        self.assertIn('pickedInstallIDs.contains(vm.tendieItems[index].id)', presenter)
+        picker = ui.split('.sheet(isPresented: $showFilePicker', 1)[1].split('.sheet(isPresented: $showCustomRequest', 1)[0]
+        self.assertIn('guard shouldInstall else { return }', picker)
+        self.assertIn('pickedInstallIDs = Set(importedIDs)', picker)
+        model = (R / "ios-app/AppViewModel.swift").read_text()
+        importer = model.split('func importTendieFiles(', 1)[1].split('func deleteTendie(', 1)[0]
+        self.assertIn('guard !urls.isEmpty else { return [] }', importer)
+        self.assertEqual(importer.count('importedIDs.append(item.id)'), 1)
+        self.assertLess(importer.index('try await TendiesEngine.shared.importTendie'), importer.index('importedIDs.append(item.id)'))
+        self.assertNotIn('importedIDs.append', importer.split('} catch {', 1)[1])
+        self.assertIn('return importedIDs', importer)
+
     def test_exact_diff_no_runtime_exception(self):
         s=(R / "ios-app/MirsaWallpaperDiagnostics.swift").read_text()
         for status in ["added","removed","modified","unobserved","unreadable","unchanged"]:

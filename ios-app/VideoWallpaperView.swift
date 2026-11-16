@@ -61,7 +61,9 @@ struct OriginalVideoWallpaperBlock: View {
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
         } header: {
-            Text(V.text(.tab))
+            Label(V.text(.tab), systemImage: "video.fill")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.teal)
+                .textCase(nil)
         }
     }
 }
