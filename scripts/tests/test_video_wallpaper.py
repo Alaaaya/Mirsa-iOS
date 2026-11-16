@@ -86,8 +86,8 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn("let ok = respringArmed", confirmation)
         self.assertIn("respringArmed = false", confirmation)
         self.assertIn("if ok {", confirmation)
-        self.assertIn("preparingRespring = true", confirmation)
-        self.assertNotIn("showRespringOverlay = true", confirmation)
+        self.assertIn("respringPresentation.start", confirmation)
+        self.assertNotIn("Task.sleep", confirmation)
         self.assertIn(".cancel(Text(ws(.respringLater)))", confirmation)
         self.assertIn("REFRESH TAP", confirmation)
         self.assertIn("REFRESH PROMPT offered", view)
@@ -102,36 +102,38 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn('tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))', success)
 
 
-    def test_placard_respring_staging_and_standalone_button(self):
+    def test_probe26_exact_respring_payload_lifecycle_and_presentation(self):
+        import hashlib
         view = (R / "ios-app/TendiesView.swift").read_text()
         self.assertIn('Button { offerRespring() } label:', view)
         self.assertLess(view.index('accessibilityIdentifier("wallpaper-flash")'),
                         view.index('accessibilityIdentifier("wallpaper-respring")'))
         self.assertLess(view.index('accessibilityIdentifier("wallpaper-respring")'),
                         view.index('MirsaWallpaperManagementSection('))
-        stage = view.split('.task(id: preparingRespring)', 1)[1].split('.overlay {', 1)[0]
-        self.assertLess(stage.index('Task.sleep(for: .milliseconds(250))'),
-                        stage.index('showRespringOverlay = true'))
-        self.assertIn('guard !Task.isCancelled', stage)
-        self.assertIn('REFRESH staging cancelled', stage)
-        self.assertGreater(view.index('.task(id: preparingRespring)'), view.index('} // ScrollViewReader'))
+        self.assertIn('@StateObject private var respringPresentation', view)
+        self.assertIn('.fullScreenCover(isPresented: $respringPresentation.isPresented', view)
+        self.assertGreater(view.index('.fullScreenCover('), view.index('} // ScrollViewReader'))
+        self.assertIn('ZStack(alignment: .topTrailing)', view)
+        self.assertIn('}.interactiveDismissDisabled()', view)
+        self.assertIn('Button(ws(.cancel)) { respringPresentation.isPresented = false }', view)
         self.assertIn('MirsaWallpaperEvidence.record(line)', view)
-        self.assertIn('REFRESH overlay appeared', view)
-        self.assertIn('guard !videoApplyRunning, !preparingRespring, !showRespringOverlay', view)
-        self.assertEqual(view.count('showRespringOverlay = true'), 1)
+        self.assertNotIn('preparingRespring', view)
+        self.assertNotIn('showRespringOverlay', view)
+        self.assertNotIn('DispatchQueue.main.async { vm.tendiesFlashLog.append(line) }', view)
+        self.assertIn('guard !videoApplyRunning, !respringPresentation.isPresented', view)
         source = (R / "ios-app/MirsaWallpaperRespringView.swift").read_text()
-        for token in ['const frame = document.getElementById(\'frame\')',
-                      'frame.srcdoc = payload', 'for (let i = 0; i < 500; i++)',
-                      'perspective-origin:9999999% 9999999%', '1024 * 1024 * 10',
-                      'crypto.getRandomValues(bytes)', '<meta charset="utf-8">']:
-            self.assertIn(token, source)
-        self.assertNotIn('WKScriptMessageHandler', source)
-        # Exact pinned Placard document, aside from required UTF-8 metadata.
-        import hashlib
-        document = source.split('    static let document = #"""', 1)[1]
-        document = document.replace('\n        <meta charset="utf-8">', '', 1)
+        document = source.split('    static let document = #"""', 1)[1].split('    """#', 1)[0]
         self.assertEqual(hashlib.sha256(document.encode()).hexdigest(),
-                         'fef1b21d0980c82182da5b28c33cc02488fed57e0c87ba61c71894019cb3194f')
+                         '3fe67875d1e7cc5d1ddba5c9fcb96a0aee024d85bba4e0392fbc0f3a9a3cdcef')
+        native = source.split('    func makeCoordinator()', 1)[1].split('    // Same underlying stages', 1)[0]
+        self.assertEqual(hashlib.sha256(native.encode()).hexdigest(),
+                         '30e7e22f0c0885129577d018f442efbbaac30fd5d9be33a344c696c037775056')
+        start = source.split('func start(log:', 1)[1]
+        self.assertLess(start.index('MirsaWallpaperEvidence.record(line)'), start.index('isPresented = true'))
+        self.assertIn('REFRESH BLOCKED', start)
+        self.assertEqual(start.count('isPresented = true'), 1)
+        self.assertNotIn('Task.sleep', source)
+        self.assertNotIn('WKScriptMessageHandler', source)
 
     def test_scoped_strategies_never_enable_library_parent_rename(self):
         source = (R / "ios-app/PosterBoardAccess.m").read_text()
