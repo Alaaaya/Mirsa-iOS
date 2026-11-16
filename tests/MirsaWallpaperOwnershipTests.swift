@@ -27,6 +27,30 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
     private func object(_ url: URL) throws -> [String: Any] {
         try XCTUnwrap(try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
     }
+    func testPersistentEvidenceSurvivesReloadAndIsBounded() throws {
+        let url = try temporaryRoot().appendingPathComponent("evidence/history.json")
+        XCTAssertEqual(try MirsaWallpaperEvidence.read(at: url), [])
+        try MirsaWallpaperEvidence.append("COPY VERIFIED fixture", at: url)
+        try MirsaWallpaperEvidence.append("REFRESH confirmed fixture", at: url)
+        XCTAssertEqual(try MirsaWallpaperEvidence.read(at: url), ["COPY VERIFIED fixture", "REFRESH confirmed fixture"])
+        for i in 0...MirsaWallpaperEvidence.maxEvents {
+            try MirsaWallpaperEvidence.append(String(i) + String(repeating: "x", count: 3000), at: url)
+        }
+        let restored = try MirsaWallpaperEvidence.read(at: url)
+        XCTAssertEqual(restored.count, MirsaWallpaperEvidence.maxEvents)
+        XCTAssertTrue(restored.allSatisfy { $0.count <= MirsaWallpaperEvidence.maxLine })
+        XCTAssertTrue(restored.first?.hasPrefix("1x") == true)
+    }
+    func testPersistentEvidenceRejectsLinksAndDoesNotOverwriteCorruption() throws {
+        let root = try temporaryRoot(), target = root.appendingPathComponent("keep")
+        let bytes = Data("not JSON".utf8)
+        try bytes.write(to: target)
+        let link = root.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        XCTAssertThrowsError(try MirsaWallpaperEvidence.append("REFRESH", at: link))
+        XCTAssertThrowsError(try MirsaWallpaperEvidence.append("REFRESH", at: target))
+        XCTAssertEqual(try Data(contentsOf: target), bytes)
+    }
     func testExactOwnedUUIDPathAndRecordRoundTrip() throws {
         let original = record()
         XCTAssertFalse(original.copied)

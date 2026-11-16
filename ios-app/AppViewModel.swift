@@ -78,7 +78,14 @@ final class AppViewModel: ObservableObject {
     @Published var resetPBProtections: Bool = true
     @Published var tendiesFlashPhase: FlashPhase = .idle
     @Published var tendiesFlashProgress: Double = 0
-    @Published var tendiesFlashLog: [String] = []
+    @Published var tendiesFlashLog: [String] = [] {
+        didSet {
+            // Capture only newly appended action markers, never replayed history.
+            if tendiesFlashLog.count > oldValue.count {
+                MirsaWallpaperEvidence.captureVisible(Array(tendiesFlashLog.dropFirst(oldValue.count)))
+            }
+        }
+    }
     @Published var isNeoSpringing: Bool = false
 
     // MARK: - AirCard UI States & Properties
@@ -116,6 +123,8 @@ final class AppViewModel: ObservableObject {
 
     init() {
         Self.shared = self
+        tendiesFlashLog = MirsaWallpaperEvidence.restored()
+        MirsaWallpaperEvidence.record("SESSION OPEN; restored evidence only, gallery/respring unverified")
         refreshPairingFile()
         loadSavedCards()
         refreshNetworkStatus()

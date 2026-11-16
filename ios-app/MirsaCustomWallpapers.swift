@@ -550,6 +550,7 @@ enum MirsaCustomWallpapers {
             processed += 1
             do {
                 let target = try MirsaWallpaperJournal.grantExact(record, lease: lease)
+                MirsaWallpaperEvidence.observe(target, context: "list uuid=" + record.id + " copied=" + String(record.copied), log: log)
                 let node = try identity(target, kind: S_IFDIR)
                 if var item = journalItem(record, device: UInt64(node.st_dev), inode: UInt64(node.st_ino)) {
                     if thumbs < 24, ProcessInfo.processInfo.systemUptime < deadline - 10 {
