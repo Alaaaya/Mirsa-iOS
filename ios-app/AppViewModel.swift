@@ -77,6 +77,10 @@ final class AppViewModel: ObservableObject {
     @Published var isDetectingContainer: Bool = false
     @Published var resetPBProtections: Bool = true
     @Published var tendiesFlashPhase: FlashPhase = .idle
+    /// Titles skipped by the last install because they were proven already installed.
+    @Published var tendiesSkippedTitles: [String] = []
+    /// False when the last install had nothing new (everything skipped): no respring offer.
+    @Published var tendiesInstalledNew = true
     @Published var tendiesFlashProgress: Double = 0
     @Published var tendiesFlashLog: [String] = [] {
         didSet {
@@ -1324,6 +1328,8 @@ final class AppViewModel: ObservableObject {
         tendiesFlashPhase = .running
         tendiesFlashProgress = 0
         tendiesFlashLog = []
+        tendiesSkippedTitles = []
+        tendiesInstalledNew = true
         let pairingPath = PairingController.pairingFilePath()
         var container = posterBoardContainer.trimmingCharacters(in: .whitespacesAndNewlines)
         if container.isEmpty {
@@ -1340,7 +1346,7 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
-            try await TendiesEngine.shared.flashTendies(
+            let skipped = try await TendiesEngine.shared.flashTendies(
                 items: selected,
                 containerPath: container,
                 resetProtections: resetPBProtections,
@@ -1356,9 +1362,11 @@ final class AppViewModel: ObservableObject {
                     }
                 }
             )
+            tendiesSkippedTitles = skipped
+            tendiesInstalledNew = selected.contains { !skipped.contains($0.name) }
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
-            tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))
+            if tendiesInstalledNew { tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified)) }
             // Copy success is already in the log. Do not open ContentView's
             // Notice alert over the separate respring confirmation.
             // Respring remains an explicit user action via TendiesView's prompt.
