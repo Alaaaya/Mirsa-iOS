@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import Darwin
 @testable import Mirsa
 
 /// These fixtures call production package/path helpers on private temporary files.
@@ -413,4 +414,145 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         XCTAssertFalse(MirsaWallpaperJournal.sameRecord(original, changed))
     }
 
+
+    func testAbsentOnlyErrnosAndParentReplacementFailClosed() throws {
+        XCTAssertTrue(try MirsaWallpaperJournal.absenceResult(-1, error: ENOENT))
+        XCTAssertFalse(try MirsaWallpaperJournal.absenceResult(0, error: EACCES))
+        for code in [EACCES, EPERM, ENOTDIR, EIO, ESTALE] {
+            XCTAssertThrowsError(try MirsaWallpaperJournal.absenceResult(-1, error: code))
+        }
+        var original = stat()
+        original.st_mode = S_IFDIR; original.st_dev = 1; original.st_ino = 12
+        XCTAssertTrue(MirsaWallpaperJournal.sameParent(original, original))
+        var replacement = original; replacement.st_ino = 13
+        XCTAssertFalse(MirsaWallpaperJournal.sameParent(original, replacement))
+        replacement = original; replacement.st_mode = S_IFLNK
+        XCTAssertFalse(MirsaWallpaperJournal.sameParent(original, replacement))
+        let root = try temporaryRoot(), fifo = root.appendingPathComponent("fifo")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        XCTAssertFalse(try MirsaWallpaperJournal.absent(fifo))
+        let parentFile = root.appendingPathComponent("regular")
+        try Data().write(to: parentFile)
+        XCTAssertThrowsError(try MirsaWallpaperJournal.absent(parentFile.appendingPathComponent("child")))
+    }
+    func testArchivePreservesEvidenceAndRestoresOnTargetAppearance() throws {
+        let fm = FileManager.default, root = try temporaryRoot(), rec = record()
+        let source = root.appendingPathComponent(rec.id + ".json")
+        let bytes = try JSONEncoder().encode(rec)
+        try bytes.write(to: source)
+        var checks = 0
+        XCTAssertThrowsError(try MirsaWallpaperJournal.archiveLocal(rec, at: root) {
+            checks += 1
+            if checks == 2 { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EEXIST)) }
+        })
+        XCTAssertEqual(checks, 2)
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: root.appendingPathComponent("Archived").path).count, 0)
+        try MirsaWallpaperJournal.archiveLocal(rec, at: root, revalidate: {})
+        XCTAssertFalse(fm.fileExists(atPath: source.path))
+        let archived = try fm.contentsOfDirectory(at: root.appendingPathComponent("Archived"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(archived.count, 1)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(archived.first)), bytes)
+    }
+    func testArchiveFailureAndChangedJournalNeverRemoveOriginal() throws {
+        let root = try temporaryRoot(), rec = record(), fm = FileManager.default
+        let source = root.appendingPathComponent(rec.id + ".json")
+        let bytes = try JSONEncoder().encode(rec)
+        try bytes.write(to: source)
+        try Data("block".utf8).write(to: root.appendingPathComponent("Archived"))
+        XCTAssertThrowsError(try MirsaWallpaperJournal.archiveLocal(rec, at: root, revalidate: {}))
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+        try fm.removeItem(at: root.appendingPathComponent("Archived"))
+        var changed = rec; changed.expected["another"] = "keep"
+        try JSONEncoder().encode(changed).write(to: source)
+        XCTAssertThrowsError(try MirsaWallpaperJournal.archiveLocal(rec, at: root, revalidate: {}))
+        XCTAssertEqual(try JSONDecoder().decode(MirsaWallpaperJournal.Record.self, from: Data(contentsOf: source)).expected, changed.expected)
+        var beforeMove = 0
+        XCTAssertThrowsError(try MirsaWallpaperJournal.archiveLocal(changed, at: root) {
+            beforeMove += 1; throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
+        })
+        XCTAssertEqual(beforeMove, 1)
+        XCTAssertTrue(fm.fileExists(atPath: source.path))
+    }
+    func testReadOnlyDiffReportsExactAddRemoveModifiedAndTypes() throws {
+        let fm = FileManager.default, root = try temporaryRoot()
+        try Data("original".utf8).write(to: root.appendingPathComponent("modified"))
+        try Data("remove".utf8).write(to: root.appendingPathComponent("removed"))
+        try fm.createDirectory(at: root.appendingPathComponent("empty"), withIntermediateDirectories: true)
+        let baseline = MirsaWallpaperDiagnostics.inventory(try .init(root: root, budget: .init()))
+        let expected = baseline.nodes.compactMapValues { $0.hash }
+        let paths = baseline.nodes.map { ($0.value.kind == "directory" ? "D:" : "F:") + $0.key }
+        try Data("changed".utf8).write(to: root.appendingPathComponent("modified"))
+        try fm.removeItem(at: root.appendingPathComponent("removed"))
+        try Data("new".utf8).write(to: root.appendingPathComponent("added"))
+        try fm.removeItem(at: root.appendingPathComponent("empty"))
+        try Data("now-file".utf8).write(to: root.appendingPathComponent("empty"))
+        let actual = MirsaWallpaperDiagnostics.inventory(try .init(root: root, budget: .init()))
+        XCTAssertTrue(actual.complete)
+        let diff = MirsaWallpaperDiagnostics.diff(expected: expected, paths: paths, actual: actual).joined(separator: "\n")
+        XCTAssertTrue(diff.contains("status=modified path=\"modified\""))
+        XCTAssertTrue(diff.contains("expectedHash=" + (try XCTUnwrap(expected["modified"]))))
+        XCTAssertTrue(diff.contains("actualHash=" + MirsaWallpaperDiagnostics.digest(Data("changed".utf8))))
+        XCTAssertTrue(diff.contains("status=removed path=\"removed\""))
+        XCTAssertTrue(diff.contains("status=added path=\"added\""))
+        XCTAssertTrue(diff.contains("status=modified path=\"empty\" expectedType=directory actualType=file"))
+        XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("added").path))
+    }
+    func testDiagnosticRejectsLinksHardlinksAndBudgetWithoutFalseRemoval() throws {
+        let fm = FileManager.default, root = try temporaryRoot()
+        let secret = root.appendingPathComponent("secret")
+        try Data("private".utf8).write(to: secret)
+        try fm.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: secret)
+        let reader = try MirsaWallpaperDiagnostics.Reader(root: root, budget: .init())
+        XCTAssertThrowsError(try reader.read("link", limit: 100))
+        XCTAssertThrowsError(try reader.read("../secret", limit: 100))
+        try fm.linkItem(at: secret, to: root.appendingPathComponent("hard"))
+        XCTAssertThrowsError(try reader.read("secret", limit: 100))
+        let bounded = MirsaWallpaperDiagnostics.inventory(try .init(root: root, budget: .init(nodes: 1)))
+        XCTAssertFalse(bounded.complete)
+        let lines = MirsaWallpaperDiagnostics.diff(expected: ["unseen": "hash"], paths: ["F:unseen"], actual: bounded).joined(separator: "\n")
+        XCTAssertTrue(lines.contains("status=unobserved path=\"unseen\""))
+        XCTAssertFalse(lines.contains("status=removed"))
+        let outside = try temporaryRoot()
+        try fm.createSymbolicLink(at: root.appendingPathComponent("alias"), withDestinationURL: outside)
+        XCTAssertThrowsError(try reader.read("alias/value", limit: 100))
+        let timeout = MirsaWallpaperDiagnostics.Budget(seconds: -1)
+        XCTAssertThrowsError(try timeout.check())
+    }
+    func testMetadataWhitelistNeverIncludesArbitraryFieldsOrContainers() {
+        let result = MirsaWallpaperDiagnostics.whitelist(
+            ["name": "fixture", "identifier": 7400, "password": "SECRET", "nested": ["name": "SECRET"], "nameData": Data("SECRET".utf8)],
+            keys: ["name", "identifier"])
+        XCTAssertEqual(result, ["name": "fixture", "identifier": "7400"])
+        XCTAssertFalse(result.description.contains("SECRET"))
+        XCTAssertEqual(MirsaWallpaperDiagnostics.quoted("name\nwith\tcontrol"), "\"name\\nwith\\tcontrol\"")
+        for key in [MirsaWallpaperActionStrings.Key.unknownWarning, .inspect, .diagnosticDone] {
+            for language in [AppLanguage.arabic, .english, .german, .kurmanji, .sorani] {
+                XCTAssertFalse(MirsaWallpaperActionStrings.text(key, language: language).isEmpty)
+            }
+        }
+    }
+
+    func testDiagnosticDeniedReadSizeLimitAndRootReplacementArePartial() throws {
+        let fm = FileManager.default, root = try temporaryRoot()
+        try Data("payload".utf8).write(to: root.appendingPathComponent("file"))
+        let denied = try MirsaWallpaperDiagnostics.Reader(root: root, budget: .init()) { _ in
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
+        }
+        let partial = MirsaWallpaperDiagnostics.inventory(denied)
+        XCTAssertFalse(partial.complete)
+        XCTAssertEqual(partial.nodes["file"]?.error, EACCES)
+        let small = try MirsaWallpaperDiagnostics.Reader(root: root, budget: .init(bytes: 1))
+        XCTAssertThrowsError(try small.read("file", limit: 1024))
+        let original = try MirsaWallpaperDiagnostics.Reader(root: root, budget: .init())
+        let moved = root.appendingPathExtension("moved")
+        try fm.moveItem(at: root, to: moved)
+        defer { try? fm.removeItem(at: moved) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try original.verify())
+        let alias = root.appendingPathComponent("alias")
+        try fm.createSymbolicLink(at: alias, withDestinationURL: moved)
+        XCTAssertThrowsError(try MirsaWallpaperDiagnostics.Reader(root: alias, budget: .init()))
+        XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("file")), Data("payload".utf8))
+    }
 }
