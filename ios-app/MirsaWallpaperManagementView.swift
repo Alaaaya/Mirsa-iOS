@@ -10,6 +10,7 @@ struct MirsaWallpaperManagementSection: View {
 
     @State private var items: [MirsaCustomWallpapers.Item] = []
     @State private var busy = false
+    @State private var thumbnailGeneration = UUID()
     @State private var pendingDelete: MirsaCustomWallpapers.Item?
     @State private var confirmCleanup = false
     @State private var message: String?
@@ -55,6 +56,14 @@ struct MirsaWallpaperManagementSection: View {
                         .buttonStyle(.bordered).tint(.red)
                         .disabled(disabled)
                     }
+                }
+                .task(id: String(describing: thumbnailGeneration) + String(disabled)) {
+                    guard !disabled, rec.thumbnail == nil else { return }
+                    let generation = thumbnailGeneration
+                    let data = await MirsaCustomWallpapers.thumbnail(rec)
+                    guard !Task.isCancelled, generation == thumbnailGeneration,
+                          let index = items.firstIndex(where: { $0.id == rec.id && $0.relative == rec.relative }) else { return }
+                    items[index].thumbnail = data
                 }
             }
             journalRows
@@ -177,6 +186,7 @@ struct MirsaWallpaperManagementSection: View {
 
     private func reload() {
         guard !busy, !externalBusy else { return }
+        thumbnailGeneration = UUID()
         let box = ItemsBox()
         run({ lines in box.items = try MirsaCustomWallpapers.list(log: { lines.add($0) }) }, done: { err in
             reloadJournal()

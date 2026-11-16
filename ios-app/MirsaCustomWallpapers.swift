@@ -355,7 +355,9 @@ enum MirsaCustomWallpapers {
     static let thumbExtensions: Set<String> = ["png", "jpg", "jpeg", "heic"]
     /// Bounded, read-only preview from the wallpaper's own files. Every node is lease/identity checked,
     /// no symlinks or hardlinks, no network, small decode via ImageIO downsample. Any problem = nil (icon).
-    static func previewThumbnail(_ root: URL, lease: PosterBoardLease) -> Data? {
+    static func previewThumbnail(_ root: URL, lease: PosterBoardLease, isCancelled: () -> Bool = { false }) -> Data? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        func active() -> Bool { !isCancelled() && ProcessInfo.processInfo.systemUptime < deadline }
         let prefix = lease.effectiveURL.path + "/"
         guard root.path.hasPrefix(prefix), let rootNode = try? identity(root, kind: S_IFDIR) else { return nil }
         var candidates: [(rank: Int, url: URL)] = []
@@ -367,11 +369,12 @@ enum MirsaCustomWallpapers {
             return true
         }
         func walk(_ dir: URL, depth: Int) {
-            guard depth <= 8, visited < thumbMaxNodes, safe(dir),
+            guard active(), depth <= 8, visited < thumbMaxNodes, safe(dir),
                   let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path), names.count <= thumbMaxNodes else { return }
             for name in names.sorted() {
                 visited += 1
-                guard visited <= thumbMaxNodes, validRelative(name) else { return }
+                guard active(), visited <= thumbMaxNodes, validRelative(name) else { return }
+                if name.hasPrefix(".") { continue }
                 let url = dir.appendingPathComponent(name)
                 var node = stat()
                 guard lstat(url.path, &node) == 0, node.st_dev == rootNode.st_dev, safe(url) else { continue }
@@ -390,6 +393,7 @@ enum MirsaCustomWallpapers {
         }
         walk(root, depth: 0)
         for candidate in candidates.sorted(by: { $0.rank < $1.rank }).prefix(3) {
+            guard active() else { return nil }
             if let data = try? read(candidate.url, limit: thumbMaxFileBytes), let jpeg = thumbnailData(from: data) { return jpeg }
         }
         return nil
@@ -414,6 +418,44 @@ enum MirsaCustomWallpapers {
         if let u = userInfoIdentifier, u != numeric { return false }
         return true
     }
+    /// Plist IDs on device may be NSString OR integer NSNumber. Do not stringify
+    /// arbitrary containers, bools or floating-point IDs into catalog evidence.
+    static func metadataIdentifier(_ value: Any?) -> String? {
+        let text: String
+        if let string = value as? String { text = string.trimmingCharacters(in: .whitespacesAndNewlines) }
+        else if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            text = number.stringValue
+        } else { return nil }
+        guard !text.isEmpty, text.count <= 16,
+              text.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else { return nil }
+        return text
+    }
+    /// Decode the real serialized Wallpaper.plist and provider userInfo schema.
+    /// Used by the bounded lease reader below and by binary/XML file regressions.
+    static func descriptorMetadata(packageName: String, wallpaperData: Data, userInfoData: Data?) -> DescriptorInfo? {
+        guard wallpaperData.count <= 64 * 1024,
+              let d = try? PropertyListSerialization.propertyList(from: wallpaperData, format: nil) as? [String: Any] else { return nil }
+        let clean = { (key: String) -> String? in
+            guard let value = d[key] as? String else { return nil }
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : String(text.prefix(80))
+        }
+        var userInfoId: String? = nil
+        if let data = userInfoData {
+            // Present-but-unreadable/malformed metadata is NOT evidence of Apple.
+            guard data.count <= 64 * 1024,
+                  let ui = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let id = metadataIdentifier(ui["wallpaperRepresentingIdentifier"]) else {
+                return DescriptorInfo(name: clean("name"), family: clean("family"), identifier: metadataIdentifier(d["identifier"]), packageName: packageName)
+            }
+            userInfoId = id
+        }
+        var info = DescriptorInfo(name: clean("name"), family: clean("family"),
+                                  identifier: metadataIdentifier(d["identifier"]), packageName: packageName)
+        info.apple = isAppleCatalog(packageName: packageName, plistIdentifier: info.identifier,
+                                    family: info.family, userInfoIdentifier: userInfoId)
+        return info
+    }
     /// Descriptor metadata from its own Wallpaper.plist, bounded and lease-checked (exact paths, no recursion).
     static func descriptorInfo(_ root: URL, lease: PosterBoardLease, log: (String) -> Void) -> DescriptorInfo {
         var info = DescriptorInfo()
@@ -428,12 +470,10 @@ enum MirsaCustomWallpapers {
         guard let versions = names(base + "/versions") else { log("CUSTOM NAME no versions dir"); return info }
         for v in versions.filter({ !$0.isEmpty && $0.utf8.allSatisfy { $0 >= 48 && $0 <= 57 } }).reversed().prefix(3) {
             let contents = base + "/versions/" + v + "/contents"
-            var userInfoId: String? = nil
+            var userInfoData: Data? = nil
             let ui = contents + "/com.apple.posterkit.provider.contents.userInfo"
-            if let url = try? grant(ui, lease: lease), PosterBoardStore.unredirected(url, lease: lease),
-               let data = try? read(url, limit: 64 * 1024),
-               let d = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-                userInfoId = d["wallpaperRepresentingIdentifier"] as? String
+            if let url = try? grant(ui, lease: lease), PosterBoardStore.unredirected(url, lease: lease) {
+                userInfoData = try? read(url, limit: 64 * 1024)
             }
             for pkg in (names(contents) ?? []).filter({ $0.hasSuffix(".wallpaper") }).prefix(3) {
                 let rel = contents + "/" + pkg + "/Wallpaper.plist"
@@ -441,14 +481,8 @@ enum MirsaCustomWallpapers {
                     let url = try grant(rel, lease: lease)
                     guard PosterBoardStore.unredirected(url, lease: lease) else { continue }
                     let data = try read(url, limit: 64 * 1024)
-                    if let d = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-                        let clean = { (k: String) -> String? in
-                            let t = ((d[k] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                            return t.isEmpty ? nil : String(t.prefix(80))
-                        }
-                        info.name = clean("name"); info.family = clean("family"); info.identifier = clean("identifier")
-                        info.packageName = pkg
-                        info.apple = isAppleCatalog(packageName: pkg, plistIdentifier: info.identifier, family: info.family, userInfoIdentifier: userInfoId)
+                    if let decoded = descriptorMetadata(packageName: pkg, wallpaperData: data, userInfoData: userInfoData) {
+                        info = decoded
                         if info.name != nil || info.apple { return info }
                     }
                 } catch { log("CUSTOM NAME unreadable " + rel + ": " + error.localizedDescription) }
@@ -538,7 +572,7 @@ enum MirsaCustomWallpapers {
         let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
         guard names.count <= 256 else { throw PosterBoardStore.failure("Too many wallpaper descriptors; no deletion allowed.") }
         var found: [Item] = []
-        var processed = 0, unavailable = 0, thumbs = 0
+        var processed = 0, unavailable = 0
         let deadline = ProcessInfo.processInfo.systemUptime + 30
         // Include exact recorded older versions as well as the current provider.
         let candidates = records.filter { $0.container == lease.targetURL.path }.sorted { $0.id < $1.id }
@@ -552,11 +586,7 @@ enum MirsaCustomWallpapers {
                 let target = try MirsaWallpaperJournal.grantExact(record, lease: lease)
                 MirsaWallpaperEvidence.observe(target, context: "list uuid=" + record.id + " copied=" + String(record.copied), log: log)
                 let node = try identity(target, kind: S_IFDIR)
-                if var item = journalItem(record, device: UInt64(node.st_dev), inode: UInt64(node.st_ino)) {
-                    if thumbs < 24, ProcessInfo.processInfo.systemUptime < deadline - 10 {
-                        thumbs += 1
-                        item.thumbnail = previewThumbnail(target, lease: lease)
-                    }
+                if let item = journalItem(record, device: UInt64(node.st_dev), inode: UInt64(node.st_ino)) {
                     found.append(item)
                 } else {
                     unavailable += 1
@@ -577,7 +607,6 @@ enum MirsaCustomWallpapers {
             unknownCount += 1
             let rel = parent + "/" + id
             var title = ""
-            var thumb: Data? = nil
             if let target = try? grant(rel, lease: lease), ProcessInfo.processInfo.systemUptime < deadline - 5 {
                 let info = descriptorInfo(target, lease: lease, log: log)
                 if info.apple {
@@ -586,26 +615,15 @@ enum MirsaCustomWallpapers {
                     continue
                 }
                 title = info.name ?? ""
-                if thumbs < 48 { thumbs += 1; thumb = previewThumbnail(target, lease: lease) }
-                if thumb == nil { log("CUSTOM THUMB none for " + id) }
             }
             if title.isEmpty { unnamed += 1 }
             found.append(Item(title: title, id: id, container: lease.targetURL.path,
                               relative: rel, expected: [:], device: 0, inode: 0,
-                              paths: [], canDelete: false, thumbnail: thumb, fallbackIndex: title.isEmpty ? unnamed : 0))
+                              paths: [], canDelete: false, fallbackIndex: title.isEmpty ? unnamed : 0))
         }
-        let budget = MirsaWallpaperDiagnostics.Budget()
-        for id in current.prefix(16) {
-            do {
-                let reader = try MirsaWallpaperDiagnostics.reader(relative: parent + "/" + id, lease: lease, budget: budget)
-                log("DIAG CURRENT uuid=" + id + " provider=" + MirsaPosterCopy.provider + " relative=" +
-                    MirsaWallpaperDiagnostics.quoted(parent + "/" + id) + " device=" + String(reader.original.st_dev) +
-                    " inode=" + String(reader.original.st_ino) + " errno=0 provenance=unclassified-unless-journal")
-                MirsaWallpaperDiagnostics.shallow(reader, log: log)
-            } catch { log("DIAG CURRENT uuid=" + id + " partial errno=" + String((error as NSError).code)) }
-            if (try? budget.check()) == nil { log("DIAG LIST budget reached; remaining uninspected, not absent"); break }
-        }
-        MirsaWallpaperDiagnostics.catalogProbe(log: log)
+        // Deep diagnostics remain available through Inspect. Refresh reads only
+        // cheap metadata, never walks Apple assets or decodes any thumbnails.
+        log("CUSTOM LIST ACCESS requested=" + String(lease.grantRequests) + " reusedReadable=" + String(lease.reusedReads) + " thumbnails=0")
         log("CUSTOM LIST SUMMARY currentDescriptors=" + String(names.count) +
             " journalCandidates=" + String(candidates.count) + " shown=" + String(found.count) +
             " unavailable=" + String(unavailable) + " unprocessed=" + String(candidates.count - processed) +
@@ -617,14 +635,37 @@ enum MirsaCustomWallpapers {
     static func list(log: @escaping (String) -> Void) throws -> [Item] {
         try MirsaWallpaperJournal.exclusive {
             let container = try MirsaPosterDiscovery.discover(log: log)
-            let lease = try PosterBoardLease(path: container, log: log)
+            let started = ProcessInfo.processInfo.systemUptime
+            let lease = try PosterBoardLease(path: container, reuseReadableAccess: true, log: log)
             defer { try? lease.close() }
             do {
                 let items = try list(lease: lease, records: journals(), log: log)
                 try lease.close()
+                log("CUSTOM LIST elapsed=" + String(ProcessInfo.processInfo.systemUptime - started))
                 log("CUSTOM LIST identity-checked journal rows \(items.count); payload validation deferred until confirmed delete. Unclassified rows visible with warnings and inspect only; no generic all-custom deletion.")
                 return items
             } catch { try? lease.close(); throw error }
+        }
+    }
+    /// Called lazily for visible rows, independently of list completion. The
+    /// same mutation lock and short lease protect every read; no cached authority.
+    static func thumbnail(_ item: Item) async -> Data? {
+        try? await MirsaWallpaperJournal.queued(timeout: 2) { cancelled in
+            if cancelled() { return nil as Data? }
+            let record = MirsaWallpaperJournal.Record(id: item.id, title: item.title,
+                container: item.container, relative: item.relative, expected: ["preview": "read-only"])
+            try MirsaWallpaperJournal.validatePath(record)
+            let lease = try PosterBoardLease(path: item.container, reuseReadableAccess: true)
+            defer { try? lease.close() }
+            try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+            let target = try grant(item.relative, lease: lease)
+            let node = try identity(target, kind: S_IFDIR)
+            guard !cancelled(), item.device == 0 ||
+                (item.device == UInt64(node.st_dev) && item.inode == UInt64(node.st_ino)) else { return nil }
+            guard !descriptorInfo(target, lease: lease, log: { _ in }).apple else { return nil }
+            let data = previewThumbnail(target, lease: lease, isCancelled: cancelled)
+            try lease.close()
+            return cancelled() ? nil : data
         }
     }
     /// UI must obtain separate per-item destructive confirmation before calling.
