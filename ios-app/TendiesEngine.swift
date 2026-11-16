@@ -333,6 +333,7 @@ public final class TendiesEngine {
 
     // MARK: - Flash Tendies to Device
 
+    @discardableResult
     public func flashTendies(
         items: [TendieItem],
         containerPath: String,
@@ -340,7 +341,7 @@ public final class TendiesEngine {
         pairingPath: String,
         log: @escaping (String) -> Void,
         progress: @escaping (Double) -> Void
-    ) async throws {
+    ) async throws -> [String] {
         let output = log
         let log: (String) -> Void = { line in
             // Synchronous persistence before the async UI log, so respring cannot erase it.
@@ -354,7 +355,7 @@ public final class TendiesEngine {
         guard !items.isEmpty else { throw PosterBoardStore.failure("No wallpapers selected.") }
         let normalized = try PosterBoardStore.canonicalContainer(containerPath)
         do {
-            try await MirsaWallpaperJournal.queued(onWait: {
+            return try await MirsaWallpaperJournal.queued(onWait: {
                 log("INSTALL WAIT current wallpaper operation finishing; installation pending")
             }) {
                         let sink = ProbeProgress(log)
@@ -403,9 +404,28 @@ public final class TendiesEngine {
                             guard !remaining.contains(where: { !$0.copied }) else {
                                 throw PosterBoardStore.failure("An incomplete Mirsa installation exists. Use owned cleanup after reviewing its log; do not blindly reinstall.")
                             }
-                            guard !remaining.contains(where: { record in items.contains(where: { $0.name == record.title }) }) else {
-                                throw PosterBoardStore.failure("This wallpaper already has a Mirsa installation journal. Review or remove that exact installation first.")
+                            // A wallpaper with a journal is skipped ONLY when every one of its journals is
+                            // proven installed (exact root identity under THIS lease). Anything else stays fatal.
+                            var skipped: [String] = []
+                            for title in Set(all.map { $0.title }) {
+                                let records = remaining.filter { $0.title == title }
+                                if records.isEmpty { continue }
+                                let wanted = all.filter { $0.title == title }.count
+                                var proven = records.count >= wanted
+                                if proven {
+                                    for record in records where !(try MirsaWallpaperJournal.confirmedInstalled(record, lease: lease)) {
+                                        proven = false
+                                        break
+                                    }
+                                }
+                                guard proven else {
+                                    throw PosterBoardStore.failure("This wallpaper already has a Mirsa installation journal. Review or remove that exact installation first.")
+                                }
+                                skipped.append(title)
+                                log("INSTALL SKIP already installed and verified: " + MirsaWallpaperDiagnostics.quoted(title))
                             }
+                            skipped.sort()
+                            all = all.filter { !skipped.contains($0.title) }
                             for descriptor in all {
                                 let expected = try PosterBoardStore.manifest(descriptor.url)
                                 if let encoded = try? JSONSerialization.data(withJSONObject: expected, options: [.sortedKeys]) {
@@ -440,8 +460,13 @@ public final class TendiesEngine {
                                 log("COPY VERIFIED " + id + " files=" + String(expected.count) + "; gallery unverified.")
                             }
                             try lease.close()
-                            log("COPY READY lease closed. Confirm Respring to refresh the wallpaper picker.")
+                            if all.isEmpty {
+                                log("INSTALL NOTHING NEW all selected wallpapers were already installed; lease closed.")
+                            } else {
+                                log("COPY READY lease closed. Confirm Respring to refresh the wallpaper picker.")
+                            }
                             progress(1)
+                            return skipped
                         } catch { try? lease.close(); throw error }
             }
         } catch {
