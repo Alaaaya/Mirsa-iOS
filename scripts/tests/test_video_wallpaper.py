@@ -52,9 +52,11 @@ class VideoWallpaperTests(unittest.TestCase):
         removal = delete.index("removeItem(at: target)")
         for guard in ["record.container == requested.container", "record.relative == requested.relative",
                       "record.copied", "validateIdentity(", "grantTree(record", "UInt64(info.st_dev) == record.device",
-                      "UInt64(info.st_ino) == record.inode", "actual == record.expected", "final.st_ino == info.st_ino",
+                      "UInt64(info.st_ino) == record.inode", "final.st_ino == info.st_ino",
                       "lease.permits(target)"]:
             self.assertLess(delete.index(guard), removal)
+        # PosterBoard may mutate contents after respring; ownership is identity, not hashes.
+        self.assertNotIn("actual == record.expected", delete)
         self.assertLess(delete.index("try lease.close()"), delete.index("try removeJournal(record)"))
         cleanup = source.split("static func cleanup(", 1)[1]
         self.assertNotIn("removeItem(at: target)", cleanup)
