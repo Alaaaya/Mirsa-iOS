@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
 struct TendiesView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var showFilePicker = false
+    @State private var installAfterPicking = false
+    @State private var pickedInstallIDs: Set<UUID> = []
     @State private var showCustomRequest = false
     @StateObject private var customRequest = WallpaperRequestDraft()
     @ObservedObject private var chatStore = ForgeChatStore.shared
@@ -92,13 +94,16 @@ struct TendiesView: View {
                             }
                             .frame(maxWidth: .infinity)
                         } else {
-                            Button { wallpaperPrompt = .install } label: {
+                            Button {
+                                pickedInstallIDs = []
+                                installAfterPicking = true
+                                showFilePicker = true
+                            } label: {
                                 Label(TendiesPageText.text(.install), systemImage: "sparkles")
                                     .font(.headline).lineLimit(2).minimumScaleFactor(0.8)
                                     .frame(maxWidth: .infinity, minHeight: 48)
                             }
                             .buttonStyle(.borderedProminent).tint(.blue)
-                            .disabled(selectedCount == 0)
                             .accessibilityIdentifier("wallpaper-flash")
                         }
                         Button { showCustomRequest = true } label: {
@@ -133,10 +138,10 @@ struct TendiesView: View {
                     externalBusy: videoApplyRunning,
                     log: { vm.tendiesFlashLog.append($0) },
                     onDeleted: { offerRespring() },
-                    extraTools: {
+                    mainContent: {
                 // Imported files waiting to be installed (selection for the install button).
+                Section {
                 if !vm.tendieItems.isEmpty {
-                    Section {
                         HStack {
                             Text(MirsaTr.p("wallpapersImported", vm.tendieItems.count))
                                 .font(.caption.bold())
@@ -157,9 +162,6 @@ struct TendiesView: View {
                                 vm.deleteTendie(item: item)
                             }
                         }
-                    } header: {
-                        Text(TendiesPageText.text(.ready))
-                    }
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "photo.stack").font(.system(size: 32)).foregroundColor(.secondary)
@@ -167,20 +169,28 @@ struct TendiesView: View {
                     }.frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
 
-                        Button { showFilePicker = true } label: {
+                        Button { installAfterPicking = false; showFilePicker = true } label: {
                             Label(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore), systemImage: "doc.badge.plus")
                         }
                         .accessibilityIdentifier("wallpaper-import")
                         Text(WallpaperMakerStrings.text(.importHint)).font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(vm.posterBoardContainer.isEmpty
-                             ? MirsaTr.lit("PosterBoard container will be auto-detected automatically on flash.")
-                             : MirsaTr.lit("Target: PosterBoard container detected ✅"))
-                            .font(.caption).foregroundColor(.secondary)
-                        OriginalVideoWallpaperBlock(applyRunning: videoApplyRunning)
+                } header: {
+                    Label(TendiesPageText.text(.ready), systemImage: "checklist")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.blue)
+                        .textCase(nil)
+                }
+                OriginalVideoWallpaperBlock(applyRunning: videoApplyRunning)
+                Section {
                         WallpaperMakerSection(applyRunning: videoApplyRunning) { archive in
                             await vm.importTendieFiles(urls: [archive])
                         }
+                } header: {
+                    Label(WallpaperMakerStrings.text(.title), systemImage: "square.3.layers.3d")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.indigo)
+                        .textCase(nil)
+                }
+                Section {
                         Toggle(isOn: $vm.resetPBProtections) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(MirsaTr.lit("Force PosterBoard Cache Refresh")).font(.subheadline.weight(.medium))
@@ -197,6 +207,13 @@ struct TendiesView: View {
                         Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("wallpaper-flash-help")
+                }
+                    },
+                    extraTools: {
+                        Text(vm.posterBoardContainer.isEmpty
+                             ? MirsaTr.lit("PosterBoard container will be auto-detected automatically on flash.")
+                             : MirsaTr.lit("Target: PosterBoard container detected ✅"))
+                            .font(.caption).foregroundColor(.secondary)
                         if !vm.tendiesFlashLog.isEmpty {
                             CompactLogView(
                                 title: "Flash Log (\(vm.tendiesFlashLog.count) lines)",
@@ -229,10 +246,14 @@ struct TendiesView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showFilePicker) {
+            .sheet(isPresented: $showFilePicker, onDismiss: presentPickedInstall) {
                 TendiesDocumentPickerView { urls in
-                    Task {
-                        await vm.importTendieFiles(urls: urls)
+                    let shouldInstall = installAfterPicking
+                    Task { @MainActor in
+                        let importedIDs = await vm.importTendieFiles(urls: urls)
+                        guard shouldInstall else { return }
+                        pickedInstallIDs = Set(importedIDs)
+                        presentPickedInstall()
                     }
                 }
             }
@@ -247,11 +268,16 @@ struct TendiesView: View {
                 case .install:
                     return Alert(title: Text(ws(.installTitle)), message: Text(ws(.installBody)),
                                  primaryButton: .default(Text(ws(.installConfirm))) {
+                                     guard !pickedInstallIDs.isEmpty else { return }
+                                     selectPickedInstallOnly()
+                                     pickedInstallIDs = []
                                      vm.errorMessage = nil
                                      installStartedThisSession = true
                                      Task { await vm.flashSelectedTendies() }
                                  },
-                                 secondaryButton: .cancel(Text(ws(.cancel))))
+                                 secondaryButton: .cancel(Text(ws(.cancel))) {
+                                     pickedInstallIDs = []
+                                 })
                 case .respring:
                     return Alert(title: Text(ws(.respringTitle)), message: Text(ws(.respringBody)),
                                  primaryButton: .destructive(Text(ws(.respringConfirm))) {
@@ -313,6 +339,20 @@ struct TendiesView: View {
                 Button(ws(.cancel)) { respringPresentation.isPresented = false }
                     .padding().background(.black.opacity(0.8)).foregroundStyle(.white)
             }.interactiveDismissDisabled()
+        }
+    }
+
+    /// Only successful imports from the primary pick can arm confirmation.
+    /// Wait for the picker to dismiss before presenting the alert.
+    private func presentPickedInstall() {
+        guard !showFilePicker, !pickedInstallIDs.isEmpty else { return }
+        selectPickedInstallOnly()
+        wallpaperPrompt = .install
+    }
+
+    private func selectPickedInstallOnly() {
+        for index in vm.tendieItems.indices {
+            vm.tendieItems[index].isSelected = pickedInstallIDs.contains(vm.tendieItems[index].id)
         }
     }
 

@@ -94,7 +94,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     func testTendiesReorganizedPage() {
         continueAfterFailure = false
         for lang in ["ar", "en"] {
-            let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"])
+            let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFlashLogFixture"])
             XCTAssertTrue(tap(app, ["Tendies"]))
             let install = app.buttons["wallpaper-flash"]
             let request = app.buttons["wallpaper-request"]
@@ -103,21 +103,49 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(install.isHittable)
             XCTAssertTrue(request.isHittable)
             XCTAssertLessThan(abs(install.frame.midY - request.frame.midY), 20)
-            let tools = app.descendants(matching: .any).matching(identifier: "wallpaper-tools").firstMatch
-            XCTAssertTrue(tools.exists)
-            XCTAssertFalse(app.buttons["wallpaper-import"].exists, "Secondary import must start collapsed")
-            shot(app, lang + "_tendies_implemented_closed")
-            tools.tap()
-            shot(app, lang + "_tendies_implemented_tools_opened")
+            shot(app, lang + "_tendies_main_top")
+            install.tap()
+            let picker = app.descendants(matching: .any).matching(identifier: "wallpaper-document-picker").firstMatch
+            XCTAssertTrue(picker.waitForExistence(timeout: 10), "Primary install must open the real document picker")
+            XCTAssertFalse(app.alerts.firstMatch.exists, "Never confirm old selections before picking")
+            shot(app, lang + "_tendies_primary_install_picker")
+            app.terminate()
+
+            app.launch()
+            XCTAssertTrue(tap(app, ["Tendies"]))
             let importButton = app.buttons["wallpaper-import"]
             revealWallpaperElement(importButton, identifier: "wallpaper-import", in: app)
-            XCTAssertTrue(importButton.isHittable)
-            shot(app, lang + "_tendies_implemented_tools")
-            importButton.tap()
-            let picker = app.descendants(matching: .any).matching(identifier: "wallpaper-document-picker").firstMatch
-            XCTAssertTrue(picker.waitForExistence(timeout: 10), "The real document picker must open, not just the existing page navigation bar")
-            shot(app, lang + "_tendies_import_picker")
+            XCTAssertTrue(importButton.isHittable, "Import must be on the main page with tools closed")
+            shot(app, lang + "_tendies_main_import")
+            let video = app.buttons["video-wallpaper-from-photos"]
+            revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app)
+            XCTAssertTrue(video.isHittable, "Video creation must remain on the main page")
+            shot(app, lang + "_tendies_main_video")
+            let tools = app.buttons["wallpaper-tools"]
+            for page in 0..<12 {
+                shot(app, lang + "_tendies_main_page_" + String(page))
+                if tools.exists && tools.isHittable { break }
+                app.swipeUp(velocity: .slow)
+            }
+            XCTAssertTrue(tools.isHittable)
+            let respring = app.buttons["wallpaper-respring"]
+            revealWallpaperElement(respring, identifier: "wallpaper-respring", in: app)
+            XCTAssertTrue(respring.isHittable, "Respring must be visible with tools closed")
+            shot(app, lang + "_tendies_main_respring")
+            revealWallpaperElement(tools, identifier: "wallpaper-tools", in: app)
+            shot(app, lang + "_tendies_main_bottom_tools_closed")
+            XCTAssertTrue(app.buttons["wallpaper-refresh"].exists)
+            XCTAssertTrue(app.buttons["wallpaper-cleanup"].exists)
+            tools.tap()
+            shot(app, lang + "_tendies_maintenance_opened")
             app.terminate()
+
+            let fresh = launch("tools", lang: lang)
+            XCTAssertTrue(tap(fresh, ["Tendies"]))
+            let freshInstall = fresh.buttons["wallpaper-flash"]
+            XCTAssertTrue(freshInstall.waitForExistence(timeout: 10))
+            XCTAssertTrue(freshInstall.isEnabled, "No imported selection is required to choose a file")
+            fresh.terminate()
         }
     }
 

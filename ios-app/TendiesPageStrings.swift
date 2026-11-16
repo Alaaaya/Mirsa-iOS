@@ -23,7 +23,7 @@ enum TendiesPageText {
         .yours: ["Your wallpapers", "خلفياتك", "Deine Hintergründe", "Wêneyên te yên paşîn", "وێنە پشتەوەکانت"],
         .yoursEmpty: ["No wallpapers installed by Mirsa yet.", "ما في خلفيات مركّبة من مرسى لسا.", "Noch keine von Mirsa installierten Hintergründe.", "Hê wêneyên paşîn yên ji Mirsa nehatine saz kirin.", "هێشتا هیچ وێنەیەکی پشتەوە لەلایەن مرسی دانەنراوە."],
         .tools: ["Tools", "أدوات", "Werkzeuge", "Amûr", "ئامرازەکان"],
-        .toolsHint: ["Import, check, clean up, respring and log.", "استيراد، فحص، تنظيف، إعادة تشغيل الواجهة والسجل.", "Import, Prüfen, Aufräumen, Respring und Protokoll.", "Împort, kontrol, paqijkirin, respring û rojname.", "هاوردە، پشکنین، پاککردنەوە، ڕێسپرینگ و تۆمار."],
+        .toolsHint: ["Logs and advanced details.", "السجلات والتفاصيل المتقدمة.", "Protokolle und erweiterte Details.", "Rojname û hûrgiliyên pêşketî.", "تۆمارەکان و وردەکارییە پێشکەوتووەکان."],
         .ready: ["Ready to install", "جاهزة للتركيب", "Bereit zur Installation", "Amade ji bo sazkirinê", "ئامادە بۆ دانان"],
         .skippedNote: ["Already installed, skipped:", "كانت مركّبة أصلاً، تم تخطيها:", "Bereits installiert, übersprungen:", "Berê hatibû saz kirin, derbas bû:", "پێشتر دانرابوو، بازدرا:"],
         .nothingNew: ["Nothing new to install. Everything selected is already installed.", "ما في شي جديد للتركيب. كل المحدد مركّب أصلاً.", "Nichts Neues zu installieren. Alles Gewählte ist bereits installiert.", "Tiştek nû tune. Hemû yên hilbijartî berê hatine saz kirin.", "هیچ شتێکی نوێ نییە. هەموو هەڵبژێردراوەکان پێشتر دانراون."],

@@ -110,9 +110,9 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertIn('Button { offerRespring() } label:', view)
         self.assertLess(view.index('accessibilityIdentifier("wallpaper-flash")'),
                         view.index('accessibilityIdentifier("wallpaper-respring")'))
-        # Secondary respring now belongs inside the single closed tools group.
-        self.assertLess(view.index('extraTools: {'),
-                        view.index('accessibilityIdentifier("wallpaper-respring")'))
+        # Owner keeps the same respring action visible on the main page.
+        self.assertLess(view.index('accessibilityIdentifier("wallpaper-respring")'),
+                        view.index('extraTools: {'))
         self.assertIn('@StateObject private var respringPresentation', view)
         self.assertIn('.fullScreenCover(isPresented: $respringPresentation.isPresented', view)
         self.assertGreater(view.index('.fullScreenCover('), view.index('} // ScrollViewReader'))
