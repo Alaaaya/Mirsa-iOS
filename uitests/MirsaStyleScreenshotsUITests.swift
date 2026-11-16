@@ -89,6 +89,36 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Real implemented page, no replacement mock. Tools must start closed, and both
+    /// primary actions stay on the same row in Arabic RTL and English LTR.
+    func testTendiesReorganizedPage() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"])
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            let install = app.buttons["wallpaper-flash"]
+            let request = app.buttons["wallpaper-request"]
+            XCTAssertTrue(install.waitForExistence(timeout: 10))
+            XCTAssertTrue(request.exists)
+            XCTAssertTrue(install.isHittable)
+            XCTAssertTrue(request.isHittable)
+            XCTAssertLessThan(abs(install.frame.midY - request.frame.midY), 20)
+            let tools = app.descendants(matching: .any).matching(identifier: "wallpaper-tools").firstMatch
+            XCTAssertTrue(tools.exists)
+            XCTAssertFalse(app.buttons["wallpaper-import"].exists, "Secondary import must start collapsed")
+            shot(app, lang + "_tendies_implemented_closed")
+            tools.tap()
+            let importButton = app.buttons["wallpaper-import"]
+            revealWallpaperElement(importButton, identifier: "wallpaper-import", in: app)
+            XCTAssertTrue(importButton.isHittable)
+            shot(app, lang + "_tendies_implemented_tools")
+            importButton.tap()
+            XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 5))
+            shot(app, lang + "_tendies_import_picker")
+            app.terminate()
+        }
+    }
+
     /// App Store section: each page of its own tab bar, with a DEBUG-only fixture account (no Apple request).
     /// Captured in both Apple Store styles; `-mirsa.store.style` sets the same UserDefaults key the
     /// Settings picker writes (argument domain, this launch only).
@@ -194,6 +224,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 XCTAssertTrue(tap(app, ["Tendies"]))
                 let prefix = "\(lang)_tendies_\(theme)_\(largeText ? "large" : "standard")"
                 shot(app, prefix + "_top")
+                app.descendants(matching: .any).matching(identifier: "wallpaper-tools").firstMatch.tap()
                 let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
                 revealWallpaperElement(field, identifier: "wallpaper-description", in: app)
                 XCTAssertTrue(field.isHittable)
@@ -267,14 +298,16 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     }
 
     /// Original video wallpaper block sits at the TOP of the same tab, Tendies maker below it.
-    func testVideoWallpaperTopThenTendiesBelow() {
+    func testVideoWallpaperPreservedInsideTools() {
         continueAfterFailure = false
         for lang in ["ar", "en"] {
             let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"])
             XCTAssertTrue(tap(app, ["Tendies"]))
+            app.descendants(matching: .any).matching(identifier: "wallpaper-tools").firstMatch.tap()
             let video = app.descendants(matching: .any).matching(identifier: "video-wallpaper-from-photos").firstMatch
             XCTAssertTrue(video.waitForExistence(timeout: 10))
-            XCTAssertTrue(video.isHittable, "Original video wallpaper must be visible before scrolling")
+            revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app)
+            XCTAssertTrue(video.isHittable, "Original video wallpaper is retained within tools")
             let initialVideoFrame = video.frame
             let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
             // Compare frames only before scrolling; Form virtualizes upper rows.
