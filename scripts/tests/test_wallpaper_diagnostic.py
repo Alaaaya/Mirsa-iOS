@@ -39,8 +39,8 @@ class DiagnosticContractTests(unittest.TestCase):
         delete = s.split("static func delete(",1)[1]
         self.assertLess(delete.index("guard requested.canDelete"), delete.index("removeItem("))
         ui = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
-        self.assertIn("if rec.canDelete {", ui)
-        self.assertIn("if !rec.canDelete {", ui)
+        self.assertIn("ForEach(items.filter { $0.canDelete })", ui)
+        self.assertIn("ForEach(items.filter { !$0.canDelete })", ui)
         self.assertIn("MirsaWallpaperDiagnostics.inspect", ui)
     def test_stale_reinstall_shares_lease_and_parent_identity(self):
         s = (R / "ios-app/MirsaWallpaperJournal.swift").read_text()
