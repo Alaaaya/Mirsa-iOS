@@ -1,12 +1,12 @@
 import Foundation
 import Darwin
 import CryptoKit
+import ImageIO
 
 /// Diagnostic listing. Unclassified entries remain visible but never deletable.
 /// A title, UUID or Apple's shared 7400 identity is never provenance by itself.
 enum MirsaCustomWallpapers {
     struct Item: Identifiable, Equatable {
-        let thumbnail: Data? = nil
         let title: String
         let id: String
         let container: String
@@ -16,6 +16,8 @@ enum MirsaCustomWallpapers {
         let inode: UInt64
         let paths: [String]
         var canDelete: Bool = true
+        /// Small read-only preview (JPEG, <=128px) from the wallpaper's own files; nil = fallback icon.
+        var thumbnail: Data? = nil
     }
     struct Snapshot: Equatable {
         let expected: [String: String]
@@ -341,9 +343,71 @@ enum MirsaCustomWallpapers {
         guard matches.count == 1, let record = matches.first,
               (try? MirsaWallpaperJournal.validatePath(record)) != nil,
               record.copied, record.container == container, record.relative == relative,
-              record.device == snapshot.device, record.inode == snapshot.inode,
-              record.paths == snapshot.paths, record.expected == snapshot.expected else { return nil }
+              record.device == snapshot.device, record.inode == snapshot.inode else { return nil }
+        // Ownership is the trusted app-private journal identity (UUID, canonical path, root inode).
+        // PosterBoard legitimately rewrites files after respring, so content hashes are NOT a gate.
         return record
+    }
+
+    static let thumbMaxNodes = 160, thumbMaxFileBytes = 6 * 1024 * 1024, thumbMaxSide = 8192
+    static let thumbExtensions: Set<String> = ["png", "jpg", "jpeg", "heic"]
+    /// Bounded, read-only preview from the wallpaper's own files. Every node is lease/identity checked,
+    /// no symlinks or hardlinks, no network, small decode via ImageIO downsample. Any problem = nil (icon).
+    static func previewThumbnail(_ root: URL, lease: PosterBoardLease) -> Data? {
+        let prefix = lease.effectiveURL.path + "/"
+        guard root.path.hasPrefix(prefix), let rootNode = try? identity(root, kind: S_IFDIR) else { return nil }
+        var candidates: [(rank: Int, url: URL)] = []
+        var visited = 0
+        func safe(_ url: URL) -> Bool {
+            guard url.path.hasPrefix(prefix),
+                  (try? grant(String(url.path.dropFirst(prefix.count)), lease: lease)) != nil,
+                  PosterBoardStore.unredirected(url, lease: lease) else { return false }
+            return true
+        }
+        func walk(_ dir: URL, depth: Int) {
+            guard depth <= 8, visited < thumbMaxNodes, safe(dir),
+                  let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path), names.count <= thumbMaxNodes else { return }
+            for name in names.sorted() {
+                visited += 1
+                guard visited <= thumbMaxNodes, validRelative(name) else { return }
+                let url = dir.appendingPathComponent(name)
+                var node = stat()
+                guard lstat(url.path, &node) == 0, node.st_dev == rootNode.st_dev, safe(url) else { continue }
+                switch node.st_mode & S_IFMT {
+                case S_IFDIR: walk(url, depth: depth + 1)
+                case S_IFREG:
+                    guard thumbExtensions.contains(url.pathExtension.lowercased()), node.st_nlink == 1,
+                          node.st_size > 0, node.st_size <= Int64(thumbMaxFileBytes) else { continue }
+                    let lower = url.path.lowercased()
+                    let snapshotFile = lower.contains("snapshot")
+                    let rank = lower.contains("/assets/") ? 0 : (lower.contains("preview") || lower.contains("thumb") ? 1 : (snapshotFile ? 3 : 2))
+                    candidates.append((rank, url))
+                default: continue
+                }
+            }
+        }
+        walk(root, depth: 0)
+        for candidate in candidates.sorted(by: { $0.rank < $1.rank }).prefix(3) {
+            if let data = try? read(candidate.url, limit: thumbMaxFileBytes), let jpeg = thumbnailData(from: data) { return jpeg }
+        }
+        return nil
+    }
+    /// ImageIO downsample with pixel-dimension caps; never a full decode of oversized images.
+    static func thumbnailData(from data: Data) -> Data? {
+        guard data.count <= thumbMaxFileBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int,
+              w > 0, h > 0, w <= thumbMaxSide, h <= thumbMaxSide, w * h <= 40_000_000,
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 128] as CFDictionary) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.7] as CFDictionary)
+        guard CGImageDestinationFinalize(dest), out.length > 0, out.length < 64 * 1024 else { return nil }
+        return out as Data
     }
     private static func journals() throws -> [MirsaWallpaperJournal.Record] {
         let root = MirsaWallpaperJournal.root
@@ -407,7 +471,7 @@ enum MirsaCustomWallpapers {
         let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
         guard names.count <= 256 else { throw PosterBoardStore.failure("Too many wallpaper descriptors; no deletion allowed.") }
         var found: [Item] = []
-        var processed = 0, unavailable = 0
+        var processed = 0, unavailable = 0, thumbs = 0
         let deadline = ProcessInfo.processInfo.systemUptime + 30
         // Include exact recorded older versions as well as the current provider.
         let candidates = records.filter { $0.container == lease.targetURL.path }.sorted { $0.id < $1.id }
@@ -420,7 +484,11 @@ enum MirsaCustomWallpapers {
             do {
                 let target = try MirsaWallpaperJournal.grantExact(record, lease: lease)
                 let node = try identity(target, kind: S_IFDIR)
-                if let item = journalItem(record, device: UInt64(node.st_dev), inode: UInt64(node.st_ino)) {
+                if var item = journalItem(record, device: UInt64(node.st_dev), inode: UInt64(node.st_ino)) {
+                    if thumbs < 24, ProcessInfo.processInfo.systemUptime < deadline - 10 {
+                        thumbs += 1
+                        item.thumbnail = previewThumbnail(target, lease: lease)
+                    }
                     found.append(item)
                 } else {
                     unavailable += 1
@@ -491,13 +559,19 @@ enum MirsaCustomWallpapers {
                 guard let fresh = try classify(id: requested.id, container: requested.container,
                                               relative: requested.relative, lease: lease,
                                               records: records, baseline: baseline),
-                      fresh == requested else { throw PosterBoardStore.failure("Wallpaper changed or is no longer proven custom. Nothing deleted.") }
+                      fresh.id == requested.id, fresh.container == requested.container,
+                      fresh.relative == requested.relative, fresh.device == requested.device,
+                      fresh.inode == requested.inode,
+                      completedJournal(records, id: fresh.id, container: fresh.container, relative: fresh.relative,
+                                       snapshot: Snapshot(expected: fresh.expected, paths: fresh.paths,
+                                                          device: fresh.device, inode: fresh.inode)) != nil else { throw PosterBoardStore.failure("Wallpaper changed or is no longer proven custom. Nothing deleted.") }
                 let target = try grant(fresh.relative, lease: lease)
                 let final = try snapshot(target, lease: lease)
                 guard final.expected == fresh.expected, final.paths == fresh.paths,
                       final.device == fresh.device, final.inode == fresh.inode,
                       let classified = try classify(id: fresh.id, container: fresh.container, relative: fresh.relative,
-                                                    lease: lease, records: try journals(), baseline: baseline), classified == fresh,
+                                                    lease: lease, records: try journals(), baseline: baseline),
+                      classified.id == fresh.id, classified.device == fresh.device, classified.inode == fresh.inode,
                       lease.permits(target) else { throw PosterBoardStore.failure("Wallpaper changed before deletion; preserved.") }
                 let last = try identity(target, kind: S_IFDIR)
                 guard UInt64(last.st_dev) == fresh.device, UInt64(last.st_ino) == fresh.inode else {
