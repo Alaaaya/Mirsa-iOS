@@ -37,7 +37,7 @@ struct MirsaWallpaperManagementSection: View {
                             .frame(width: 32, height: 44)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(rec.title.isEmpty ? (String(localized: "Wallpaper") + " " + String(max(rec.fallbackIndex, 1))) : rec.title).font(.subheadline.bold()).lineLimit(1)
+                        Text(rec.title.isEmpty ? MirsaWallpaperActionStrings.fallbackName(max(rec.fallbackIndex, 1)) : rec.title).font(.subheadline.bold()).lineLimit(1)
                         Text(rec.id).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
                         if !rec.canDelete {
                             Label(t(.unknownWarning), systemImage: "exclamationmark.triangle")

@@ -22,6 +22,19 @@ enum MirsaWallpaperActionStrings {
         }
         return values[key]![column]
     }
+    /// Localized "Wallpaper N" with locale-formatted index (AR/CKB Arabic-Indic digits).
+    static func fallbackName(_ index: Int, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        let f = NumberFormatter()
+        let word: String
+        switch language {
+        case .english: f.locale = Locale(identifier: "en"); word = "Wallpaper"
+        case .arabic: f.locale = Locale(identifier: "ar"); word = "خلفية"
+        case .german: f.locale = Locale(identifier: "de"); word = "Hintergrund"
+        case .kurmanji: f.locale = Locale(identifier: "ku"); word = "Wênesazî"
+        case .sorani: f.locale = Locale(identifier: "ckb"); word = "وێنەزەمینە"
+        }
+        return word + " " + (f.string(from: NSNumber(value: index)) ?? String(index))
+    }
     static let values: [Key: [String]] = [
         .installTitle: ["Install selected wallpapers?", "تثبّت الخلفيات المحددة؟", "Ausgewählte Hintergründe installieren?", "Wênesaziyên hilbijartî saz bikim?", "ئەو وێنەزەمینانە دابمەزرێنم کە هەڵبژێردراون؟"],
         .installBody: ["This copies the selected wallpapers into the iOS wallpaper gallery. Your imported files stay as they are. You will be asked separately before anything restarts.", "رح ينسخ الخلفيات المحددة لمعرض خلفيات iOS. ملفاتك المستوردة بتضل متل ما هي. رح نسألك لحالها قبل ما يعيد التشغيل أي شي.", "Die ausgewählten Hintergründe werden in die iOS-Hintergrundgalerie kopiert. Deine importierten Dateien bleiben unverändert. Vor einem Neustart wirst du separat gefragt.", "Ev wênesaziyên hilbijartî ji galeriya wênesaziyên iOS re kopî dike. Pelên te yên hatine import kirin wekî xwe dimînin. Berî ku tiştek ji nû ve dest pê bike, dê ji te ji aliyekî din ve bê pirsîn.", "ئەمە وێنەزەمینە هەڵبژێردراوەکان کۆپی دەکات بۆ گالەری وێنەزەمینەی iOS. فایلە هاوردەکراوەکانت وەک خۆیان دەمێننەوە. پێش هەر دووبارە دەستپێکردنەوەیەک جیا پرسیارت لێ دەکرێت."],
