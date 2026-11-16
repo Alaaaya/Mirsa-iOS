@@ -2,11 +2,14 @@ import SwiftUI
 
 /// Diagnostic build: journal rows keep strict deletion; unclassified rows are inspect-only.
 /// Nothing here runs on appear except a read-only listing.
-struct MirsaWallpaperManagementSection: View {
+struct MirsaWallpaperManagementSection<Extra: View>: View {
     let externalBusy: Bool
     let log: (String) -> Void
     /// Called on main only after a current-session owned delete succeeded.
     let onDeleted: () -> Void
+    /// Everything secondary from the page (import, video, maker, options, respring, log) lives in the same closed tools group.
+    @ViewBuilder let extraTools: () -> Extra
+    @State private var toolsOpen = false
 
     @State private var items: [MirsaCustomWallpapers.Item] = []
     @State private var busy = false
@@ -23,66 +26,110 @@ struct MirsaWallpaperManagementSection: View {
     private func t(_ k: MirsaWallpaperActionStrings.Key) -> String { MirsaWallpaperActionStrings.text(k) }
     private var disabled: Bool { busy || externalBusy }
 
-    var body: some View {
-        Section {
-            if items.isEmpty {
-                Text(t(.ownedEmpty)).font(.subheadline).foregroundColor(.secondary)
+    private func cardTitle(_ rec: MirsaCustomWallpapers.Item) -> String {
+        rec.title.isEmpty ? MirsaWallpaperActionStrings.fallbackName(max(rec.fallbackIndex, 1)) : rec.title
+    }
+
+    private func thumb(_ rec: MirsaCustomWallpapers.Item) -> some View {
+        Group {
+            if let data = rec.thumbnail, let img = UIImage(data: data) {
+                Image(uiImage: img).resizable().scaledToFill()
+                    .frame(width: 44, height: 60).clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                RoundedRectangle(cornerRadius: 8).fill(Color(UIColor.tertiarySystemFill))
+                    .frame(width: 44, height: 60)
+                    .overlay { Image(systemName: "photo.on.rectangle").foregroundColor(.secondary) }
             }
-            ForEach(items) { rec in
-                HStack(spacing: 10) {
-                    if let data = rec.thumbnail, let img = UIImage(data: data) {
-                        Image(uiImage: img).resizable().scaledToFill()
-                            .frame(width: 32, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
-                    } else {
-                        Image(systemName: "photo.on.rectangle").foregroundColor(.secondary)
-                            .frame(width: 32, height: 44)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(rec.title.isEmpty ? MirsaWallpaperActionStrings.fallbackName(max(rec.fallbackIndex, 1)) : rec.title).font(.subheadline.bold()).lineLimit(1)
-                        Text(rec.id).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
-                        if !rec.canDelete {
-                            Label(t(.unknownWarning), systemImage: "exclamationmark.triangle")
-                                .font(.caption2).foregroundColor(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
-                            .buttonStyle(.bordered).disabled(disabled)
-                    }
-                    Spacer()
-                    if rec.canDelete {
+        }
+    }
+
+    private func thumbnailTask(_ rec: MirsaCustomWallpapers.Item) -> some View {
+        Color.clear.frame(width: 0, height: 0)
+            .task(id: String(describing: thumbnailGeneration) + String(disabled)) {
+                guard !disabled, rec.thumbnail == nil else { return }
+                let generation = thumbnailGeneration
+                let data = await MirsaCustomWallpapers.thumbnail(rec)
+                guard !Task.isCancelled, generation == thumbnailGeneration,
+                      let index = items.firstIndex(where: { $0.id == rec.id && $0.relative == rec.relative }) else { return }
+                items[index].thumbnail = data
+            }
+    }
+
+    var body: some View {
+        Group {
+            // Installed wallpapers: compact cards (thumbnail, name, current confirmed delete).
+            Section {
+                if !items.contains(where: { $0.canDelete }) {
+                    Text(TendiesPageText.text(.yoursEmpty)).font(.subheadline).foregroundColor(.secondary)
+                }
+                ForEach(items.filter { $0.canDelete }) { rec in
+                    HStack(spacing: 12) {
+                        thumb(rec)
+                        Text(cardTitle(rec)).font(.subheadline.bold()).lineLimit(2)
+                        Spacer()
                         Button(role: .destructive) { pendingDelete = rec } label: {
                             Text(t(.deleteItem)).font(.caption.bold())
                         }
                         .buttonStyle(.bordered).tint(.red)
                         .disabled(disabled)
                     }
+                    .background(thumbnailTask(rec))
                 }
-                .task(id: String(describing: thumbnailGeneration) + String(disabled)) {
-                    guard !disabled, rec.thumbnail == nil else { return }
-                    let generation = thumbnailGeneration
-                    let data = await MirsaCustomWallpapers.thumbnail(rec)
-                    guard !Task.isCancelled, generation == thumbnailGeneration,
-                          let index = items.firstIndex(where: { $0.id == rec.id && $0.relative == rec.relative }) else { return }
-                    items[index].thumbnail = data
+            } header: {
+                Text(TendiesPageText.text(.yours))
+            }
+
+            // One closed tools group: nothing is removed, everything secondary lives here.
+            Section {
+                DisclosureGroup(isExpanded: $toolsOpen) {
+                    extraTools()
+                    ForEach(items.filter { !$0.canDelete }) { rec in
+                        HStack(spacing: 10) {
+                            thumb(rec)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(cardTitle(rec)).font(.subheadline.bold()).lineLimit(1)
+                                Text(rec.id).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
+                                Label(t(.unknownWarning), systemImage: "exclamationmark.triangle")
+                                    .font(.caption2).foregroundColor(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
+                                    .buttonStyle(.bordered).disabled(disabled)
+                            }
+                            Spacer()
+                        }
+                        .background(thumbnailTask(rec))
+                    }
+                    ForEach(items.filter { $0.canDelete }) { rec in
+                        // Deletable rows keep their separate inspect action here too.
+                        HStack {
+                            Text(cardTitle(rec)).font(.caption).lineLimit(1)
+                            Spacer()
+                            Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
+                                .buttonStyle(.bordered).disabled(disabled)
+                        }
+                    }
+                    journalRows
+                    Button { reload() } label: { Label(t(.refresh), systemImage: "arrow.clockwise") }
+                        .disabled(disabled)
+                    Button { confirmCleanup = true } label: { Label(t(.cleanup), systemImage: "sparkles") }
+                        .disabled(disabled)
+                    if busy { HStack { ProgressView(); Text(t(.busy)).font(.caption).foregroundColor(.secondary) } }
+                    else if externalBusy { Text(t(.busy)).font(.caption).foregroundColor(.secondary) }
+                    if let message {
+                        Text(message).font(.caption).foregroundColor(failed ? .red : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(t(.ownedFooter))
+                        Text(t(.importRemoveHint))
+                    }.font(.caption2).foregroundColor(.secondary)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(TendiesPageText.text(.tools)).font(.headline)
+                        Text(TendiesPageText.text(.toolsHint)).font(.caption).foregroundColor(.secondary)
+                    }
                 }
-            }
-            journalRows
-            Button { reload() } label: { Label(t(.refresh), systemImage: "arrow.clockwise") }
-                .disabled(disabled)
-            Button { confirmCleanup = true } label: { Label(t(.cleanup), systemImage: "sparkles") }
-                .disabled(disabled)
-            if busy { HStack { ProgressView(); Text(t(.busy)).font(.caption).foregroundColor(.secondary) } }
-            else if externalBusy { Text(t(.busy)).font(.caption).foregroundColor(.secondary) }
-            if let message {
-                Text(message).font(.caption).foregroundColor(failed ? .red : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } header: {
-            Text(t(.ownedTitle))
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(t(.ownedFooter))
-                Text(t(.importRemoveHint))
+                .accessibilityIdentifier("wallpaper-tools")
             }
         }
         .onAppear { reload(); reloadJournal() }
