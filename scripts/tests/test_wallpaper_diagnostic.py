@@ -3,6 +3,22 @@ import unittest
 R = pathlib.Path(__file__).resolve().parents[2]
 
 class DiagnosticContractTests(unittest.TestCase):
+    def test_process_restart_evidence_is_local_bounded_and_not_authority(self):
+        r = R / "ios-app"
+        journal = (r / "MirsaWallpaperJournal.swift").read_text()
+        evidence = journal.split("enum MirsaWallpaperEvidence {", 1)[1]
+        for token in ["maxEvents = 256", "maxLine = 2048", "maxBytes", "NSLock()", "options: .atomic", "st_nlink == 1", "HISTORY ", "session=", "uptime=", "build="]:
+            self.assertIn(token, evidence)
+        for token in ["URLSession", "removeItem(", "PosterBoardLease(", "grant("]:
+            self.assertNotIn(token, evidence)
+        vm = (r / "AppViewModel.swift").read_text()
+        self.assertIn("tendiesFlashLog = MirsaWallpaperEvidence.restored()", vm)
+        self.assertIn("MirsaWallpaperEvidence.captureVisible", vm)
+        engine = (r / "TendiesEngine.swift").read_text().split("public func flashTendies(", 1)[1].split("func prepareDescriptor(", 1)[0]
+        self.assertLess(engine.index('log("COPY INTENT'), engine.index("try MirsaPosterCopy.copyExclusive("))
+        self.assertIn('context: "post-copy uuid="', engine)
+        self.assertIn('log("COPY VERIFIED', engine)
+        self.assertIn('log("INSTALL ERROR', engine)
     def test_read_only_and_bounded(self):
         s = (R / "ios-app/MirsaWallpaperDiagnostics.swift").read_text()
         for prohibited in ["removeItem(", "moveItem(", "createDirectory(", "NSKeyedUnarchiver", "URLSession", "enumerator("]:

@@ -343,6 +343,15 @@ public final class TendiesEngine {
         log: @escaping (String) -> Void,
         progress: @escaping (Double) -> Void
     ) async throws {
+        let output = log
+        let log: (String) -> Void = { line in
+            // Synchronous persistence before the async UI log, so respring cannot erase it.
+            if ["INSTALL", "COPY", "JOURNAL", "CLEANUP"].contains(where: { line.hasPrefix($0) }) {
+                if !MirsaWallpaperEvidence.record(line) { output("EVIDENCE WRITE FAILED; persistent diagnostics unavailable") }
+            }
+            output(line)
+        }
+        log("INSTALL BEGIN items=" + String(items.count) + " container=" + containerPath)
         // Completion means byte-for-byte verified copy, not unobserved gallery registration.
         guard !items.isEmpty else { throw PosterBoardStore.failure("No wallpapers selected.") }
         let normalized = try PosterBoardStore.canonicalContainer(containerPath)
@@ -383,6 +392,7 @@ public final class TendiesEngine {
                         do {
                             try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
                             let parent = try MirsaPosterCopy.destination(lease: lease)
+                            log("INSTALL DESTINATION " + parent)
                             // Reconcile only matching journals, never unrelated records.
                             // Each absence is freshly proved under this install lease.
                             let matching = try MirsaWallpaperJournal.records().filter { record in
@@ -400,6 +410,11 @@ public final class TendiesEngine {
                             }
                             for descriptor in all {
                                 let expected = try PosterBoardStore.manifest(descriptor.url)
+                                if let encoded = try? JSONSerialization.data(withJSONObject: expected, options: [.sortedKeys]) {
+                                    log("INSTALL SOURCE title=" + MirsaWallpaperDiagnostics.quoted(descriptor.title) +
+                                        " manifestSHA256=" + MirsaWallpaperDiagnostics.digest(encoded) +
+                                        " files=" + String(expected.count))
+                                }
                                 let id = UUID().uuidString
                                 let relative = parent + "/" + id
                                 var record = MirsaWallpaperJournal.Record(id: id, title: descriptor.title,
@@ -411,12 +426,14 @@ public final class TendiesEngine {
                                 // Durable intent BEFORE any system write. Partial copies are retained.
                                 try MirsaWallpaperJournal.save(record)
                                 let target = lease.effectiveURL.appendingPathComponent(relative)
+                                log("COPY INTENT uuid=" + id + " relative=" + relative)
                                 try MirsaPosterCopy.copyExclusive(source: descriptor.url, target: target, expected: expected, log: log)
                                 let attrs = try fm.attributesOfItem(atPath: target.path)
                                 guard let device = attrs[.systemNumber] as? NSNumber,
                                       let inode = attrs[.systemFileNumber] as? NSNumber else {
                                     throw PosterBoardStore.failure("Copied root identity unavailable; journal retained.")
                                 }
+                                MirsaWallpaperEvidence.observe(target, context: "post-copy uuid=" + id, log: log)
                                 record.device = device.uint64Value
                                 record.inode = inode.uint64Value
                                 record.paths = try MirsaPosterCopy.typedPaths(target)
@@ -430,7 +447,10 @@ public final class TendiesEngine {
                         } catch { try? lease.close(); throw error }
                     }
                     continuation.resume()
-                } catch { continuation.resume(throwing: error) }
+                } catch {
+                    log("INSTALL ERROR " + error.localizedDescription)
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }

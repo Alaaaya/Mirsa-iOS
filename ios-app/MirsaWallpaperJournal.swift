@@ -297,3 +297,68 @@ enum MirsaWallpaperJournal {
         }
     }
 }
+
+/// Bounded app-private evidence, independent of the transient on-screen log.
+/// Never read on-disk history as instructions or as deletion/ownership authority.
+enum MirsaWallpaperEvidence {
+    static let lock = NSLock()
+    static let maxEvents = 256, maxLine = 2048, maxBytes = 2 * 1024 * 1024
+    static let session = UUID().uuidString
+    static var file: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MirsaWallpaperEvidence", isDirectory: true)
+            .appendingPathComponent("history.json")
+    }
+    static func read(at url: URL) throws -> [String] {
+        try MirsaWallpaperJournal.safeLocal(url)
+        var node = stat()
+        let result = lstat(url.path, &node), error = errno
+        if result == -1 && error == ENOENT { return [] }
+        guard result == 0, (node.st_mode & S_IFMT) == S_IFREG, node.st_nlink == 1,
+              node.st_size <= Int64(maxBytes) else {
+            throw PosterBoardStore.failure("Wallpaper evidence is unavailable or unsafe.")
+        }
+        return Array(try JSONDecoder().decode([String].self, from: Data(contentsOf: url)).suffix(maxEvents))
+            .map { String($0.prefix(maxLine)) }
+    }
+    static func append(_ line: String, at url: URL) throws {
+        lock.lock(); defer { lock.unlock() }
+        try MirsaWallpaperJournal.safeLocal(url.deletingLastPathComponent())
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var events = try read(at: url)
+        events.append(String(line.prefix(maxLine)))
+        events = Array(events.suffix(maxEvents))
+        try JSONEncoder().encode(events).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+    @discardableResult static func record(_ line: String) -> Bool {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let text = stamp + " uptime=" + String(ProcessInfo.processInfo.systemUptime) +
+            " build=" + build + " session=" + session + " " + line
+        do { try append(text, at: file); return true } catch { return false }
+    }
+    static func restored() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        do { return try read(at: file).map { "HISTORY " + $0 } }
+        catch { return ["HISTORY UNAVAILABLE " + error.localizedDescription] }
+    }
+    static func captureVisible(_ lines: [String]) {
+        for line in lines where ["REFRESH", "DELETE", "CLEANUP", "CUSTOM LIST", "Removed absent", "❌ Error:"]
+            .contains(where: { line.hasPrefix($0) }) {
+            record(line)
+        }
+    }
+    /// Exact root metadata only, using access already granted by the caller.
+    /// ENOENT is logged verbatim; no purge/copy-success conclusion is inferred.
+    static func observe(_ target: URL, context: String, log: (String) -> Void) {
+        var node = stat()
+        let result = lstat(target.path, &node), error = result == 0 ? 0 : errno
+        let line = "OBSERVE " + context + " path=" + MirsaWallpaperDiagnostics.quoted(target.path) +
+            " rc=" + String(result) + " errno=" + String(error) +
+            " mode=" + String(node.st_mode) + " device=" + String(node.st_dev) +
+            " inode=" + String(node.st_ino) + " mtime=" + String(node.st_mtimespec.tv_sec)
+        record(line)
+        log(line)
+    }
+}
