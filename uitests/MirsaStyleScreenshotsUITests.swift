@@ -108,12 +108,14 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertFalse(app.buttons["wallpaper-import"].exists, "Secondary import must start collapsed")
             shot(app, lang + "_tendies_implemented_closed")
             tools.tap()
+            shot(app, lang + "_tendies_implemented_tools_opened")
             let importButton = app.buttons["wallpaper-import"]
             revealWallpaperElement(importButton, identifier: "wallpaper-import", in: app)
             XCTAssertTrue(importButton.isHittable)
             shot(app, lang + "_tendies_implemented_tools")
             importButton.tap()
-            XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 5))
+            let picker = app.descendants(matching: .any).matching(identifier: "wallpaper-document-picker").firstMatch
+            XCTAssertTrue(picker.waitForExistence(timeout: 10), "The real document picker must open, not just the existing page navigation bar")
             shot(app, lang + "_tendies_import_picker")
             app.terminate()
         }

@@ -81,7 +81,23 @@ struct MirsaWallpaperManagementSection<Extra: View>: View {
 
             // One closed tools group: nothing is removed, everything secondary lives here.
             Section {
-                DisclosureGroup(isExpanded: $toolsOpen) {
+                // Keep the header identifier on its own button. On iOS 26 a
+                // DisclosureGroup identifier propagates into the expanded rows,
+                // hiding their explicit control identifiers from accessibility.
+                Button { withAnimation { toolsOpen.toggle() } } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(TendiesPageText.text(.tools)).font(.headline)
+                            Text(TendiesPageText.text(.toolsHint)).font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: toolsOpen ? "chevron.down" : "chevron.forward")
+                            .font(.caption.bold()).foregroundColor(.secondary)
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("wallpaper-tools")
+                if toolsOpen {
                     extraTools()
                     ForEach(items.filter { !$0.canDelete }) { rec in
                         HStack(spacing: 10) {
@@ -123,13 +139,7 @@ struct MirsaWallpaperManagementSection<Extra: View>: View {
                         Text(t(.ownedFooter))
                         Text(t(.importRemoveHint))
                     }.font(.caption2).foregroundColor(.secondary)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(TendiesPageText.text(.tools)).font(.headline)
-                        Text(TendiesPageText.text(.toolsHint)).font(.caption).foregroundColor(.secondary)
-                    }
                 }
-                .accessibilityIdentifier("wallpaper-tools")
             }
         }
         .onAppear { reload(); reloadJournal() }
