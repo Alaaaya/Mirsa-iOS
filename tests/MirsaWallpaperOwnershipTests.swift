@@ -862,4 +862,33 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         XCTAssertFalse(MirsaWallpaperActionStrings.fallbackName(2, language: .kurmanji).isEmpty)
         XCTAssertFalse(MirsaWallpaperActionStrings.fallbackName(2, language: .sorani).isEmpty)
     }
+
+    // MARK: strict confirmed-installed proof (batch skip)
+    private func installed(_ r: MirsaWallpaperJournal.Record, device: UInt64, inode: UInt64) -> MirsaWallpaperJournal.Record {
+        var c = r; c.copied = true; c.device = device; c.inode = inode; c.paths = ["versions/1/contents/asset"]; return c
+    }
+    private func node(mode: mode_t, dev: Int32 = 7, ino: UInt64 = 42) -> stat {
+        var n = stat(); n.st_mode = mode; n.st_dev = dev; n.st_ino = ino; return n
+    }
+    func testConfirmedInstalledRequiresExactRootIdentity() {
+        let r = installed(record(), device: 7, inode: 42)
+        XCTAssertTrue(MirsaWallpaperJournal.isConfirmedInstalled(r, node: node(mode: S_IFDIR | 0o755)))
+    }
+    func testUncertainStatesAreNotConfirmedInstalled() {
+        let good = installed(record(), device: 7, inode: 42)
+        let dir = node(mode: S_IFDIR | 0o755)
+        var incomplete = good; incomplete.copied = false
+        var noDevice = good; noDevice.device = nil
+        var noInode = good; noInode.inode = nil
+        var noPaths = good; noPaths.paths = nil
+        var emptyPaths = good; emptyPaths.paths = []
+        for r in [incomplete, noDevice, noInode, noPaths, emptyPaths] {
+            XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(r, node: dir))
+        }
+        XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: nil), "absent/unreadable")
+        XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: node(mode: S_IFDIR | 0o755, ino: 43)), "replaced inode")
+        XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: node(mode: S_IFDIR | 0o755, dev: 8)), "other device")
+        XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: node(mode: S_IFLNK | 0o755)), "symlink")
+        XCTAssertFalse(MirsaWallpaperJournal.isConfirmedInstalled(good, node: node(mode: S_IFREG | 0o644)), "regular file")
+    }
 }

@@ -292,6 +292,32 @@ enum MirsaWallpaperJournal {
             log("JOURNAL REINSTALL ARCHIVED " + record.id + " fresh exact ENOENT under install lease; no PosterBoard files modified.")
         }
     }
+    /// Pure strict proof used by batch skip. Only a COMPLETED record whose exact root is a real
+    /// directory (lstat, never a symlink) with the recorded device+inode counts as installed.
+    /// Everything else (incomplete, missing identity, absent, replaced, symlink, unreadable)
+    /// is NOT proof and stays fatal for the caller.
+    static func isConfirmedInstalled(_ record: Record, node: stat?) -> Bool {
+        guard record.copied, let device = record.device, let inode = record.inode,
+              let paths = record.paths, !paths.isEmpty, let node else { return false }
+        return (node.st_mode & S_IFMT) == S_IFDIR &&
+            UInt64(node.st_dev) == device && UInt64(node.st_ino) == inode
+    }
+    /// Called inside the install's exclusive operation with its SAME active lease.
+    /// Any lstat failure (including ENOENT) is simply "not confirmed".
+    static func confirmedInstalled(_ requested: Record, lease: PosterBoardLease) throws -> Bool {
+        try exclusive {
+            let record = try current(requested)
+            try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+            let target = try grantExact(record, lease: lease)
+            guard lease.permits(target) else { return false }
+            var first = stat()
+            guard lstat(target.path, &first) == 0 else { return false }
+            guard isConfirmedInstalled(record, node: first) else { return false }
+            var second = stat()
+            guard lstat(target.path, &second) == 0 else { return false }
+            return isConfirmedInstalled(record, node: second)
+        }
+    }
     /// Called only from the per-item destructive confirmation, never on launch.
     static func delete(_ requested: Record, log: @escaping (String) -> Void) throws {
         try exclusive {
