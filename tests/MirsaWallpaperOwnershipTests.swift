@@ -738,10 +738,10 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
             }
         }
     }
-    func testRealCustomNormalizedWWDCIdentityStaysVisibleAndBadMetadataIsNotApple() throws {
+    func testUnrecognizedCustomWWDCIdentityStaysVisibleAndBadMetadataIsNotApple() throws {
         let root = try temporaryRoot(), wallpaper = root.appendingPathComponent("Wallpaper.plist"), ui = root.appendingPathComponent("userInfo")
-        // Build431 custom 11A05C4D uses Apple's 7400 envelope but has a normalized
-        // 19662 identifier. The package filename alone must NEVER hide it.
+        // A different custom family is not the owner-confirmed WWDC22 identity.
+        // The shared 7400 package filename alone must NEVER hide it.
         try plist(["identifier": 19662, "name": "WWDC", "family": "WWDC"], at: wallpaper)
         try plist(["wallpaperRepresentingIdentifier": 19662], at: ui)
         let custom = try XCTUnwrap(MirsaCustomWallpapers.descriptorMetadata(packageName: "7400.WWDC.wallpaper",
@@ -759,6 +759,85 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         }
         XCTAssertNil(MirsaCustomWallpapers.descriptorMetadata(packageName: "5010.Multicolored.wallpaper", wallpaperData: Data("corrupt".utf8), userInfoData: nil))
     }
+    func testDevice433WWDC22PlistIdentityIsAppleAcrossSerializedTypes() throws {
+        let pkg = "7400.WWDC_2022-390w-844h@3x~iphone.wallpaper"
+        for format in [PropertyListSerialization.PropertyListFormat.binary, .xml] {
+            for pid in [19662 as Any, "19662" as Any] {
+                for uid in [19662 as Any, "19662" as Any] {
+                    let wallpaper = try PropertyListSerialization.data(fromPropertyList:
+                        ["identifier": pid, "family": "WWDC22", "name": "WWDC 2022"], format: format, options: 0)
+                    let userInfo = try PropertyListSerialization.data(fromPropertyList:
+                        ["wallpaperRepresentingIdentifier": uid], format: format, options: 0)
+                    let info = try XCTUnwrap(MirsaCustomWallpapers.descriptorMetadata(packageName: pkg,
+                        wallpaperData: wallpaper, userInfoData: userInfo))
+                    XCTAssertTrue(info.apple)
+                    XCTAssertEqual(info.name, "WWDC 2022")
+                    XCTAssertEqual(info.identifier, "19662")
+                }
+            }
+        }
+        // The confirmed plist identity works even when filename/catalog IDs differ.
+        XCTAssertTrue(MirsaCustomWallpapers.isAppleCatalog(packageName: "7777.Other.wallpaper",
+            plistIdentifier: "19662", family: "WWDC22", userInfoIdentifier: "19662"))
+        for (id, family, userID) in [("99999", "WWDC22", "99999"),
+                                     ("19662", "Custom", "19662"),
+                                     ("19662", "WWDC22", "99999"),
+                                     ("7400", "Custom", "19662")] {
+            XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: pkg,
+                plistIdentifier: id, family: family, userInfoIdentifier: userID))
+        }
+    }
+
+    func testDiagnosticWaitsBehindListAndExcludesConcurrentMutation() {
+        let pending = expectation(description: "diagnostic pending behind list")
+        let finished = expectation(description: "diagnostic finished")
+        MirsaWallpaperJournal.lock.lock()
+        DispatchQueue.global().async {
+            do {
+                try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 2, onWait: { pending.fulfill() }) {
+                    let excluded = self.expectation(description: "mutation excluded during diagnostic")
+                    DispatchQueue.global().async {
+                        do {
+                            try MirsaWallpaperJournal.exclusive { XCTFail("Mutation overlapped diagnostic") }
+                            XCTFail("Mutation acquired diagnostic lock")
+                        } catch { XCTAssertTrue(error.localizedDescription.contains("already running")) }
+                        excluded.fulfill()
+                    }
+                    self.wait(for: [excluded], timeout: 1)
+                }
+            } catch { XCTFail("Diagnostic wait failed: \(error)") }
+            finished.fulfill()
+        }
+        wait(for: [pending], timeout: 1)
+        MirsaWallpaperJournal.lock.unlock()
+        wait(for: [finished], timeout: 3)
+    }
+
+    func testDiagnosticWaitCancellationTimeoutAndErrorRelease() throws {
+        let finished = expectation(description: "diagnostic timeout and cancellation")
+        MirsaWallpaperJournal.lock.lock()
+        DispatchQueue.global().async {
+            XCTAssertThrowsError(try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 0.05) {
+                XCTFail("Timed out diagnostic opened lease")
+            })
+            var waiting = false
+            XCTAssertThrowsError(try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 1,
+                isCancelled: { waiting }, onWait: { waiting = true }) {
+                XCTFail("Cancelled diagnostic opened lease")
+            }) { XCTAssertTrue($0 is CancellationError) }
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 2)
+        MirsaWallpaperJournal.lock.unlock()
+        XCTAssertThrowsError(try MirsaWallpaperDiagnostics.withInspectionAccess {
+            throw PosterBoardStore.failure("diagnostic fixture failure")
+        })
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusive { 7 }, 7)
+        XCTAssertEqual(try MirsaWallpaperDiagnostics.withInspectionAccess {
+            try MirsaWallpaperJournal.exclusive { 8 }
+        }, 8)
+    }
+
     func testCustomEnvelopeNotMisclassifiedAsApple() {
         XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "Anime.wallpaper", plistIdentifier: "5010", family: "Bokeh"))
         XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "5010.Mine.wallpaper", plistIdentifier: "9999", family: "Bokeh"))

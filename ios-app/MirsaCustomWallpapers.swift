@@ -406,17 +406,20 @@ enum MirsaCustomWallpapers {
         var packageName: String? = nil
         var apple = false
     }
-    /// Pure Apple-catalog test: a CollectionsPoster stock descriptor carries "NNNN.Name.wallpaper" whose
-    /// numeric prefix equals the package's own Wallpaper.plist identifier and has a non-empty family.
-    /// Provider alone, UUIDs and names never decide. Mirsa envelopes lack this triple match.
+    /// Read-only list classification, never deletion authority. Stock packages
+    /// usually match their numeric filename; the device's WWDC22 plist uses
+    /// identifier 19662 inside a shared 7400 envelope instead.
     static func isAppleCatalog(packageName: String, plistIdentifier: String?, family: String?, userInfoIdentifier: String? = nil) -> Bool {
         guard packageName.hasSuffix(".wallpaper"), let dot = packageName.firstIndex(of: ".") else { return false }
         let numeric = String(packageName[packageName.startIndex..<dot])
         guard (3...6).contains(numeric.count), numeric.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
-              let pid = plistIdentifier, pid == numeric,
+              let pid = plistIdentifier,
               let fam = family, !fam.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        if let u = userInfoIdentifier, u != numeric { return false }
-        return true
+        if let u = userInfoIdentifier, u != pid { return false }
+        // Explicit owner-confirmed Apple plist identity, not a blanket 7400,
+        // WWDC display-name or family-only rule. Custom identities stay visible.
+        if fam == "WWDC22", pid == "19662" { return true }
+        return pid == numeric
     }
     /// Plist IDs on device may be NSString OR integer NSNumber. Do not stringify
     /// arbitrary containers, bools or floating-point IDs into catalog evidence.

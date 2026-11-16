@@ -51,6 +51,27 @@ class DiagnosticContractTests(unittest.TestCase):
         local=s.split("static func archiveLocal(",1)[1].split("static func archiveAbsentForReinstall(",1)[0]
         self.assertEqual(local.count("try revalidate()"),2)
         self.assertIn("moveItem(at: destination, to: source)",local)
+    def test_apple_plist_identity_hides_without_extra_list_io_or_delete_changes(self):
+        s=(R / "ios-app/MirsaCustomWallpapers.swift").read_text()
+        classifier=s.split("static func isAppleCatalog(",1)[1].split("static func metadataIdentifier",1)[0]
+        self.assertIn('fam == "WWDC22", pid == "19662"', classifier)
+        self.assertNotIn("contentsOfDirectory", classifier)
+        self.assertNotIn("Data(contentsOf", classifier)
+        listing=s.split("private static func list(lease:",1)[1].split("static func list(log:",1)[0]
+        self.assertLess(listing.index("if info.apple"), listing.index("appleHidden += 1"))
+        self.assertIn('continue', listing.split("if info.apple",1)[1].split("title = info.name",1)[0])
+        self.assertIn("canDelete: false", listing)
+
+    def test_diagnostic_wait_uses_shared_lock_before_opening_lease(self):
+        s=(R / "ios-app/MirsaWallpaperDiagnostics.swift").read_text()
+        wrapper=s.split("static func withInspectionAccess",1)[1].split("static func inspect(",1)[0]
+        self.assertIn("MirsaWallpaperJournal.exclusiveWaiting", wrapper)
+        self.assertIn("isCancelled: isCancelled", wrapper)
+        inspect=s.split("static func inspect(",1)[1]
+        self.assertLess(inspect.index("try withInspectionAccess"), inspect.index("PosterBoardLease("))
+        self.assertIn("defer { try? lease.close() }", inspect)
+        self.assertNotIn("lock.unlock()", inspect)
+
     def test_exact_diff_no_runtime_exception(self):
         s=(R / "ios-app/MirsaWallpaperDiagnostics.swift").read_text()
         for status in ["added","removed","modified","unobserved","unreadable","unchanged"]:

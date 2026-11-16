@@ -326,8 +326,18 @@ enum MirsaWallpaperDiagnostics {
         let same = catalog.f_fsid.val.0 == system.f_fsid.val.0 && catalog.f_fsid.val.1 == system.f_fsid.val.1
         log("DIAG CATALOG readable=true readonly=" + String(readonly) + " sameSystemFS=" + String(same) + " inventoryNotRead=true; no classification")
     }
+    /// Called off-main by management. Wait for list/thumbnail access to finish
+    /// under the SAME recursive lock; never open a second lease while it is busy.
+    /// This seam also exercises waiting/cancellation without device access.
+    static func withInspectionAccess<T>(timeout: TimeInterval = 120,
+                                         isCancelled: () -> Bool = { false },
+                                         onWait: () -> Void = {},
+                                         _ body: () throws -> T) throws -> T {
+        try MirsaWallpaperJournal.exclusiveWaiting(timeout: timeout, isCancelled: isCancelled,
+                                                    onWait: onWait, body)
+    }
     static func inspect(_ item: MirsaCustomWallpapers.Item, log: @escaping (String) -> Void) throws {
-        try MirsaWallpaperJournal.exclusive {
+        try withInspectionAccess(onWait: { log("DIAG WAIT current wallpaper access; no diagnostic lease opened yet") }) {
             let lease = try PosterBoardLease(path: item.container, log: { _ in })
             defer { try? lease.close() }
             try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
