@@ -43,8 +43,11 @@ class DiagnosticContractTests(unittest.TestCase):
         self.assertIn("actualHash=",s)
         self.assertNotIn("RuntimeSnapshotMetadata",s)
         self.assertNotIn("A5E53089",s)
-        # No change to the original strict journal deletion check.
+        # Build 425: content/hash gate dropped; identity checks stay.
         journal=(R / "ios-app/MirsaWallpaperJournal.swift").read_text().split("static func delete(",1)[1].split("static func cleanup(",1)[0]
-        self.assertIn("actual == record.expected",journal)
-        self.assertIn("MirsaPosterCopy.typedPaths(target) == record.paths",journal)
+        self.assertNotIn("actual == record.expected",journal)
+        self.assertNotIn("Descriptor content changed",journal)
+        self.assertIn("record.device",journal)
+        self.assertIn("record.inode",journal)
+        self.assertIn("lease.permits(target)",journal)
 if __name__ == "__main__": unittest.main()
