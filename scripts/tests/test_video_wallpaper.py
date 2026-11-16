@@ -135,6 +135,37 @@ class VideoWallpaperTests(unittest.TestCase):
         self.assertNotIn('Task.sleep', source)
         self.assertNotIn('WKScriptMessageHandler', source)
 
+    def test_successful_deletes_share_one_confirmed_respring_route(self):
+        ui = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
+        self.assertEqual(ui.count('onDeleted()'), 2)
+        for method, next_method, operation in [
+            ('deleteJournalItem', 'reload', 'MirsaWallpaperJournal.delete'),
+            ('delete', 'cleanup', 'MirsaCustomWallpapers.delete'),
+        ]:
+            body = ui.split('private func ' + method + '(', 1)[1].split('private func ' + next_method + '(', 1)[0]
+            self.assertLess(body.index('try ' + operation), body.index('done: { err in'))
+            completion = body.split('done: { err in', 1)[1]
+            failure, success = completion.split('else {', 1)
+            self.assertIn('if let err', failure)
+            self.assertNotIn('onDeleted()', failure)
+            self.assertEqual(success.count('onDeleted()'), 1)
+            self.assertIn('DELETE RESULT success', success)
+            self.assertNotIn('.alert(', body)
+        for method, next_method in [('reconcile', 'deleteJournalItem'), ('cleanup', None)]:
+            body = ui.split('private func ' + method + '(', 1)[1]
+            if next_method:
+                body = body.split('private func ' + next_method + '(', 1)[0]
+            self.assertNotIn('onDeleted()', body)
+        cancel_actions = [line for line in ui.splitlines() if 'role: .cancel)' in line]
+        self.assertTrue(cancel_actions)
+        self.assertTrue(all('onDeleted' not in line for line in cancel_actions))
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertIn('onDeleted: { offerRespring() }', view)
+        self.assertIn('Button { offerRespring() } label:', view)
+        self.assertIn('installStartedThisSession, case .done(ok: true)', view)
+        self.assertEqual(view.count('respringPresentation.start'), 1)
+        self.assertEqual(view.count('MirsaWallpaperRespringView(event:'), 1)
+
     def test_scoped_strategies_never_enable_library_parent_rename(self):
         source = (R / "ios-app/PosterBoardAccess.m").read_text()
         for label in ["class13-traversal", "class7-symlink", "class2-stage", "class2-subpath", "class12-geod-traversal"]:
