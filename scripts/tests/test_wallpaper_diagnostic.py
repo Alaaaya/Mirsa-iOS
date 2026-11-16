@@ -72,6 +72,20 @@ class DiagnosticContractTests(unittest.TestCase):
         self.assertIn("defer { try? lease.close() }", inspect)
         self.assertNotIn("lock.unlock()", inspect)
 
+    def test_tools_header_does_not_override_child_identifiers(self):
+        ui = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
+        header = ui.split('// One closed tools group:', 1)[1].split('if toolsOpen {', 1)[0]
+        self.assertIn('@State private var toolsOpen = false', ui)
+        self.assertIn('Button { withAnimation { toolsOpen.toggle() } }', header)
+        self.assertIn('.accessibilityIdentifier("wallpaper-tools")', header)
+        # A container identifier inherited by descendants made import a StaticText
+        # with the tools id in the actual iOS simulator accessibility tree.
+        self.assertNotIn('DisclosureGroup(', header)
+        self.assertIn('if toolsOpen {\n                    extraTools()', ui)
+        tendies = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertIn('.accessibilityIdentifier("wallpaper-import")', tendies)
+        self.assertIn('picker.view.accessibilityIdentifier = "wallpaper-document-picker"', tendies)
+
     def test_exact_diff_no_runtime_exception(self):
         s=(R / "ios-app/MirsaWallpaperDiagnostics.swift").read_text()
         for status in ["added","removed","modified","unobserved","unreadable","unchanged"]:
