@@ -569,4 +569,27 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         let small = try XCTUnwrap(UIImage(data: jpeg))
         XCTAssertLessThanOrEqual(max(small.size.width * small.scale, small.size.height * small.scale), 128)
     }
+
+    func testAppleCatalogMetadataClassification() {
+        let apple: [(String, String, String)] = [("5010.Multicolored.wallpaper", "5010", "Bokeh"), ("7585.Titanium_White-D84.wallpaper", "7585", "Titanium"),
+            ("7565.iOS_17-393w-852h@3x~iphone.wallpaper", "7565", "iOS 17"), ("7365.Stripe_Green.wallpaper", "7365", "Stripe"),
+            ("7420.Clownfish-402w-874h@3x~iphone.wallpaper", "7420", "Clownfish")]
+        for (pkg, id, fam) in apple {
+            XCTAssertTrue(MirsaCustomWallpapers.isAppleCatalog(packageName: pkg, plistIdentifier: id, family: fam, userInfoIdentifier: id), pkg)
+        }
+    }
+    func testCustomEnvelopeNotMisclassifiedAsApple() {
+        XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "Anime.wallpaper", plistIdentifier: "5010", family: "Bokeh"))
+        XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "5010.Mine.wallpaper", plistIdentifier: "9999", family: "Bokeh"))
+        XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "5010.Mine.wallpaper", plistIdentifier: "5010", family: nil))
+        XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "5010.Mine.wallpaper", plistIdentifier: "5010", family: "X", userInfoIdentifier: "1"))
+        XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "5010.Mine", plistIdentifier: "5010", family: "X"))
+    }
+    func testFallbackNameLocalized() {
+        XCTAssertEqual(MirsaWallpaperActionStrings.fallbackName(1, language: .english), "Wallpaper 1")
+        XCTAssertEqual(MirsaWallpaperActionStrings.fallbackName(1, language: .arabic), "خلفية ١")
+        XCTAssertTrue(MirsaWallpaperActionStrings.fallbackName(2, language: .german).hasPrefix("Hintergrund"))
+        XCTAssertFalse(MirsaWallpaperActionStrings.fallbackName(2, language: .kurmanji).isEmpty)
+        XCTAssertFalse(MirsaWallpaperActionStrings.fallbackName(2, language: .sorani).isEmpty)
+    }
 }
