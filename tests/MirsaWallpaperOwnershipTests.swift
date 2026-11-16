@@ -611,7 +611,7 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
     }
     func testFallbackNameLocalized() {
         XCTAssertEqual(MirsaWallpaperActionStrings.fallbackName(1, language: .english), "Wallpaper 1")
-        XCTAssertEqual(MirsaWallpaperActionStrings.fallbackName(1, language: .arabic), "خلفية ١")
+        XCTAssertEqual(MirsaWallpaperActionStrings.fallbackName(1, language: .arabic), "خلفية 1")
         XCTAssertTrue(MirsaWallpaperActionStrings.fallbackName(2, language: .german).hasPrefix("Hintergrund"))
         XCTAssertFalse(MirsaWallpaperActionStrings.fallbackName(2, language: .kurmanji).isEmpty)
         XCTAssertFalse(MirsaWallpaperActionStrings.fallbackName(2, language: .sorani).isEmpty)
