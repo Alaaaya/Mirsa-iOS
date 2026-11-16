@@ -817,14 +817,24 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         let finished = expectation(description: "diagnostic timeout and cancellation")
         MirsaWallpaperJournal.lock.lock()
         DispatchQueue.global().async {
-            XCTAssertThrowsError(try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 0.05) {
-                XCTFail("Timed out diagnostic opened lease")
-            })
+            do {
+                try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 0.05) {
+                    XCTFail("Timed out diagnostic opened lease")
+                }
+                XCTFail("Timed out diagnostic unexpectedly acquired the lock")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("timed out"))
+            }
             var waiting = false
-            XCTAssertThrowsError(try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 1,
-                isCancelled: { waiting }, onWait: { waiting = true }) {
-                XCTFail("Cancelled diagnostic opened lease")
-            }) { XCTAssertTrue($0 is CancellationError) }
+            do {
+                try MirsaWallpaperDiagnostics.withInspectionAccess(timeout: 1,
+                    isCancelled: { waiting }, onWait: { waiting = true }) {
+                    XCTFail("Cancelled diagnostic opened lease")
+                }
+                XCTFail("Cancelled diagnostic unexpectedly acquired the lock")
+            } catch {
+                XCTAssertTrue(error is CancellationError)
+            }
             finished.fulfill()
         }
         wait(for: [finished], timeout: 2)
