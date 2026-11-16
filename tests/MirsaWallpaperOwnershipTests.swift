@@ -396,7 +396,12 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
                     // A competing mutation cannot bypass the queued install.
                     let excluded = self.expectation(description: "competing mutation excluded")
                     DispatchQueue.global().async {
-                        XCTAssertThrowsError(try MirsaWallpaperJournal.exclusive { XCTFail("Overlapping mutation") })
+                        do {
+                            try MirsaWallpaperJournal.exclusive { XCTFail("Overlapping mutation") }
+                            XCTFail("Competing mutation unexpectedly acquired the lock")
+                        } catch {
+                            XCTAssertTrue(error.localizedDescription.contains("already running"))
+                        }
                         excluded.fulfill()
                     }
                     self.wait(for: [excluded], timeout: 1)
@@ -414,9 +419,14 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         MirsaWallpaperJournal.lock.lock()
         DispatchQueue.global(qos: .userInitiated).async {
             let start = ProcessInfo.processInfo.systemUptime
-            XCTAssertThrowsError(try MirsaWallpaperJournal.exclusiveWaiting(timeout: 0.05) {
-                XCTFail("Timed-out install ran")
-            }) { XCTAssertTrue($0.localizedDescription.contains("timed out")) }
+            do {
+                try MirsaWallpaperJournal.exclusiveWaiting(timeout: 0.05) {
+                    XCTFail("Timed-out install ran")
+                }
+                XCTFail("Timed-out install unexpectedly acquired the lock")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("timed out"))
+            }
             XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 1)
             finished.fulfill()
         }
