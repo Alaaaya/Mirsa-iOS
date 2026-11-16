@@ -479,6 +479,7 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = true
+        picker.view.accessibilityIdentifier = "wallpaper-document-picker"
         return picker
     }
 
