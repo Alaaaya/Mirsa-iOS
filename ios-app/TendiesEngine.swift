@@ -353,13 +353,6 @@ public final class TendiesEngine {
                         let sink = ProbeProgress(log)
                         defer { sink.finish() }
                         let fm = FileManager.default
-                        let existing = try MirsaWallpaperJournal.records()
-                        guard !existing.contains(where: { !$0.copied }) else {
-                            throw PosterBoardStore.failure("An incomplete Mirsa installation exists. Use owned cleanup after reviewing its log; do not blindly reinstall.")
-                        }
-                        guard !existing.contains(where: { record in items.contains(where: { $0.name == record.title }) }) else {
-                            throw PosterBoardStore.failure("This wallpaper already has a Mirsa installation journal. Review or remove that exact installation first.")
-                        }
                         try MirsaWallpaperJournal.safeLocal(MirsaWallpaperJournal.work)
                         let stage = MirsaWallpaperJournal.work.appendingPathComponent(UUID().uuidString)
                         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
@@ -390,6 +383,21 @@ public final class TendiesEngine {
                         do {
                             try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
                             let parent = try MirsaPosterCopy.destination(lease: lease)
+                            // Reconcile only matching journals, never unrelated records.
+                            // Each absence is freshly proved under this install lease.
+                            let matching = try MirsaWallpaperJournal.records().filter { record in
+                                items.contains(where: { $0.name == record.title })
+                            }
+                            for record in matching {
+                                try MirsaWallpaperJournal.archiveAbsentForReinstall(record, lease: lease, log: log)
+                            }
+                            let remaining = try MirsaWallpaperJournal.records()
+                            guard !remaining.contains(where: { !$0.copied }) else {
+                                throw PosterBoardStore.failure("An incomplete Mirsa installation exists. Use owned cleanup after reviewing its log; do not blindly reinstall.")
+                            }
+                            guard !remaining.contains(where: { record in items.contains(where: { $0.name == record.title }) }) else {
+                                throw PosterBoardStore.failure("This wallpaper already has a Mirsa installation journal. Review or remove that exact installation first.")
+                            }
                             for descriptor in all {
                                 let expected = try PosterBoardStore.manifest(descriptor.url)
                                 let id = UUID().uuidString
