@@ -18,6 +18,8 @@ enum MirsaCustomWallpapers {
         var canDelete: Bool = true
         /// Small read-only preview (JPEG, <=128px) from the wallpaper's own files; nil = fallback icon.
         var thumbnail: Data? = nil
+        /// >0: no name found; UI shows localized numbered fallback with UUID as secondary text.
+        var fallbackIndex: Int = 0
     }
     struct Snapshot: Equatable {
         let expected: [String: String]
@@ -392,6 +394,36 @@ enum MirsaCustomWallpapers {
         }
         return nil
     }
+
+    /// Display name from the descriptor's own Wallpaper.plist ("name"), bounded and lease-checked. nil = unknown.
+    static func descriptorName(_ root: URL, lease: PosterBoardLease, log: (String) -> Void) -> String? {
+        let prefix = lease.effectiveURL.path + "/"
+        guard root.path.hasPrefix(prefix) else { return nil }
+        let base = String(root.path.dropFirst(prefix.count))
+        func names(_ rel: String) -> [String]? {
+            guard let url = try? grant(rel, lease: lease), PosterBoardStore.unredirected(url, lease: lease),
+                  let n = try? FileManager.default.contentsOfDirectory(atPath: url.path), n.count <= 64 else { return nil }
+            return n.filter { validRelative($0) }.sorted()
+        }
+        guard let versions = names(base + "/versions") else { log("CUSTOM NAME no versions dir"); return nil }
+        for v in versions.filter({ !$0.isEmpty && $0.utf8.allSatisfy { $0 >= 48 && $0 <= 57 } }).reversed().prefix(3) {
+            let contents = base + "/versions/" + v + "/contents"
+            for pkg in (names(contents) ?? []).filter({ $0.hasSuffix(".wallpaper") }).prefix(3) {
+                let rel = contents + "/" + pkg + "/Wallpaper.plist"
+                do {
+                    let url = try grant(rel, lease: lease)
+                    guard PosterBoardStore.unredirected(url, lease: lease) else { continue }
+                    let data = try read(url, limit: 64 * 1024)
+                    if let d = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                       let name = d["name"] as? String {
+                        let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty { return String(t.prefix(80)) }
+                    }
+                } catch { log("CUSTOM NAME unreadable " + rel + ": " + error.localizedDescription) }
+            }
+        }
+        return nil
+    }
     /// ImageIO downsample with pixel-dimension caps; never a full decode of oversized images.
     static func thumbnailData(from data: Data) -> Data? {
         guard data.count <= thumbMaxFileBytes,
@@ -504,11 +536,21 @@ enum MirsaCustomWallpapers {
         let current = names.filter { UUID(uuidString: $0) != nil }.sorted()
         var unknownCount = 0
         // No historical UUIDs or provider/basename heuristics confer provenance.
+        var unnamed = 0
         for id in current.prefix(64) where !visible.contains(parent + "/" + id) {
             unknownCount += 1
-            found.append(Item(title: id, id: id, container: lease.targetURL.path,
-                              relative: parent + "/" + id, expected: [:], device: 0, inode: 0,
-                              paths: [], canDelete: false))
+            let rel = parent + "/" + id
+            var title = ""
+            var thumb: Data? = nil
+            if let target = try? grant(rel, lease: lease), ProcessInfo.processInfo.systemUptime < deadline - 5 {
+                title = descriptorName(target, lease: lease, log: log) ?? ""
+                if thumbs < 48 { thumbs += 1; thumb = previewThumbnail(target, lease: lease) }
+                if thumb == nil { log("CUSTOM THUMB none for " + id) }
+            }
+            if title.isEmpty { unnamed += 1 }
+            found.append(Item(title: title, id: id, container: lease.targetURL.path,
+                              relative: rel, expected: [:], device: 0, inode: 0,
+                              paths: [], canDelete: false, thumbnail: thumb, fallbackIndex: title.isEmpty ? unnamed : 0))
         }
         let budget = MirsaWallpaperDiagnostics.Budget()
         for id in current.prefix(16) {
