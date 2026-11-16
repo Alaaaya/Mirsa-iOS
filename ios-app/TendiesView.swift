@@ -129,6 +129,11 @@ struct TendiesView: View {
                     }
                 }
 
+                MirsaWallpaperManagementSection(
+                    externalBusy: videoApplyRunning,
+                    log: { vm.tendiesFlashLog.append($0) },
+                    onDeleted: { offerRespring() },
+                    extraTools: {
                 // Imported files waiting to be installed (selection for the install button).
                 if !vm.tendieItems.isEmpty {
                     Section {
@@ -155,16 +160,17 @@ struct TendiesView: View {
                     } header: {
                         Text(TendiesPageText.text(.ready))
                     }
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "photo.stack").font(.system(size: 32)).foregroundColor(.secondary)
+                        Text(MirsaTr.lit("No .tendies wallpapers loaded yet")).font(.subheadline).foregroundColor(.secondary)
+                    }.frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
 
-                MirsaWallpaperManagementSection(
-                    externalBusy: videoApplyRunning,
-                    log: { vm.tendiesFlashLog.append($0) },
-                    onDeleted: { offerRespring() },
-                    extraTools: {
                         Button { showFilePicker = true } label: {
                             Label(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore), systemImage: "doc.badge.plus")
                         }
+                        .accessibilityIdentifier("wallpaper-import")
                         Text(WallpaperMakerStrings.text(.importHint)).font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(vm.posterBoardContainer.isEmpty
