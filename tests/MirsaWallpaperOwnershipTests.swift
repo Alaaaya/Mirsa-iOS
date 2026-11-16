@@ -386,6 +386,76 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         wait(for: [finished], timeout: 2)
     }
 
+    func testQueuedInstallWaitsForReadScanAndKeepsMutationExclusion() {
+        let pending = expectation(description: "install pending behind read scan")
+        let finished = expectation(description: "install acquired after scan")
+        MirsaWallpaperJournal.lock.lock()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try MirsaWallpaperJournal.exclusiveWaiting(timeout: 2, onWait: { pending.fulfill() }) {
+                    // A competing mutation cannot bypass the queued install.
+                    let excluded = self.expectation(description: "competing mutation excluded")
+                    DispatchQueue.global().async {
+                        XCTAssertThrowsError(try MirsaWallpaperJournal.exclusive { XCTFail("Overlapping mutation") })
+                        excluded.fulfill()
+                    }
+                    self.wait(for: [excluded], timeout: 1)
+                }
+            } catch { XCTFail("Queued install failed: \(error)") }
+            finished.fulfill()
+        }
+        wait(for: [pending], timeout: 1)
+        // Pending is reported while the simulated list still owns the lock.
+        MirsaWallpaperJournal.lock.unlock()
+        wait(for: [finished], timeout: 3)
+    }
+    func testQueuedInstallTimeoutDoesNotRunAndLockRecovers() throws {
+        let finished = expectation(description: "bounded wait ends")
+        MirsaWallpaperJournal.lock.lock()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let start = ProcessInfo.processInfo.systemUptime
+            XCTAssertThrowsError(try MirsaWallpaperJournal.exclusiveWaiting(timeout: 0.05) {
+                XCTFail("Timed-out install ran")
+            }) { XCTAssertTrue($0.localizedDescription.contains("timed out")) }
+            XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 1)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 2)
+        MirsaWallpaperJournal.lock.unlock()
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusiveWaiting { 3 }, 3)
+        XCTAssertThrowsError(try MirsaWallpaperJournal.exclusiveWaiting { throw PosterBoardStore.failure("fixture") })
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusive { 4 }, 4)
+    }
+    func testQueuedInstallCancellationWhileScanOwnsLockNeverStartsMutation() throws {
+        let pending = expectation(description: "async install waiting")
+        let cancelled = expectation(description: "async wait cancelled")
+        MirsaWallpaperJournal.lock.lock()
+        let task = Task.detached {
+            do {
+                try await MirsaWallpaperJournal.queued(onWait: { pending.fulfill() }) {
+                    XCTFail("Cancelled queued install mutated")
+                }
+                XCTFail("Cancelled queued install returned success")
+            } catch { XCTAssertTrue(error is CancellationError) }
+            cancelled.fulfill()
+        }
+        wait(for: [pending], timeout: 2)
+        task.cancel()
+        // Cancellation finishes even though the read scan still owns the lock.
+        wait(for: [cancelled], timeout: 2)
+        MirsaWallpaperJournal.lock.unlock()
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusive { 9 }, 9)
+    }
+    func testQueuedInstallChecksCancellationAfterAcquisitionAndRemainsRecursive() throws {
+        var checks = 0
+        XCTAssertThrowsError(try MirsaWallpaperJournal.exclusiveWaiting(isCancelled: {
+            checks += 1; return checks > 1
+        }) { XCTFail("Cancelled acquired install ran") }) { XCTAssertTrue($0 is CancellationError) }
+        XCTAssertEqual(try MirsaWallpaperJournal.exclusiveWaiting {
+            try MirsaWallpaperJournal.exclusive { 12 }
+        }, 12)
+    }
+
     func testWallpaperOperationLockRemainsRecursiveAndReleasesAfterThrow() throws {
         XCTAssertEqual(try MirsaWallpaperJournal.exclusive {
             try MirsaWallpaperJournal.exclusive { 42 }
@@ -584,6 +654,33 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("file")), Data("payload".utf8))
     }
 
+    func testReadScanReuseRequiresRealReadableNodesAndDoesNotFollowLinks() throws {
+        let root = try temporaryRoot(), file = root.appendingPathComponent("Wallpaper.plist")
+        try Data("readable".utf8).write(to: file)
+        XCTAssertTrue(PosterBoardStore.readableNode(root))
+        XCTAssertTrue(PosterBoardStore.readableNode(file))
+        XCTAssertFalse(PosterBoardStore.readableNode(root.appendingPathComponent("missing")))
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: file)
+        XCTAssertFalse(PosterBoardStore.readableNode(alias))
+        let fifo = root.appendingPathComponent("fifo")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        XCTAssertFalse(PosterBoardStore.readableNode(fifo))
+        let store = "Library/Application Support/PRBPosterExtensionDataStore"
+        XCTAssertTrue(PosterBoardStore.readReuseAllowed(store + "/61/Extensions"))
+        for path in ["/etc/passwd", "Library/../Secrets", "Library/Secrets", store + "Other", store + "/../Secrets"] {
+            XCTAssertFalse(PosterBoardStore.readReuseAllowed(path))
+        }
+        // Measured LOCAL fixture counts only, not a device speed claim. If an
+        // existing directory lease opens these children, no child token is needed.
+        var requested = 0, reused = 0
+        for _ in 0..<50 {
+            if PosterBoardStore.readableNode(file) { reused += 1 } else { requested += 1 }
+        }
+        XCTAssertEqual(reused, 50)
+        XCTAssertEqual(requested, 0)
+    }
+
     func testThumbnailDecodeIsBoundedAndFallsBack() throws {
         XCTAssertNil(MirsaCustomWallpapers.thumbnailData(from: Data("not an image".utf8)))
         XCTAssertNil(MirsaCustomWallpapers.thumbnailData(from: Data(count: MirsaCustomWallpapers.thumbMaxFileBytes + 1)))
@@ -601,6 +698,56 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         for (pkg, id, fam) in apple {
             XCTAssertTrue(MirsaCustomWallpapers.isAppleCatalog(packageName: pkg, plistIdentifier: id, family: fam, userInfoIdentifier: id), pkg)
         }
+    }
+    func testDeviceSchemaFilesDecodeAppleNumericAndStringIdentifiers() throws {
+        // Names/IDs/families transcribed from the FULL build426 and build431
+        // device evidence. Both serialized types are exercised because the
+        // diagnostic whitelist logs values, not their original plist types.
+        let rows = [("5010.Multicolored.wallpaper", 5010, "Bokeh"),
+                    ("7585.Titanium_White-D84.wallpaper", 7585, "Titanium"),
+                    ("7565.iOS_17-393w-852h@3x~iphone.wallpaper", 7565, "iOS 17"),
+                    ("7365.Stripe_Green.wallpaper", 7365, "Stripe"),
+                    ("7420.Clownfish-402w-874h@3x~iphone.wallpaper", 7420, "Clownfish")]
+        let root = try temporaryRoot()
+        for format in [PropertyListSerialization.PropertyListFormat.binary, .xml] {
+            for (pkg, id, family) in rows {
+                for pid in [id as Any, String(id) as Any] {
+                    for uid in [id as Any, String(id) as Any] {
+                        let wallpaper = root.appendingPathComponent(pkg + "/Wallpaper.plist")
+                        let userInfo = root.appendingPathComponent("com.apple.posterkit.provider.contents.userInfo")
+                        try FileManager.default.createDirectory(at: wallpaper.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try PropertyListSerialization.data(fromPropertyList: ["identifier": pid, "name": family, "family": family], format: format, options: 0).write(to: wallpaper)
+                        try PropertyListSerialization.data(fromPropertyList: ["wallpaperRepresentingIdentifier": uid], format: format, options: 0).write(to: userInfo)
+                        let info = try XCTUnwrap(MirsaCustomWallpapers.descriptorMetadata(packageName: pkg,
+                            wallpaperData: Data(contentsOf: wallpaper), userInfoData: Data(contentsOf: userInfo)))
+                        XCTAssertTrue(info.apple, pkg)
+                        XCTAssertEqual(info.identifier, String(id))
+                        XCTAssertEqual(info.name, family)
+                    }
+                }
+            }
+        }
+    }
+    func testRealCustomNormalizedWWDCIdentityStaysVisibleAndBadMetadataIsNotApple() throws {
+        let root = try temporaryRoot(), wallpaper = root.appendingPathComponent("Wallpaper.plist"), ui = root.appendingPathComponent("userInfo")
+        // Build431 custom 11A05C4D uses Apple's 7400 envelope but has a normalized
+        // 19662 identifier. The package filename alone must NEVER hide it.
+        try plist(["identifier": 19662, "name": "WWDC", "family": "WWDC"], at: wallpaper)
+        try plist(["wallpaperRepresentingIdentifier": 19662], at: ui)
+        let custom = try XCTUnwrap(MirsaCustomWallpapers.descriptorMetadata(packageName: "7400.WWDC.wallpaper",
+            wallpaperData: Data(contentsOf: wallpaper), userInfoData: Data(contentsOf: ui)))
+        XCTAssertFalse(custom.apple)
+        XCTAssertEqual(custom.identifier, "19662")
+        XCTAssertEqual(custom.name, "WWDC")
+        for bad: Any in [true, false, 5010.5, ["identifier": 5010], [5010], "not-a-number"] {
+            XCTAssertNil(MirsaCustomWallpapers.metadataIdentifier(bad))
+        }
+        try plist(["identifier": 5010, "name": "Bokeh", "family": "Bokeh"], at: wallpaper)
+        for bad in [Data("corrupt".utf8), try PropertyListSerialization.data(fromPropertyList: ["wallpaperRepresentingIdentifier": 9999], format: .binary, options: 0)] {
+            XCTAssertFalse(try XCTUnwrap(MirsaCustomWallpapers.descriptorMetadata(packageName: "5010.Multicolored.wallpaper",
+                wallpaperData: Data(contentsOf: wallpaper), userInfoData: bad)).apple)
+        }
+        XCTAssertNil(MirsaCustomWallpapers.descriptorMetadata(packageName: "5010.Multicolored.wallpaper", wallpaperData: Data("corrupt".utf8), userInfoData: nil))
     }
     func testCustomEnvelopeNotMisclassifiedAsApple() {
         XCTAssertFalse(MirsaCustomWallpapers.isAppleCatalog(packageName: "Anime.wallpaper", plistIdentifier: "5010", family: "Bokeh"))

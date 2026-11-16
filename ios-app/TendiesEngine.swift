@@ -306,14 +306,12 @@ public final class TendiesEngine {
     public func detectPosterBoardContainer(pairingPath: String) async throws -> String {
         // Local package installation must remain local on offline/cellular.
         // Access/entitlement failure is not a tunnel or Wi-Fi problem.
-        return try await Task.detached(priority: .userInitiated) {
-            try MirsaWallpaperJournal.exclusive {
+        return try await MirsaWallpaperJournal.queued {
                 if let cached = UserDefaults.standard.string(forKey: "aircard.posterboard_container"),
                    let path = try? PosterBoardStore.canonicalContainer(cached),
                    try MirsaPosterDiscovery.identifiesPosterBoard(path, log: { _ in }) { return path }
                 return try MirsaPosterDiscovery.discover(log: { _ in })
-            }
-        }.value
+        }
     }
 
     // MARK: - Send Respring Signal via Tunnel
@@ -355,10 +353,10 @@ public final class TendiesEngine {
         // Completion means byte-for-byte verified copy, not unobserved gallery registration.
         guard !items.isEmpty else { throw PosterBoardStore.failure("No wallpapers selected.") }
         let normalized = try PosterBoardStore.canonicalContainer(containerPath)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try MirsaWallpaperJournal.exclusive {
+        do {
+            try await MirsaWallpaperJournal.queued(onWait: {
+                log("INSTALL WAIT current wallpaper operation finishing; installation pending")
+            }) {
                         let sink = ProbeProgress(log)
                         defer { sink.finish() }
                         let fm = FileManager.default
@@ -445,13 +443,10 @@ public final class TendiesEngine {
                             log("COPY READY lease closed. Confirm Respring to refresh the wallpaper picker.")
                             progress(1)
                         } catch { try? lease.close(); throw error }
-                    }
-                    continuation.resume()
-                } catch {
-                    log("INSTALL ERROR " + error.localizedDescription)
-                    continuation.resume(throwing: error)
-                }
             }
+        } catch {
+            log("INSTALL ERROR " + error.localizedDescription)
+            throw error
         }
     }
 

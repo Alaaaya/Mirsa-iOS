@@ -7,12 +7,63 @@ enum MirsaWallpaperJournal {
     static let lock = NSRecursiveLock()
     static func exclusive<T>(_ body: () throws -> T) throws -> T {
         // Recursive callers on this thread remain valid; competing operations
-        // fail immediately instead of leaving an install spinner queued forever.
+        // still fail immediately; installation explicitly uses bounded queued access.
         guard lock.try() else {
             throw PosterBoardStore.failure("Another wallpaper operation is already running. Wait for its log to finish, then retry.")
         }
         defer { lock.unlock() }
         return try body()
+    }
+    /// Installation waits off-main behind discovery/listing without weakening the
+    /// same recursive mutation lock. Cancellation is honored BEFORE the body;
+    /// once acquired, the existing journaled transaction runs to completion.
+    static func exclusiveWaiting<T>(timeout: TimeInterval = 120,
+                                    isCancelled: () -> Bool = { false },
+                                    onWait: () -> Void = {},
+                                    _ body: () throws -> T) throws -> T {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        guard timeout.isFinite, timeout >= 0 else {
+            throw PosterBoardStore.failure("Invalid wallpaper wait timeout.")
+        }
+        if isCancelled() { throw CancellationError() }
+        var acquired = lock.try()
+        var reportedWait = false
+        while !acquired {
+            if isCancelled() { throw CancellationError() }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else {
+                throw PosterBoardStore.failure("Wallpaper operation wait timed out. No installation started; retry after the current operation finishes.")
+            }
+            if !reportedWait { reportedWait = true; onWait() }
+            acquired = lock.lock(before: Date(timeIntervalSinceNow: min(0.05, remaining)))
+        }
+        defer { lock.unlock() }
+        if isCancelled() { throw CancellationError() }
+        return try body()
+    }
+    private final class PendingCancellation: @unchecked Sendable {
+        private let guardLock = NSLock()
+        private var value = false
+        func cancel() { guardLock.lock(); defer { guardLock.unlock() }; value = true }
+        var isCancelled: Bool { guardLock.lock(); defer { guardLock.unlock() }; return value }
+    }
+    static func queued<T>(onWait: @escaping () -> Void = {}, _ body: @escaping () throws -> T) async throws -> T {
+        try await queued(timeout: 120, onWait: onWait) { _ in try body() }
+    }
+    static func queued<T>(timeout: TimeInterval, onWait: @escaping () -> Void = {}, _ body: @escaping (@escaping () -> Bool) throws -> T) async throws -> T {
+        let pending = PendingCancellation()
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        let result = try exclusiveWaiting(timeout: timeout, isCancelled: { pending.isCancelled }, onWait: onWait) {
+                            try body({ pending.isCancelled })
+                        }
+                        continuation.resume(returning: result)
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+        }, onCancel: { pending.cancel() })
     }
     struct Record: Codable, Identifiable {
         var id: String
