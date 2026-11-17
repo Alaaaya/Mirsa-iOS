@@ -28,6 +28,13 @@ enum MirsaDiagnosticPrivacy {
         return rules.map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
     }()
 
+    private static let unicodeRegex = try! NSRegularExpression(pattern: #"\\u([0-9a-fA-F]{4})"#)
+    private static let oscRegex = try! NSRegularExpression(pattern: "\u{1B}\\][^\u{07}\u{1B}]*(\u{07}|\u{1B}\\\\)")
+    /// Keeps already-sanitized prefix, sanitizes only appended lines (avoids O(n^2) on main thread).
+    static func appending(old: [String], new: [String]) -> [String] {
+        if new.count >= old.count, Array(new.prefix(old.count)) == old { return old + lines(Array(new.dropFirst(old.count))) }
+        return lines(new)
+    }
     static func line(_ input: String) -> String {
         // Oversized untrusted messages are not partially retained: a cut could split a credential.
         guard input.utf8.count <= 64 * 1024 else { return "[oversized diagnostic omitted]" }
@@ -37,7 +44,7 @@ enum MirsaDiagnosticPrivacy {
             if decoded == text { break }; text = decoded
         }
         // Normalize JSON unicode escapes too, without interpreting log text as code.
-        let unicode = try! NSRegularExpression(pattern: #"\\u([0-9a-fA-F]{4})"#)
+        let unicode = unicodeRegex
         for match in unicode.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
             if let digits = Range(match.range(at: 1), in: text),
                let value = UInt32(text[digits], radix: 16), let scalar = UnicodeScalar(value),
