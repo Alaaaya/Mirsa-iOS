@@ -95,6 +95,9 @@ targets:
       - path: tests
         excludes:
           - fixtures/foreground
+          - fixtures/tendies
+      - path: tests/fixtures/tendies/Naruto-Space.tendies
+        buildPhase: resources
       - path: tests/fixtures/foreground/nasa-eileen-collins.jpg
         buildPhase: resources
       - path: rust-core/tests/fixtures/tweak-import/OwnerTikTokV4.zip
