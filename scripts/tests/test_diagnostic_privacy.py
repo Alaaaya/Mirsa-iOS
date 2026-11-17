@@ -88,8 +88,8 @@ class DiagnosticPrivacySourceTests(unittest.TestCase):
         management = (S / 'MirsaWallpaperManagementView.swift').read_text()
         before, after = management.split('MirsaOwnerDiagnostics(access: diagnosticAccess)', 1)
         self.assertNotIn('Button { inspect(rec)', before)
-        self.assertIn('Section { extraTools() }', before)
-        self.assertNotIn('extraTools()', after)
+        self.assertNotIn('extraTools()', before)
+        self.assertIn('extraTools()', after)
         self.assertIn('journalRows', after)
         for name in ['reconcile', 'deleteJournalItem', 'inspect']:
             fn = management.split('private func ' + name + '(', 1)[1].split('\n    private func ', 1)[0]
