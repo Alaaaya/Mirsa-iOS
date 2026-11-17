@@ -4,12 +4,13 @@ import XCTest
 /// Tools › Device, in Arabic and English, for both themes. No assertions on content
 /// beyond the dock being present; every run attaches named full-screen screenshots.
 final class MirsaDesignReviewUITests: XCTestCase {
-    override func setUpWithError() throws { continueAfterFailure = true }
+    override func setUpWithError() throws { continueAfterFailure = false }
 
     private func launch(lang: String, theme: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "apps-design",
                                "-mirsa.appLanguage", lang, "-mirsa.theme", theme,
+                               "-mirsa.apps.homeLayout", "NO",
                                "-AppleLanguages", lang == "en" ? "(en)" : "(ar)",
                                "-AppleLocale", lang == "en" ? "en_US" : "ar"]
         app.launch()
@@ -43,17 +44,23 @@ final class MirsaDesignReviewUITests: XCTestCase {
                 shot("design_\(lang)_\(theme)_2_home_scrolled")
 
                 let tools = app.buttons["main-tab-Pairing"]
-                if tools.waitForExistence(timeout: 5) {
-                    tools.tap()
-                    Thread.sleep(forTimeInterval: 1.2)
-                    shot("design_\(lang)_\(theme)_3_tools")
-                    let device = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", lang == "en" ? "Device" : "الجهاز")).firstMatch
-                    if device.waitForExistence(timeout: 3) {
-                        device.tap()
-                        Thread.sleep(forTimeInterval: 1.2)
-                        shot("design_\(lang)_\(theme)_4_tools_device")
-                    }
-                }
+                XCTAssertTrue(tools.waitForExistence(timeout: 5))
+                XCTAssertTrue(tools.isHittable)
+                tools.tap()
+                Thread.sleep(forTimeInterval: 1.2)
+                XCTAssertTrue(tools.isSelected)
+                shot("design_\(lang)_\(theme)_3_tools")
+                let device = app.buttons["tools-section-device"]
+                XCTAssertTrue(device.waitForExistence(timeout: 5))
+                XCTAssertTrue(device.isHittable)
+                device.tap()
+                Thread.sleep(forTimeInterval: 1.2)
+                XCTAssertTrue(device.isSelected)
+                shot("design_\(lang)_\(theme)_4_tools_device")
+                // Retained NavigationStacks must keep their section across tab switches.
+                app.buttons["main-tab-Apps"].tap()
+                tools.tap()
+                XCTAssertTrue(device.isSelected)
                 app.terminate()
             }
         }

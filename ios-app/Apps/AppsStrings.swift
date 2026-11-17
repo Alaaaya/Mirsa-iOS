@@ -9,7 +9,8 @@ enum L {
 
     static func t(_ key: String) -> String {
         switch lang {
-        case .english, .german: return en[key] ?? key
+        case .english: return en[key] ?? key
+        case .german: return de[key] ?? en[key] ?? key
         case .arabic: return ar[key] ?? en[key] ?? key
         case .sorani: return MirsaTr.ckbKeys[key] ?? ar[key] ?? en[key] ?? key
         case .kurmanji: return MirsaTr.kmrKeys[key] ?? ar[key] ?? en[key] ?? key
@@ -19,6 +20,12 @@ enum L {
     static func f(_ key: String, _ args: CVarArg...) -> String {
         String(format: t(key), locale: lang.locale, arguments: args)
     }
+
+    private static let de: [String: String] = [
+        "hero.appIDs.label": "App-IDs diese Woche übrig",
+        "hero.slots.label": "Echte App-Plätze übrig",
+        "hero.count": "%d von %d",
+    ]
 
     private static let en: [String: String] = [
         "tab": "Apps",

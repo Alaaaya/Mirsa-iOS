@@ -269,6 +269,8 @@ struct AppsTab: View {
         } message: { Text(L.t("repair.body")) }
         .overlay(alignment: .top) { toast }
         .task {
+            // Screenshot fixture must never refresh credentials, install, or persist test data.
+            if MirsaUITestHarness.active && MirsaStyleShots.page == "apps-design" { return }
             let launchErr = store.lastLaunchError
             if launchErr != nil {
                 UserDefaults.standard.removeObject(forKey: "aircard.guest.lastError")
@@ -540,6 +542,8 @@ struct HeroCard: View {
             }
         }
         .padding(14)
+        // The root dock stays fixed LTR; only the localized account card mirrors.
+        .environment(\.layoutDirection, (L.lang == .arabic || L.lang == .sorani) ? .rightToLeft : .leftToRight)
         .appsGlass(cornerRadius: 26, tint: Color(red: 0.45, green: 0.35, blue: 1))
     }
 }
