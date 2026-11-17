@@ -95,6 +95,23 @@ class DiagnosticPrivacySourceTests(unittest.TestCase):
             fn = management.split('private func ' + name + '(', 1)[1].split('\n    private func ', 1)[0]
             self.assertIn('await diagnosticAccess.perform', fn)
 
+    def test_hidden_diagnostics_lifecycle_is_owned_by_visible_parent(self):
+        source = (S / 'MirsaOwnerDiagnostics.swift').read_text()
+        gate, lifecycle = source.split('@MainActor struct MirsaDiagnosticAccessLifecycle', 1)
+        self.assertNotIn('.task(id: scenePhase)', gate)
+        self.assertIn('@ObservedObject private var access', gate)
+        self.assertIn('while !Task.isCancelled {', lifecycle)
+        self.assertNotIn('while !Task.isCancelled && access.allowed', lifecycle)
+        self.assertIn('_ = await access.refresh()', lifecycle)
+        for name in ['MirsaWallpaperManagementView.swift', 'ContentView.swift']:
+            parent = (S / name).read_text()
+            self.assertIn('.modifier(MirsaDiagnosticAccessLifecycle(access: diagnosticAccess))', parent)
+            self.assertIn('MirsaOwnerDiagnostics(access: diagnosticAccess)', parent)
+        settings = (S / 'Apps/AppsView.swift').read_text()
+        claim = settings.split('private func claim() async {', 1)[1].split('var body:', 1)[0]
+        self.assertLess(claim.index('try await ForgeClient.json'), claim.index('NotificationCenter.default.post'))
+        self.assertIn('name: .mirsaDiagnosticIdentityChanged', claim)
+
     def test_actual_swift_tests_and_ci_selectors_exist(self):
         tests = (R / 'tests/MirsaDiagnosticPrivacyTests.swift').read_text()
         for name in ['testDisplayCopyAndExportUseIdenticalSanitizedFormatting', 'testHistoricalEvidenceIsSanitizedAndRewrittenAndNewAppendNeverPersistsRaw', 'testUnauthenticatedAndNonownerCannotPerformAnyDiagnosticAction', 'testLoadingCredentialChangeAndBackgroundFailClosed', 'testExplicitRevokeInvalidatesInFlightServerResponse']:

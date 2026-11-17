@@ -54,12 +54,12 @@ import SwiftUI
 /// Renders *nothing*, including no title/placeholder or action, until server approval.
 /// Foreground mount/re-entry refresh; background/unmount/account changes revoke.
 @MainActor struct MirsaOwnerDiagnostics<Content: View>: View {
-    @StateObject private var access = MirsaDiagnosticAccess()
+    @ObservedObject private var access: MirsaDiagnosticAccess
     @Environment(\.scenePhase) private var scenePhase
     @State private var expanded = false
     @ViewBuilder var content: () -> Content
-    init(access: MirsaDiagnosticAccess? = nil, @ViewBuilder content: @escaping () -> Content) {
-        _access = StateObject(wrappedValue: access ?? MirsaDiagnosticAccess())
+    init(access: MirsaDiagnosticAccess, @ViewBuilder content: @escaping () -> Content) {
+        self.access = access
         self.content = content
     }
 
@@ -87,24 +87,36 @@ import SwiftUI
                 }
             }
         }
+        .onChange(of: access.allowed) { _, allowed in if !allowed { expanded = false } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { expanded = false } }
+    }
+}
+
+/// Attach to an always-present parent, NOT the empty, unauthorized Form section.
+/// A hidden section cannot own the lifecycle that makes itself visible.
+@MainActor struct MirsaDiagnosticAccessLifecycle: ViewModifier {
+    @ObservedObject var access: MirsaDiagnosticAccess
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
         .task(id: scenePhase) {
             access.revoke()
-            guard scenePhase == .active else { expanded = false; return }
-            guard await access.refresh() else { return }
-            // Detect local credential removal even by older code without notifications.
-            // Periodic server revalidation also bounds an out-of-band admin revocation.
+            guard scenePhase == .active else { return }
+            _ = await access.refresh()
+            // Keep observing even after an initial denial or a transient failure.
             var ticks = 0
-            while !Task.isCancelled && access.allowed {
+            while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { break }
                 access.invalidateIfIdentityChanged(); ticks += 1
                 if ticks == 12 { ticks = 0; _ = await access.refresh() }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .mirsaDiagnosticIdentityChanged).receive(on: RunLoop.main)) { _ in
-            access.revoke(); expanded = false
+            access.revoke()
             if scenePhase == .active { Task { await access.refresh() } }
         }
-        .onDisappear { access.revoke(); expanded = false }
+        .onDisappear { access.revoke() }
     }
 }
 

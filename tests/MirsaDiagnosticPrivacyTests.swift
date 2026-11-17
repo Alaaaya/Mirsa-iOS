@@ -152,6 +152,20 @@ final class MirsaDiagnosticPrivacyTests: XCTestCase {
         owner.invalidateIfIdentityChanged()
         XCTAssertFalse(owner.allowed)
     }
+    func testAdminActivationAfterInitialDenialRefreshesWithoutRestart() async {
+        var granted = false
+        let access = MirsaDiagnosticAccess(identity: { "synthetic-session" }, verify: { granted })
+        let initial = await access.refresh()
+        XCTAssertFalse(initial)
+        granted = true // successful server claim, same identity
+        let activated = await access.refresh()
+        XCTAssertTrue(activated)
+        XCTAssertTrue(access.allowed)
+        granted = false
+        let revoked = await access.refresh()
+        XCTAssertFalse(revoked)
+        XCTAssertFalse(access.allowed)
+    }
     func testExplicitRevokeInvalidatesInFlightServerResponse() async {
         var continuation: CheckedContinuation<Bool, Never>?
         let access = MirsaDiagnosticAccess(identity: { "synthetic-session" }, verify: {
