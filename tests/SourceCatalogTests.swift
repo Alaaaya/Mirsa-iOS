@@ -205,4 +205,32 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertTrue(store.remove(id: store.sources[0].id))
         XCTAssertEqual(store.listing(for: ryp0).count, 1)
     }
+    func testGlobalSearchLoadsPartialCacheAndFindsFullTailByNameOnly() async throws {
+        let data = try fixture("apptesters")
+        var requests = [String]()
+        let store = makeStore { request in
+            requests.append(request.url!.absoluteString)
+            return (data, self.response(request.url!))
+        }
+        store.sources = [RepoSource(url: appTesters, name: "AppTesters"),
+                         RepoSource(url: ryp0, name: "Other source")]
+        store.apps[ryp0] = [] // global cache is nonempty, AppTesters still missing
+        let discovery = DiscoveryStore(sources: store)
+        discovery.input = " tIkToK "
+        await discovery.search()
+        XCTAssertEqual(requests, [appTesters])
+        XCTAssertFalse(discovery.results.isEmpty)
+        XCTAssertTrue(discovery.results.allSatisfy { $0.app.name.localizedCaseInsensitiveContains("tiktok") })
+        let expected = (store.apps[appTesters] ?? []).filter { $0.name.localizedCaseInsensitiveContains("tiktok") }
+        XCTAssertEqual(discovery.results.count, Set(expected.map { $0.id + "|" + $0.downloadURL.absoluteString }).count)
+        discovery.input = "HeyJapan"
+        await discovery.search()
+        XCTAssertFalse(discovery.results.isEmpty, "full catalogue tail, not first N entries")
+        XCTAssertEqual(requests.count, 1, "loaded sources are reused")
+        discovery.input = "no-match-name-473829"
+        await discovery.search()
+        XCTAssertTrue(discovery.results.isEmpty)
+        XCTAssertTrue(discovery.failures.isEmpty)
+    }
+
 }
