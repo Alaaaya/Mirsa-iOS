@@ -527,8 +527,11 @@ final class WallpaperMakerTests: XCTestCase {
             var referenced = 0
             for name in [PhotoWallpaper.backgroundName, PhotoWallpaper.floatingName, PhotoWallpaper.foregroundName] {
                 let xml = String(decoding: try file(name + "/main.caml", in: files), as: UTF8.self)
-                referenced += xml.components(separatedBy: #"src="assets/"#).count - 1
-                XCTAssertTrue(xml.contains("LKStateTransitionElement"))
+                let layerCount = xml.components(separatedBy: #"src="assets/"#).count - 1
+                referenced += layerCount
+                // Empty role bundles have no state targets. Every populated
+                // bundle must still carry real per-layer spring transitions.
+                XCTAssertEqual(xml.contains("LKStateTransitionElement"), layerCount > 0)
             }
             XCTAssertEqual(referenced, n)
             let fg = String(decoding: try file(PhotoWallpaper.foregroundName + "/main.caml", in: files), as: UTF8.self)
@@ -711,7 +714,15 @@ final class WallpaperMakerTests: XCTestCase {
         for layer in [lock, home, sticker] {
             XCTAssertEqual(tree.filter { $0.attributes["src"] == "assets/\(layer.id.uuidString).png" }.count, 1)
         }
-        XCTAssertEqual(tree.filter { $0.name == "animation" && $0.attributes["type"] == "CAKeyframeAnimation" }.count, 6)
+        // The confirmed recipe encodes x as <p> and y as <animation>.
+        // Assert BOTH axes on each timed node, not a spelling-specific count.
+        for index in 0..<3 {
+            let node = try XCTUnwrap(tree.first { $0.attributes["id"] == "float-\(index)" })
+            let loops = node.all.filter { $0.attributes["type"] == "CAKeyframeAnimation" }
+            XCTAssertEqual(loops.count, 2)
+            XCTAssertEqual(Set(loops.compactMap { $0.attributes["keyPath"] }), ["position.x", "position.y"])
+            XCTAssertTrue(loops.allSatisfy { $0.attributes["repeatCount"] == "inf" })
+        }
         XCTAssertTrue(nodes.contains { $0.name == "LKStateTransition" })
         try recordEvidence(url, name: "Hatsune-Miku-original-scenes-persistent-sticker")
     }
