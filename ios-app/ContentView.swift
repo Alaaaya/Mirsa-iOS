@@ -630,7 +630,7 @@ struct ContentView: View {
     @State private var loadedTabs: Set<AppTab> = []
 
     @ViewBuilder
-    private func sixTab<C: View>(_ tab: AppTab, @ViewBuilder _ content: () -> C) -> some View {
+    private func sixTab<C: View>(_ tab: AppTab, @ViewBuilder _ content: @escaping () -> C) -> some View {
         if loadedTabs.contains(tab) || vm.selectedTab == tab {
             let on = vm.selectedTab == tab
             GeometryReader { viewport in
