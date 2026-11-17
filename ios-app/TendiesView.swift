@@ -595,7 +595,8 @@ private extension View {
     func tendiesChip() -> some View {
         self.font(.subheadline.weight(.semibold))
             .foregroundStyle(.white)
-            .lineLimit(1).minimumScaleFactor(0.75)
+            .lineLimit(2).minimumScaleFactor(0.75)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, minHeight: 40)
             .background(Capsule().fill(Color.white.opacity(0.07)))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8))
