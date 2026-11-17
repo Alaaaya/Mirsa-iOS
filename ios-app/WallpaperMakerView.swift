@@ -78,16 +78,14 @@ struct WallpaperMakerSection: View {
             Text(t(.steps)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 Button {
-                    guard mediaPicker == nil else { return }
-                    mediaPicker = .photos
+                    presentPicker(.photos)
                 } label: {
                     Label(t(.photos), systemImage: "photo.stack").frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("wallpaper-choose-photos")
                 Button {
-                    guard mediaPicker == nil else { return }
-                    mediaPicker = .video
+                    presentPicker(.video)
                 } label: {
                     Label(t(.video), systemImage: "video.badge.plus").frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
@@ -185,26 +183,41 @@ struct WallpaperMakerSection: View {
         .task(id: layers.map { "\($0.id):\($0.role.rawValue):\($0.cutoutEnabled)" }.joined()) {
             await prepareForegrounds()
         }
-        // Sheet hangs off the whole maker body so row re-renders cannot swallow the state.
-        .sheet(item: $mediaPicker) { selection in
-            switch selection {
-            case .photos:
-                WallpaperPhotosPicker { result in
-                    mediaPicker = nil
-                    receivePhotos(result)
-                }.interactiveDismissDisabled().pickerHostMarker("photos")
-            case .video:
-                WallpaperVideoPicker { result in
-                    mediaPicker = nil
-                    guard let result else { return }
-                    switch result {
-                    case .failure: message = t(.error)
-                    case .success(let url): setVideo(url)
-                    }
-                }.interactiveDismissDisabled().pickerHostMarker("video")
-            }
-        }
         .onDisappear { clear() }
+    }
+
+    /// Modal UIKit presentation. A SwiftUI .sheet on this Group would be attached to every Form row
+    /// and was swallowed by row recycling (picker state never changed in the real simulator run).
+    private func presentPicker(_ selection: MediaPicker) {
+        guard mediaPicker == nil else { return }
+        mediaPicker = selection
+        var host: UIHostingController<AnyView>?
+        let close = { host?.dismiss(animated: true); mediaPicker = nil }
+        let root: AnyView
+        switch selection {
+        case .photos:
+            root = AnyView(WallpaperPhotosPicker { result in
+                close(); receivePhotos(result)
+            }.ignoresSafeArea().pickerHostMarker("photos"))
+        case .video:
+            root = AnyView(WallpaperVideoPicker { result in
+                close()
+                guard let result else { return }
+                switch result {
+                case .failure: message = t(.error)
+                case .success(let url): setVideo(url)
+                }
+            }.ignoresSafeArea().pickerHostMarker("video"))
+        }
+        let controller = UIHostingController(rootView: root)
+        controller.isModalInPresentation = true
+        host = controller
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive } ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        var top = scene?.windows.first { $0.isKeyWindow }?.rootViewController ?? scene?.windows.first?.rootViewController
+        while let next = top?.presentedViewController { top = next }
+        guard let top else { mediaPicker = nil; return }
+        top.present(controller, animated: true)
     }
 
     private var photoControls: some View {
