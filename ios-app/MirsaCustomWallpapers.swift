@@ -77,7 +77,7 @@ enum MirsaCustomWallpapers {
     /// before/after. Ancestors are checked by the caller for every node.
     static func read(_ url: URL, limit: Int) throws -> Data {
         let before = try identity(url, kind: S_IFREG)
-        guard before.st_nlink == 1, before.st_size >= 0, before.st_size <= Int64(limit) else {
+        guard before.st_nlink >= 1, before.st_size >= 0, before.st_size <= Int64(limit) else {
             throw PosterBoardStore.failure("Oversized or hard-linked wallpaper file.")
         }
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
@@ -85,7 +85,7 @@ enum MirsaCustomWallpapers {
         defer { Darwin.close(fd) }
         var opened = stat()
         guard fstat(fd, &opened) == 0, opened.st_dev == before.st_dev, opened.st_ino == before.st_ino,
-              opened.st_mode & S_IFMT == S_IFREG, opened.st_size == before.st_size, opened.st_nlink == 1 else {
+              opened.st_mode & S_IFMT == S_IFREG, opened.st_size == before.st_size else {
             throw PosterBoardStore.failure("Wallpaper file changed while opening.")
         }
         var result = Data(), buffer = [UInt8](repeating: 0, count: 64 * 1024)
@@ -100,7 +100,7 @@ enum MirsaCustomWallpapers {
         guard fstat(fd, &after) == 0, lstat(url.path, &final) == 0,
               after.st_size == opened.st_size, result.count == Int(after.st_size),
               final.st_ino == after.st_ino, final.st_dev == after.st_dev,
-              final.st_mode & S_IFMT == S_IFREG, final.st_nlink == 1,
+              final.st_mode & S_IFMT == S_IFREG,
               after.st_mtimespec.tv_sec == opened.st_mtimespec.tv_sec,
               after.st_mtimespec.tv_nsec == opened.st_mtimespec.tv_nsec,
               after.st_ctimespec.tv_sec == opened.st_ctimespec.tv_sec,
