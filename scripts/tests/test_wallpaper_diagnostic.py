@@ -90,9 +90,12 @@ class DiagnosticContractTests(unittest.TestCase):
         ui = (R / "ios-app/TendiesView.swift").read_text()
         main = ui.split('mainContent: {', 1)[1].split('extraTools: {', 1)[0]
         tools = ui.split('extraTools: {', 1)[1].split('// Bound the actual Form viewport', 1)[0]
-        for token in ['ForEach($vm.tendieItems)', 'wallpaper-import', 'OriginalVideoWallpaperBlock(', 'WallpaperMakerSection(', 'wallpaper-respring']:
+        for token in ['ForEach($vm.tendieItems)', 'wallpaper-import', 'OriginalVideoWallpaperBlock(', 'WallpaperMakerSection(']:
             self.assertIn(token, main)
             self.assertNotIn(token, tools)
+        self.assertEqual(ui.count('.accessibilityIdentifier("wallpaper-respring")'), 1)
+        self.assertLess(ui.index('.accessibilityIdentifier("wallpaper-respring")'), ui.index('MirsaWallpaperManagementSection('))
+        self.assertIn('Button { offerRespring() }', ui)
         for icon in ['"checklist"', '"square.3.layers.3d"']:
             self.assertIn(icon, main)
         self.assertIn('Text(vm.posterBoardContainer.isEmpty', tools)

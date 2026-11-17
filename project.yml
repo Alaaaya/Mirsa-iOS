@@ -59,6 +59,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa
         INFOPLIST_FILE: ios-app/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "MirsaIcon1 MirsaIcon2 MirsaIcon3 MirsaIcon4 MirsaIcon5 MirsaIcon6"
         # idevice's static lib pulls in C++ symbols (aws-lc); link libc++.
         OTHER_LDFLAGS: "-lc++"
         GENERATE_INFOPLIST_FILE: NO

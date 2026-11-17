@@ -170,6 +170,7 @@ struct LiquidTabBar: View {
                 }
                 .buttonStyle(.mirsaPress)
                 .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(6)
