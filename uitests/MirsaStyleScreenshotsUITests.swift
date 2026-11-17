@@ -287,23 +287,20 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app)
             XCTAssertTrue(video.isHittable, "Video creation must remain on the main page")
             shot(app, lang + "_tendies_main_video")
-            let tools = app.buttons["wallpaper-tools"]
-            for page in 0..<12 {
-                shot(app, lang + "_tendies_main_page_" + String(page))
-                if tools.exists && tools.isHittable { break }
-                app.swipeUp(velocity: .slow)
-            }
-            XCTAssertTrue(tools.isHittable)
             let respring = app.buttons["wallpaper-respring"]
             revealWallpaperElement(respring, identifier: "wallpaper-respring", in: app)
-            XCTAssertTrue(respring.isHittable, "Respring must be visible with tools closed")
+            XCTAssertTrue(respring.isHittable, "Respring remains an ordinary user action")
             shot(app, lang + "_tendies_main_respring")
-            revealWallpaperElement(tools, identifier: "wallpaper-tools", in: app)
-            shot(app, lang + "_tendies_main_bottom_tools_closed")
+            for page in 0..<6 {
+                XCTAssertFalse(app.buttons["owner-diagnostics"].exists)
+                XCTAssertFalse(app.buttons["wallpaper-tools"].exists)
+                XCTAssertFalse(app.buttons["diagnostics-copy"].exists)
+                XCTAssertFalse(app.descendants(matching: .any)["wallpaper-flash-log"].exists)
+                shot(app, lang + "_tendies_nonowner_" + String(page))
+                app.swipeUp(velocity: .slow)
+            }
             XCTAssertTrue(app.buttons["wallpaper-refresh"].exists)
             XCTAssertTrue(app.buttons["wallpaper-cleanup"].exists)
-            tools.tap()
-            shot(app, lang + "_tendies_maintenance_opened")
             app.terminate()
 
             let fresh = launch("tools", lang: lang)
@@ -312,6 +309,22 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(freshInstall.waitForExistence(timeout: 10))
             XCTAssertTrue(freshInstall.isEnabled, "No imported selection is required to choose a file")
             fresh.terminate()
+        }
+    }
+
+    func testNonownerHasNoDiagnostics() {
+        for lang in ["ar", "en", "de", "kmr", "ckb"] {
+            let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFlashLogFixture"])
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            XCTAssertTrue(app.buttons["wallpaper-flash"].waitForExistence(timeout: 10))
+            for _ in 0..<8 {
+                for identifier in ["owner-diagnostics", "diagnostics-copy", "wallpaper-tools", "wallpaper-flash-log"] {
+                    XCTAssertFalse(app.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists)
+                }
+                app.swipeUp(velocity: .slow)
+            }
+            shot(app, lang + "_diagnostics_absent_nonowner")
+            app.terminate()
         }
     }
 
@@ -466,7 +479,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 XCTAssertTrue(tap(app, ["Tendies"]))
                 let prefix = "\(lang)_tendies_\(theme)_\(largeText ? "large" : "standard")"
                 shot(app, prefix + "_top")
-                app.descendants(matching: .any).matching(identifier: "wallpaper-tools").firstMatch.tap()
+                XCTAssertFalse(app.buttons["owner-diagnostics"].exists)
                 let field = app.descendants(matching: .any).matching(identifier: "wallpaper-description").firstMatch
                 revealWallpaperElement(field, identifier: "wallpaper-description", in: app)
                 XCTAssertTrue(field.isHittable)

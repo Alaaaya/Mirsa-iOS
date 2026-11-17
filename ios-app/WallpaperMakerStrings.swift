@@ -2,10 +2,13 @@ import Foundation
 
 enum WallpaperMakerStrings {
     enum Key: String, CaseIterable {
+        case gyroStrength, subtle, mediumStrength, strong, gyroHelp, unlockHelp, spin, spinHelp, particles, snow, leaves, stars, particlesHelp, sleepDim, sleepHelp, gradient, replicate, replicateHelp, blend, normalBlend, screenBlend, overlayBlend, blur, liquidGlass, glassHelp, scene, sceneShared, sceneLock, sceneHome, sceneHelp, homeHorizontal, homeVertical, sceneOutput
+        case particleDirection, falling, rising
+        case appearance, appearanceBoth, appearanceLight, appearanceDark, appearanceHelp
         case selectAll, deselectAll, collectionsType, suggestedPhotosType, mercuryType, containerType
         case cutout, cutoutHelp, cutoutReady, cutoutNoSubject, cutoutUnavailable, cutoutPreparing, connectionHint, containerUnavailable, copyVerified, applyFailed, respringHelp, motionPreset, motionLeft, motionRight, motionUp, motionDown, motionFloat
         case chooseTendies, importMore, importHint
-        case unlock, off, unlockZoom, unlockSlide, gyro, floating, effectsHelp
+        case unlock, off, unlockZoom, unlockSlide, gyro, floating, effectsHelp, animatedPhotos, staticPhotos
         case middle, zoom, horizontal, vertical, describe, plan, manualFallback
         case title, steps, photos, video, files, crop, layers, background, foreground, reorder, depth, depthHelp
         case preview, generate, preparing, share, importFile, ready, error, remove, clear, videoHelp, compatibility, limit
@@ -22,6 +25,47 @@ enum WallpaperMakerStrings {
         return values[key]![column]
     }
     static let values: [Key: [String]] = [
+        .gyroStrength: ["Tilt strength", "قوة الميلان", "Neigungsstärke", "Hêza xwarbûnê", "هێزی لاربوون"],
+        .subtle: ["Subtle", "خفيف", "Dezent", "Hindik", "کەم"],
+        .mediumStrength: ["Medium", "وسط", "Mittel", "Navîn", "مامناوەند"],
+        .strong: ["Strong", "قوي", "Stark", "Xurt", "بەهێز"],
+        .gyroHelp: ["Tilt moves layers with the phone. Choose tilt or clock depth, not both.", "الصور بتميل مع الموبايل. اختار الميلان أو عمق الساعة، مو التنين سوا.", "Ebenen folgen der Neigung. Neigung oder Uhrtiefe wählen, nicht beides.", "Çîn bi telefonê re dilivin. Xwarbûn an kûrahiya demjimêrê hilbijêre, ne her du.", "چینەکان لەگەڵ مۆبایل دەجووڵێن. لاربوون یان قوڵایی کاتژمێر هەڵبژێرە، نەک هەردووکیان."],
+        .unlockHelp: ["Zoom or slide between lock and home scenes. Choose each photo’s scene below.", "تكبير أو سحب بين القفل والرئيسية. اختار شاشة كل صورة من تحت.", "Zoom oder Gleiten zwischen Sperr- und Home-Bild. Szene je Foto unten wählen.", "Di navbera kilît û malê de mezinkirin an şemitandin. Dîmena her wêneyê li jêr hilbijêre.", "گەورەکردن یان خلیسکان لەنێوان قوفڵ و سەرەکی. دیمەنی هەر وێنەیەک لە خوارەوە هەڵبژێرە."],
+        .spin: ["Slow rotation", "دوران بطيء", "Langsame Drehung", "Zivirîna hêdî", "سووڕانەوەی هێواش"],
+        .spinHelp: ["One full turn repeats every 16 seconds.", "لفة كاملة بتتكرر كل ١٦ ثانية.", "Eine volle Drehung alle 16 Sekunden.", "Her 16 çirkeyan carekê tam dizivire.", "هەر ١٦ چرکە سووڕانەوەیەکی تەواو دووبارە دەبێتەوە."],
+        .particles: ["Particles", "أشكال متحركة", "Partikel", "Parçe", "تەنۆلکە"],
+        .snow: ["Snow", "ثلج", "Schnee", "Berf", "بەفر"],
+        .leaves: ["Leaves", "ورق شجر", "Blätter", "Pel", "گەڵا"],
+        .stars: ["Stars", "نجوم", "Sterne", "Stêrk", "ئەستێرە"],
+        .particlesHelp: ["Small original shapes fall over the photos. Saved as emitter particles.", "أشكال صغيرة بتنزل فوق الصور وبتنحفظ كجزيئات متحركة بالملف.", "Kleine Formen fallen über die Fotos und werden als Partikel gespeichert.", "Şêweyên biçûk li ser wêneyan dadikevin û di pelê de tên tomarkirin.", "شێوە بچووکەکان بەسەر وێنەکاندا دادەبەزن و وەک تەنۆلکە پاشەکەوت دەکرێن."],
+        .sleepDim: ["Dim in Sleep state", "تعتيم بوضع السكون", "Im Ruhezustand abdunkeln", "Di xewê de tarî bike", "تاریککردن لە دۆخی خەودا"],
+        .sleepHelp: ["Dims photos in the wallpaper Sleep state. Does not enable Always On or bypass iOS limits.", "بيعتّم الصور بحالة سكون الخلفية. ما بيشغّل Always On ولا بيتجاوز قيود iOS.", "Dunkelt den Sleep-Zustand ab. Aktiviert kein Always On und umgeht keine iOS-Grenzen.", "Di rewşa xewê de tarî dike. Always On çalak nake û sînorên iOS derbas nake.", "لە دۆخی خەو وێنەکان تاریک دەکات. Always On چالاک ناکات و سنووری iOS تێناپەڕێنێت."],
+        .gradient: ["Colour gradient behind photos", "تدرّج ألوان خلف الصور", "Farbverlauf hinter Fotos", "Rengên gavbi gav li paş wêneyan", "پلەڕەنگ لە پشت وێنەکان"],
+        .replicate: ["Six rotated copies", "ست نسخ بشكل دائري", "Sechs gedrehte Kopien", "Şeş kopiyên zivirî", "شەش کۆپیی سووڕاو"],
+        .replicateHelp: ["Repeats each photo around the centre. Transparent stickers work best.", "بيكرر كل صورة حوالين النص. أحلى مع الملصقات الشفافة.", "Wiederholt jedes Foto um die Mitte. Ideal für transparente Sticker.", "Her wêneyê li dora navendê dubare dike. Stîkerên şefaf baştir in.", "هەر وێنەیەک دەوروبەری ناوەڕاست دووبارە دەکات. ستیکەری شەفاف باشترە."],
+        .blend: ["Layer blending", "مزج الطبقات", "Ebenenmischung", "Tevlihevkirina çînan", "تێکەڵکردنی چینەکان"],
+        .normalBlend: ["Normal", "عادي", "Normal", "Asayî", "ئاسایی"],
+        .screenBlend: ["Screen · lighter", "Screen · أفتح", "Screen · heller", "Screen · ronîtir", "Screen · ڕووناکتر"],
+        .overlayBlend: ["Overlay · contrast", "Overlay · تباين", "Overlay · Kontrast", "Overlay · berevajî", "Overlay · کۆنتراست"],
+        .blur: ["Soft blur", "ضبابية خفيفة", "Weichzeichnen", "Nezelaliya nerm", "تەمومژی نەرم"],
+        .liquidGlass: ["Glass lens", "عدسة زجاج", "Glaslinse", "Lensa camê", "لینزی شووشە"],
+        .glassHelp: ["A round refracting lens over the image, not blur. System rendering varies by iOS version.", "عدسة دائرية بتكسر الصورة، مو ضبابية. ظهورها حسب نسخة iOS.", "Runde brechende Linse, kein Weichzeichner. Darstellung hängt von iOS ab.", "Lenseke girover a şikandina wêneyê, ne nezelalî. Xuyabûn bi guhertoya iOS ve girêdayî ye.", "لینزێکی بازنەیی بۆ شکاندنی وێنە، نەک تەمومژ. دەرکەوتن بە وەشانی iOS بەستراوە."],
+        .scene: ["Show photo on", "الصورة تظهر على", "Foto anzeigen auf", "Wêne li vir nîşan bide", "وێنە پیشان بدە لە"],
+        .sceneShared: ["Both · shared layer", "التنين · طبقة مشتركة", "Beiden · gemeinsame Ebene", "Her du · çîna hevpar", "هەردووکیان · چینی هاوبەش"],
+        .sceneLock: ["Lock Screen", "شاشة القفل", "Sperrbildschirm", "Ekrana kilîtê", "شاشەی قوفڵ"],
+        .sceneHome: ["Home Screen", "الشاشة الرئيسية", "Home-Bildschirm", "Ekrana malê", "شاشەی سەرەکی"],
+        .sceneHelp: ["Shared layers stay in both scenes. Lock/home-only photos switch on unlock.", "الطبقة المشتركة بتضل بالشاشتين. صور القفل والرئيسية بتتبدل وقت الفتح.", "Gemeinsame Ebenen bleiben in beiden Szenen. Andere wechseln beim Entsperren.", "Çînên hevpar di her du dîmenan de dimînin. Yên din di vekirinê de diguherin.", "چینە هاوبەشەکان لە هەردوو دیمەندا دەمێننەوە. ئەوانی تر لە کردنەوەدا دەگۆڕدرێن."],
+        .homeHorizontal: ["Home position · horizontal offset", "مكانها بالرئيسية · أفقي", "Home-Position · horizontal", "Cihê malê · dûrahiya berwar", "شوێنی سەرەکی · ئاسۆیی"],
+        .homeVertical: ["Home position · vertical offset", "مكانها بالرئيسية · عمودي", "Home-Position · vertikal", "Cihê malê · dûrahiya stûnî", "شوێنی سەرەکی · ستوونی"],
+        .sceneOutput: ["Preview shows layout only. Scene and tilt effects play through iOS.", "المعاينة للترتيب بس. حركة الشاشات والميلان بيشغّلها iOS.", "Vorschau zeigt nur das Layout. Szenenwechsel und Neigung spielt iOS ab.", "Pêşdîtin tenê rêzê nîşan dide. Dîmen û xwarbûnê iOS dilîze.", "پێشبینین تەنها ڕێکخستنە. گۆڕینی دیمەن و لاربوون لەڕێی iOS کار دەکەن."],
+        .particleDirection: ["Particle direction", "اتجاه الأشكال", "Partikelrichtung", "Arasteya parçeyan", "ئاراستەی تەنۆلکە"],
+        .falling: ["Falling", "نازلة", "Fallend", "Dadikevin", "دادەبەزن"],
+        .rising: ["Rising", "طالعة", "Aufsteigend", "Bilind dibin", "بەرزدەبنەوە"],
+        .appearance: ["System appearance", "مظهر النظام", "Systemdarstellung", "Xuyabûna pergalê", "ڕووکارى سیستەم"],
+        .appearanceBoth: ["Light and dark", "فاتح وداكن", "Hell und dunkel", "Ronî û tarî", "ڕووناک و تاریک"],
+        .appearanceLight: ["Light only", "الفاتح بس", "Nur hell", "Tenê ronî", "تەنها ڕووناک"],
+        .appearanceDark: ["Dark only", "الداكن بس", "Nur dunkel", "Tenê tarî", "تەنها تاریک"],
+        .appearanceHelp: ["Changes with iOS light/dark appearance, not the time of day. Cannot combine with tilt yet.", "بتتبدل حسب مظهر iOS الفاتح والداكن، مو حسب الساعة. حالياً ما بتجتمع مع الميلان.", "Wechselt mit dem iOS-Hell-/Dunkelmodus, nicht nach Uhrzeit. Noch nicht mit Neigung kombinierbar.", "Bi moda ronî/tarî ya iOS diguhere, ne bi saetê. Hê bi xwarbûnê re nayê tevlihevkirin.", "بەپێی دۆخی ڕووناک/تاریکی iOS دەگۆڕێت، نەک کاتی ڕۆژ. هێشتا لەگەڵ لاربوون تێکەڵ ناکرێت."],
         .selectAll: ["Select All", "اختار الكل", "Alle auswählen", "Hemûyan hilbijêre", "هەمووی هەڵبژێرە"],
         .deselectAll: ["Deselect All", "شيل تحديد الكل", "Auswahl aufheben", "Hilbijartina hemûyan rake", "هەڵبژاردنی هەمووی لاببە"],
         .collectionsType: ["Collections", "المجموعات", "Sammlungen", "Koleksiyon", "کۆمەڵەکان"],
@@ -55,7 +99,9 @@ enum WallpaperMakerStrings {
         .unlockSlide: ["Slide", "سحب", "Verschieben", "Şemitandin", "خلیسکان"],
         .gyro: ["Tilt with device motion (experimental)", "ميلان مع حركة الجهاز (تجريبي)", "Neigung mit Gerätebewegung (experimentell)", "Xwarbûn bi tevgera amûrê (ceribandin)", "لاربوون بە جووڵەی ئامێر (تاقیکردنەوە)"],
         .floating: ["Gentle floating animation", "حركة طفو خفيفة", "Sanftes Schweben", "Tevgera hêsan a herikînê", "جووڵەی هێواشی هەڵواسین"],
-        .effectsHelp: ["Several photos start with depth, unlock zoom and tilt enabled. Your changes are preserved. Floating is optional. Preview shows layout only, not system effects; system animation support depends on iOS.", "مع كذا صورة بيشتغل العمق وتكبير فتح القفل والميلان بالأصل. اختياراتك ما بتتغيّر. الطفو اختياري. المعاينة للترتيب بس، ودعم الحركات حسب iOS.", "Mehrere Fotos starten mit Tiefe, Entsperr-Zoom und Neigung. Eigene Einstellungen bleiben erhalten. Schweben ist optional. Vorschau zeigt nur Layout; Systemanimationen hängen von iOS ab.", "Bi gelek wêneyan kûrahî, zooma vekirinê û xwarbûn vekirî ne. Guhertinên te diparêzin. Herikîn bijarte ye. Pêşdîtin tenê rêzê nîşan dide; anîmasyon bi iOS ve girêdayî ye.", "بە چەند وێنەیەک قوڵایی و گەورەکردنی کردنەوە و لاربوون چالاکن. گۆڕانکارییەکانت دەپارێزرێن. هەڵواسین هەڵبژاردەییە. پێشبینین تەنها ڕێکخستنە؛ جووڵەی سیستەم بە iOS بەستراوە."],
+        .animatedPhotos: ["Output: continuous photo motion. The preview shows layout only.", "الملف فيه حركة مستمرة للصور. المعاينة للترتيب بس.", "Ausgabe: dauerhafte Fotobewegung. Die Vorschau zeigt nur das Layout.", "Derketin: livîna domdar a wêneyan. Pêşdîtin tenê rêzê nîşan dide.", "دەرچوو جووڵەی بەردەوامی وێنەکانە. پێشبینین تەنها ڕێکخستن نیشان دەدات."],
+        .staticPhotos: ["Output: static photos. Turn on floating for continuous motion.", "الملف صور ثابتة. شغّل الطفو إذا بدك حركة مستمرة.", "Ausgabe: statische Fotos. Für Dauerbewegung Schweben einschalten.", "Derketin: wêneyên sekinî. Ji bo livîna domdar herikînê veke.", "دەرچوو وێنەی جێگیرە. بۆ جووڵەی بەردەوام هەڵواسین چالاک بکە."],
+        .effectsHelp: ["Effects are saved in the file. The preview shows layout only; system playback depends on iOS. New effects need verification on your device.", "التأثيرات بتنحفظ بالملف. المعاينة للترتيب بس والتشغيل حسب iOS. التأثيرات الجديدة بدها تأكد عالجهاز.", "Effekte werden in der Datei gespeichert. Vorschau zeigt nur das Layout; Wiedergabe hängt von iOS ab. Neue Effekte am Gerät prüfen.", "Bandor di pelê de tên tomarkirin. Pêşdîtin tenê rêzê ye; lêxistin bi iOS ve girêdayî ye. Bandorên nû li ser amûrê kontrol bike.", "کاریگەرییەکان لە فایلەکەدا پاشەکەوت دەکرێن. پێشبینین تەنها ڕێکخستنە؛ لێدان بە iOS بەستراوە. کاریگەرییە نوێکان لە ئامێر تاقی بکەوە."],
         .middle: ["Middle", "بالنص", "Mitte", "Navîn", "ناوەڕاست"],
         .zoom: ["Zoom", "تكبير", "Zoom", "Mezinkirin", "گەورەکردن"],
         .horizontal: ["Horizontal position", "المكان يمين ويسار", "Horizontale Position", "Cihê asoyî", "شوێنی ئاسۆیی"],

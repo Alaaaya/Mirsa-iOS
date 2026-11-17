@@ -142,6 +142,7 @@ enum SideloadError: LocalizedError {
 /// Thin, thread-safe wrapper over the `al_sl_*` / `al_container_*` FFI.
 /// Every call blocks, so call from a background queue.
 enum SideloadService {
+    private static let diagnosticStream = MirsaDiagnosticPrivacy.Stream()
     static func configure() {
         let store = ALKeyValueStore(
             ctx: nil,
@@ -227,11 +228,11 @@ enum SideloadService {
             guard let ctx else { return }
             let b = Unmanaged<ProgressBox>.fromOpaque(ctx).takeUnretainedValue()
             let s = stage.map { String(cString: $0) } ?? ""
-            UserDefaults.standard.set("\(s) (\(Int(f * 100))%)", forKey: "mirsa.install.stage")
+            UserDefaults.standard.set(MirsaDiagnosticPrivacy.line("\(s) (\(Int(f * 100))%)"), forKey: "mirsa.install.stage")
             DispatchQueue.main.async { b.f(f, s) }
         }, { _, msg in
             guard let msg else { return }
-            let line = InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic)
+            let line = diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
             UserDefaults.standard.set(line, forKey: "mirsa.install.lastLog")
             DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
         }, ctx, &out, &err)
@@ -256,7 +257,7 @@ enum SideloadService {
             DispatchQueue.main.async { b.f(f, s) }
         }, { _, msg in
             guard let msg else { return }
-            let line = InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic)
+            let line = diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
             DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
         }, ctx, &out, &err)
         let o = take(out), e = take(err)
@@ -279,7 +280,7 @@ enum SideloadService {
             DispatchQueue.main.async { b.f(f, s) }
         }, { _, msg in
             guard let msg else { return }
-            let line = InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic)
+            let line = diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
             DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
         }, ctx, &out, &err)
         let o = take(out), e = take(err)

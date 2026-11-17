@@ -449,17 +449,20 @@ struct CompactLogView: View {
     let title: String
     let lines: [String]
     var onClear: (() -> Void)? = nil
+    @EnvironmentObject private var access: MirsaDiagnosticAccess
     @State private var copied: Bool = false
+    private var safeLines: [String] { MirsaDiagnosticPrivacy.lines(lines) }
 
     var body: some View {
+        if access.allowed {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(title)
+                Text(MirsaDiagnosticPrivacy.line(title))
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let onClear = onClear, !lines.isEmpty {
-                    Button(action: onClear) {
+                    Button { Task { await access.perform(onClear) } } label: {
                         Image(systemName: "trash")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -468,7 +471,8 @@ struct CompactLogView: View {
                     .padding(.trailing, 6)
                 }
                 Button {
-                    UIPasteboard.general.string = lines.joined(separator: "\n")
+                    Task { await access.perform {
+                    MirsaDiagnosticPrivacy.copy(lines, write: { UIPasteboard.general.string = $0 })
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     var t = Transaction()
                     t.disablesAnimations = true
@@ -482,6 +486,7 @@ struct CompactLogView: View {
                             copied = false
                         }
                     }
+                    } }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")
@@ -496,13 +501,14 @@ struct CompactLogView: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.borderless)
+                .accessibilityIdentifier("diagnostics-copy")
                 .transaction { $0.animation = nil }
             }
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
+                        ForEach(Array(safeLines.enumerated()), id: \.offset) { idx, line in
                             Text(line)
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(logLineColor(line))
@@ -520,14 +526,15 @@ struct CompactLogView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
                 )
-                .onChange(of: lines.count) { _, _ in
-                    if !lines.isEmpty {
-                        proxy.scrollTo(lines.count - 1, anchor: .bottom)
+                .onChange(of: safeLines.count) { _, _ in
+                    if !safeLines.isEmpty {
+                        proxy.scrollTo(safeLines.count - 1, anchor: .bottom)
                     }
                 }
             }
         }
         .padding(.vertical, 4)
+        }
     }
 }
 
@@ -1066,13 +1073,12 @@ struct PairingTab: View {
                     }
                 }
 
-                if !vm.log.isEmpty {
-                    Section {
-                        CompactLogView(
-                            title: "Activity Log (\(vm.log.count) lines)",
-                            lines: vm.log,
-                            onClear: { vm.log.removeAll() }
-                        )
+                MirsaOwnerDiagnostics {
+                    if !vm.log.isEmpty {
+                        CompactLogView(title: "Activity Log", lines: vm.log, onClear: { vm.log.removeAll() })
+                    }
+                    if !AppsStore.shared.legacyInstallDiagnostics.isEmpty {
+                        CompactLogView(title: "Previous installation", lines: AppsStore.shared.legacyInstallDiagnostics)
                     }
                 }
             }.listRowBackground(MirsaPalette.row) }
