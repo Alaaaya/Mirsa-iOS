@@ -82,6 +82,7 @@ struct WallpaperMakerSection: View {
                     mediaPicker = .photos
                 } label: {
                     Label(t(.photos), systemImage: "photo.stack").frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("wallpaper-choose-photos")
                 Button {
@@ -89,11 +90,12 @@ struct WallpaperMakerSection: View {
                     mediaPicker = .video
                 } label: {
                     Label(t(.video), systemImage: "video.badge.plus").frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("wallpaper-choose-video")
             }
             // Automatic Form-row buttons can fire BOTH actions. Keep explicit tap targets.
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             #if DEBUG
             .overlay(alignment: .topLeading) {
                 Color.clear.frame(width: 2, height: 2).accessibilityElement()
@@ -102,25 +104,6 @@ struct WallpaperMakerSection: View {
             }
             #endif
             .disabled(busy || applyRunning || planBusy)
-            // One concrete row owns one media sheet, never the distributed Form Group.
-            .sheet(item: $mediaPicker) { selection in
-                switch selection {
-                case .photos:
-                    WallpaperPhotosPicker { result in
-                        mediaPicker = nil
-                        receivePhotos(result)
-                    }.interactiveDismissDisabled().pickerHostMarker("photos")
-                case .video:
-                    WallpaperVideoPicker { result in
-                        mediaPicker = nil
-                        guard let result else { return }
-                        switch result {
-                        case .failure: message = t(.error)
-                        case .success(let url): setVideo(url)
-                        }
-                    }.interactiveDismissDisabled().pickerHostMarker("video")
-                }
-            }
             Button { showFiles = true } label: { Label(t(.files), systemImage: "folder") }
                 .disabled(busy || applyRunning || planBusy)
             if !layers.isEmpty {
@@ -201,6 +184,25 @@ struct WallpaperMakerSection: View {
         }
         .task(id: layers.map { "\($0.id):\($0.role.rawValue):\($0.cutoutEnabled)" }.joined()) {
             await prepareForegrounds()
+        }
+        // Sheet hangs off the whole maker body so row re-renders cannot swallow the state.
+        .sheet(item: $mediaPicker) { selection in
+            switch selection {
+            case .photos:
+                WallpaperPhotosPicker { result in
+                    mediaPicker = nil
+                    receivePhotos(result)
+                }.interactiveDismissDisabled().pickerHostMarker("photos")
+            case .video:
+                WallpaperVideoPicker { result in
+                    mediaPicker = nil
+                    guard let result else { return }
+                    switch result {
+                    case .failure: message = t(.error)
+                    case .success(let url): setVideo(url)
+                    }
+                }.interactiveDismissDisabled().pickerHostMarker("video")
+            }
         }
         .onDisappear { clear() }
     }
