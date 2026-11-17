@@ -375,7 +375,16 @@ enum ForgeChatImage {
         guard let d = try? await call(["action": "chat-list"]), let w0 = try? JSONDecoder().decode(W.self, from: d) else { return }
         let w = (threads: w0.threads.compactMap(\.value).filter { !deleting.contains($0.id) && deleteEpoch[$0.id] == epochs[$0.id] }, ())
         let sorted = w.threads.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+        MirsaRequestReadyNotifications.activeStore = self
+        await MirsaRequestReadyNotifications.observe(sorted)
         if sorted != threads { threads = sorted }
+    }
+
+    /// Preserve the same delete-epoch guard as foreground refresh.
+    func mergeReadyNotificationThreads(_ incoming: [ForgeChatThread]) {
+        let known = Set(threads.map(\.id))
+        let fresh = incoming.filter { !deleting.contains($0.id) && (deleteEpoch[$0.id] == nil || known.contains($0.id)) }
+        if fresh != threads { threads = fresh.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") } }
     }
 
     func read(_ id: UUID) async {
@@ -1073,7 +1082,7 @@ struct ForgeChatImageView: View {
     let messageID: UUID
     @State private var image: UIImage?
     var body: some View {
-        Group { if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 200).cornerRadius(8) } else { ProgressView().frame(height: 60) } }
+        Group { if let image { MirsaTappableImage(image: image) } else { ProgressView().frame(height: 60) } }
             .task { image = await ForgeChatStore.shared.image(messageID) }
     }
 }

@@ -44,9 +44,11 @@ struct ForgeChatReplyRef: Codable, Equatable { let messageID: UUID; let snippet:
     @Published private(set) var replies: [UUID: ForgeChatReplyRef] = [:]
     @Published private(set) var reactions: [UUID: String] = [:]
     @Published private(set) var seen: [UUID: String] = [:]
+    @Published private(set) var readyUnread: Set<UUID> = []
+    private let readyUnreadKey = "mirsa.chat.readyUnread.v1"
     private let repliesKey = "mirsa.chat.replies.v1", reactionsKey = "mirsa.chat.reactions.v1", seenKey = "mirsa.chat.seen.v1"
     static let usedKey = "mirsa.chat.everUsed"
-    // No background polling for badges: they update only from reads the chat already makes while it is on screen and the app is active.
+    // Ready checks also feed unread badges; all reads stay authenticated and device-bound.
     private var hasBaseline: Bool
 
     init() {
@@ -55,6 +57,7 @@ struct ForgeChatReplyRef: Codable, Equatable { let messageID: UUID; let snippet:
         replies = load(repliesKey) ?? [:]
         reactions = load(reactionsKey) ?? [:]
         seen = load(seenKey) ?? [:]
+        readyUnread = load(readyUnreadKey) ?? []
         hasBaseline = d.data(forKey: seenKey) != nil
     }
     private func save<T: Encodable>(_ v: T, _ k: String) { UserDefaults.standard.set(try? JSONEncoder().encode(v), forKey: k) }
@@ -80,11 +83,17 @@ struct ForgeChatReplyRef: Codable, Equatable { let messageID: UUID; let snippet:
         for t in threads { seen[t.id] = t.updatedAt ?? "" }
         hasBaseline = true; save(seen, seenKey)
     }
+    func markReadyUnread(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        readyUnread.formUnion(ids); save(readyUnread, readyUnreadKey)
+    }
     func markSeen(_ id: UUID, updatedAt: String?) {
+        if readyUnread.remove(id) != nil { save(readyUnread, readyUnreadKey) }
         guard seen[id] != (updatedAt ?? "") else { return }
         seen[id] = updatedAt ?? ""; hasBaseline = true; save(seen, seenKey)
     }
     func isUnread(_ t: ForgeChatThread) -> Bool {
+        if readyUnread.contains(t.id) { return true }
         guard hasBaseline, let u = t.updatedAt, !u.isEmpty else { return false }
         guard let s = seen[t.id] else { return true } // a thread that appeared after the baseline
         return s != u
