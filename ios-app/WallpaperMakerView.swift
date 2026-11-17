@@ -142,7 +142,7 @@ struct WallpaperMakerSection: View {
                 Button(t(.generate)) { descriptionFocused = false; generate() }
                     .accessibilityIdentifier("wallpaper-generate")
                     .buttonStyle(.borderedProminent)
-                    .disabled(busy || cutoutBusy || planBusy || applyRunning)
+                    .disabled(busy || cutoutBusy || planBusy || applyRunning || (video == nil && effects.mechanism?.isSupported == false))
                 Button(t(.clear), role: .destructive) { clear() }
                     .disabled(busy || planBusy)
             }
@@ -242,6 +242,8 @@ struct WallpaperMakerSection: View {
             Toggle(t(.crop), isOn: $crop)
             Toggle(t(.depth), isOn: $depth).disabled(effects.gyro)
             Text(t(.depthHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            mechanismChooser
+            Group {
             referenceEffectControls
             Toggle(t(.floating), isOn: $effects.floating)
             if effects.floating {
@@ -253,6 +255,8 @@ struct WallpaperMakerSection: View {
                     Text(t(.motionFloat)).tag(PhotoWallpaper.Effects.Motion.float)
                 }
             }
+            }
+            .disabled(effects.mechanism != nil)
             Text(t(effects.floating || effects.spin || effects.particles != .none ? .animatedPhotos : .sceneOutput))
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("wallpaper-motion-output")
@@ -370,6 +374,35 @@ struct WallpaperMakerSection: View {
         }
     }
 
+    private func mx(_ key: MechanismText) -> String { MechanismText.text(key) }
+
+    /// Catalogue selection. nil = normal/manual controls; any mechanism replaces the manual effect rows below.
+    private var mechanismChooser: some View {
+        Group {
+            Picker(mx(.title), selection: $effects.mechanism) {
+                Text(mx(.manual)).tag(WallpaperMechanism?.none)
+                ForEach(WallpaperMechanism.allCases) { m in
+                    Text(m.title).tag(WallpaperMechanism?.some(m))
+                }
+            }
+            .accessibilityIdentifier("wallpaper-mechanism-picker")
+            if let m = effects.mechanism {
+                Text(mx(.overrides)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if !m.isSupported {
+                    Text(mx(.unsupported) + (m.limitation.map { "\n" + $0 } ?? ""))
+                        .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("wallpaper-mechanism-unsupported")
+                } else if m.isExperimental {
+                    Text(mx(.experimental) + (m.limitation.map { "\n" + $0 } ?? ""))
+                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("wallpaper-mechanism-experimental")
+                }
+            } else {
+                Text(mx(.manualHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private func invalidate() {
         if let generated { try? FileManager.default.removeItem(at: generated) }
         generated = nil
@@ -482,6 +515,24 @@ struct WallpaperMakerSection: View {
             } catch { if !Task.isCancelled { message = t(.manualFallback) } }
         }
     }
+}
+
+/// Labels for the mechanism chooser only (en, ar, de, kmr, ckb).
+private enum MechanismText {
+    case title, manual, manualHelp, overrides, experimental, unsupported
+    static func text(_ key: MechanismText, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        let c: Int
+        switch language { case .english: c = 0; case .arabic: c = 1; case .german: c = 2; case .kurmanji: c = 3; case .sorani: c = 4 }
+        return values[key]![c]
+    }
+    static let values: [MechanismText: [String]] = [
+        .title: ["Effect catalogue", "كتالوج التأثيرات", "Effektkatalog", "Kataloga bandoran", "کاتالۆگی کاریگەرییەکان"],
+        .manual: ["Normal / manual", "عادي / يدوي", "Normal / manuell", "Asayî / destî", "ئاسایی / دەستی"],
+        .manualHelp: ["Use the manual effect controls below, or pick one effect from the catalogue.", "استخدم أدوات التأثير اليدوية بالأسفل، أو اختر تأثيراً واحداً من الكتالوج.", "Nutze die manuellen Effekte unten oder wähle einen Effekt aus dem Katalog.", "Kontrolên destî yên jêrîn bi kar bîne, an jî ji katalogê bandorek hilbijêre.", "کۆنترۆڵە دەستییەکانی خوارەوە بەکاربهێنە، یان یەک کاریگەری لە کاتالۆگ هەڵبژێرە."],
+        .overrides: ["A catalogue effect replaces the manual effect controls below. Choose Normal / manual to use them again.", "تأثير الكتالوج يستبدل أدوات التأثير اليدوية بالأسفل. اختر عادي / يدوي لاستخدامها من جديد.", "Ein Katalogeffekt ersetzt die manuellen Effekte unten. Wähle Normal / manuell, um sie wieder zu nutzen.", "Bandora katalogê kontrolên destî yên jêrîn diguherîne. Asayî / destî hilbijêre da ku dîsa bi kar bînî.", "کاریگەرییەکی کاتالۆگ جێگەی کۆنترۆڵە دەستییەکانی خوارەوە دەگرێتەوە. ئاسایی / دەستی هەڵبژێرە بۆ بەکارهێنانەوەیان."],
+        .experimental: ["Experimental: not yet verified on a real device. It may look different or not work.", "تجريبي: لم يُجرَّب بعد على جهاز حقيقي. قد يظهر بشكل مختلف أو لا يعمل.", "Experimentell: noch nicht auf einem echten Gerät geprüft. Es kann anders aussehen oder nicht funktionieren.", "Ceribandî: hê li ser cihazek rast nehatiye ceribandin. Dibe ku cuda xuya bike an nexebite.", "تاقیکارییە: هێشتا لەسەر ئامێری ڕاستەقینە تاقی نەکراوەتەوە. لەوانەیە جیاواز دەرکەوێت یان کار نەکات."],
+        .unsupported: ["Not supported yet. Generating is disabled for this effect.", "غير مدعوم حالياً. إنشاء هذا التأثير معطّل.", "Noch nicht unterstützt. Das Erstellen ist für diesen Effekt deaktiviert.", "Hêj nayê piştgirîkirin. Çêkirin ji bo vê bandorê girtî ye.", "هێشتا پشتگیری نەکراوە. دروستکردن بۆ ئەم کاریگەرییە ناچالاکە."],
+    ]
 }
 
 #if DEBUG
