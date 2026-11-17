@@ -74,6 +74,17 @@ struct MirsaStyleShotHost: View {
         case "setup": SetupView()
         case "mirsa-ai-embedded": tab(.mirsaAI)
         #if DEBUG
+        case "apps-design":
+            // Design review only: the real Apps tab with an in-memory signed-in account
+            // (9 of 10 App IDs left) and five fixture apps (one real, so 1 of 3 slots left).
+            ContentView().onAppear {
+                let store = AppsStore.shared
+                store.account = AccountState(email: "review@mirsa.app", appIDsAvailable: 9, appIDsMax: 10)
+                store.apps = Array(Self.fixtureApps.prefix(5))
+                vm.selectedTab = .apps
+            }
+        #endif
+        #if DEBUG
         case "chat-image-fixture":
             ZStack { MirsaChatTheme.bg.ignoresSafeArea(); MirsaTappableImage(image: Self.fixtureImage, maxWidth: 220, maxHeight: 200, cornerRadius: 14) }
         #endif
