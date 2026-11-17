@@ -4,7 +4,8 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        case tweaks, wallpapers, device, pairing
+        // Fixed physical order in every language (same as the dock): Pairing, Device, Tendies, Tweaks.
+        case pairing, device, wallpapers, tweaks
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -51,7 +52,7 @@ struct ToolsTab: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
-                        Text(s == .device ? tr("Device", "الجهاز") : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s == .device ? MirsaTr.german(tr("Device", "الجهاز")) : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity)
