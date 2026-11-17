@@ -552,6 +552,7 @@ struct HeroCard: View {
 /// filled part is the share still left (9 of 10 is nearly full; 1 of 3 is a third).
 /// Turns amber when one or none is left.
 struct HeroQuota: View {
+    @Environment(\.layoutDirection) private var layoutDirection
     let label: String
     let left: Int
     let total: Int
@@ -575,15 +576,21 @@ struct HeroQuota: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
             GeometryReader { geo in
-                ZStack(alignment: .leading) {
+                let fillWidth = geo.size.width * fraction
+                // Position in physical coordinates once; semantic leading can mirror twice.
+                let fillX = layoutDirection == .rightToLeft
+                    ? geo.size.width - fillWidth / 2 : fillWidth / 2
+                ZStack {
                     Capsule().fill(.white.opacity(0.10))
                     Capsule()
                         .fill(LinearGradient(colors: low
                                              ? [Color(red: 0.96, green: 0.62, blue: 0.04), Color(red: 0.98, green: 0.75, blue: 0.14)]
                                              : [MirsaPalette.accent, Color(red: 0.13, green: 0.83, blue: 0.93)],
                                              startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * fraction)
+                        .frame(width: fillWidth, height: geo.size.height)
+                        .position(x: fillX, y: geo.size.height / 2)
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
             .frame(height: 5)
         }
