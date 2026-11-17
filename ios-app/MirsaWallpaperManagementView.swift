@@ -138,6 +138,7 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
                     }.font(.caption2).foregroundColor(.secondary)
             }
         }
+        .modifier(MirsaDiagnosticAccessLifecycle(access: diagnosticAccess))
         .onAppear { reload(); reloadJournal() }
         .onChange(of: externalBusy) { _, nowBusy in if !nowBusy { reload() } }
         .alert(t(.reconcileTitle), isPresented: Binding(get: { pendingReconcile != nil }, set: { if !$0 { pendingReconcile = nil } })) {

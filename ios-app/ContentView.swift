@@ -789,6 +789,7 @@ struct ContentView: View {
 // MARK: - Pairing Tab
 
 struct PairingTab: View {
+    @StateObject private var diagnosticAccess = MirsaDiagnosticAccess()
     @EnvironmentObject var vm: AppViewModel
     @State private var showDeleteConfirm = false
     @State private var showCredits = false
@@ -1077,7 +1078,7 @@ struct PairingTab: View {
                     }
                 }
 
-                MirsaOwnerDiagnostics {
+                MirsaOwnerDiagnostics(access: diagnosticAccess) {
                     if !vm.log.isEmpty {
                         CompactLogView(title: "Activity Log", lines: vm.log, onClear: { vm.log.removeAll() })
                     }
@@ -1086,6 +1087,7 @@ struct PairingTab: View {
                     }
                 }
             }.listRowBackground(MirsaPalette.row) }
+            .modifier(MirsaDiagnosticAccessLifecycle(access: diagnosticAccess))
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 60)
             }
