@@ -108,4 +108,46 @@ final class ForgeChatNonblockingRecoveryTests: XCTestCase {
         XCTAssertTrue(store.sentEcho.isEmpty)
         XCTAssertEqual(store.error, "limit")
     }
+    func testSuccessfulRetryClearsSendBanner() async {
+        let pending = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true, text: "retry", imageBase64: nil)
+        var fail = true
+        let store = ForgeChatStore(testRequest: { body in
+            guard body["action"] as? String == "chat-send" else { return self.list }
+            if fail { throw URLError(.timedOut) }
+            return self.ok
+        })
+        store.outgoing = [pending]
+        await store.flush()
+        XCTAssertEqual(store.error, ForgeChatText.failed)
+        fail = false
+        await store.flush()
+        XCTAssertTrue(store.outgoing.isEmpty)
+        XCTAssertNil(store.error)
+    }
+
+    func testServerConfirmedMessageClearsTimedOutSendButNotOtherPendingFailure() async throws {
+        let tid = UUID()
+        let confirmed = ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: true, text: "arrived", imageBase64: nil)
+        let other = ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: true, text: "still offline", imageBase64: nil)
+        let rows = [ForgeChatMessage(id: confirmed.id, threadID: tid, role: "user", text: confirmed.text),
+                    ForgeChatMessage(id: UUID(), threadID: tid, role: "kat", text: "reply")]
+        struct Read: Encodable { let messages: [ForgeChatMessage] }
+        let response = try JSONEncoder().encode(Read(messages: rows))
+        let store = ForgeChatStore(testRequest: { _ in response })
+        store.threads = [ForgeChatThread(id: tid, title: nil, status: "open", createdAt: nil, updatedAt: nil)]
+        store.outgoing = [confirmed, other]
+        store.error = ForgeChatText.failed
+        await store.read(tid)
+        XCTAssertEqual(store.outgoing, [other])
+        XCTAssertEqual(store.error, ForgeChatText.failed)
+        // An unrelated assistant reply must not pretend that the other UUID was sent.
+        await store.read(tid)
+        XCTAssertEqual(store.outgoing, [other])
+        store.outgoing = [confirmed]
+        await store.read(tid)
+        XCTAssertTrue(store.outgoing.isEmpty)
+        XCTAssertNil(store.error)
+        XCTAssertEqual(store.messages[tid]?.count, 2)
+    }
+
 }
