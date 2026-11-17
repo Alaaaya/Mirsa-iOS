@@ -39,6 +39,8 @@ struct ToolsTab: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Animate the picker highlight, never the incoming UIKit/Form viewport.
+            .animation(nil, value: section)
         }
         // One continuous page background behind the picker and every section.
         .background(AuroraBackground().ignoresSafeArea())

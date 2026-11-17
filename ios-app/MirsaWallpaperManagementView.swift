@@ -29,7 +29,11 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
     private var disabled: Bool { busy || externalBusy }
 
     private func cardTitle(_ rec: MirsaCustomWallpapers.Item) -> String {
-        rec.title.isEmpty ? MirsaWallpaperActionStrings.fallbackName(max(rec.fallbackIndex, 1)) : rec.title
+        let title = rec.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let generatedID = title.hasPrefix("Mirsa-") && UUID(uuidString: String(title.dropFirst(6))) != nil
+        guard title.isEmpty || generatedID else { return title }
+        let index = items.firstIndex(where: { $0.id == rec.id && $0.relative == rec.relative }).map { $0 + 1 }
+        return MirsaWallpaperActionStrings.fallbackName(index ?? max(rec.fallbackIndex, 1))
     }
 
     private func thumb(_ rec: MirsaCustomWallpapers.Item) -> some View {
