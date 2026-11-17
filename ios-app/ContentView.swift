@@ -449,12 +449,10 @@ struct CompactLogView: View {
     let title: String
     let lines: [String]
     var onClear: (() -> Void)? = nil
-    @EnvironmentObject private var access: MirsaDiagnosticAccess
     @State private var copied: Bool = false
-    private var safeLines: [String] { MirsaDiagnosticPrivacy.lines(lines) }
+    private var safeLines: [String] { lines }
 
     var body: some View {
-        if access.allowed {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(MirsaDiagnosticPrivacy.line(title))
@@ -462,7 +460,7 @@ struct CompactLogView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let onClear = onClear, !lines.isEmpty {
-                    Button { Task { await access.perform(onClear) } } label: {
+                    Button(action: onClear) {
                         Image(systemName: "trash")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -471,7 +469,6 @@ struct CompactLogView: View {
                     .padding(.trailing, 6)
                 }
                 Button {
-                    Task { await access.perform {
                     MirsaDiagnosticPrivacy.copy(lines, write: { UIPasteboard.general.string = $0 })
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     var t = Transaction()
@@ -486,7 +483,6 @@ struct CompactLogView: View {
                             copied = false
                         }
                     }
-                    } }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")
@@ -534,7 +530,6 @@ struct CompactLogView: View {
             }
         }
         .padding(.vertical, 4)
-        }
     }
 }
 

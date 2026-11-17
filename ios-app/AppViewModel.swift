@@ -54,7 +54,7 @@ final class AppViewModel: ObservableObject {
     @Published private var safe_cardFlashLog: [String] = []
     var cardFlashLog: [String] {
         get { safe_cardFlashLog }
-        set { safe_cardFlashLog = MirsaDiagnosticPrivacy.lines(newValue) }
+        set { safe_cardFlashLog = MirsaDiagnosticPrivacy.appending(old: safe_cardFlashLog, new: newValue) }
     }
 
     enum FlashPhase: Equatable {
@@ -86,7 +86,7 @@ final class AppViewModel: ObservableObject {
     @Published private var safe_passthmFlashLog: [String] = []
     var passthmFlashLog: [String] {
         get { safe_passthmFlashLog }
-        set { safe_passthmFlashLog = MirsaDiagnosticPrivacy.lines(newValue) }
+        set { safe_passthmFlashLog = MirsaDiagnosticPrivacy.appending(old: safe_passthmFlashLog, new: newValue) }
     }
 
     // MARK: - Tendies / Wallpapers tab
@@ -104,7 +104,7 @@ final class AppViewModel: ObservableObject {
     var tendiesFlashLog: [String] {
         get { safe_tendiesFlashLog }
         set {
-            let sanitized = MirsaDiagnosticPrivacy.lines(newValue)
+            let sanitized = MirsaDiagnosticPrivacy.appending(old: safe_tendiesFlashLog, new: newValue)
             let previousCount = safe_tendiesFlashLog.count
             safe_tendiesFlashLog = sanitized
             if sanitized.count > previousCount {
@@ -138,7 +138,7 @@ final class AppViewModel: ObservableObject {
     @Published private var safe_log: [String] = []
     var log: [String] {
         get { safe_log }
-        set { safe_log = MirsaDiagnosticPrivacy.lines(newValue) }
+        set { safe_log = MirsaDiagnosticPrivacy.appending(old: safe_log, new: newValue) }
     }
     @Published var showDeletePairingConfirm: Bool = false
 

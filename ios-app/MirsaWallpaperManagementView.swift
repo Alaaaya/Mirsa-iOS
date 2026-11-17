@@ -98,6 +98,9 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
                     }
             }
 
+            // Flash log and tools are visible to the owner without the server gate (lines are sanitized).
+            Section { extraTools() }
+
             // Owner-only, closed diagnostics. Ordinary maintenance remains above.
             MirsaOwnerDiagnostics(access: diagnosticAccess) {
                     ForEach(items.filter { $0.canDelete }) { rec in
@@ -109,7 +112,6 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
                                 .buttonStyle(.bordered).disabled(disabled)
                         }
                     }
-                    extraTools()
                     ForEach(items.filter { !$0.canDelete }) { rec in
                         HStack(spacing: 10) {
                             thumb(rec)

@@ -95,9 +95,9 @@ import SwiftUI
             // Periodic server revalidation also bounds an out-of-band admin revocation.
             var ticks = 0
             while !Task.isCancelled && access.allowed {
-                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { break }
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { break }
                 access.invalidateIfIdentityChanged(); ticks += 1
-                if ticks == 30 { ticks = 0; _ = await access.refresh() }
+                if ticks == 12 { ticks = 0; _ = await access.refresh() }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .mirsaDiagnosticIdentityChanged).receive(on: RunLoop.main)) { _ in
