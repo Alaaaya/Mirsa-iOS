@@ -83,6 +83,23 @@ Bi hûrgilî binivîse tu çi dixwazî, û heke wêneyekî tiştê di hişê te 
 
 enum ForgeChatTransient: Error { case failed(String) }
 
+struct ForgeChatConversationConflict: Error, Equatable {
+    let code: String
+
+    static func response(status: Int, code: String) -> Self? {
+        guard status == 409, !ChatAttachmentError.isAttachmentCode(code) else { return nil }
+        return Self(code: code.isEmpty ? "conversation_conflict" : code)
+    }
+
+    var message: String {
+        tr5("This send was not accepted because of a conversation conflict. Your text and attachments are saved. Review the conversation, then send the same text to retry. No need to upload the attachments again.",
+           "الإرسال ما انقبل بسبب تعارض بالمحادثة. نصّك ومرفقاتك محفوظين. راجع المحادثة، وبعدين ابعت نفس النص لتعيد المحاولة. ما في داعي ترفع المرفقات من جديد.",
+           de: "Die Nachricht wurde wegen eines Konflikts im Gespräch nicht angenommen. Text und Anhänge sind gespeichert. Prüfe das Gespräch und sende denselben Text erneut. Du musst die Anhänge nicht erneut hochladen.",
+           ckb: "گفتوگۆکە گۆڕاوە یان پێویستی بە پشتڕاستکردنەوە هەیە. نامە و هاوپێچەکانت پاشەکەوت کراون، نەنێردراون. گفتوگۆکە بپشکنە، پاشان هەمان دەق بنێرەوە. پێویست ناکات هاوپێچەکان دووبارە بار بکەیتەوە.",
+           kmr: "Sohbet guherî an pejirandin dixwaze. Peyam û pêvekên te hatine tomarkirin, nehatine şandin. Sohbetê kontrol bike, paşê heman nivîsê dîsa bişîne. Pêdivî bi barkirina pêvekan ji nû ve tune ye.")
+    }
+}
+
 enum ForgeChatImage {
     /// Re-encode: strips metadata, max 1600px side and 1 MiB.
     static func prepare(_ data: Data) -> Data? {
@@ -160,6 +177,9 @@ enum ForgeChatImage {
         defer { startRetrying() }; outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? []
         sentEcho = UserDefaults.standard.data(forKey: echoKey).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? []
         for echo in sentEcho { ackedThreads.insert(echo.threadID) }
+        if let paused = outgoing.first(where: { $0.conversationConflict != nil }) {
+            error = ForgeChatConversationConflict(code: paused.conversationConflict ?? "").message
+        }
     }
     private func saveEcho() {
         #if DEBUG
@@ -199,6 +219,10 @@ enum ForgeChatImage {
         if r.status == 200 { lastDiagnostic = nil; return r.data }
         let code = (try? JSONSerialization.jsonObject(with: r.data) as? [String: Any])?["error"] as? String ?? ""
         if code == "message_too_long" { lastDiagnostic = code; throw ForgeChatTransient.failed(code) }
+        if let conflict = ForgeChatConversationConflict.response(status: r.status, code: code) {
+            lastDiagnostic = "HTTP \(r.status) \(code)"
+            throw conflict
+        }
         if let ids = body["attachmentIDs"] as? [String], !ids.isEmpty, [401, 404, 409, 410, 422, 503].contains(r.status) || (r.status == 403 && !retryBind) {
             lastDiagnostic = "HTTP \(r.status) \(code)"
             throw ChatAttachmentError(status: r.status, code: code)
@@ -234,6 +258,20 @@ enum ForgeChatImage {
         guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return nil }
         if let tid = threadID, deleting.contains(tid) { return nil }
         let ids = ChatAttachmentRules.sendIDs(attachmentIDs)
+        // Only an explicit Send of the same text can resume a paused conflict.
+        // Reuse the saved attachment IDs when the composer has no new chips.
+        // Never synthesize approval text or assign a second message UUID.
+        if let tid = threadID, let index = outgoing.firstIndex(where: {
+            $0.threadID == tid && $0.conversationConflict != nil && $0.text == t &&
+            jpeg == nil && (ids.isEmpty || ids == ($0.attachmentIDs ?? []))
+        }) {
+            let id = outgoing[index].id
+            outgoing[index].conversationConflict = nil
+            saveOutgoing()
+            Task { await flush() }
+            startRetrying()
+            return id
+        }
         // Never the legacy image together with attachmentIDs.
         let img = ids.isEmpty ? jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString() : nil
         let tid = threadID ?? UUID()
@@ -257,11 +295,11 @@ enum ForgeChatImage {
         #if DEBUG
         if testRequest != nil { return }
         #endif
-        guard !retrying, !outgoing.isEmpty else { return }
+        guard !retrying, outgoing.contains(where: { $0.conversationConflict == nil }) else { return }
         retrying = true
         Task { [weak self] in
             var delay: UInt64 = 5
-            while let self, !self.outgoing.isEmpty {
+            while let self, self.outgoing.contains(where: { $0.conversationConflict == nil }) {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 await self.flush()
                 delay = min(delay * 2, 60)
@@ -276,7 +314,7 @@ enum ForgeChatImage {
         // One attempt per saved message per pass. A failed older row stays saved but
         // cannot starve later rows, including messages appended while a request awaits.
         var attempted = Set<UUID>()
-        while let o = outgoing.first(where: { !deleting.contains($0.threadID) && !attempted.contains($0.id) }) {
+        while let o = outgoing.first(where: { !deleting.contains($0.threadID) && $0.conversationConflict == nil && !attempted.contains($0.id) }) {
             attempted.insert(o.id)
             var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text, "language": AppLanguageStore.snapshot.rawValue]
             if let ids = o.attachmentIDs, !ids.isEmpty {
@@ -291,6 +329,14 @@ enum ForgeChatImage {
                 ackedThreads.insert(o.threadID); let echo = ForgeChatTimeline.acceptedEcho(o); sentEcho.removeAll { $0.id == o.id }; sentEcho.append(echo); saveEcho()
                 outgoing.removeAll { $0.id == o.id }; saveOutgoing(); if outgoing.isEmpty { error = nil }
                 if let ids = o.attachmentIDs, !ids.isEmpty { applySentAttachments(sent, threadID: o.threadID) }
+            } catch let conflict as ForgeChatConversationConflict {
+                if let index = outgoing.firstIndex(where: { $0.id == o.id }) {
+                    outgoing[index].conversationConflict = conflict.code
+                    saveOutgoing()
+                }
+                self.error = conflict.message
+                // Preserve text, UUID and valid uploaded IDs. Do not invalidate
+                // attachments, restore unusable chips, auto-confirm or auto-retry.
             } catch let a as ChatAttachmentError {
                 if a.isTransient || a.status == 401 || a.status == 403 {
                     self.error = a.message
