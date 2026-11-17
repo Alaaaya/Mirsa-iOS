@@ -116,11 +116,20 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(app.buttons["wallpaper-flash"].waitForExistence(timeout: 10))
             // The sixth destination must remain directly reachable, not replaced by More.
             app.buttons["main-tab-Personal Apps Hub"].tap()
-            XCTAssertTrue(app.buttons["wallpaper-flash"].waitForNonExistence(timeout: 10), "sixth tab did not leave Tools")
+            shot(app, lang + "_442_certificate_transition")
+            XCTAssertTrue(app.buttons["main-tab-Personal Apps Hub"].isSelected)
+            XCTAssertFalse(app.buttons["wallpaper-flash"].isHittable, "hidden Tools must not receive taps")
             XCTAssertFalse(app.navigationBars["More"].exists || app.navigationBars["المزيد"].exists, "sixth destination fell under native More")
             XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "personal-hub-root").firstMatch.waitForExistence(timeout: 10), "sixth tab content missing")
             shot(app, lang + "_442_certificate_sixth_tab")
             XCTAssertTrue(app.buttons["main-tab-Mirsa AI"].isHittable)
+            // Revisit the retained Tools subtree without reselecting Tendies.
+            app.buttons["main-tab-Pairing"].tap()
+            XCTAssertTrue(app.buttons["wallpaper-flash"].isHittable, "Tools selection was not preserved")
+            shot(app, lang + "_442_tools_state_restored")
+            app.buttons["main-tab-Mirsa AI"].tap()
+            XCTAssertTrue(app.buttons["chat-new"].isHittable, "AI root state was not restored")
+            shot(app, lang + "_442_ai_state_restored")
             app.terminate()
         }
     }
@@ -139,6 +148,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             app.buttons["main-tab-Personal Apps Hub"].tap()
             XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "personal-hub-root").firstMatch.waitForExistence(timeout: 10))
             XCTAssertFalse(app.navigationBars["More"].exists || app.navigationBars["المزيد"].exists)
+            XCTAssertTrue(app.buttons["main-tab-Personal Apps Hub"].isSelected)
             shot(app, lang + "_445_classic_sixth_tab")
             app.buttons["main-tab-Mirsa AI"].tap()
             XCTAssertTrue(app.buttons["chat-new"].waitForExistence(timeout: 10))

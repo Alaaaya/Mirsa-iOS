@@ -632,6 +632,10 @@ struct ContentView: View {
         if loadedTabs.contains(tab) || vm.selectedTab == tab {
             let on = vm.selectedTab == tab
             content()
+                // NavigationStack owns UIKit-backed bars that can escape opacity alone.
+                // Keep the subtree/state alive, but clip inactive tabs to an empty viewport.
+                .frame(width: on ? nil : 0, height: on ? nil : 0)
+                .clipped()
                 .opacity(on ? 1 : 0)
                 .allowsHitTesting(on)
                 .accessibilityHidden(!on)
