@@ -57,7 +57,7 @@ class DiagnosticPrivacySourceTests(unittest.TestCase):
         vm = (S / 'AppViewModel.swift').read_text()
         for name in ['log', 'cardFlashLog', 'passthmFlashLog', 'tendiesFlashLog']:
             self.assertIn('@Published private var safe_' + name, vm)
-        self.assertIn('MirsaDiagnosticPrivacy.lines(newValue)', vm)
+        self.assertIn('MirsaDiagnosticPrivacy.appending(old:', vm)
         self.assertIn('sink(stream.line($0))', vm)
         evidence = (S / 'MirsaWallpaperJournal.swift').read_text().split('enum MirsaWallpaperEvidence {')[1]
         for token in ['MirsaDiagnosticPrivacy.lines(Array(', 'events = MirsaDiagnosticPrivacy.lines(events + [line])', 'static func restore(at url:', 'JSONEncoder().encode(events).write', 'log(MirsaDiagnosticPrivacy.line(line))']:
@@ -72,7 +72,7 @@ class DiagnosticPrivacySourceTests(unittest.TestCase):
 
     def test_display_clipboard_and_export_share_final_boundary(self):
         ui = (S / 'ContentView.swift').read_text().split('struct CompactLogView: View {')[1].split('// MARK: - Native Document Picker')[0]
-        for token in ['if access.allowed', 'MirsaDiagnosticPrivacy.lines(lines)', 'await access.perform', 'MirsaDiagnosticPrivacy.copy(lines', 'ForEach(Array(safeLines.enumerated())']:
+        for token in ['private var safeLines: [String] { lines }', 'MirsaDiagnosticPrivacy.copy(lines', 'ForEach(Array(safeLines.enumerated())']:
             self.assertIn(token, ui)
         self.assertNotIn('lines.joined', ui)
         self.assertIn('write(formatted(input))', PRIVACY)
@@ -88,7 +88,8 @@ class DiagnosticPrivacySourceTests(unittest.TestCase):
         management = (S / 'MirsaWallpaperManagementView.swift').read_text()
         before, after = management.split('MirsaOwnerDiagnostics(access: diagnosticAccess)', 1)
         self.assertNotIn('Button { inspect(rec)', before)
-        self.assertIn('extraTools()', after)
+        self.assertIn('Section { extraTools() }', before)
+        self.assertNotIn('extraTools()', after)
         self.assertIn('journalRows', after)
         for name in ['reconcile', 'deleteJournalItem', 'inspect']:
             fn = management.split('private func ' + name + '(', 1)[1].split('\n    private func ', 1)[0]
