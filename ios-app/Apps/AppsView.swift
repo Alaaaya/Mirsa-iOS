@@ -1165,7 +1165,7 @@ struct AppsSettingsSheet: View {
     @State private var adminCode = ""
     @State private var adminNote: String?
     private func claim() async {
-        do { _ = try await ForgeClient.json(["action": "admin-claim", "code": adminCode]); adminCode = ""; adminNote = tr("Admin access enabled on this device.", "تفعّلت صلاحية المشرف.", ckb: "چالاک کرا.", kmr: "Çalak bû.") }
+        do { _ = try await ForgeClient.json(["action": "admin-claim", "code": adminCode]); NotificationCenter.default.post(name: .mirsaDiagnosticIdentityChanged, object: nil); adminCode = ""; adminNote = tr("Admin access enabled on this device.", "تفعّلت صلاحية المشرف.", ckb: "چالاک کرا.", kmr: "Çalak bû.") }
         catch { adminNote = tr("Invalid or expired code.", "الكود غلط أو منتهي.", ckb: "کۆدەکە هەڵەیە یان بەسەرچووە.", kmr: "Kod çewt an qediyaye.") }
     }
 
