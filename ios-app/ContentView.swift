@@ -642,7 +642,10 @@ struct ContentView: View {
                 // NavigationStack owns UIKit-backed bars that can escape opacity alone.
                 // Keep the subtree/state alive, but clip inactive tabs to an empty viewport.
                 .frame(width: on ? nil : 0, height: on ? nil : 0)
-                .clipped()
+                // Clip only the hidden tabs. Clipping the visible one cut its page
+                // background off at the safe area and left black bands under the
+                // status bar and the home indicator.
+                .clipShape(MirsaTabClip(active: on))
                 .opacity(on ? 1 : 0)
                 .allowsHitTesting(on)
                 .accessibilityHidden(!on)
@@ -673,6 +676,9 @@ struct ContentView: View {
                     .accessibilityIdentifier("personal-hub-root")
             }
         }
+        // One backdrop for the whole window, under the status bar, every tab and the
+        // floating dock, so nothing between the pages and the screen edge shows black.
+        .background { AuroraBackground() }
         // The dock animates its selection pill, not the retained NavigationStacks.
         // Inheriting its spring shrinks/fades the old stack over the new UIKit bar.
         // Suppress only selection-change animation inside the content host.
@@ -1233,6 +1239,16 @@ extension LiquidTabItem {
             LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
             LiquidTabItem(tab: .personalHub, title: tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), icon: "checkmark.seal"),
         ]
+    }
+}
+
+/// Clip shape for the custom tab host: a hidden tab is clipped to its zero frame,
+/// the visible tab is left unclipped so its full-screen background reaches every edge.
+/// One shape type for both states keeps the tab's identity (and its state) stable.
+struct MirsaTabClip: Shape {
+    var active: Bool
+    func path(in rect: CGRect) -> Path {
+        Path(active ? rect.insetBy(dx: -10_000, dy: -10_000) : rect)
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Mirsa's look for the older Form/ScrollView screens: aurora background,
 /// translucent rows, clear navigation bar, purple accent.
@@ -23,7 +24,7 @@ extension View {
         self
             .scrollContentBackground(.hidden)
             .background(AuroraBackground().ignoresSafeArea())
-            .toolbarBackground(MirsaPalette.sheet, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .tint(MirsaPalette.accentSoft)
             .environment(\.defaultMinListRowHeight, 50)
             .preferredColorScheme(.dark)
@@ -84,41 +85,84 @@ struct LiquidGlass<S: InsettableShape>: ViewModifier {
 }
 
 /// Base #090A1E with violet, cyan and pink light and two floating orbs.
+/// Drawn once at full-screen size and pinned to the screen, so every copy of the
+/// page background (root, tab, picker strip, padded dock area) lines up pixel for
+/// pixel and the app reads as one continuous backdrop from the status bar to the
+/// home indicator.
 struct LiquidBackground: View {
     var paused = false
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            ZStack {
-                Color(red: 9 / 255, green: 10 / 255, blue: 30 / 255)
-                RadialGradient(colors: [Color(red: 139 / 255, green: 92 / 255, blue: 246 / 255).opacity(0.8), .clear],
-                               center: UnitPoint(x: 0.88, y: 0.06), startRadius: 0, endRadius: 300)
-                RadialGradient(colors: [Color(red: 34 / 255, green: 211 / 255, blue: 238 / 255).opacity(0.5), .clear],
-                               center: UnitPoint(x: 0, y: 0.46), startRadius: 0, endRadius: 280)
-                RadialGradient(colors: [Color(red: 236 / 255, green: 72 / 255, blue: 153 / 255).opacity(0.42), .clear],
-                               center: UnitPoint(x: 1, y: 0.88), startRadius: 0, endRadius: 310)
-                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused)) { ctx in
-                    let t = ctx.date.timeIntervalSinceReferenceDate
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(colors: [Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255),
-                                                          Color(red: 34 / 255, green: 211 / 255, blue: 238 / 255)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 190, height: 190)
-                            .opacity(0.55).blur(radius: 6)
-                            .position(x: w - 65 + sin(t * 0.20) * 14, y: 245 + cos(t * 0.17) * 18)
-                        Circle()
-                            .fill(LinearGradient(colors: [Color(red: 129 / 255, green: 140 / 255, blue: 248 / 255),
-                                                          Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 120, height: 120)
-                            .opacity(0.5).blur(radius: 4)
-                            .position(x: 100 + cos(t * 0.15) * 16, y: min(h * 0.58, 490) + sin(t * 0.22) * 20)
-                    }
+        MirsaScreenAnchored { size in
+            LiquidBackdrop(size: size, paused: paused)
+        }
+    }
+}
+
+private struct LiquidBackdrop: View {
+    let size: CGSize
+    let paused: Bool
+    var body: some View {
+        let w = size.width, h = size.height
+        ZStack {
+            Color(red: 9 / 255, green: 10 / 255, blue: 30 / 255)
+            RadialGradient(colors: [Color(red: 139 / 255, green: 92 / 255, blue: 246 / 255).opacity(0.8), .clear],
+                           center: UnitPoint(x: 0.88, y: 0.06), startRadius: 0, endRadius: 300)
+            RadialGradient(colors: [Color(red: 34 / 255, green: 211 / 255, blue: 238 / 255).opacity(0.5), .clear],
+                           center: UnitPoint(x: 0, y: 0.46), startRadius: 0, endRadius: 280)
+            RadialGradient(colors: [Color(red: 236 / 255, green: 72 / 255, blue: 153 / 255).opacity(0.42), .clear],
+                           center: UnitPoint(x: 1, y: 0.88), startRadius: 0, endRadius: 310)
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused)) { ctx in
+                let t = ctx.date.timeIntervalSinceReferenceDate
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255),
+                                                      Color(red: 34 / 255, green: 211 / 255, blue: 238 / 255)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 190, height: 190)
+                        .opacity(0.55).blur(radius: 6)
+                        .position(x: w - 65 + sin(t * 0.20) * 14, y: 245 + cos(t * 0.17) * 18)
+                    Circle()
+                        .fill(LinearGradient(colors: [Color(red: 129 / 255, green: 140 / 255, blue: 248 / 255),
+                                                      Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 120, height: 120)
+                        .opacity(0.5).blur(radius: 4)
+                        .position(x: 100 + cos(t * 0.15) * 16, y: min(h * 0.58, 490) + sin(t * 0.22) * 20)
                 }
+                .frame(width: w, height: h)
             }
         }
+        .frame(width: w, height: h)
+    }
+}
+
+/// Renders `content` at the size of the whole screen and pins it to the screen's
+/// origin, whatever frame the caller gives it. A background drawn this way never
+/// shows a seam where two containers of different sizes meet, and it always reaches
+/// under the status bar and the home indicator.
+struct MirsaScreenAnchored<Content: View>: View {
+    @ViewBuilder var content: (CGSize) -> Content
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .global)
+            let screen = Self.screenSize(fallback: frame.size)
+            content(screen)
+                .frame(width: screen.width, height: screen.height)
+                .offset(x: -frame.minX, y: -frame.minY)
+                .environment(\.layoutDirection, .leftToRight)
+        }
         .ignoresSafeArea()
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @MainActor static func screenSize(fallback: CGSize) -> CGSize {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        if let size = scene?.screen.bounds.size, size.width > 0, size.height > 0 { return size }
+        return fallback
     }
 }
 
@@ -179,7 +223,16 @@ struct LiquidTabBar: View {
         .accessibilityIdentifier("mirsa-tab-dock")
         .environment(\.layoutDirection, .leftToRight)
         .modifier(MirsaSolidCard(shape: Capsule(), tint: nil, elevation: 1.2))
-        .padding(.horizontal, MirsaSpacing.page)
+        // Floating look: a light rim on the upper edge and a soft shadow under the
+        // capsule only. Nothing is drawn behind the dock; the page shows around it.
+        .overlay {
+            Capsule()
+                .strokeBorder(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.06)],
+                                             startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(0.38), radius: 18, y: 10)
+        .padding(.horizontal, MirsaTabBarMetrics.sideInset)
         .padding(.bottom, MirsaTabBarMetrics.bottomGap)
     }
 }
@@ -187,6 +240,8 @@ struct LiquidTabBar: View {
 enum MirsaTabBarMetrics {
     static let height: CGFloat = 66
     static let bottomGap: CGFloat = 8
+    /// Side margin of the floating dock, a little tighter than the page margin.
+    static let sideInset: CGFloat = 14
     /// Space content must keep free so nothing hides behind the floating bar.
     static var clearance: CGFloat { height + bottomGap + 10 }
 }
