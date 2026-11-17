@@ -70,7 +70,6 @@ final class MirsaRequestReadyTests: XCTestCase {
         }
     }
     @MainActor
-    @MainActor
     func testReadyBadgeClearsOnReadEvenWithoutTimestampChange() {
         let defaults = UserDefaults.standard
         let keys = ["mirsa.chat.seen.v1", "mirsa.chat.readyUnread.v1"]
