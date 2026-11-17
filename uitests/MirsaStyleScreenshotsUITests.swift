@@ -125,6 +125,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(app.buttons["main-tab-Mirsa AI"].isHittable)
             // Revisit the retained Tools subtree without reselecting Tendies.
             app.buttons["main-tab-Pairing"].tap()
+            shot(app, lang + "_442_tools_return_transition")
             XCTAssertTrue(app.buttons["wallpaper-flash"].isHittable, "Tools selection was not preserved")
             shot(app, lang + "_442_tools_state_restored")
             app.buttons["main-tab-Mirsa AI"].tap()
