@@ -17,6 +17,17 @@ enum TendiesPageText {
     static func skipped(_ titles: [String], language: AppLanguage = AppLanguageStore.snapshot) -> String {
         text(.skippedNote, language: language) + " " + titles.joined(separator: ", ")
     }
+    static func selected(_ n: Int, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        let w: String
+        switch language {
+        case .english: w = "Install selected (\(n))"
+        case .arabic: w = "ركّب المختار (\(n))"
+        case .german: w = "Auswahl installieren (\(n))"
+        case .kurmanji: w = "Yên hilbijartî saz bike (\(n))"
+        case .sorani: w = "هەڵبژێردراوەکان دابنێ (\(n))"
+        }
+        return w
+    }
     private static let values: [Key: [String]] = [
         .install: ["Install wallpaper", "ركّب خلفية", "Hintergrund installieren", "Wêneya paşîn saz bike", "وێنەی پشتەوە دابنێ"],
         .request: ["Request wallpaper", "اطلب خلفية", "Hintergrund anfragen", "Wêneya paşîn bixwaze", "داوای وێنەی پشتەوە بکە"],
