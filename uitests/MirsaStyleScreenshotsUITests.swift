@@ -407,6 +407,52 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
     func testPerfClassicAccount() { perfScroll(style: "classic", tab: "account") }
     func testPerfNewAccount() { perfScroll(style: "new", tab: "account") }
 
+    /// Exercise actual PHPickers. No mock picker, media selection, export or apply.
+    func testWallpaperMakerPickersStayIndependent() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang)
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            let tools = app.buttons["wallpaper-tools"]
+            revealWallpaperElement(tools, identifier: "wallpaper-tools", in: app)
+            tools.tap()
+            for kind in ["photos", "video"] {
+                let button = app.buttons["wallpaper-choose-" + kind]
+                revealWallpaperElement(button, identifier: "wallpaper-choose-" + kind, in: app)
+                XCTAssertTrue(button.isHittable)
+                XCTAssertEqual(app.buttons.matching(identifier: "wallpaper-choose-" + kind).count, 1)
+                button.tap()
+                let prefix = "wallpaper-" + kind + "-picker-"
+                let query = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
+                let picker = query.firstMatch
+                XCTAssertTrue(picker.waitForExistence(timeout: 10))
+                XCTAssertEqual(query.count, 1, "One tap must create one picker host")
+                let identity = picker.identifier
+                let otherKind = kind == "photos" ? "video" : "photos"
+                let other = app.descendants(matching: .any).matching(NSPredicate(
+                    format: "identifier BEGINSWITH %@", "wallpaper-" + otherKind + "-picker-"))
+                XCTAssertEqual(other.count, 0, "The other button's action must never fire")
+                let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    !picker.exists || picker.identifier != identity || other.count != 0
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 4), .timedOut,
+                               "Native picker must stay open with the SAME instance")
+                shot(app, lang + "_maker_" + kind + "_picker_stable")
+                let cancel = app.buttons.matching(NSPredicate(
+                    format: "label IN %@", ["Cancel", "إلغاء"])).firstMatch
+                XCTAssertTrue(cancel.waitForExistence(timeout: 3))
+                cancel.tap()
+                XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+                let reopened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    query.count != 0 || other.count != 0
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 2), .timedOut,
+                               "Cancel must not reopen either picker")
+            }
+            app.terminate()
+        }
+    }
+
     /// Real tools tab, dock and NavigationStack, with local DEBUG-only sample photos.
     /// No network AI call or wallpaper apply/respring is performed by this test.
     func testWallpaperMakerLayout() {

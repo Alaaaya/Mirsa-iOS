@@ -14,6 +14,9 @@ struct WallpaperVideoPicker: UIViewControllerRepresentable {
         config.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
+        #if DEBUG
+        picker.view.accessibilityIdentifier = "wallpaper-video-picker-" + UUID().uuidString
+        #endif
         return picker
     }
     func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
