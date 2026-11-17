@@ -116,6 +116,8 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             XCTAssertTrue(app.buttons["wallpaper-flash"].waitForExistence(timeout: 10))
             // The sixth destination must remain directly reachable, not replaced by More.
             app.buttons["main-tab-Personal Apps Hub"].tap()
+            XCTAssertTrue(app.buttons["wallpaper-flash"].waitForNonExistence(timeout: 10), "sixth tab did not leave Tools")
+            XCTAssertFalse(app.navigationBars["More"].exists || app.navigationBars["المزيد"].exists, "sixth destination fell under native More")
             shot(app, lang + "_442_certificate_sixth_tab")
             XCTAssertTrue(app.buttons["main-tab-Mirsa AI"].isHittable)
             app.terminate()

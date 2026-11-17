@@ -174,6 +174,7 @@ struct LiquidTabBar: View {
         }
         .padding(6)
         .frame(height: MirsaTabBarMetrics.height)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mirsa-tab-dock")
         .environment(\.layoutDirection, .leftToRight)
         .modifier(MirsaSolidCard(shape: Capsule(), tint: nil, elevation: 1.2))
