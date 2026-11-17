@@ -148,7 +148,7 @@ struct LiquidTabBar: View {
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: item.icon).font(.system(size: 19, weight: on ? .semibold : .regular))
-                            .overlay(alignment: .topTrailing) { if item.tab == .pairing { ForgeChatUnreadDot(count: chatUnread).offset(x: 10, y: -6) } }
+                            .overlay(alignment: .topTrailing) { if item.tab == .mirsaAI { ForgeChatUnreadDot(count: chatUnread).offset(x: 10, y: -6) } }
                             .frame(height: 22)
                         Text(item.title).font(MirsaFont.tabLabel).lineLimit(1)
                             .minimumScaleFactor(0.7)
@@ -169,6 +169,7 @@ struct LiquidTabBar: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.mirsaPress)
+                .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
             }
         }
         .padding(6)

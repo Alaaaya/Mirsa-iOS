@@ -637,10 +637,16 @@ struct ContentView: View {
                 .tabItem { Label(tr("Sources", "السورسات"), systemImage: "shippingbox.fill") }
                 .tag(AppTab.sources)
 
+            ForgeChatRoot(embedded: true)
+                .environment(\.layoutDirection, .leftToRight)
+                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
+                .tabItem { Label(ForgeChatText.title, systemImage: "bubble.left.and.bubble.right") }
+                .modifier(ForgeChatUnreadTabBadge())
+                .tag(AppTab.mirsaAI)
+
             ToolsTab()
                 .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
-                .modifier(ForgeChatUnreadTabBadge())
                 .tag(AppTab.pairing)
 
             // Classic (default) keeps the original store and the main dock; New draws its own single bar.
@@ -1204,6 +1210,7 @@ extension LiquidTabItem {
         [
             LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
             LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
+            LiquidTabItem(tab: .mirsaAI, title: ForgeChatText.title, icon: "bubble.left.and.bubble.right"),
             LiquidTabItem(tab: .pairing, title: L.t("tools.tab"), icon: "wand.and.stars"),
             LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
             LiquidTabItem(tab: .personalHub, title: tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), icon: "checkmark.seal"),
