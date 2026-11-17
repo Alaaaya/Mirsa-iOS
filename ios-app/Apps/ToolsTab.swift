@@ -27,6 +27,8 @@ struct ToolsTab: View {
                 picker
                     .padding(.horizontal, MirsaSpacing.page)
                     .padding(.vertical, MirsaSpacing.xs)
+                    // UIKit navigation content below must not cover the section controls.
+                    .zIndex(1)
             }
             Group {
                 switch section {
@@ -72,7 +74,13 @@ struct ToolsTab: View {
             }
         }
         .padding(4)
-        .appsGlassCapsule()
+        .background {
+            // Glass and its rim are decoration, never an input surface over the buttons.
+            Capsule().fill(.clear)
+                .appsGlassCapsule()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .overlay {
             Capsule()
                 .strokeBorder(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.05)],
