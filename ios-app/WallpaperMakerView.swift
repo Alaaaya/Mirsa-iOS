@@ -16,8 +16,11 @@ struct WallpaperMakerSection: View {
     @State private var layers: [WallpaperPhotoLayer] = WallpaperMakerSection.fixtureLayers()
     @State private var video: URL?
     @State private var generated: URL?
-    @State private var showPhotos = false
-    @State private var showVideo = false
+    private enum MediaPicker: String, Identifiable {
+        case photos, video
+        var id: String { rawValue }
+    }
+    @State private var mediaPicker: MediaPicker?
     @State private var showFiles = false
     @State private var showShare = false
     @State private var busy = false
@@ -73,12 +76,44 @@ struct WallpaperMakerSection: View {
     var body: some View {
         Group {
             Text(t(.steps)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button { showPhotos = true } label: { Label(t(.photos), systemImage: "photo.stack") }
-                Spacer()
-                Button { showVideo = true } label: { Image(systemName: "video.badge.plus") }
-                    .accessibilityLabel(t(.video))
-            }.disabled(busy || applyRunning || planBusy)
+            HStack(spacing: 12) {
+                Button {
+                    guard mediaPicker == nil else { return }
+                    mediaPicker = .photos
+                } label: {
+                    Label(t(.photos), systemImage: "photo.stack").frame(maxWidth: .infinity)
+                }
+                .accessibilityIdentifier("wallpaper-choose-photos")
+                Button {
+                    guard mediaPicker == nil else { return }
+                    mediaPicker = .video
+                } label: {
+                    Label(t(.video), systemImage: "video.badge.plus").frame(maxWidth: .infinity)
+                }
+                .accessibilityIdentifier("wallpaper-choose-video")
+            }
+            // Automatic Form-row buttons can fire BOTH actions. Keep explicit tap targets.
+            .buttonStyle(.borderless)
+            .disabled(busy || applyRunning || planBusy)
+            // One concrete row owns one media sheet, never the distributed Form Group.
+            .sheet(item: $mediaPicker) { selection in
+                switch selection {
+                case .photos:
+                    WallpaperPhotosPicker { result in
+                        mediaPicker = nil
+                        receivePhotos(result)
+                    }.interactiveDismissDisabled()
+                case .video:
+                    WallpaperVideoPicker { result in
+                        mediaPicker = nil
+                        guard let result else { return }
+                        switch result {
+                        case .failure: message = t(.error)
+                        case .success(let url): setVideo(url)
+                        }
+                    }.interactiveDismissDisabled()
+                }
+            }
             Button { showFiles = true } label: { Label(t(.files), systemImage: "folder") }
                 .disabled(busy || applyRunning || planBusy)
             if !layers.isEmpty {
@@ -138,22 +173,6 @@ struct WallpaperMakerSection: View {
             // Keeps the last (destructive) button clear of the floating dock, keyboard and large text.
             Color.clear.frame(height: MirsaTabBarMetrics.clearance).listRowBackground(Color.clear)
                 .accessibilityHidden(true)
-        }
-        .sheet(isPresented: $showPhotos) {
-            WallpaperPhotosPicker { result in
-                showPhotos = false
-                receivePhotos(result)
-            }.interactiveDismissDisabled()
-        }
-        .sheet(isPresented: $showVideo) {
-            WallpaperVideoPicker { result in
-                showVideo = false
-                guard let result else { return }
-                switch result {
-                case .failure: message = t(.error)
-                case .success(let url): setVideo(url)
-                }
-            }.interactiveDismissDisabled()
         }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
             switch result {
@@ -386,6 +405,10 @@ struct WallpaperPhotosPicker: UIViewControllerRepresentable {
         config.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
+        #if DEBUG
+        // Instance identity lets the UI test detect dismiss/recreate loops, not just a final frame.
+        picker.view.accessibilityIdentifier = "wallpaper-photos-picker-" + UUID().uuidString
+        #endif
         return picker
     }
     func updateUIViewController(_ picker: PHPickerViewController, context: Context) {}
