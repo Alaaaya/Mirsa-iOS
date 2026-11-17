@@ -94,6 +94,13 @@ struct WallpaperMakerSection: View {
             }
             // Automatic Form-row buttons can fire BOTH actions. Keep explicit tap targets.
             .buttonStyle(.borderless)
+            #if DEBUG
+            .overlay(alignment: .topLeading) {
+                Color.clear.frame(width: 2, height: 2).accessibilityElement()
+                    .accessibilityIdentifier("wallpaper-picker-state")
+                    .accessibilityValue(mediaPicker.map { "\($0)" } ?? "none")
+            }
+            #endif
             .disabled(busy || applyRunning || planBusy)
             // One concrete row owns one media sheet, never the distributed Form Group.
             .sheet(item: $mediaPicker) { selection in
