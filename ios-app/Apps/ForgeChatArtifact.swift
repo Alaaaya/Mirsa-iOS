@@ -10,6 +10,7 @@ struct ForgeChatShare: UIViewControllerRepresentable {
 extension ForgeChatText {
     static var install: String { tr("Install", "ثبّت", ckb: "دایبمەزرێنە", kmr: "Saz bike") }
     static var download: String { tr("Download", "حمّل", ckb: "دابەزاندن", kmr: "Daxe") }
+    static var addWallpaper: String { tr5("Add to wallpapers", "أضف للخلفيات", de: "Zu Hintergründen hinzufügen", ckb: "زیادکردن بۆ وەڵپەیپەرەکان", kmr: "Li wallpaperan zêde bike") }
     static var share: String { tr("Share", "شارك", ckb: "هاوبەشکردن", kmr: "Parve bike") }
     static var cancel: String { tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal bike") }
     static var expired: String { tr("This file expired. Ask Mirsa again.", "انتهت صلاحية الملف. اطلب من مرسى مرة تانية.", ckb: "فایلەکە بەسەرچووە. دووبارە لە مرسا بپرسە.", kmr: "Dema pelê qediya. Dîsa ji Mirsayê bipirse.") }
@@ -19,22 +20,33 @@ extension ForgeChatText {
 
 extension ForgeChatStore {
     struct Issued: Decodable { let url: URL }
+    /// Keep the delivered wallpaper name (import uses lastPathComponent); strip path bits, force .tendies.
+    static func safeTendiesName(_ a: ForgeChatArtifact) -> String {
+        let raw = (a.name ?? "").replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? ""
+        var base = (raw as NSString).deletingPathExtension.filter { $0 != ":" }.trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty || base.hasPrefix(".") { base = "Wallpaper-" + String(a.id.uuidString.prefix(8)) }
+        return String(base.prefix(80)) + ".tendies"
+    }
     /// Signed Oracle URL only; no Forge headers are sent to it. Streams to disk, verifies size and sha256.
-    func downloadArtifact(threadID: UUID, artifact a: ForgeChatArtifact, progress: @escaping (Double) -> Void) async throws -> URL {
+    func downloadArtifact(threadID: UUID, artifact a: ForgeChatArtifact, progress: @escaping (Double) -> Void, configuration: URLSessionConfiguration = .ephemeral) async throws -> URL {
+        if a.kind == "tendies" {
+            guard let size = a.size, size > 0, let hash = a.sha256, hash.count == 64,
+                  hash.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
+        }
         let d = try await callPublic(["action": "chat-artifact-download", "threadID": threadID.uuidString.lowercased(), "id": a.id.uuidString.lowercased()])
         guard let issued = try? JSONDecoder().decode(Issued.self, from: d), issued.url.scheme == "https" else { throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
-        let ext = ["ipa": "ipa", "apk": "apk", "zip": "zip"][a.kind] ?? ForgeChatTweakArtifact.fileExtension(a) ?? "bin"
+        let ext = ["ipa": "ipa", "apk": "apk", "zip": "zip"][a.kind] ?? (a.kind == "tendies" ? "tendies" : nil) ?? ForgeChatTweakArtifact.fileExtension(a) ?? "bin"
         let dir = try MirsaManagedTmp.begin("chat-artifact")
         var handedOff = false
         defer { if !handedOff { MirsaManagedTmp.end(dir) } }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent(a.id.uuidString + "." + ext)
+        let dest = dir.appendingPathComponent(ext == "tendies" ? Self.safeTendiesName(a) : a.id.uuidString + "." + ext)
         try? FileManager.default.removeItem(at: dest)
         FileManager.default.createFile(atPath: dest.path, contents: nil)
         let out = try FileHandle(forWritingTo: dest)
         defer { try? out.close() }
         var req = URLRequest(url: issued.url); req.timeoutInterval = 60
-        let (bytes, resp) = try await URLSession(configuration: .ephemeral).bytes(for: req)
+        let (bytes, resp) = try await URLSession(configuration: configuration).bytes(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ForgeClient.Failure.message(code == 404 || code == 410 || code == 403 ? ForgeChatText.expired : ForgeChatText.dlFailed) }
         var hasher = SHA256(); var buf = Data(); var total: Int64 = 0
@@ -54,6 +66,13 @@ extension ForgeChatStore {
         handedOff = true
         return dest
     }
+    /// The same library import used by Files. Does not install or touch PosterBoard.
+    static func importDownloadedTendies(_ file: URL, model: AppViewModel?) async throws {
+        defer { MirsaManagedTmp.end(file.deletingLastPathComponent()) }
+        guard let model else { throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
+        let ids = await model.importTendieFiles(urls: [file])
+        guard !ids.isEmpty else { throw ForgeClient.Failure.message(ForgeChatText.dlFailed) }
+    }
 }
 
 struct ForgeChatArtifactCard: View {
@@ -65,7 +84,8 @@ struct ForgeChatArtifactCard: View {
     @State private var shareURL: URL?
     @State private var injectURL: URL?
     private var isIPA: Bool { artifact.kind == "ipa" }
-    private var isTweak: Bool { !isIPA && artifact.kind != "apk" && ForgeChatTweakArtifact.fileExtension(artifact) != nil }
+    private var isTendies: Bool { artifact.kind == "tendies" }
+    private var isTweak: Bool { !isIPA && !isTendies && artifact.kind != "apk" && ForgeChatTweakArtifact.fileExtension(artifact) != nil }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(artifact.name ?? artifact.kind.uppercased(), systemImage: isIPA ? "app.badge" : "doc.zipper").font(.caption.bold())
@@ -76,7 +96,8 @@ struct ForgeChatArtifactCard: View {
                 Button(ForgeChatText.cancel) { task?.cancel(); progress = nil }.font(.caption)
             } else {
                 HStack(spacing: 8) {
-                    Button(isIPA ? ForgeChatText.install : (artifact.kind == "apk" ? ForgeChatText.download : ForgeChatText.share)) { start() }.buttonStyle(.borderedProminent)
+                    Button(isIPA ? ForgeChatText.install : isTendies ? ForgeChatText.addWallpaper : (artifact.kind == "apk" ? ForgeChatText.download : ForgeChatText.share)) { start() }.buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier(isTendies ? "mirsa.chat.artifact.add-wallpaper" : "mirsa.chat.artifact.download")
                     if isTweak {
                         Button { start(inject: true) } label: { Label(ForgeChatInjectText.inject, systemImage: "syringe.fill") }
                             .buttonStyle(.bordered)
@@ -104,7 +125,9 @@ struct ForgeChatArtifactCard: View {
                 let f = try await ForgeChatStore.shared.downloadArtifact(threadID: threadID, artifact: artifact) { p in Task { @MainActor in progress = p } }
                 progress = nil
                 if Task.isCancelled { MirsaManagedTmp.end(f.deletingLastPathComponent()); return }
-                if isIPA {
+                if isTendies {
+                    try await ForgeChatStore.importDownloadedTendies(f, model: AppViewModel.shared)
+                } else if isIPA {
                     defer { MirsaManagedTmp.end(f.deletingLastPathComponent()) }
                     await AppsStore.shared.importIPA(from: f)
                 } else if inject { injectURL = f } else { shareURL = f }

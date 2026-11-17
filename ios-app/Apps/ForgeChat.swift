@@ -145,6 +145,15 @@ enum ForgeChatImage {
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Make me a tweak that hides the dock labels."),
                 ForgeChatMessage(id: UUID(), threadID: t, role: "kat", text: "Got it. I'll build it and send it here when it's ready."),
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Thanks, no rush.")]]
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaTendiesArtifactFixture") {
+                // Actual authenticated backend artifact metadata; no issued URL or network access.
+                let artifact = ForgeChatArtifact(id: UUID(), kind: "tendies", name: "Naruto-Space.tendies",
+                    size: 1_349_699, sha256: "8720c01d9d5f486e03500441b9b75bf202c8147573c45367625143ef1370acf1", expiresAt: nil)
+                let result = ForgeChatResult(inboxID: nil, tweakID: nil, bundleID: nil, name: nil, version: nil, artifact: artifact)
+                messages[t] = [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: nil, result: result)]
+            }
+            #endif
             ackedThreads.insert(t)
             return
         }
