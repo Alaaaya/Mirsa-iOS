@@ -124,6 +124,10 @@ struct ForgeChatOutgoing: Codable, Identifiable, Equatable {
     /// Mirsa 2.1: server attachment IDs bound to this message (max 3, unique). Kept with the
     /// message UUID across network retries. Never sent together with the legacy imageBase64.
     var attachmentIDs: [UUID]?
+    /// Non-attachment HTTP 409: preserve the original idempotency key and payload,
+    /// but never automatically replay a request requiring conversation review.
+    /// Optional so outgoing v1 drafts saved before this fix still decode.
+    var conversationConflict: String?
     init(id: UUID, threadID: UUID, newThread: Bool, text: String, imageBase64: String?, afterMessageID: UUID? = nil, attachmentIDs: [UUID]? = nil) {
         self.id = id; self.threadID = threadID; self.newThread = newThread
         self.text = text; self.imageBase64 = imageBase64; self.afterMessageID = afterMessageID
