@@ -3,7 +3,8 @@ import Foundation
 enum MirsaTr {
     static func pick(_ en: String, _ ar: String) -> String {
         switch AppLanguageStore.shared.current {
-        case .english, .german: return en
+        case .english: return en
+        case .german: return deByEnglish[en] ?? en
         case .arabic: return ar
         case .sorani: return ckb[en] ?? extraCkb[en] ?? forgeCkb[en] ?? ar
         case .kurmanji: return kmr[en] ?? extraKmr[en] ?? forgeKmr[en] ?? ar
@@ -1030,4 +1031,73 @@ enum MirsaTr {
         "Folder": "Peldank",
         "Drag an app outside to remove it": "Sepanekê derxe derve da ku rake",
     ]
+    // MARK: German
+
+    /// German for `tr(en, ar)` strings, keyed by the English text. Missing ones fall back to English.
+    static let deByEnglish: [String: String] = [
+        "About": "Über",
+        "Add to Home Screen": "Zum Home-Bildschirm",
+        "Admin access": "Admin-Zugang",
+        "Admin access enabled on this device.": "Admin-Zugang auf diesem Gerät aktiviert.",
+        "Apps layout": "App-Ansicht",
+        "Cancel": "Abbrechen",
+        "Cancel download": "Download abbrechen",
+        "Certificate Library": "Zertifikatsbibliothek",
+        "Certificates": "Zertifikate",
+        "Claim": "Einlösen",
+        "Classic": "Klassisch",
+        "Completion sound & haptic": "Ton & Haptik bei Abschluss",
+        "Data backups": "Datensicherungen",
+        "Days left": "Tage übrig",
+        "Developer": "Entwickler",
+        "Device": "Gerät",
+        "Download from link again": "Erneut vom Link laden",
+        "Downloading": "Wird geladen",
+        "Downloads": "Downloads",
+        "Edit IPA & inject tweaks": "IPA bearbeiten & Tweaks einfügen",
+        "Finish the current import first.": "Schließe zuerst den aktuellen Import ab.",
+        "From Files": "Aus Dateien",
+        "From link": "Von Link",
+        "Get apps": "Apps holen",
+        "GitHub Updates": "GitHub-Updates",
+        "Graphite": "Graphit",
+        "Hide": "Ausblenden",
+        "Home Screen": "Home-Bildschirm",
+        "Import IPA again": "IPA erneut importieren",
+        "Install mode": "Installationsmodus",
+        "Installing": "Wird installiert",
+        "Invalid or expired code.": "Ungültiger oder abgelaufener Code.",
+        "Liquid Glass": "Liquid Glass",
+        "My certificate": "Mein Zertifikat",
+        "Name, icon, version and your own code": "Name, Symbol, Version und eigener Code",
+        "Ocean": "Ozean",
+        "Off keeps your current apps view unchanged. Home Screen uses pages and a glass dock.": "Aus lässt deine App-Ansicht unverändert. Home-Bildschirm nutzt Seiten und ein Glas-Dock.",
+        "One-time code": "Einmalcode",
+        "Open Settings": "Einstellungen öffnen",
+        "Pages": "Seiten",
+        "Preparing": "Wird vorbereitet",
+        "Privacy": "Datenschutz",
+        "Save only. No Apple ID or installation.": "Nur speichern. Keine Apple-ID, keine Installation.",
+        "Self-install and updates use your certificate and a private HTTPS link valid for 15 minutes, OTA installation does not use VPN, after a one-time real device read in Settings. Signing and installation use only the device-bound secure cache. Only the signed IPA and public profile are uploaded, never your P12, password or private key. The profile must cover Mirsa and this device. Keychain data may reset; certificate revocation stops the app. Other Apple ID operations still require VPN.": "Selbstinstallation und Updates nutzen dein Zertifikat und einen privaten HTTPS-Link, der 15 Minuten gilt; die OTA-Installation braucht kein VPN, nach einem einmaligen echten Geräte-Auslesen in den Einstellungen. Signieren und Installieren nutzen nur den gerätegebundenen sicheren Cache. Hochgeladen werden nur die signierte IPA und das öffentliche Profil, nie deine P12, dein Passwort oder dein privater Schlüssel. Das Profil muss Mirsa und dieses Gerät abdecken. Schlüsselbunddaten können zurückgesetzt werden; ein Widerruf des Zertifikats stoppt die App. Andere Apple-ID-Vorgänge brauchen weiterhin VPN.",
+        "Signing": "Wird signiert",
+        "Style": "Stil",
+        "Sunset": "Sonnenuntergang",
+        "Theme": "Design",
+        "Tweaks": "Tweaks",
+        "Update Mirsa": "Mirsa aktualisieren",
+        "Updating": "Wird aktualisiert",
+        "Upload from Computer": "Vom Computer hochladen",
+        "Version ": "Version ",
+        "Wallpaper": "Hintergrundbild",
+        "cannot be cancelled": "kann nicht abgebrochen werden",
+        "iPhone": "iPhone",
+        "Sources": "Quellen",
+        "Certificate": "Zertifikat",
+        "Mirsa AI": "Mirsa AI",
+    ]
+
+    /// German for a string some helper already resolved to English (the four-language `tr`).
+    static func german(_ resolved: String) -> String {
+        AppLanguageStore.shared.current == .german ? (deByEnglish[resolved] ?? resolved) : resolved
+    }
 }

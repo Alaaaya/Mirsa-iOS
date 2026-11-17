@@ -6,13 +6,19 @@ import XCTest
 final class MirsaDesignReviewUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    private func launch(lang: String, theme: String) -> XCUIApplication {
+    private func launch(lang: String, theme: String, storeDetail: Bool? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "apps-design",
                                "-mirsa.appLanguage", lang, "-mirsa.theme", theme,
                                "-mirsa.apps.homeLayout", "NO",
                                "-AppleLanguages", lang == "en" ? "(en)" : "(ar)",
                                "-AppleLocale", lang == "en" ? "en_US" : "ar"]
+        if let detail = storeDetail {
+            let i = app.launchArguments.firstIndex(of: "apps-design")!
+            app.launchArguments[i] = "encrypted"
+            app.launchArguments += ["-MirsaStoreFixtureAccount", "-MirsaStoreTab", "search"]
+            if detail { app.launchArguments.append("-MirsaStoreFixtureDetail") }
+        }
         app.launch()
         Thread.sleep(forTimeInterval: 2.0)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -61,7 +67,32 @@ final class MirsaDesignReviewUITests: XCTestCase {
                 app.buttons["main-tab-Apps"].tap()
                 tools.tap()
                 XCTAssertTrue(device.isSelected)
+                let sections = ["pairing", "device", "wallpapers", "tweaks"].map { app.buttons["tools-section-" + $0] }
+                for (left, right) in zip(sections, sections.dropFirst()) {
+                    XCTAssertLessThan(left.frame.midX, right.frame.midX, "Tools physical order must not mirror")
+                }
+                let tendies = app.buttons["tools-section-wallpapers"]
+                XCTAssertTrue(tendies.isHittable)
+                tendies.tap()
+                XCTAssertTrue(app.buttons["wallpaper-flash"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.buttons["wallpaper-request"].exists)
+                XCTAssertTrue(app.buttons["wallpaper-import"].exists)
+                XCTAssertTrue(app.buttons["wallpaper-respring"].exists)
+                shot("design_\(lang)_\(theme)_5_tendies")
+                app.swipeUp(velocity: .slow)
+                shot("design_\(lang)_\(theme)_6_tendies_scrolled")
                 app.terminate()
+                for detail in [false, true] {
+                    let storeApp = launch(lang: lang, theme: theme, storeDetail: detail)
+                    XCTAssertTrue(storeApp.buttons["store-tab-search"].waitForExistence(timeout: 10))
+                    if detail {
+                        XCTAssertTrue(storeApp.buttons["store-detail-get"].waitForExistence(timeout: 5))
+                    } else {
+                        XCTAssertTrue(storeApp.staticTexts["Notes Pro"].waitForExistence(timeout: 5))
+                    }
+                    shot("design_\(lang)_\(theme)_" + (detail ? "8_app_store_detail" : "7_app_store_results"))
+                    storeApp.terminate()
+                }
             }
         }
     }
