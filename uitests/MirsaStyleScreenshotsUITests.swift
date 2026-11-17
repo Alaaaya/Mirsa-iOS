@@ -174,6 +174,87 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Floating dock for every theme: six tabs, selected trait, tab transitions.
+    func testFloatingDockAllThemes() {
+        continueAfterFailure = false
+        for theme in ["liquid", "classic"] {
+            for lang in ["ar", "en"] {
+                let app = launch("tools", lang: lang, extra: ["-mirsa.theme", theme])
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForExistence(timeout: 10))
+                for id in ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"] {
+                    let b = app.buttons["main-tab-" + id]
+                    XCTAssertTrue(b.waitForExistence(timeout: 10), id)
+                    b.tap(); Thread.sleep(forTimeInterval: 0.8)
+                    XCTAssertTrue(b.isSelected, id)
+                }
+                shot(app, lang + "_450_dock_" + theme)
+                app.terminate()
+            }
+        }
+    }
+
+    /// All six alternate icons plus Original, uncropped in the settings picker.
+    func testAppIconPickerAllIcons() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("settings", lang: lang)
+            for i in 0...6 { XCTAssertTrue(app.buttons["mirsa.icon.\(i)"].waitForExistence(timeout: 10), "icon \(i)") }
+            shot(app, lang + "_450_icons")
+            app.terminate()
+        }
+    }
+
+    /// Chat image: tap opens fullscreen with close and save controls.
+    func testChatImageFullscreen() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("chat-image-fixture", lang: lang)
+            let thumb = app.descendants(matching: .any).matching(identifier: "chat-image-thumb").firstMatch
+            XCTAssertTrue(thumb.waitForExistence(timeout: 10))
+            thumb.tap()
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-image-zoom").firstMatch.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["chat-image-save"].exists)
+            app.descendants(matching: .any).matching(identifier: "chat-image-zoom").firstMatch.pinch(withScale: 2, velocity: 1)
+            shot(app, lang + "_450_image_fullscreen")
+            app.buttons["chat-image-close"].tap()
+            XCTAssertTrue(thumb.waitForExistence(timeout: 10))
+            app.terminate()
+        }
+    }
+
+    /// Respring button is standalone under the primary actions.
+    func testRespringStandalone() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang)
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            XCTAssertTrue(app.buttons["wallpaper-respring"].waitForExistence(timeout: 10) || app.descendants(matching: .any).matching(identifier: "wallpaper-respring").firstMatch.exists)
+            shot(app, lang + "_450_respring")
+            app.terminate()
+        }
+    }
+
+
+    /// 3 imported, 1 selected: the apply button and respring must be visible. Never taps apply (fixture).
+    func testTendiesSelectedApplyVisible() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperSelectedFixture"])
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            let apply = app.buttons["wallpaper-install-selected"]
+            revealWallpaperElement(apply, identifier: "wallpaper-install-selected", in: app)
+            XCTAssertTrue(apply.exists)
+            XCTAssertTrue(apply.label.contains("1"))
+            let respring = app.buttons["wallpaper-respring"]
+            revealWallpaperElement(respring, identifier: "wallpaper-respring", in: app)
+            XCTAssertTrue(respring.exists)
+            XCTAssertGreaterThan(respring.frame.minY, apply.frame.minY)
+            XCTAssertEqual(app.buttons.matching(identifier: "wallpaper-respring").count, 1)
+            shot(app, lang + "_tendies_selected_apply")
+            app.terminate()
+        }
+    }
+
     /// Real implemented page, no replacement mock. Tools must start closed, and both
     /// primary actions stay on the same row in Arabic RTL and English LTR.
     func testTendiesReorganizedPage() {
