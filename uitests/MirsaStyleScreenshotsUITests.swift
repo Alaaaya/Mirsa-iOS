@@ -435,6 +435,14 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 XCTAssertTrue(button.isHittable)
                 XCTAssertEqual(app.buttons.matching(identifier: "wallpaper-choose-" + kind).count, 1)
                 button.tap()
+                // Evidence split: did the action fire (state) vs did a sheet appear (host marker).
+                let state = app.descendants(matching: .any).matching(identifier: "wallpaper-picker-state").firstMatch
+                let fired = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    state.exists && (state.value as? String) == kind }, object: nil)
+                if XCTWaiter.wait(for: [fired], timeout: 5) != .completed {
+                    add(XCTAttachment(string: "state exists=\(state.exists) value=\(String(describing: state.value))" + "\n" + app.debugDescription))
+                    XCTFail("Button tap did not set picker state to " + kind)
+                }
                 let prefix = "wallpaper-" + kind + "-picker-"
                 let query = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
                 let picker = query.firstMatch
