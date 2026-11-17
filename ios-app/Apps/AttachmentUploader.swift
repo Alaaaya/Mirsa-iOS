@@ -43,6 +43,12 @@ struct ChatAttachmentError: Error, Equatable {
     let status: Int
     let code: String
 
+    /// HTTP 409 is shared with conversation/intake conflicts. Only attachment-named
+    /// contract errors may invalidate uploaded chips or ask for another upload.
+    static func isAttachmentCode(_ code: String) -> Bool {
+        code.hasPrefix("attachment_") || code == "bad_attachment_ids" || code == "attachments_disabled"
+    }
+
     static let disabled = ChatAttachmentError(status: 0, code: "attachments_disabled")
     static let network = ChatAttachmentError(status: 0, code: "network")
 
