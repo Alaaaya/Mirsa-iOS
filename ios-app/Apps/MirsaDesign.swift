@@ -405,12 +405,17 @@ struct MirsaStatusBarScrim: View {
             .frame(height: 14)
             .frame(maxWidth: .infinity)
             .background {
-                LinearGradient(stops: [
-                    .init(color: MirsaPalette.sheet, location: 0),
-                    .init(color: MirsaPalette.sheet.opacity(0.8), location: 0.55),
-                    .init(color: MirsaPalette.sheet.opacity(0), location: 1),
-                ], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
+                // Frosted glass that fades out downward, so scrolled content blurs
+                // under the clock instead of meeting a dark band.
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(MirsaPalette.sheet.opacity(0.25))
+                    .mask(LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black.opacity(0.85), location: 0.55),
+                        .init(color: .clear, location: 1),
+                    ], startPoint: .top, endPoint: .bottom))
+                    .ignoresSafeArea(edges: .top)
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)

@@ -9,7 +9,8 @@ enum L {
 
     static func t(_ key: String) -> String {
         switch lang {
-        case .english, .german: return en[key] ?? key
+        case .english: return en[key] ?? key
+        case .german: return de[key] ?? en[key] ?? key
         case .arabic: return ar[key] ?? en[key] ?? key
         case .sorani: return MirsaTr.ckbKeys[key] ?? ar[key] ?? en[key] ?? key
         case .kurmanji: return MirsaTr.kmrKeys[key] ?? ar[key] ?? en[key] ?? key
@@ -19,6 +20,12 @@ enum L {
     static func f(_ key: String, _ args: CVarArg...) -> String {
         String(format: t(key), locale: lang.locale, arguments: args)
     }
+
+    private static let de: [String: String] = [
+        "hero.appIDs.label": "App-IDs diese Woche übrig",
+        "hero.slots.label": "Echte App-Plätze übrig",
+        "hero.count": "%d von %d",
+    ]
 
     private static let en: [String: String] = [
         "tab": "Apps",
@@ -36,6 +43,9 @@ enum L {
         "hero.renews": "until renewal",
         "hero.appIDs": "App IDs left this week: %d of %d",
         "hero.slots": "Real-app slots: %d of %d left",
+        "hero.appIDs.label": "App IDs left this week",
+        "hero.slots.label": "Real app slots left",
+        "hero.count": "%d of %d",
         "hero.vpnOff": "Loopback VPN is off — turn on LocalDevVPN to install",
         "hero.wifiOff": "Check LocalDevVPN and pairing",
         "empty.title": "No Apps Yet",
@@ -166,6 +176,9 @@ enum L {
         "hero.renews": "حتى التجديد",
         "hero.appIDs": "معرّفات التطبيقات المتبقية هذا الأسبوع: %d من %d",
         "hero.slots": "خانات التطبيقات الحقيقية: %d من %d متبقية",
+        "hero.appIDs.label": "معرّفات متبقية هذا الأسبوع",
+        "hero.slots.label": "خانات حقيقية متبقية",
+        "hero.count": "%d من %d",
         "hero.vpnOff": "شبكة VPN المحلية متوقفة — شغّل LocalDevVPN للتثبيت",
         "hero.wifiOff": "تأكد من LocalDevVPN وملف الاقتران",
         "empty.title": "لا توجد تطبيقات بعد",

@@ -81,8 +81,9 @@ struct TendiesView: View {
                     }
                 }
 
-                // Two primary actions side by side.
+                // Approved mirrored top card; the tools sub-bar remains fixed LTR.
                 Section {
+                    VStack(spacing: 10) {
                     HStack(spacing: 10) {
                         if case .running = vm.tendiesFlashPhase {
                             HStack(spacing: 8) {
@@ -104,7 +105,7 @@ struct TendiesView: View {
                                     .font(.headline).lineLimit(2).minimumScaleFactor(0.8)
                                     .frame(maxWidth: .infinity, minHeight: 48)
                             }
-                            .buttonStyle(.borderedProminent).tint(.blue)
+                            .buttonStyle(.mirsaPrimary)
                             .accessibilityIdentifier("wallpaper-flash")
                         }
                         Button { showCustomRequest = true } label: {
@@ -121,11 +122,33 @@ struct TendiesView: View {
                                     }
                                 }
                         }
-                        .buttonStyle(.borderedProminent).tint(.indigo)
+                        .buttonStyle(.mirsaSecondary)
                         .disabled(videoApplyRunning)
                         .accessibilityIdentifier("wallpaper-request")
                     }
                     .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+                    .environment(\.layoutDirection, L.lang == .arabic || L.lang == .sorani ? .rightToLeft : .leftToRight)
+                // Secondary actions as one row of glass chips (same buttons, same actions).
+                HStack(spacing: 10) {
+                        Button { installAfterPicking = false; showFilePicker = true } label: {
+                            Label(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore), systemImage: "doc.badge.plus")
+                                .tendiesChip()
+                        }
+                        .buttonStyle(.mirsaPress)
+                        .accessibilityIdentifier("wallpaper-import")
+                Button { offerRespring() } label: {
+                    Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
+                        .tendiesChip()
+                }
+                .buttonStyle(.mirsaPress)
+                .disabled(videoApplyRunning || respringPresentation.isPresented)
+                .accessibilityIdentifier("wallpaper-respring")
+
+                }
+                .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
+                    .environment(\.layoutDirection, L.lang == .arabic || L.lang == .sorani ? .rightToLeft : .leftToRight)
+
+                    }
                 } footer: {
                     if !vm.tendiesSkippedTitles.isEmpty {
                         Text(TendiesPageText.skipped(vm.tendiesSkippedTitles))
@@ -154,7 +177,9 @@ struct TendiesView: View {
                                     vm.tendieItems[i].isSelected = target
                                 }
                             }
-                            .font(.caption)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(MirsaPalette.accent)
+                            .buttonStyle(.plain)
                         }
                         ForEach($vm.tendieItems) { $item in
                             TendieRowView(item: $item) {
@@ -175,22 +200,13 @@ struct TendiesView: View {
                         Label(TendiesPageText.selected(selectedCount), systemImage: "checkmark.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).tint(.green)
+                    .buttonStyle(.mirsaPrimary)
                     .disabled(videoApplyRunning || respringPresentation.isPresented)
                     .accessibilityIdentifier("wallpaper-install-selected")
                 }
-                Button { offerRespring() } label: {
-                    Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
-                }
-                .disabled(videoApplyRunning || respringPresentation.isPresented)
-                .accessibilityIdentifier("wallpaper-respring")
                 Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("wallpaper-flash-help")
-                        Button { installAfterPicking = false; showFilePicker = true } label: {
-                            Label(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore), systemImage: "doc.badge.plus")
-                        }
-                        .accessibilityIdentifier("wallpaper-import")
                         Text(WallpaperMakerStrings.text(.importHint)).font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                 } header: {
@@ -571,5 +587,19 @@ struct TendiesDocumentPickerView: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             parent.dismiss()
         }
+    }
+}
+
+/// Glass chip used for the secondary Tendies actions (layout only).
+private extension View {
+    func tendiesChip() -> some View {
+        self.font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .lineLimit(2).minimumScaleFactor(0.75)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .background(Capsule().fill(Color.white.opacity(0.07)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8))
+            .contentShape(Capsule())
     }
 }
