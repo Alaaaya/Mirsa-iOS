@@ -386,6 +386,13 @@ enum ForgeChatImage {
         }
         // Publish confirmed rows before retiring echoes. One stable UUID stays visible throughout.
         let ids = Set(merged.map(\.id))
+        // A timed-out send may already have reached the server. Its canonical UUID
+        // in chat-read confirms delivery even when the POST never returned locally.
+        if outgoing.contains(where: { $0.threadID == id && ids.contains($0.id) }) {
+            outgoing.removeAll { $0.threadID == id && ids.contains($0.id) }
+            saveOutgoing()
+            if outgoing.isEmpty && error == ForgeChatText.failed { error = nil }
+        }
         if sentEcho.contains(where: { ids.contains($0.id) }) {
             sentEcho.removeAll { ids.contains($0.id) }; saveEcho()
         }
