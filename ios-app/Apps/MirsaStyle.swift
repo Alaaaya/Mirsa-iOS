@@ -85,7 +85,7 @@ struct LiquidGlass<S: InsettableShape>: ViewModifier {
 }
 
 /// Base #090A1E with violet, cyan and pink light and two floating orbs.
-/// Drawn once at full-screen size and pinned to the screen, so every copy of the
+/// Sampled at window size and pinned to its origin, so every copy of the
 /// page background (root, tab, picker strip, padded dock area) lines up pixel for
 /// pixel and the app reads as one continuous backdrop from the status bar to the
 /// home indicator.
@@ -136,33 +136,50 @@ private struct LiquidBackdrop: View {
     }
 }
 
-/// Renders `content` at the size of the whole screen and pins it to the screen's
-/// origin, whatever frame the caller gives it. A background drawn this way never
-/// shows a seam where two containers of different sizes meet, and it always reaches
-/// under the status bar and the home indicator.
-struct MirsaScreenAnchored<Content: View>: View {
-    @ViewBuilder var content: (CGSize) -> Content
+/// Geometry from this view's own window, including safe areas. Updates on rotation
+/// and split-view resizing without consulting another scene or physical screen.
+private struct MirsaBackdropFrameKey: EnvironmentKey {
+    static let defaultValue: CGRect? = nil
+}
+extension EnvironmentValues {
+    var mirsaBackdropFrame: CGRect? {
+        get { self[MirsaBackdropFrameKey.self] }
+        set { self[MirsaBackdropFrameKey.self] = newValue }
+    }
+}
+struct MirsaWindowBackdropHost: ViewModifier {
+    func body(content: Content) -> some View {
+        GeometryReader { geo in
+            let local = geo.frame(in: .global)
+            let safe = geo.safeAreaInsets
+            let window = CGRect(x: local.minX - safe.leading, y: local.minY - safe.top,
+                                width: local.width + safe.leading + safe.trailing,
+                                height: local.height + safe.top + safe.bottom)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .environment(\.mirsaBackdropFrame, window)
+        }
+    }
+}
 
+/// Nested opaque page backdrops sample the same window coordinates as the root.
+/// Standalone sheets fall back to their own geometry rather than another scene.
+struct MirsaScreenAnchored<Content: View>: View {
+    @Environment(\.mirsaBackdropFrame) private var window
+    @ViewBuilder var content: (CGSize) -> Content
     var body: some View {
         GeometryReader { geo in
-            let frame = geo.frame(in: .global)
-            let screen = Self.screenSize(fallback: frame.size)
-            content(screen)
-                .frame(width: screen.width, height: screen.height)
-                .offset(x: -frame.minX, y: -frame.minY)
+            let local = geo.frame(in: .global)
+            let canvas = window ?? local
+            content(canvas.size)
+                .frame(width: canvas.width, height: canvas.height)
+                .offset(x: canvas.minX - local.minX, y: canvas.minY - local.minY)
                 .environment(\.layoutDirection, .leftToRight)
         }
         .ignoresSafeArea()
         .clipped()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-
-    @MainActor static func screenSize(fallback: CGSize) -> CGSize {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
-        if let size = scene?.screen.bounds.size, size.width > 0, size.height > 0 { return size }
-        return fallback
     }
 }
 

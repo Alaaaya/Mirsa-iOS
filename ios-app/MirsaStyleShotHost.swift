@@ -78,8 +78,11 @@ struct MirsaStyleShotHost: View {
             // Design review only: the real Apps tab with an in-memory signed-in account
             // (9 of 10 App IDs left) and five fixture apps (one real, so 1 of 3 slots left).
             ContentView().onAppear {
+                guard MirsaUITestHarness.active else { return }
                 let store = AppsStore.shared
-                store.account = AccountState(email: "review@mirsa.app", appIDsAvailable: 9, appIDsMax: 10)
+                store.account = AccountState(email: "review@mirsa.app",
+                                             certExpires: Date().addingTimeInterval(5 * 86_400),
+                                             appIDsAvailable: 9, appIDsMax: 10)
                 store.apps = Array(Self.fixtureApps.prefix(5))
                 vm.selectedTab = .apps
             }

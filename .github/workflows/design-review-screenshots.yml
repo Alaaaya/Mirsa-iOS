@@ -3,7 +3,6 @@ name: Design review screenshots (floating dock)
 on:
   push:
     branches: [mirsa/design-floating-dock-glass]
-  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -41,10 +40,12 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaDesignReviewUITests -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFloatingDockAllThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testClassicSixTabs test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/design-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUnit.xcresult test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/design-unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaDesignReviewUITests -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFloatingDockAllThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testClassicSixTabs -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testAppIconPickerAllIcons -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testChatImageFullscreen -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testRespringStandalone -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesSelectedApplyVisible -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerPickersStayIndependent -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testNonownerHasNoDiagnostics test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/design-ui.log
       - name: Export named screenshots
         if: always()
         run: |
+          test -d build/DesignUI.xcresult || { echo "Missing UI result bundle"; exit 1; }
           if [ -d build/DesignUI.xcresult ]; then
             mkdir -p build/raw build/shots
             xcrun xcresulttool export attachments --path build/DesignUI.xcresult --output-path build/raw
@@ -61,7 +62,11 @@ jobs:
                   if head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff":
                       if not name.lower().endswith(".png"): name += ".png"
                       shutil.copy(src, os.path.join("build/shots", name))
-          print("\n".join(sorted(os.listdir("build/shots"))))
+          names = sorted(os.listdir("build/shots"))
+          print("\n".join(names))
+          expected = [f"design_{lang}_{theme}_{page}" for lang in ("ar", "en") for theme in ("classic", "liquid") for page in ("1_home", "2_home_scrolled", "3_tools", "4_tools_device")]
+          missing = [name for name in expected if not any(n == name + ".png" or n.startswith(name + "_") for n in names)]
+          if missing: raise SystemExit("Missing required screenshots: " + ", ".join(missing))
           PY
           fi
       - uses: actions/upload-artifact@v4
@@ -71,4 +76,6 @@ jobs:
           path: |
             build/shots
             build/design-ui.log
-          if-no-files-found: warn
+            build/design-unit.log
+            build/raw/manifest.json
+          if-no-files-found: error
