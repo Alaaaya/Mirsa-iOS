@@ -32,6 +32,10 @@ final class MirsaDesignReviewUITests: XCTestCase {
     }
 
     private func shot(_ name: String) {
+        let hierarchy = XCTAttachment(string: XCUIApplication().debugDescription)
+        hierarchy.name = name + "_hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         a.name = name
         a.lifetime = .keepAlways
