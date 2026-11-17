@@ -28,6 +28,11 @@ struct AuroraBackground: View {
     }
 
     private var classic: some View {
+        // Pinned to the screen like the Liquid backdrop, so every copy lines up seamlessly.
+        MirsaScreenAnchored { _ in classicMesh }
+    }
+
+    private var classicMesh: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused || MirsaUITestHarness.active)) { ctx in
             let t = Float(ctx.date.timeIntervalSinceReferenceDate)
             let s = sin(t * 0.25) * 0.08
@@ -47,7 +52,6 @@ struct AuroraBackground: View {
             )
         }
         .overlay(Color.black.opacity(0.25))
-        .ignoresSafeArea()
     }
 }
 
@@ -162,7 +166,8 @@ struct AppsTab: View {
 
             fab
                 .padding(.trailing, MirsaSpacing.page)
-                .padding(.bottom, MirsaSpacing.m)
+                // Clear gap above the floating dock (the tab already reserves the dock's own room).
+                .padding(.bottom, MirsaSpacing.xl)
 
             }
 
@@ -264,6 +269,8 @@ struct AppsTab: View {
         } message: { Text(L.t("repair.body")) }
         .overlay(alignment: .top) { toast }
         .task {
+            // Screenshot fixture must never refresh credentials, install, or persist test data.
+            if MirsaUITestHarness.active && MirsaStyleShots.page == "apps-design" { return }
             let launchErr = store.lastLaunchError
             if launchErr != nil {
                 UserDefaults.standard.removeObject(forKey: "aircard.guest.lastError")
@@ -338,7 +345,7 @@ struct AppsTab: View {
             }
             .foregroundStyle(segment == s ? .white : .white.opacity(0.6))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background {
                 if segment == s {
                     Capsule()
@@ -440,7 +447,7 @@ struct AppsTab: View {
             Image(systemName: "plus")
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 64, height: 64)
+                .frame(width: 58, height: 58)
                 .background(Circle().fill(MirsaPalette.accentGradient))
                 .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1))
                 .shadow(color: MirsaPalette.accent.opacity(0.5), radius: 14, y: 6)
@@ -486,87 +493,144 @@ struct HeroCard: View {
         return max(0, Int(ceil(d.timeIntervalSinceNow / 86_400)))
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle().fill(LinearGradient(colors: [Color(red: 0.3, green: 0.85, blue: 0.6), Color(red: 0.1, green: 0.55, blue: 0.75)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: store.account != nil ? "checkmark.shield.fill" : "person.badge.shield.checkmark")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 50, height: 50)
-                .shadow(color: .green.opacity(0.45), radius: 12)
+    private var canRenew: Bool { store.account != nil || store.hasSavedLogin }
 
-                VStack(alignment: .leading, spacing: 3) {
+    var body: some View {
+        // Compact account card: the renewal ring leads, the account and its Renew action
+        // share one row, and the two weekly quotas sit side by side with bars that fill
+        // by what is still left.
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                RenewalRing(days: days, size: 52)
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(store.account != nil ? L.t("hero.active") : L.t("hero.signedOut"))
                         .font(.headline)
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     if let a = store.account {
                         Text(a.email)
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.65))
                             .lineLimit(1)
-                        if let avail = a.appIDsAvailable, let max = a.appIDsMax {
-                            Text(L.f("hero.appIDs", avail, max))
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
+                            .truncationMode(.middle)
                     }
-                    Text(L.f("hero.slots", store.slotsLeft, store.realLimit))
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.55))
                 }
-                Spacer(minLength: 8)
-                RenewalRing(days: days)
-            }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 8) {
-                Image(systemName: "bolt.fill").foregroundStyle(.yellow)
-                Text(L.t("seg.container") + " ∞ · " + L.t("seg.real") + " \(store.slotsUsed)/\(store.realLimit)")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Button(action: store.account != nil || store.hasSavedLogin ? onRefresh : onSignIn) {
-                    Label(store.account != nil || store.hasSavedLogin ? L.t("hero.refresh") : L.t("hero.signIn"),
-                          systemImage: store.account != nil || store.hasSavedLogin ? "arrow.clockwise" : "person.crop.circle")
+                Button(action: canRenew ? onRefresh : onSignIn) {
+                    Label(canRenew ? L.t("hero.refresh") : L.t("hero.signIn"),
+                          systemImage: canRenew ? "arrow.clockwise" : "person.crop.circle")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 12).padding(.vertical, 8)
                 }
                 .buttonStyle(.mirsaPress)
                 .appsGlassCapsule(tint: Color(red: 0.45, green: 0.4, blue: 1))
             }
+
+            HStack(spacing: 10) {
+                if let a = store.account, let avail = a.appIDsAvailable, let max = a.appIDsMax {
+                    HeroQuota(label: L.t("hero.appIDs.label"), left: avail, total: max,
+                              spoken: L.f("hero.appIDs", avail, max))
+                }
+                HeroQuota(label: L.t("hero.slots.label"), left: store.slotsLeft, total: store.realLimit,
+                          spoken: L.f("hero.slots", store.slotsLeft, store.realLimit))
+            }
         }
-        .padding(18)
-        .appsGlass(cornerRadius: 28, tint: Color(red: 0.45, green: 0.35, blue: 1))
+        .padding(14)
+        // The root dock stays fixed LTR; only the localized account card mirrors.
+        .environment(\.layoutDirection, (L.lang == .arabic || L.lang == .sorani) ? .rightToLeft : .leftToRight)
+        .appsGlass(cornerRadius: 26, tint: Color(red: 0.45, green: 0.35, blue: 1))
+    }
+}
+
+/// One weekly quota on the account card: its name, "left of total", and a bar whose
+/// filled part is the share still left (9 of 10 is nearly full; 1 of 3 is a third).
+/// Turns amber when one or none is left.
+struct HeroQuota: View {
+    @Environment(\.layoutDirection) private var layoutDirection
+    let label: String
+    let left: Int
+    let total: Int
+    let spoken: String
+
+    private var fraction: Double {
+        guard total > 0 else { return 0 }
+        return min(1, max(0, Double(left) / Double(total)))
+    }
+    private var low: Bool { left <= 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.66))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(L.f("hero.count", left, total))
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            GeometryReader { geo in
+                let fillWidth = geo.size.width * fraction
+                // Position in physical coordinates once; semantic leading can mirror twice.
+                let fillX = layoutDirection == .rightToLeft
+                    ? geo.size.width - fillWidth / 2 : fillWidth / 2
+                ZStack {
+                    Capsule().fill(.white.opacity(0.10))
+                    Capsule()
+                        .fill(LinearGradient(colors: low
+                                             ? [Color(red: 0.96, green: 0.62, blue: 0.04), Color(red: 0.98, green: 0.75, blue: 0.14)]
+                                             : [MirsaPalette.accent, Color(red: 0.13, green: 0.83, blue: 0.93)],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: fillWidth, height: geo.size.height)
+                        .position(x: fillX, y: geo.size.height / 2)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .frame(height: 5)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.07), lineWidth: 1))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
     }
 }
 
 struct RenewalRing: View {
     let days: Int?
+    var size: CGFloat = 64
     var body: some View {
         let fraction = days.map { min(1, Double($0) / 7.0) } ?? 0
         let color: Color = (days ?? 7) <= 1 ? .red : ((days ?? 7) <= 3 ? .orange : Color(red: 0.4, green: 0.9, blue: 0.7))
         ZStack {
-            Circle().stroke(.white.opacity(0.12), lineWidth: 6)
+            Circle().stroke(.white.opacity(0.12), lineWidth: size < 60 ? 5 : 6)
             Circle()
                 .trim(from: 0, to: fraction)
                 .stroke(AngularGradient(colors: [color.opacity(0.6), color], center: .center),
-                        style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                        style: StrokeStyle(lineWidth: size < 60 ? 5 : 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .shadow(color: color.opacity(0.6), radius: 6)
             VStack(spacing: -2) {
                 Text(days.map(String.init) ?? "–")
-                    .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: size < 60 ? 18 : 20, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(.white)
                 Text(L.t("hero.days"))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
             }
         }
-        .frame(width: 64, height: 64)
+        .frame(width: size, height: size)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(days ?? 0) \(L.t("hero.days")) \(L.t("hero.renews"))")
     }
@@ -580,6 +644,8 @@ struct AppTile: View {
     private var liquid: Bool { theme == MirsaTheme.liquid.rawValue }
     private var icon: UIImage? { UIImage(contentsOfFile: AppsStore.iconURL(app.id).path) }
     @ObservedObject private var progress = MirsaOperationProgress.shared
+    private var iconSize: CGFloat { liquid ? 60 : 68 }
+    private var iconRadius: CGFloat { iconSize * 0.225 }
 
     var body: some View {
         let img = icon
@@ -598,13 +664,14 @@ struct AppTile: View {
                         }
                     }
                 }
-                .frame(width: liquid ? 54 : 64, height: liquid ? 54 : 64)
-                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.35), radius: 6, y: 4)
+                .frame(width: iconSize, height: iconSize)
+                .clipShape(RoundedRectangle(cornerRadius: iconRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: iconRadius, style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.35), radius: 8, y: 5)
             }
+            // The icon stands on its own, like on the Home Screen; no glass tile around it.
+            // The outer frame keeps the grid rhythm and the badge position unchanged.
             .frame(width: liquid ? 68 : 78, height: liquid ? 68 : 78)
-            .appsGlass(cornerRadius: 21, tint: liquid ? nil : tint)
             .overlay(alignment: .topTrailing) { badges }
             .overlay { operationOverlay }
 
@@ -622,7 +689,7 @@ struct AppTile: View {
     private var operationOverlay: some View {
         if let e = progress.entry(for: app.id) {
             ZStack {
-                RoundedRectangle(cornerRadius: 15, style: .continuous).fill(.black.opacity(0.92)).frame(width: 54, height: 54)
+                RoundedRectangle(cornerRadius: iconRadius, style: .continuous).fill(.black.opacity(0.92)).frame(width: iconSize, height: iconSize)
                 if let f = e.fraction {
                     Circle().stroke(.white.opacity(0.25), lineWidth: 3).frame(width: 30, height: 30)
                     Circle().trim(from: 0, to: f).stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))

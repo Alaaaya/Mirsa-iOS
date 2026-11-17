@@ -148,6 +148,9 @@ struct AppStoreAccountView: View {
             Button(StoreFeatureText.cancel, role: .cancel) { pendingOS = nil }
         } message: { Text(StoreFeatureText.minOSWarn) }
         .onChange(of: account) { _, value in
+            #if DEBUG
+            if Self.uiTestFixture() != nil { return }
+            #endif
             // Account switched: drop in-flight work and every account-specific result immediately.
             operationGeneration = UUID(); preflightTask?.cancel(); preflightTask = nil; work?.cancel(); work = nil; busy = nil; transfer = nil; progressAttempt = nil
             results = []; accountAvailable = []; metadata = [:]; pendingOS = nil
@@ -635,17 +638,15 @@ struct AppStoreAccountView: View {
     private func resultRow(_ app: MirsaStoreApp) -> some View {
         let tint = tints.tint(app.artworkURL, seed: app.bundleID)
         return VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            HStack(alignment: .top, spacing: MirsaSpacing.s) {
+            // Top: icon, name and details open the app page; the download action sits on the same line.
+            HStack(alignment: .center, spacing: MirsaSpacing.s) {
                 Button { openDetail(app) } label: {
-                    HStack(alignment: .top, spacing: MirsaSpacing.s) {
-                        StoreArtwork(url: app.artworkURL, seed: app.bundleID, name: app.name, size: 76)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(app.name).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
+                    HStack(alignment: .center, spacing: MirsaSpacing.s) {
+                        StoreArtwork(url: app.artworkURL, seed: app.bundleID, name: app.name, size: 64)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(app.name).font(.system(size: 17, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
                             Text(app.bundleID).font(.caption2.monospaced()).foregroundStyle(Color.white.opacity(0.62)).lineLimit(1)
-                            HStack(spacing: 6) {
-                                Text("v" + app.version).font(MirsaFont.caption).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1)
-                                priceBadge(app)
-                            }
+                            Text("v" + app.version).font(MirsaFont.caption).foregroundStyle(Color.white.opacity(0.75)).lineLimit(1)
                         }
                         Spacer(minLength: 0)
                     }
@@ -653,27 +654,39 @@ struct AppStoreAccountView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(t("Opens the app page", "بيفتح صفحة التطبيق", "پەڕەی ئەپەکە دەکاتەوە", "Rûpela sepanê vedike"))
-                if (app.price ?? 0) > 0 { wishButton(app) }
-            }
-            HStack(spacing: MirsaSpacing.xs) {
                 Button { StoreHaptics.get(); guardedStart(app, acquire: false) } label: {
                     Label(canDownload(app) ? t("Download", "تنزيل", "داگرتن", "Daxe") : t("Not in account store", "مو بمتجر حسابك", "لە ستۆرەکەت نییە", "Ne li stoya te ye"),
                           systemImage: canDownload(app) ? "icloud.and.arrow.down" : "nosign")
-                        .font(MirsaFont.button).foregroundStyle(.white)
-                        .padding(.horizontal, 16).frame(height: 36)
+                        .font(MirsaFont.caption.weight(.bold)).foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 12).frame(height: 34)
                         .background(Capsule().fill(StoreLuxe.identity))
                         .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8))
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.mirsaPress)
                 .disabled(busy != nil || !canDownload(app))
                 .opacity(busy != nil || !canDownload(app) ? 0.5 : 1)
+            }
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.7)
+            // Footer: status on one side, wishlist and versions on the other.
+            HStack(spacing: MirsaSpacing.xs) {
+                if ownership[app.id] == .owned {
+                    Text(storeText("Owned", "مملوك", de: "Im Besitz", ckb: "خاوەندارە", kmr: "Xwedî"))
+                        .font(MirsaFont.badge).foregroundStyle(MirsaPalette.success)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Capsule().fill(MirsaPalette.success.opacity(0.16)))
+                } else {
+                    priceBadge(app).lineLimit(1).minimumScaleFactor(0.8)
+                }
                 Spacer(minLength: 0)
+                if (app.price ?? 0) > 0 { wishButton(app) }
                 Button { openDetail(app) } label: {
                     HStack(spacing: 4) {
                         Text(storeText("Versions", "النسخ", de: "Versionen", ckb: "وەشانەکان", kmr: "Guherto"))
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
                     }
-                    .font(MirsaFont.caption.weight(.semibold)).foregroundStyle(Color.white.opacity(0.85))
+                    .font(MirsaFont.caption.weight(.semibold)).foregroundStyle(Color(red: 0.77, green: 0.71, blue: 1.0))
                     .padding(.horizontal, 12).frame(height: 32)
                     .storeGlassCapsule(elevation: 0.2)
                 }
@@ -767,7 +780,7 @@ struct AppStoreAccountView: View {
         // Hero header: the result card's icon grows into this place (matched geometry).
         VStack(alignment: .leading, spacing: MirsaSpacing.m) {
             HStack(alignment: .top, spacing: MirsaSpacing.m) {
-                StoreArtwork(url: app.artworkURL, seed: app.bundleID, name: app.name, size: 112)
+                StoreArtwork(url: app.artworkURL, seed: app.bundleID, name: app.name, size: 96)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(app.name).font(.system(size: 24, weight: .heavy, design: .rounded)).foregroundStyle(.white).lineLimit(3)
                         .minimumScaleFactor(0.8)
@@ -794,16 +807,24 @@ struct AppStoreAccountView: View {
         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
 
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+            // Main actions on one line: Download, and Get beside it only when it applies.
+            HStack(spacing: MirsaSpacing.s) {
             Button { StoreHaptics.get(); guardedStart(app, acquire: false) } label: {
                 HStack { Image(systemName: "icloud.and.arrow.down"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }
                     .font(MirsaFont.button).foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.24), lineWidth: 0.8))
+                    .background(StoreLuxe.identity, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.24), lineWidth: 0.8))
                     .shadow(color: StoreLuxe.accent.opacity(0.5), radius: 12, y: 5)
             }
             .buttonStyle(.mirsaPress).disabled(busy != nil || !canDownload(app))
             .opacity(busy != nil || !canDownload(app) ? 0.5 : 1)
+            if app.price == 0 && ownership[app.id] != .owned {
+                Button { StoreHaptics.get(); guardedStart(app, acquire: true) } label: { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")).frame(maxWidth: .infinity, minHeight: 48) }
+                    .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || (otherStore && !accountAvailable.contains(app.id)))
+                    .accessibilityIdentifier("store-detail-get")
+            }
+            }
             if otherStore && !accountAvailable.contains(app.id) {
                 Text(t("Not available in your account storefront. Download is disabled.", "مو متاح بمتجر حسابك، التنزيل موقف.", "لە ستۆری ئەکاونتەکەت بەردەست نییە.", "Li stoya hesabê te ne berdest e.")).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             }
@@ -817,11 +838,6 @@ struct AppStoreAccountView: View {
                    "Divê hesab xwediyê sepanê be. Wekî xwe li Firoşgeha Apple tê tomarkirin."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.7)
-            if app.price == 0 && ownership[app.id] != .owned {
-                Button { StoreHaptics.get(); guardedStart(app, acquire: true) } label: { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")).frame(maxWidth: .infinity) }
-                    .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || (otherStore && !accountAvailable.contains(app.id)))
-                    .accessibilityIdentifier("store-detail-get")
-            }
             if ownership[app.id] == .owned {
                 Text(t("Owned by this account. Tap Download separately for the selected version.", "هالحساب بيملك التطبيق. دوس تنزيل لحاله للنسخة المختارة.", "ئەم ئەکاونتە خاوەنی ئەپەکەیە. داگرتن جیا بکە.", "Ev hesab xwedî ye. Ji bo guhertoya hilbijartî Daxe bitikîne."))
                     .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
