@@ -191,36 +191,43 @@ final class AppViewModel: ObservableObject {
         scanDocumentsForTendies()
     }
 
+    private var tendiesScanRunning = false
+
     func scanDocumentsForTendies() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let tendiesDir = TendiesEngine.tendiesStorageDirectory
-        
-        var foundURLs: [URL] = []
-        if let rootItems = try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
-            for u in rootItems where u.pathExtension.lowercased() == "tendies" {
-                let target = tendiesDir.appendingPathComponent(u.lastPathComponent)
-                if u.path != target.path && !FileManager.default.fileExists(atPath: target.path) {
-                    try? FileManager.default.copyItem(at: u, to: target)
+        // onAppear and the Documents scanner can arrive together. Copying a large
+        // .tendies archive here used to block the main actor (and dock animation).
+        guard !tendiesScanRunning else { return }
+        tendiesScanRunning = true
+        Task { @MainActor in
+            defer { tendiesScanRunning = false }
+            let foundURLs = await Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let tendiesDir = TendiesEngine.tendiesStorageDirectory
+                var found: [URL] = []
+                if let roots = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
+                    for source in roots where source.pathExtension.lowercased() == "tendies" {
+                        let target = tendiesDir.appendingPathComponent(source.lastPathComponent)
+                        if source.path != target.path && !fm.fileExists(atPath: target.path) {
+                            // Failed copies must not be imported as if they succeeded.
+                            do { try fm.copyItem(at: source, to: target) }
+                            catch { continue }
+                        }
+                        found.append(target)
+                    }
                 }
-                foundURLs.append(target)
-            }
-        }
-        if let storedItems = try? FileManager.default.contentsOfDirectory(at: tendiesDir, includingPropertiesForKeys: nil) {
-            for u in storedItems where u.pathExtension.lowercased() == "tendies" {
-                if !foundURLs.contains(u) {
-                    foundURLs.append(u)
+                if let stored = try? fm.contentsOfDirectory(at: tendiesDir, includingPropertiesForKeys: nil) {
+                    for url in stored where url.pathExtension.lowercased() == "tendies" {
+                        if !found.contains(url) { found.append(url) }
+                    }
                 }
+                return found
+            }.value
+            // Check current state AFTER the worker returns, not a stale pre-scan snapshot.
+            let newURLs = foundURLs.filter { url in
+                !tendieItems.contains(where: { $0.fileName == url.lastPathComponent })
             }
-        }
-
-        let newURLs = foundURLs.filter { url in
-            !tendieItems.contains(where: { $0.fileName == url.lastPathComponent })
-        }
-
-        guard !newURLs.isEmpty else { return }
-
-        Task {
-            await self.importTendieFiles(urls: newURLs)
+            if !newURLs.isEmpty { await importTendieFiles(urls: newURLs) }
         }
     }
 
