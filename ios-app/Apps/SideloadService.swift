@@ -232,7 +232,7 @@ enum SideloadService {
             DispatchQueue.main.async { b.f(f, s) }
         }, { _, msg in
             guard let msg else { return }
-            let line = diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
+            let line = SideloadService.diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
             UserDefaults.standard.set(line, forKey: "mirsa.install.lastLog")
             DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
         }, ctx, &out, &err)
@@ -257,7 +257,7 @@ enum SideloadService {
             DispatchQueue.main.async { b.f(f, s) }
         }, { _, msg in
             guard let msg else { return }
-            let line = diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
+            let line = SideloadService.diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
             DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
         }, ctx, &out, &err)
         let o = take(out), e = take(err)
@@ -280,7 +280,7 @@ enum SideloadService {
             DispatchQueue.main.async { b.f(f, s) }
         }, { _, msg in
             guard let msg else { return }
-            let line = diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
+            let line = SideloadService.diagnosticStream.line(InstallErrorText.sanitize(String(cString: msg), arabic: L.isArabic))
             DispatchQueue.main.async { AppViewModel.sharedLogSink?(line) }
         }, ctx, &out, &err)
         let o = take(out), e = take(err)
