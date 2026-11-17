@@ -1324,6 +1324,37 @@ final class AppViewModel: ObservableObject {
         return importedIDs
     }
 
+    /// Replaces one existing row's file with a freshly generated archive. Same row, same id and selection;
+    /// the stored file is only swapped after the new archive validated and imported.
+    @MainActor
+    func replaceTendie(item: TendieItem, with archive: URL) async -> Bool {
+        let fm = FileManager.default
+        let staging = fm.temporaryDirectory.appendingPathComponent("tendie_replace_" + UUID().uuidString, isDirectory: true)
+        do {
+            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+            defer { try? fm.removeItem(at: staging) }
+            let named = staging.appendingPathComponent(item.fileName)
+            try fm.copyItem(at: archive, to: named)
+            var fresh = try await TendiesEngine.shared.importTendie(from: named)
+            fresh.id = item.id
+            fresh.name = item.name
+            fresh.isSelected = item.isSelected
+            guard let index = tendieItems.firstIndex(where: { $0.id == item.id }) else {
+                // Row was deleted meanwhile: do not resurrect it.
+                try? fm.removeItem(at: fresh.fileURL)
+                return false
+            }
+            // importTendie wrote the same fileName, so only this row changes.
+            tendieItems[index] = fresh
+            saveTendieItems()
+            try? fm.removeItem(at: archive)
+            return true
+        } catch {
+            errorMessage = WallpaperMakerStrings.text(.error)
+            return false
+        }
+    }
+
     func deleteTendie(item: TendieItem) {
         try? FileManager.default.removeItem(at: item.fileURL)
         tendieItems.removeAll(where: { $0.id == item.id })
