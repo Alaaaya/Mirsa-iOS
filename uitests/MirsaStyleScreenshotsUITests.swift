@@ -426,9 +426,9 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         for lang in ["ar", "en"] {
             let app = launch("tools", lang: lang)
             XCTAssertTrue(tap(app, ["Tendies"]))
-            let tools = app.buttons["wallpaper-tools"]
-            revealWallpaperElement(tools, identifier: "wallpaper-tools", in: app)
-            tools.tap()
+            // Creation is ordinary content now; the removed tools disclosure
+            // held diagnostics, not the photo/video pickers.
+            XCTAssertFalse(app.buttons["owner-diagnostics"].exists)
             for kind in ["photos", "video"] {
                 let button = app.buttons["wallpaper-choose-" + kind]
                 revealWallpaperElement(button, identifier: "wallpaper-choose-" + kind, in: app)
@@ -558,7 +558,6 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         for lang in ["ar", "en"] {
             let app = launch("tools", lang: lang, extra: ["-MirsaWallpaperFixture", "-MirsaWallpaperAIFixture"])
             XCTAssertTrue(tap(app, ["Tendies"]))
-            app.descendants(matching: .any).matching(identifier: "wallpaper-tools").firstMatch.tap()
             let video = app.descendants(matching: .any).matching(identifier: "video-wallpaper-from-photos").firstMatch
             XCTAssertTrue(video.waitForExistence(timeout: 10))
             revealWallpaperElement(video, identifier: "video-wallpaper-from-photos", in: app)
