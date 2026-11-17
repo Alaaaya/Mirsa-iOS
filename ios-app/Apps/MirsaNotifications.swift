@@ -122,11 +122,11 @@ actor MirsaNotificationLedger {
 enum MirsaNotificationText {
     static var title: String { tr5("Mirsa notifications", "إشعارات مرسى", de: "Mirsa-Mitteilungen", ckb: "ئاگادارکردنەوەکانی میرسا", kmr: "Agahiyên Mirsa") }
     static var explanation: String { tr5(
-        "Get a local notification when a new Mirsa version or a developer announcement is available. iOS decides when background refresh runs, so alerts may be delayed. Opening Mirsa also checks. No remote push notifications.",
-        "بيوصلك إشعار محلي لما ينزل تحديث لمرسى أو إعلان من المطوّر. iOS بيقرر إمتى يفحص بالخلفية، فممكن يتأخر الإشعار. كمان منفحص لما تفتح مرسى. مو إشعارات دفع عن بُعد.",
-        de: "Lokale Mitteilungen für neue Mirsa-Versionen und Ankündigungen des Entwicklers. iOS bestimmt die Hintergrundaktualisierung; Hinweise können sich verzögern. Auch beim Öffnen wird geprüft. Keine Push-Mitteilungen.",
-        ckb: "بۆ وەشانی نوێی میرسا و ڕاگەیاندنی گەشەپێدەر ئاگادارکردنەوەی ناوخۆیی وەربگرە. iOS کاتی پشکنینی پاشبنەما دیاری دەکات، بۆیە دەکرێت دواکەوێت. کاتێک میرسا دەکەیتەوەش دەپشکنرێت. Push نییە.",
-        kmr: "Ji bo guhertoyên nû yên Mirsa û daxuyaniyên pêşdebir agahiyên herêmî bistîne. iOS dema nûkirina paşperdeyê diyar dike, ji ber vê agahî dikarin dereng bibin. Dema Mirsa vedikî jî tê kontrolkirin. Ne push e.") }
+        "Get a local notification when your request is ready, a new Mirsa version or a developer announcement is available. iOS decides when background refresh runs, so alerts may be delayed. Opening Mirsa also checks. No remote push notifications.",
+        "بيوصلك إشعار محلي لما يجهز طلبك أو ينزل تحديث لمرسى أو إعلان من المطوّر. iOS بيقرر إمتى يفحص بالخلفية، فممكن يتأخر الإشعار. كمان منفحص لما تفتح مرسى. مو إشعارات دفع عن بُعد.",
+        de: "Lokale Mitteilungen für fertige Aufträge, neue Mirsa-Versionen und Ankündigungen des Entwicklers. iOS bestimmt die Hintergrundaktualisierung; Hinweise können sich verzögern. Auch beim Öffnen wird geprüft. Keine Push-Mitteilungen.",
+        ckb: "بۆ ئامادەبوونی داواکارییەکەت، وەشانی نوێی میرسا و ڕاگەیاندنی گەشەپێدەر ئاگادارکردنەوەی ناوخۆیی وەربگرە. iOS کاتی پشکنینی پاشبنەما دیاری دەکات، بۆیە دەکرێت دواکەوێت. کاتێک میرسا دەکەیتەوەش دەپشکنرێت. Push نییە.",
+        kmr: "Ji bo amadebûna daxwaza te, guhertoyên nû yên Mirsa û daxuyaniyên pêşdebir agahiyên herêmî bistîne. iOS dema nûkirina paşperdeyê diyar dike, ji ber vê agahî dikarin dereng bibin. Dema Mirsa vedikî jî tê kontrolkirin. Ne push e.") }
     static var enable: String { tr5("Enable notifications", "فعّل الإشعارات", de: "Mitteilungen aktivieren", ckb: "ئاگادارکردنەوەکان چالاک بکە", kmr: "Agahiyan çalak bike") }
     static var systemSettings: String { tr5("Open iOS notification settings", "افتح إعدادات إشعارات iOS", de: "iOS-Mitteilungseinstellungen öffnen", ckb: "ڕێکخستنەکانی ئاگادارکردنەوەی iOS بکەرەوە", kmr: "Mîhengên agahiyên iOS veke") }
     static var updateTitle: String { tr5("A Mirsa update is available", "نزل تحديث جديد لمرسى", de: "Ein Mirsa-Update ist verfügbar", ckb: "نوێکردنەوەی میرسا بەردەستە", kmr: "Nûkirina Mirsa amade ye") }
@@ -187,7 +187,7 @@ enum MirsaNotifications {
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         return (status == .authorized || status == .provisional) && UserDefaults.standard.bool(forKey: preference)
     }
-    private static func post(id: String, title: String, body: String) async {
+    static func post(id: String, title: String, body: String) async {
         let center = UNUserNotificationCenter.current()
         await MirsaNotificationLedger.shared.deliver(id: id, enabled: UserDefaults.standard.bool(forKey: preference), permitted: {
             await allowed()
@@ -202,7 +202,7 @@ enum MirsaNotifications {
             try await center.add(UNNotificationRequest(identifier: name, content: content, trigger: nil))
         })
     }
-    private static func get(_ request: URLRequest, maxBytes: Int) async throws -> Data {
+    static func get(_ request: URLRequest, maxBytes: Int) async throws -> Data {
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil; config.urlCache = nil
         config.timeoutIntervalForRequest = 8; config.timeoutIntervalForResource = 12
@@ -226,6 +226,7 @@ enum MirsaNotifications {
         guard !checking else { return false }
         checking = true
         defer { checking = false }
+        await MirsaRequestReadyNotifications.check()
         var success = true
         do {
             let data = try await get(URLRequest(url: URL(string: "https://mirsa-source.mooo.com/source.json")!, timeoutInterval: 8), maxBytes: 2 * 1024 * 1024)

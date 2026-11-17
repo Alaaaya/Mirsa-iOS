@@ -134,6 +134,18 @@ struct TendiesView: View {
                     }
                 }
 
+                // Standalone, directly under the primary install/request actions (not inside collapsed tools).
+                Section {
+                        Button { offerRespring() } label: {
+                            Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
+                        }
+                        .disabled(videoApplyRunning || respringPresentation.isPresented)
+                        .accessibilityIdentifier("wallpaper-respring")
+                        Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("wallpaper-flash-help")
+                }
+
                 MirsaWallpaperManagementSection(
                     externalBusy: videoApplyRunning,
                     log: { vm.tendiesFlashLog.append($0) },
@@ -199,14 +211,6 @@ struct TendiesView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        Button { offerRespring() } label: {
-                            Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
-                        }
-                        .disabled(videoApplyRunning || respringPresentation.isPresented)
-                        .accessibilityIdentifier("wallpaper-respring")
-                        Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("wallpaper-flash-help")
                 }
                     },
                     extraTools: {

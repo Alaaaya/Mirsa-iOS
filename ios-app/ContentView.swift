@@ -617,8 +617,8 @@ struct ContentView: View {
         }
         incoming = nil
     }
-    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
-    private var liquidTheme: Bool { theme == MirsaTheme.liquid.rawValue }
+    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue // theme only recolors; the floating dock is shared by every theme
+    private var liquidTheme: Bool { true }
     @AppStorage(StoreStyle.key) private var storeStyle = StoreStyle.fallback.rawValue
     /// The single-bar App Store (main dock hidden there) belongs to the New store style only.
     private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
@@ -672,11 +672,6 @@ struct ContentView: View {
         .animation(nil, value: vm.selectedTab)
         .onAppear { loadedTabs.insert(vm.selectedTab) }
         .onChange(of: vm.selectedTab) { _, t in loadedTabs.insert(t) }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !liquidTheme && !chatComposerFocused && !wallpaperMakerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
-                ClassicTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
-            }
-        }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
             // In the New store style the App Store tab draws its own single bottom bar (its
@@ -1263,41 +1258,5 @@ struct LiquidTabChrome: ViewModifier {
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }
-    }
-}
-
-
-/// Classic (non-liquid) bottom bar: all six destinations directly, same ids as the liquid dock.
-struct ClassicTabBar: View {
-    @Binding var selection: AppTab
-    let items: [LiquidTabItem]
-    @ObservedObject private var chatStore = ForgeChatStore.shared
-    @ObservedObject private var chatLocal = ForgeChatLocal.shared
-    private var chatUnread: Int { chatLocal.unreadCount(chatStore.threads) }
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(items) { item in
-                let on = selection == item.tab
-                Button { selection = item.tab } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: item.icon).font(.system(size: 20))
-                            .overlay(alignment: .topTrailing) { if item.tab == .mirsaAI { ForgeChatUnreadDot(count: chatUnread).offset(x: 10, y: -6) } }
-                            .frame(height: 24)
-                        Text(item.title).font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.6)
-                    }
-                    .foregroundStyle(on ? Color.accentColor : Color.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 49)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
-                .accessibilityAddTraits(on ? .isSelected : [])
-            }
-        }
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("mirsa-tab-dock")
-        .environment(\.layoutDirection, .leftToRight)
     }
 }

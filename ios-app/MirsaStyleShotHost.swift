@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// UI-test only (DEBUG + `-MirsaUITestHarness -MirsaStylePage <id>`): hosts one real
 /// screen of the app with harmless fixture data so the style screenshot test can
@@ -38,6 +39,14 @@ struct MirsaStyleShotHost: View {
     private static let fixtureApps: [ManagedApp] = (1...8).map(fixtureApp)
     private static let fixturePersonal: [PersonalLibraryApp] = (1...6).map(fixturePersonalApp)
 
+    #if DEBUG
+    /// Generated locally, no network and no arbitrary URL.
+    private static let fixtureImage: UIImage = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { c in
+        UIColor.systemIndigo.setFill(); c.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+        UIColor.systemOrange.setFill(); c.cgContext.fillEllipse(in: CGRect(x: 200, y: 100, width: 200, height: 200))
+    }
+    #endif
+
     var body: some View {
         switch page {
         case "apps": tab(.apps)
@@ -64,6 +73,10 @@ struct MirsaStyleShotHost: View {
             .preferredColorScheme(.dark)
         case "setup": SetupView()
         case "mirsa-ai-embedded": tab(.mirsaAI)
+        #if DEBUG
+        case "chat-image-fixture":
+            ZStack { MirsaChatTheme.bg.ignoresSafeArea(); MirsaTappableImage(image: Self.fixtureImage, maxWidth: 220, maxHeight: 200, cornerRadius: 14) }
+        #endif
         case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(.dark)
         default: sheetHost
         }

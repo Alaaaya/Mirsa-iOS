@@ -79,7 +79,7 @@ struct ChatAttachmentMetaChip: View {
     var body: some View {
         Group {
             if meta.kind == "image", !unavailable, let image {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 200).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                MirsaTappableImage(image: image, maxWidth: 220, maxHeight: 200, cornerRadius: 14)
             } else {
                 chip
             }
