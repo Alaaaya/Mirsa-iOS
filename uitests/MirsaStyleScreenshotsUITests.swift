@@ -135,6 +135,39 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Physical viewport and responsive tab round trips on the actual Tools hierarchy.
+    /// Does not open media pickers, apply/delete wallpapers or restart the screen.
+    func testTendiesViewportAndReturn() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang)
+            let tools = app.buttons["main-tab-Pairing"]
+            let ai = app.buttons["main-tab-Mirsa AI"]
+            let tendies = app.buttons["tools-section-wallpapers"]
+            XCTAssertTrue(tendies.waitForExistence(timeout: 10))
+            tendies.tap()
+            let flash = app.buttons["wallpaper-flash"]
+            XCTAssertTrue(flash.waitForExistence(timeout: 10))
+            for round in 0..<3 {
+                let screen = app.windows.firstMatch.frame
+                for id in ["wallpaper-flash", "wallpaper-request", "main-tab-Pairing", "main-tab-Mirsa AI"] {
+                    let control = app.buttons[id]
+                    XCTAssertTrue(control.isHittable, "Unresponsive or clipped " + id)
+                    XCTAssertGreaterThanOrEqual(control.frame.minX, screen.minX - 1)
+                    XCTAssertLessThanOrEqual(control.frame.maxX, screen.maxX + 1)
+                }
+                XCTAssertTrue(tools.isSelected)
+                shot(app, lang + "_tendies_viewport_" + String(round))
+                ai.tap()
+                XCTAssertTrue(ai.isSelected)
+                tools.tap()
+                XCTAssertTrue(flash.waitForExistence(timeout: 5))
+                XCTAssertTrue(flash.isHittable)
+            }
+            app.terminate()
+        }
+    }
+
     /// The actual result card must expose the wallpaper action, never IPA installation or injection.
     /// Download integrity and existing library import are exercised separately by the unit suite.
     func testTendiesArtifactCard() {

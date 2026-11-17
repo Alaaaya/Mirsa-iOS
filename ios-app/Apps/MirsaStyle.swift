@@ -176,6 +176,9 @@ struct MirsaScreenAnchored<Content: View>: View {
                 .offset(x: canvas.minX - local.minX, y: canvas.minY - local.minY)
                 .environment(\.layoutDirection, .leftToRight)
         }
+        // Global canvas offsets are physical coordinates, even in an RTL Form.
+        // Set this on the geometry host, not only its oversized child.
+        .environment(\.layoutDirection, .leftToRight)
         .ignoresSafeArea()
         .clipped()
         .allowsHitTesting(false)
@@ -195,7 +198,6 @@ struct LiquidTabItem: Identifiable {
 struct LiquidTabBar: View {
     @Binding var selection: AppTab
     let items: [LiquidTabItem]
-    @Namespace private var ns
     @ObservedObject private var chatStore = ForgeChatStore.shared
     @ObservedObject private var chatLocal = ForgeChatLocal.shared
     private var chatUnread: Int { chatLocal.unreadCount(chatStore.threads) }
@@ -224,7 +226,8 @@ struct LiquidTabBar: View {
                                 .opacity(0.9)
                                 .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 1))
                                 .shadow(color: MirsaPalette.accent.opacity(0.45), radius: 8, y: 3)
-                                .matchedGeometryEffect(id: "tab", in: ns)
+                                // Cell-local highlight cannot be stranded between tabs
+                                // if a navigation/Form layout changes during selection.
                         }
                     }
                     .contentShape(Capsule())

@@ -633,7 +633,12 @@ struct ContentView: View {
     private func sixTab<C: View>(_ tab: AppTab, @ViewBuilder _ content: () -> C) -> some View {
         if loadedTabs.contains(tab) || vm.selectedTab == tab {
             let on = vm.selectedTab == tab
-            content()
+            GeometryReader { viewport in
+                content()
+                    // Bound the UIKit navigation/Form host to its offered viewport.
+                    // Its intrinsic content must not widen the shared ZStack/dock.
+                    .frame(width: viewport.size.width, height: viewport.size.height)
+            }
                 // NavigationStack owns UIKit-backed bars that can escape opacity alone.
                 // Keep the subtree/state alive, but clip inactive tabs to an empty viewport.
                 .frame(width: on ? nil : 0, height: on ? nil : 0)
