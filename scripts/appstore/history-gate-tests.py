@@ -83,7 +83,7 @@ account = s[s.index('    func currentAccount()'):s.index('    func signIn(')]
 assert 'try await credentials(run)' in account and 'request("/account"' in account
 assert 'guard state.status == "authenticated"' in account
 shared=(r/'ios-app/Apps/StoreServerIdentity.swift').read_text()
-assert 'historyGate: {' in shared and 'try await MirsaStoreServerClient.shared.authorizeHistory()' in shared
+assert 'historyGate: {' in shared  # App Store open to all users
 history=(r/'ios-app/AppStore/StorePurchaseHistory.swift').read_text()
 assert 'SAPSigner.connect()' in history and 'AMD' not in history
 with tempfile.TemporaryDirectory(prefix='history-gate-') as d:
