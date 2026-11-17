@@ -94,7 +94,12 @@ class DiagnosticContractTests(unittest.TestCase):
             self.assertIn(token, main)
             self.assertNotIn(token, tools)
         self.assertEqual(ui.count('.accessibilityIdentifier("wallpaper-respring")'), 1)
-        self.assertLess(ui.index('.accessibilityIdentifier("wallpaper-respring")'), ui.index('MirsaWallpaperManagementSection('))
+        self.assertIn('wallpaper-install-selected', main)
+        self.assertIn('wallpaper-respring', main)
+        self.assertNotIn('wallpaper-respring', tools)
+        self.assertLess(main.index('wallpaper-install-selected'), main.index('wallpaper-respring'))
+        self.assertIn('Task { await vm.flashSelectedTendies() }', ui)
+        self.assertIn('if selectedCount >= 1 { installSelectedNow(); return }', ui)
         self.assertIn('Button { offerRespring() }', ui)
         for icon in ['"checklist"', '"square.3.layers.3d"']:
             self.assertIn(icon, main)

@@ -95,11 +95,12 @@ struct TendiesView: View {
                             .frame(maxWidth: .infinity)
                         } else {
                             Button {
+                                if selectedCount >= 1 { installSelectedNow(); return }
                                 pickedInstallIDs = []
                                 installAfterPicking = true
                                 showFilePicker = true
                             } label: {
-                                Label(TendiesPageText.text(.install), systemImage: "sparkles")
+                                Label(selectedCount >= 1 ? TendiesPageText.selected(selectedCount) : TendiesPageText.text(.install), systemImage: "sparkles")
                                     .font(.headline).lineLimit(2).minimumScaleFactor(0.8)
                                     .frame(maxWidth: .infinity, minHeight: 48)
                             }
@@ -132,18 +133,6 @@ struct TendiesView: View {
                     } else if case .done(ok: true) = vm.tendiesFlashPhase, !vm.tendiesInstalledNew {
                         Text(TendiesPageText.text(.nothingNew))
                     }
-                }
-
-                // Standalone, directly under the primary install/request actions (not inside collapsed tools).
-                Section {
-                        Button { offerRespring() } label: {
-                            Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
-                        }
-                        .disabled(videoApplyRunning || respringPresentation.isPresented)
-                        .accessibilityIdentifier("wallpaper-respring")
-                        Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("wallpaper-flash-help")
                 }
 
                 MirsaWallpaperManagementSection(
@@ -181,6 +170,23 @@ struct TendiesView: View {
                     }.frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
 
+                if selectedCount >= 1 {
+                    Button { installSelectedNow() } label: {
+                        Label(TendiesPageText.selected(selectedCount), systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.green)
+                    .disabled(videoApplyRunning || respringPresentation.isPresented)
+                    .accessibilityIdentifier("wallpaper-install-selected")
+                }
+                Button { offerRespring() } label: {
+                    Label(ws(.respringConfirm), systemImage: "arrow.clockwise")
+                }
+                .disabled(videoApplyRunning || respringPresentation.isPresented)
+                .accessibilityIdentifier("wallpaper-respring")
+                Text(WallpaperMakerStrings.text(.respringHelp)).font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("wallpaper-flash-help")
                         Button { installAfterPicking = false; showFilePicker = true } label: {
                             Label(WallpaperMakerStrings.text(vm.tendieItems.isEmpty ? .chooseTendies : .importMore), systemImage: "doc.badge.plus")
                         }
@@ -318,6 +324,15 @@ struct TendiesView: View {
                                                isSelected: false)]
                     vm.tendiesFlashLog = (1...24).map { "Layout fixture log line \($0), no device action performed." }
                 }
+                if MirsaUITestHarness.active {
+                    if ProcessInfo.processInfo.arguments.contains("-MirsaWallpaperSelectedFixture") {
+                        vm.tendieItems = (1...3).map { n in
+                            TendieItem(name: "Layout fixture \(n)", fileName: "layout-fixture-\(n).tendies",
+                                       relativePath: "layout-fixture-\(n).tendies", posterType: .suggestedPhotos,
+                                       isSelected: n == 1)
+                        }
+                    }
+                }
                 #endif
             }
             .task {
@@ -358,6 +373,13 @@ struct TendiesView: View {
         for index in vm.tendieItems.indices {
             vm.tendieItems[index].isSelected = pickedInstallIDs.contains(vm.tendieItems[index].id)
         }
+    }
+
+    private func installSelectedNow() {
+        guard !videoApplyRunning, !respringPresentation.isPresented, selectedCount >= 1 else { return }
+        vm.errorMessage = nil
+        installStartedThisSession = true
+        Task { await vm.flashSelectedTendies() }
     }
 
     private func offerRespring() {
