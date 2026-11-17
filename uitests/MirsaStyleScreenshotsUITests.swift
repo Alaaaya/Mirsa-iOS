@@ -193,13 +193,14 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
-    /// All six alternate icons plus Original, uncropped in the settings picker.
+    /// Alternate icon selection was removed; Settings must not expose it.
     func testAppIconPickerAllIcons() {
         continueAfterFailure = false
         for lang in ["ar", "en"] {
             let app = launch("settings", lang: lang)
-            for i in 0...6 { XCTAssertTrue(app.buttons["mirsa.icon.\(i)"].waitForExistence(timeout: 10), "icon \(i)") }
-            shot(app, lang + "_450_icons")
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+            for i in 0...6 { XCTAssertFalse(app.buttons["mirsa.icon.\(i)"].exists) }
+            shot(app, lang + "_primary_icon_only")
             app.terminate()
         }
     }
