@@ -66,6 +66,8 @@ struct ToolsTab: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.mirsaPress)
+                .accessibilityIdentifier("tools-section-" + s.rawValue)
+                .accessibilityAddTraits(section == s ? .isSelected : [])
             }
         }
         .padding(4)
