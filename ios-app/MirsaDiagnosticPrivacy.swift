@@ -29,10 +29,15 @@ enum MirsaDiagnosticPrivacy {
     }()
 
     private static let unicodeRegex = try! NSRegularExpression(pattern: #"\\u([0-9a-fA-F]{4})"#)
-    private static let oscRegex = try! NSRegularExpression(pattern: "\u{1B}\\][^\u{07}\u{1B}]*(\u{07}|\u{1B}\\\\)")
     /// Keeps already-sanitized prefix, sanitizes only appended lines (avoids O(n^2) on main thread).
     static func appending(old: [String], new: [String]) -> [String] {
-        if new.count >= old.count, Array(new.prefix(old.count)) == old { return old + lines(Array(new.dropFirst(old.count))) }
+        if new.count >= old.count, new.prefix(old.count).elementsEqual(old) {
+            let stream = Stream()
+            // Recover split PEM state from sanitized boundary markers, without re-filtering history.
+            let boundary = old.last { $0 == "[private material begin]" || $0 == "[private material end]" }
+            if boundary == "[private material begin]" { _ = stream.line("[private material begin]") }
+            return old + new.dropFirst(old.count).map { stream.line($0) }
+        }
         return lines(new)
     }
     static func line(_ input: String) -> String {
