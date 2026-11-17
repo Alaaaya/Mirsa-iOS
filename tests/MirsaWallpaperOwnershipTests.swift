@@ -328,6 +328,59 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         try fm.createSymbolicLink(at: root.appendingPathComponent("redirect"), withDestinationURL: file)
         XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root))
     }
+    func testOwnedDeleteSnapshotAllowsLargeHardlinkButPreservesExternalInode() throws {
+        let base = try temporaryRoot(), fm = FileManager.default
+        var owned = record()
+        let root = base.appendingPathComponent(owned.relative)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let outside = base.appendingPathComponent("outside-video")
+        XCTAssertTrue(fm.createFile(atPath: outside.path, contents: Data([7])))
+        let handle = try FileHandle(forWritingTo: outside)
+        try handle.truncate(atOffset: UInt64(MirsaCustomWallpapers.maxTreeBytes + 1))
+        try handle.close()
+        let linked = root.appendingPathComponent("video.mov")
+        try fm.linkItem(at: outside, to: linked)
+        var node = stat()
+        XCTAssertEqual(lstat(root.path, &node), 0)
+        owned.copied = true; owned.device = UInt64(node.st_dev); owned.inode = UInt64(node.st_ino)
+        owned.paths = ["F:video.mov"]
+        // Generic content classification remains bounded and cannot acquire ownership.
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root))
+        let first = try MirsaCustomWallpapers.snapshot(root, ownedRecord: owned)
+        XCTAssertEqual(first.paths, ["F:video.mov"])
+        XCTAssertEqual(first, try MirsaCustomWallpapers.snapshot(root, ownedRecord: owned))
+        var wrong = owned; wrong.inode = (owned.inode ?? 0) + 1
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root, ownedRecord: wrong))
+        wrong = owned; wrong.copied = false
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root, ownedRecord: wrong))
+        wrong = owned; wrong.id = UUID().uuidString
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root, ownedRecord: wrong))
+        // Same unlink operation as production: outside hardlink bytes must survive.
+        try fm.removeItem(at: root)
+        XCTAssertEqual(lstat(outside.path, &node), 0)
+        XCTAssertEqual(node.st_size, Int64(MirsaCustomWallpapers.maxTreeBytes + 1))
+        XCTAssertEqual(node.st_nlink, 1)
+        let reader = try FileHandle(forReadingFrom: outside)
+        XCTAssertEqual(try reader.read(upToCount: 1), Data([7]))
+        try reader.close()
+    }
+    func testOwnedDeleteSnapshotStillRejectsSymlinkAndDetectsChanges() throws {
+        let base = try temporaryRoot(), fm = FileManager.default
+        var owned = record()
+        let root = base.appendingPathComponent(owned.relative)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("asset")
+        try Data([1]).write(to: file)
+        var node = stat()
+        XCTAssertEqual(lstat(root.path, &node), 0)
+        owned.copied = true; owned.device = UInt64(node.st_dev); owned.inode = UInt64(node.st_ino)
+        let first = try MirsaCustomWallpapers.snapshot(root, ownedRecord: owned)
+        try Data([1, 2]).write(to: file)
+        XCTAssertNotEqual(first, try MirsaCustomWallpapers.snapshot(root, ownedRecord: owned))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("redirect"), withDestinationURL: file)
+        XCTAssertThrowsError(try MirsaCustomWallpapers.snapshot(root, ownedRecord: owned))
+    }
+
     func testSnapshotNodeDepthReadLimitsAndTraversalRejectWithoutWriting() throws {
         for path in ["", "../asset", "a//b", "/asset", "a/./b", "a/../b", "a\\b", "a\0b"] {
             XCTAssertFalse(MirsaCustomWallpapers.validRelative(path), path)
