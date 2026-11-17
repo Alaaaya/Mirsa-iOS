@@ -11,7 +11,7 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
     @ViewBuilder let mainContent: () -> Main
     /// Only logs, historical journals, unknown rows and target details remain collapsed.
     @ViewBuilder let extraTools: () -> Extra
-    @State private var toolsOpen = false
+    @StateObject private var diagnosticAccess = MirsaDiagnosticAccess()
 
     @State private var items: [MirsaCustomWallpapers.Item] = []
     @State private var busy = false
@@ -84,15 +84,6 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
             mainContent()
 
             Section {
-                    ForEach(items.filter { $0.canDelete }) { rec in
-                        // Deletable rows keep their separate inspect action here too.
-                        HStack {
-                            Text(cardTitle(rec)).font(.caption).lineLimit(1)
-                            Spacer()
-                            Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
-                                .buttonStyle(.bordered).disabled(disabled)
-                        }
-                    }
                     Button { reload() } label: { Label(t(.refresh), systemImage: "arrow.clockwise") }
                         .disabled(disabled)
                         .accessibilityIdentifier("wallpaper-refresh")
@@ -107,32 +98,24 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
                     }
             }
 
-            // One closed tools group: maintenance only.
-            Section {
-                // Keep the header identifier on its own button. On iOS 26 a
-                // DisclosureGroup identifier propagates into the expanded rows,
-                // hiding their explicit control identifiers from accessibility.
-                Button { withAnimation { toolsOpen.toggle() } } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(TendiesPageText.text(.tools)).font(.headline)
-                            Text(TendiesPageText.text(.toolsHint)).font(.caption).foregroundColor(.secondary)
+            // Owner-only, closed diagnostics. Ordinary maintenance remains above.
+            MirsaOwnerDiagnostics(access: diagnosticAccess) {
+                    ForEach(items.filter { $0.canDelete }) { rec in
+                        // Deletable rows keep their separate inspect action here too.
+                        HStack {
+                            Text(MirsaDiagnosticPrivacy.line(cardTitle(rec))).font(.caption).lineLimit(1)
+                            Spacer()
+                            Button { inspect(rec) } label: { Text(t(.inspect)).font(.caption.bold()) }
+                                .buttonStyle(.bordered).disabled(disabled)
                         }
-                        Spacer()
-                        Image(systemName: toolsOpen ? "chevron.down" : "chevron.forward")
-                            .font(.caption.bold()).foregroundColor(.secondary)
-                    }.contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("wallpaper-tools")
-                if toolsOpen {
+                    }
                     extraTools()
                     ForEach(items.filter { !$0.canDelete }) { rec in
                         HStack(spacing: 10) {
                             thumb(rec)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(cardTitle(rec)).font(.subheadline.bold()).lineLimit(1)
-                                Text(rec.id).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
+                                Text(MirsaDiagnosticPrivacy.line(cardTitle(rec))).font(.subheadline.bold()).lineLimit(1)
+                                Text(MirsaDiagnosticPrivacy.line(rec.id)).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
                                 Label(t(.unknownWarning), systemImage: "exclamationmark.triangle")
                                     .font(.caption2).foregroundColor(.orange)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -148,7 +131,6 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
                         Text(t(.ownedFooter))
                         Text(t(.importRemoveHint))
                     }.font(.caption2).foregroundColor(.secondary)
-                }
             }
         }
         .onAppear { reload(); reloadJournal() }
@@ -186,12 +168,12 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
         ForEach(journal) { rec in
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(rec.title.isEmpty ? rec.id : rec.title).font(.subheadline.bold()).lineLimit(1)
+                    Text(MirsaDiagnosticPrivacy.line(rec.title.isEmpty ? rec.id : rec.title)).font(.subheadline.bold()).lineLimit(1)
                     Spacer()
                     Text(rec.copied ? t(.journalCopied) : t(.journalPending)).font(.caption2).foregroundColor(.secondary)
                 }
-                Text(rec.id).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
-                Button { pendingReconcile = rec } label: { Text(t(.reconcile)).font(.caption.bold()) }
+                Text(MirsaDiagnosticPrivacy.line(rec.id)).font(.caption2.monospaced()).foregroundColor(.secondary).lineLimit(1)
+                Button { Task { await diagnosticAccess.perform { pendingReconcile = rec } } } label: { Text(t(.reconcile)).font(.caption.bold()) }
                     .buttonStyle(.bordered).disabled(disabled)
             }
         }
@@ -225,6 +207,7 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
 
     private func reconcile(_ rec: MirsaWallpaperJournal.Record) {
         guard !disabled else { return }
+        Task { await diagnosticAccess.perform {
         let box = StateBox()
         run({ lines in
             box.state = try MirsaWallpaperJournal.inspect(rec, log: { lines.add($0) })
@@ -235,10 +218,12 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
             else if box.state == .absent { failed = false; message = t(.reconcileClearedDone); reload() }
             else { failed = false; presentRecord = rec }
         })
+        } }
     }
 
     private func deleteJournalItem(_ rec: MirsaWallpaperJournal.Record) {
         guard !disabled else { return }
+        Task { await diagnosticAccess.perform {
         log("DELETE CONFIRMED by user for journal UUID " + rec.id)
         run({ lines in
             lines.add("DELETE IDENTITY CHECK exact journal UUID " + rec.id)
@@ -248,6 +233,7 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
             if let err { log("DELETE RESULT error " + err.localizedDescription); report(err, "") }
             else { log("DELETE RESULT success; offering respring"); failed = false; message = t(.deleteDone); onDeleted() }
         })
+        } }
     }
 
     private func reload() {
@@ -262,15 +248,17 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
 
     private func inspect(_ rec: MirsaCustomWallpapers.Item) {
         guard !disabled else { return }
+        Task { await diagnosticAccess.perform {
         run({ lines in try MirsaWallpaperDiagnostics.inspect(rec, log: { lines.add($0) }) }, done: { err in
             if let err { report(err, "") }
             else { failed = false; message = t(.diagnosticDone) }
         })
+        } }
     }
 
     private func report(_ error: Error, _ prefix: String) {
         failed = true
-        message = t(.failedPrefix) + MirsaWallpaperActionStrings.localizedError(error.localizedDescription)
+        message = MirsaDiagnosticPrivacy.line(t(.failedPrefix) + MirsaWallpaperActionStrings.localizedError(error.localizedDescription))
         log("MANAGEMENT ERROR " + error.localizedDescription)
     }
 
@@ -302,6 +290,6 @@ private final class StateBox: @unchecked Sendable { var state = MirsaWallpaperJo
 private final class LogBox: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
-    func add(_ s: String) { lock.lock(); lines.append(s); lock.unlock() }
+    func add(_ s: String) { lock.lock(); lines.append(MirsaDiagnosticPrivacy.line(s)); lock.unlock() }
     var all: [String] { lock.lock(); defer { lock.unlock() }; return lines }
 }

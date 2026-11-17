@@ -390,7 +390,6 @@ enum MirsaWallpaperJournal {
 enum MirsaWallpaperEvidence {
     static let lock = NSLock()
     static let maxEvents = 256, maxLine = 2048, maxBytes = 2 * 1024 * 1024
-    static let session = UUID().uuidString
     static var file: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MirsaWallpaperEvidence", isDirectory: true)
@@ -405,15 +404,14 @@ enum MirsaWallpaperEvidence {
               node.st_size <= Int64(maxBytes) else {
             throw PosterBoardStore.failure("Wallpaper evidence is unavailable or unsafe.")
         }
-        return Array(try JSONDecoder().decode([String].self, from: Data(contentsOf: url)).suffix(maxEvents))
-            .map { String($0.prefix(maxLine)) }
+        return MirsaDiagnosticPrivacy.lines(Array(try JSONDecoder().decode([String].self, from: Data(contentsOf: url)).suffix(maxEvents)))
     }
     static func append(_ line: String, at url: URL) throws {
         lock.lock(); defer { lock.unlock() }
         try MirsaWallpaperJournal.safeLocal(url.deletingLastPathComponent())
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var events = try read(at: url)
-        events.append(String(line.prefix(maxLine)))
+        events = MirsaDiagnosticPrivacy.lines(events + [line])
         events = Array(events.suffix(maxEvents))
         try JSONEncoder().encode(events).write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
@@ -422,13 +420,22 @@ enum MirsaWallpaperEvidence {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         let stamp = ISO8601DateFormatter().string(from: Date())
         let text = stamp + " uptime=" + String(ProcessInfo.processInfo.systemUptime) +
-            " build=" + build + " session=" + session + " " + line
+            " build=" + build + " " + line
         do { try append(text, at: file); return true } catch { return false }
     }
     static func restored() -> [String] {
         lock.lock(); defer { lock.unlock() }
-        do { return try read(at: file).map { "HISTORY " + $0 } }
-        catch { return ["HISTORY UNAVAILABLE " + error.localizedDescription] }
+        do { return try restore(at: file) }
+        catch { return [MirsaDiagnosticPrivacy.line("HISTORY UNAVAILABLE " + error.localizedDescription)] }
+    }
+    /// Caller holds lock. Rewrites historical records, but never creates missing history.
+    static func restore(at url: URL) throws -> [String] {
+        let events = try read(at: url)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try JSONEncoder().encode(events).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
+        return events.map { "HISTORY " + $0 }
     }
     static func captureVisible(_ lines: [String]) {
         for line in lines where ["REFRESH", "DELETE", "CLEANUP", "CUSTOM LIST", "Removed absent", "❌ Error:"]
@@ -446,6 +453,6 @@ enum MirsaWallpaperEvidence {
             " mode=" + String(node.st_mode) + " device=" + String(node.st_dev) +
             " inode=" + String(node.st_ino) + " mtime=" + String(node.st_mtimespec.tv_sec)
         record(line)
-        log(line)
+        log(MirsaDiagnosticPrivacy.line(line))
     }
 }

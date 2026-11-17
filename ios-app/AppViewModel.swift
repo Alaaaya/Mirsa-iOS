@@ -9,7 +9,17 @@ import AirliftFFI
 final class AppViewModel: ObservableObject {
 
     /// Static sink for Rust log lines — set in init so AirliftApp can forward them.
-    static var sharedLogSink: ((String) -> Void)? = nil
+    private static var diagnosticSink: ((String) -> Void)?
+    static var sharedLogSink: ((String) -> Void)? {
+        get { diagnosticSink }
+        set {
+            if let sink = newValue {
+                let stream = MirsaDiagnosticPrivacy.Stream()
+                diagnosticSink = { sink(stream.line($0)) }
+            }
+            else { diagnosticSink = nil }
+        }
+    }
     static weak var shared: AppViewModel? = nil
 
     // MARK: - Pairing
@@ -41,7 +51,11 @@ final class AppViewModel: ObservableObject {
     @Published var cards: [CardItem] = []
     @Published var cardFlashPhase: FlashPhase = .idle
     @Published var cardFlashProgress: Double = 0
-    @Published var cardFlashLog: [String] = []
+    @Published private var safe_cardFlashLog: [String] = []
+    var cardFlashLog: [String] {
+        get { safe_cardFlashLog }
+        set { safe_cardFlashLog = MirsaDiagnosticPrivacy.lines(newValue) }
+    }
 
     enum FlashPhase: Equatable {
         case idle, running, done(ok: Bool)
@@ -69,7 +83,11 @@ final class AppViewModel: ObservableObject {
 
     @Published var passthmFlashPhase: FlashPhase = .idle
     @Published var passthmFlashProgress: Double = 0
-    @Published var passthmFlashLog: [String] = []
+    @Published private var safe_passthmFlashLog: [String] = []
+    var passthmFlashLog: [String] {
+        get { safe_passthmFlashLog }
+        set { safe_passthmFlashLog = MirsaDiagnosticPrivacy.lines(newValue) }
+    }
 
     // MARK: - Tendies / Wallpapers tab
     @Published var tendieItems: [TendieItem] = []
@@ -82,11 +100,15 @@ final class AppViewModel: ObservableObject {
     /// False when the last install had nothing new (everything skipped): no respring offer.
     @Published var tendiesInstalledNew = true
     @Published var tendiesFlashProgress: Double = 0
-    @Published var tendiesFlashLog: [String] = [] {
-        didSet {
-            // Capture only newly appended action markers, never replayed history.
-            if tendiesFlashLog.count > oldValue.count {
-                MirsaWallpaperEvidence.captureVisible(Array(tendiesFlashLog.dropFirst(oldValue.count)))
+    @Published private var safe_tendiesFlashLog: [String] = []
+    var tendiesFlashLog: [String] {
+        get { safe_tendiesFlashLog }
+        set {
+            let sanitized = MirsaDiagnosticPrivacy.lines(newValue)
+            let previousCount = safe_tendiesFlashLog.count
+            safe_tendiesFlashLog = sanitized
+            if sanitized.count > previousCount {
+                MirsaWallpaperEvidence.captureVisible(Array(sanitized.dropFirst(previousCount)))
             }
         }
     }
@@ -113,7 +135,11 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Shared
     @Published var errorMessage: String? = nil
-    @Published var log: [String] = []
+    @Published private var safe_log: [String] = []
+    var log: [String] {
+        get { safe_log }
+        set { safe_log = MirsaDiagnosticPrivacy.lines(newValue) }
+    }
     @Published var showDeletePairingConfirm: Bool = false
 
     private let storageKeys = [

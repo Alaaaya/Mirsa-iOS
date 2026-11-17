@@ -39,7 +39,7 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         let restored = try MirsaWallpaperEvidence.read(at: url)
         XCTAssertEqual(restored.count, MirsaWallpaperEvidence.maxEvents)
         XCTAssertTrue(restored.allSatisfy { $0.count <= MirsaWallpaperEvidence.maxLine })
-        XCTAssertTrue(restored.first?.hasPrefix("1x") == true)
+        XCTAssertEqual(restored.first, "[opaque]") // Long identifiers must never survive evidence.
     }
     func testPersistentEvidenceRejectsLinksAndDoesNotOverwriteCorruption() throws {
         let root = try temporaryRoot(), target = root.appendingPathComponent("keep")

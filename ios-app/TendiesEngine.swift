@@ -343,12 +343,13 @@ public final class TendiesEngine {
         progress: @escaping (Double) -> Void
     ) async throws -> [String] {
         let output = log
+        let diagnosticStream = MirsaDiagnosticPrivacy.Stream()
         let log: (String) -> Void = { line in
             // Synchronous persistence before the async UI log, so respring cannot erase it.
             if ["INSTALL", "COPY", "JOURNAL", "CLEANUP"].contains(where: { line.hasPrefix($0) }) {
                 if !MirsaWallpaperEvidence.record(line) { output("EVIDENCE WRITE FAILED; persistent diagnostics unavailable") }
             }
-            output(line)
+            output(diagnosticStream.line(line))
         }
         log("INSTALL BEGIN items=" + String(items.count) + " container=" + containerPath)
         // Completion means byte-for-byte verified copy, not unobserved gallery registration.
