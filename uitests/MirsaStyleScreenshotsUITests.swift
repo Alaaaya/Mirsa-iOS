@@ -89,6 +89,39 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Exercise the actual six-tab dock and unchanged chat, never a replacement UI.
+    func testMirsaAIBottomTab() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang, extra: ["-MirsaChatFixture", "-MirsaChatEmptyFixture"])
+            let ids = ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"]
+            let buttons = ids.map { app.buttons["main-tab-" + $0] }
+            for button in buttons { XCTAssertTrue(button.waitForExistence(timeout: 10)); XCTAssertTrue(button.isHittable) }
+            for index in 1..<buttons.count { XCTAssertLessThan(buttons[index - 1].frame.midX, buttons[index].frame.midX) }
+            // AI is not duplicated in the top tools segments.
+            XCTAssertEqual(app.buttons.matching(identifier: "main-tab-Mirsa AI").count, 1)
+            XCTAssertFalse(app.buttons["chat-new"].exists)
+            shot(app, lang + "_442_tools_bottom_bar")
+            buttons[2].tap()
+            XCTAssertTrue(app.buttons["chat-new"].waitForExistence(timeout: 10))
+            shot(app, lang + "_442_ai_bottom_tab")
+            app.buttons["chat-new"].tap()
+            XCTAssertTrue(app.staticTexts["chat-welcome"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch.exists)
+            shot(app, lang + "_442_ai_conversation")
+            app.buttons["chat-back"].tap()
+            XCTAssertTrue(app.buttons["main-tab-Pairing"].waitForExistence(timeout: 10))
+            app.buttons["main-tab-Pairing"].tap()
+            XCTAssertTrue(tap(app, ["Tendies"]))
+            XCTAssertTrue(app.buttons["wallpaper-flash"].waitForExistence(timeout: 10))
+            // The sixth destination must remain directly reachable, not replaced by More.
+            app.buttons["main-tab-Personal Apps Hub"].tap()
+            shot(app, lang + "_442_certificate_sixth_tab")
+            XCTAssertTrue(app.buttons["main-tab-Mirsa AI"].isHittable)
+            app.terminate()
+        }
+    }
+
     /// Real implemented page, no replacement mock. Tools must start closed, and both
     /// primary actions stay on the same row in Arabic RTL and English LTR.
     func testTendiesReorganizedPage() {

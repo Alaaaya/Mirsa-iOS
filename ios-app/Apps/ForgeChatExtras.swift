@@ -515,7 +515,7 @@ struct ForgeChatUnreadDot: View {
     }
 }
 
-/// Tab bar badge for the Tools tab (where Mirsa AI lives).
+/// Tab bar badge for the dedicated Mirsa AI tab.
 struct ForgeChatUnreadTabBadge: ViewModifier {
     @ObservedObject private var store = ForgeChatStore.shared
     @ObservedObject private var local = ForgeChatLocal.shared

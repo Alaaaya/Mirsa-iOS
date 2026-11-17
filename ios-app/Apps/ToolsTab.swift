@@ -4,29 +4,20 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        case tweaks, create, wallpapers, device, pairing
+        case tweaks, wallpapers, device, pairing
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .pairing: return "antenna.radiowaves.left.and.right"
             case .device: return "iphone.gen3"
                 case .tweaks: return "wand.and.stars"
-            case .create: return "bubble.left.and.bubble.right"
             case .wallpapers: return "play.rectangle.fill"
             }
         }
     }
-    @State private var section: Section = {
-        #if DEBUG
-        if MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaChatEmbeddedFixture") { return .create }
-        #endif
-        return .pairing
-    }()
+    @State private var section: Section = .pairing
     @Namespace private var ns
     @State private var chatComposerFocused = false
-    @ObservedObject private var chatStore = ForgeChatStore.shared
-    @ObservedObject private var chatLocal = ForgeChatLocal.shared
-    private var unread: Int { chatLocal.unreadCount(chatStore.threads) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,7 +31,6 @@ struct ToolsTab: View {
                 switch section {
                 case .pairing: SetupPairingSheet(showsClose: false)
                 case .device: DeviceToolsView()
-                case .create: ForgeChatRoot(embedded: true).environment(\.layoutDirection, .leftToRight)
                 case .wallpapers: TendiesView()
                 case .tweaks: NavigationView { ForgeView() }.navigationViewStyle(.stack)
                 }
@@ -61,8 +51,7 @@ struct ToolsTab: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
-                            .overlay(alignment: .topTrailing) { if s == .create { ForgeChatUnreadDot(count: unread).offset(x: 12, y: -8) } }
-                        Text(s == .device ? tr("Device", "الجهاز") : s == .create ? ForgeChatText.title : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s == .device ? tr("Device", "الجهاز") : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity)
