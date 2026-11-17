@@ -27,7 +27,8 @@ final class WallpaperMakerTests: XCTestCase {
             alpha[path] = WallpaperForeground.hasTransparency(try XCTUnwrap(UIImage(data: data)?.cgImage))
         }
         let proof: [String: Any] = ["listing": files.keys.sorted(), "alpha": alpha,
-                                    "galleryRegistrationVerified": false, "realVisionSegmentation": false]
+                                    "galleryRegistrationVerified": false, "realVisionSegmentation": false,
+                                    "devicePlaybackVerified": false]
         try JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
             .write(to: root.appendingPathComponent(name + ".json"))
     }
@@ -117,7 +118,9 @@ final class WallpaperMakerTests: XCTestCase {
             XCTAssertNotNil(UIImage(data: bytes))
             XCTAssertTrue(xml.contains("src=\"assets/\(URL(fileURLWithPath: path).lastPathComponent)\""))
         }
-        for state in ["Locked", "Unlock", "Sleep"] { XCTAssertTrue(xml.contains("LKState name=\"\(state)\"")) }
+        if !xml.contains("wallpaperPropertyGroups") {
+            for state in ["Locked", "Unlock", "Sleep"] { XCTAssertTrue(xml.contains("LKState name=\"\(state)\"")) }
+        }
         return xml
     }
     func testBothVariantsCompleteMetadataEveryReferencedAssetAndFreshIDs() throws {
@@ -171,14 +174,21 @@ final class WallpaperMakerTests: XCTestCase {
                            PhotoWallpaper.Effects(floating: true),
                            PhotoWallpaper.Effects(unlock: .zoom, gyro: true, floating: true)] {
                 let layer = WallpaperPhotoLayer(image: photo(), role: .middle)
+                if depth && effect.gyro {
+                    XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5,
+                                                                        depth: depth, effects: effect))
+                    continue
+                }
                 let url = try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5, depth: depth, effects: effect)
                 defer { try? FileManager.default.removeItem(at: url) }
                 let files = try unpack(url)
-                let caml = try checkBundle(depth ? PhotoWallpaper.floatingName : PhotoWallpaper.simpleName, count: 1, files: files)
-                XCTAssertEqual(caml.contains("CASpringAnimation"), effect.unlock != .none)
+                let bundle = effect.gyro ? PhotoWallpaper.simpleName :
+                    depth ? PhotoWallpaper.floatingName : PhotoWallpaper.backgroundName
+                let caml = try checkBundle(bundle, count: 1, files: files)
+                XCTAssertEqual(caml.contains("CASpringAnimation"), !effect.gyro)
                 if effect.unlock != .none {
-                    XCTAssertTrue(caml.contains("targetId=\"#1\"")); XCTAssertTrue(caml.contains("duration=\"0.8\""))
-                    XCTAssertTrue(caml.contains("keyPath=\"\(effect.unlock == .slide ? "position" : "transform")\""))
+                    XCTAssertTrue(caml.contains(effect.unlock == .slide ? "position.y" : "transform.scale.xy"))
+                    XCTAssertFalse(caml.contains("CATransform3D"))
                 }
                 XCTAssertEqual(caml.contains("CAKeyframeAnimation"), effect.floating)
                 if effect.floating {
@@ -187,10 +197,14 @@ final class WallpaperMakerTests: XCTestCase {
                     XCTAssertTrue(caml.contains("autoreverses=\"1\""))
                     XCTAssertTrue(caml.contains("bounds=\"0 0 390 844\""))
                     XCTAssertTrue(caml.contains("bounds=\"0 0 470 924\""))
-                    XCTAssertFalse(caml.contains("keyPath=\"opacity\""))
                 }
                 XCTAssertEqual(caml.contains("transform.translation.x"), effect.gyro)
-                if effect.gyro { XCTAssertTrue(caml.contains("value=\"motion-0\"")); XCTAssertTrue(caml.contains("transform.translation.y")) }
+                if effect.gyro {
+                    XCTAssertTrue(caml.contains("value=\"gyro-0\""))
+                    XCTAssertTrue(caml.contains("transform.translation.y"))
+                    XCTAssertTrue(caml.contains("name=\"FLOATING\""))
+                    XCTAssertFalse(caml.contains("LKState"))
+                }
                 let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
                 XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, effect.gyro)
             }
@@ -223,6 +237,141 @@ final class WallpaperMakerTests: XCTestCase {
             XCTAssertTrue(xml.contains("beginTimeMode=\"absolute\""))
             XCTAssertTrue(xml.contains("position.x"))
             XCTAssertTrue(xml.contains("position.y"))
+        }
+    }
+
+
+    /// Parse the ACTUAL generated archive, not the SwiftUI preview or helper output.
+    private final class ExportMotionProbe: NSObject, XMLParserDelegate {
+        var animations: [[String: String]] = []
+        var values: [[Double]] = []
+        private var current: Int?
+        func parser(_ parser: XMLParser, didStartElement elementName: String,
+                    namespaceURI: String?, qualifiedName qName: String?,
+                    attributes attributeDict: [String: String]) {
+            if attributeDict["type"] == "CAKeyframeAnimation" {
+                current = animations.count
+                animations.append(attributeDict); values.append([])
+            } else if elementName == "real", let index = current,
+                      let text = attributeDict["value"], let value = Double(text) {
+                values[index].append(value)
+            }
+        }
+        func parser(_ parser: XMLParser, didEndElement elementName: String,
+                    namespaceURI: String?, qualifiedName qName: String?) {
+            if elementName == "animation" || elementName == "p" { current = nil }
+        }
+    }
+
+    func testActualAnimatedExportsUseProvenRouteGeometryEndpointsDurationsAndLoopRange() throws {
+        let photos: [WallpaperPhotoLayer] = [
+            .init(image: photo(.blue), role: .background),
+            .init(image: photo(.green, transparent: true), role: .middle),
+            .init(image: photo(.red, transparent: true), role: .foreground)]
+        let specs: [(WallpaperPhotoLayer.Role, String, Double, Double, Double, Double)] = [
+            (.background, PhotoWallpaper.backgroundName, 4, 3, 18, 23),
+            (.middle, PhotoWallpaper.floatingName, 13, 7, 12, 15),
+            (.foreground, PhotoWallpaper.foregroundName, 28, 12, 8, 11)]
+        for depth in [false, true] {
+            // Preserve the original device-confirmed float-only route independently of the new engine.
+            let archive = try PhotoWallpaper.makeArchive(layers: photos, screenAspect: 0.5, depth: depth,
+                effects: .init(floating: true))
+            defer { try? FileManager.default.removeItem(at: archive) }
+            let files = try unpack(archive)
+            try recordEvidence(archive, name: depth ? "motion-proven-depth" : "motion-proven-manual")
+            let plist = try XCTUnwrap(try PropertyListSerialization.propertyList(
+                from: file("/Wallpaper.plist", in: files), format: nil) as? [String: Any])
+            XCTAssertEqual(plist["family"] as? String, "WWDC22")
+            XCTAssertEqual(plist["logicalScreenClass"] as? String, "390w-844h@3x~iphone")
+            XCTAssertEqual(plist["version"] as? Int, 1)
+            XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, false)
+            let route = try XCTUnwrap((((plist["assets"] as? [String: Any])?["lockAndHome"]
+                as? [String: Any])?["default"]) as? [String: Any])
+            XCTAssertEqual(route["type"] as? String, "LayeredAnimation")
+            XCTAssertEqual(route["backgroundAnimationFileName"] as? String, PhotoWallpaper.backgroundName)
+            XCTAssertEqual(route["floatingAnimationFileNameKey"] as? String, PhotoWallpaper.floatingName)
+            XCTAssertEqual(route["foregroundAnimationFileName"] as? String, PhotoWallpaper.foregroundName)
+            for (_, bundle, _, _, _, _) in specs {
+                let data = try file(bundle + "/main.caml", in: files)
+                let xml = String(decoding: data, as: UTF8.self)
+                let parser = XMLParser(data: data), probe = ExportMotionProbe()
+                parser.delegate = probe
+                XCTAssertTrue(parser.parse())
+                let expected = depth ? specs.filter { $0.1 == bundle }
+                    : bundle == PhotoWallpaper.backgroundName ? specs : []
+                XCTAssertEqual(probe.animations.count, expected.count * 2)
+                for (index, spec) in expected.enumerated() {
+                    for (axis, center, amplitude, duration) in [
+                        ("position.y", 422.0, spec.3, spec.5), ("position.x", 195.0, spec.2, spec.4)] {
+                        let offset = index * 2 + (axis == "position.y" ? 0 : 1)
+                        guard offset < probe.animations.count else { continue }
+                        let animation = probe.animations[offset]
+                        XCTAssertEqual(animation["keyPath"], axis)
+                        XCTAssertEqual(Double(animation["duration"] ?? ""), duration)
+                        XCTAssertEqual(animation["repeatCount"], "inf")
+                        XCTAssertEqual(animation["repeatDuration"], "inf")
+                        XCTAssertEqual(animation["beginTime"], "1e-100")
+                        XCTAssertEqual(animation["autoreverses"], "1")
+                        XCTAssertEqual(animation["removedOnCompletion"], "0")
+                        XCTAssertEqual(probe.values[offset], [center - amplitude, center + amplitude])
+                    }
+                }
+                XCTAssertTrue(xml.contains("bounds=\"0 0 390 844\""))
+                if !expected.isEmpty { XCTAssertTrue(xml.contains("bounds=\"0 0 470 924\"")) }
+                XCTAssertFalse(xml.contains("keyPath=\"opacity\""))
+                XCTAssertFalse(xml.contains("transform.translation"))
+                XCTAssertFalse(xml.contains("scale("))
+                XCTAssertFalse(xml.contains("<style>"))
+                let index = try XCTUnwrap(try PropertyListSerialization.propertyList(
+                    from: file(bundle + "/index.xml", in: files), format: nil) as? [String: Any])
+                XCTAssertEqual(index["documentWidth"] as? Int, 390)
+                XCTAssertEqual(index["documentHeight"] as? Int, 844)
+                XCTAssertEqual(index["loopingEnabled"] as? Bool, true)
+                XCTAssertEqual(index["loopStart"] as? Double, 0)
+                XCTAssertEqual(index["loopEnd"] as? Double, Double.infinity)
+                XCTAssertEqual(index["unitsInPixelsInPlayer"] as? Bool, false)
+                XCTAssertEqual(index["documentResizesToView"] as? Bool, false)
+            }
+            if !depth {
+                let xml = String(decoding: try file(PhotoWallpaper.backgroundName + "/main.caml", in: files), as: UTF8.self)
+                let positions = try photos.map { layer in try XCTUnwrap(xml.range(of: layer.id.uuidString)?.lowerBound) }
+                XCTAssertEqual(positions, positions.sorted(), "Clock depth off must preserve manual image order")
+            }
+        }
+    }
+
+    func testActualExportEveryDirectionalPresetHasCorrectAxisAndDistinctEndpoints() throws {
+        for preset in PhotoWallpaper.Effects.Motion.allCases {
+            let archive = try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: 0.5,
+                effects: .init(floating: true, motion: preset))
+            defer { try? FileManager.default.removeItem(at: archive) }
+            let files = try unpack(archive)
+            let parser = XMLParser(data: try file(PhotoWallpaper.backgroundName + "/main.caml", in: files))
+            let probe = ExportMotionProbe(); parser.delegate = probe
+            XCTAssertTrue(parser.parse())
+            let horizontal = preset == .float || preset == .left || preset == .right
+            let vertical = preset == .float || preset == .up || preset == .down
+            XCTAssertEqual(probe.animations.count, (horizontal ? 1 : 0) + (vertical ? 1 : 0))
+            for (i, animation) in probe.animations.enumerated() {
+                let isX = animation["keyPath"] == "position.x"
+                XCTAssertEqual(isX ? horizontal : vertical, true)
+                let center = isX ? 195.0 : 422.0, amplitude = isX ? 4.0 : 3.0
+                let reverse = isX ? preset == .left : preset == .up
+                XCTAssertEqual(probe.values[i], reverse
+                    ? [center + amplitude, center - amplitude] : [center - amplitude, center + amplitude])
+                XCTAssertEqual(Double(animation["duration"] ?? ""), isX ? 18 : 23)
+                XCTAssertEqual(animation["repeatCount"], "inf")
+                XCTAssertEqual(animation["repeatDuration"], "inf")
+            }
+        }
+    }
+
+    func testMakerOutputLabelsDistinguishStaticAndAnimationInAllLanguages() {
+        for language in AppLanguage.allCases {
+            XCTAssertNotEqual(WallpaperMakerStrings.text(.staticPhotos, language: language),
+                              WallpaperMakerStrings.text(.animatedPhotos, language: language))
+            XCTAssertEqual(WallpaperMakerStrings.values[.staticPhotos]?.count, 5)
+            XCTAssertEqual(WallpaperMakerStrings.values[.animatedPhotos]?.count, 5)
         }
     }
 
@@ -370,7 +519,7 @@ final class WallpaperMakerTests: XCTestCase {
             let roles = PhotoWallpaper.defaultRoles(existing: 0, adding: n)
             let photos = roles.map { WallpaperPhotoLayer(image: photo(.blue, transparent: $0 == .foreground), role: $0) }
             let url = try PhotoWallpaper.makeArchive(layers: photos, screenAspect: 0.5, depth: true,
-                                                     effects: .init(unlock: .zoom, gyro: true, floating: false))
+                                                     effects: .init(unlock: .zoom, floating: false))
             defer { try? FileManager.default.removeItem(at: url) }
             let files = try unpack(url)
             let pngs = files.keys.filter { $0.hasSuffix(".png") && $0.contains("/assets/") }
@@ -385,7 +534,7 @@ final class WallpaperMakerTests: XCTestCase {
             let fg = String(decoding: try file(PhotoWallpaper.foregroundName + "/main.caml", in: files), as: UTF8.self)
             XCTAssertTrue(fg.contains(photos.last!.id.uuidString))
             let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
-            XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, true)
+            XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, false)
         }
     }
 
@@ -435,6 +584,230 @@ final class WallpaperMakerTests: XCTestCase {
         XCTAssertEqual(try alphaAtCorner(cut[0].id), 1, accuracy: 0.01)
         XCTAssertEqual(try alphaAtCorner(cut[1].id), 0, accuracy: 0.01)
     }
+    // Reference mechanism tests name actual pinned packages, not screenshots/preview guesses.
+    private final class ReferenceXML: NSObject, XMLParserDelegate {
+        final class Node {
+            let name: String; let attributes: [String: String]
+            var children: [Node] = []
+            init(_ name: String, _ attributes: [String: String]) { self.name = name; self.attributes = attributes }
+            var all: [Node] { [self] + children.flatMap(\.all) }
+        }
+        var roots: [Node] = []; var stack: [Node] = []
+        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+                    qualifiedName qName: String?, attributes attributeDict: [String: String]) {
+            let node = Node(elementName, attributeDict)
+            if let parent = stack.last { parent.children.append(node) } else { roots.append(node) }
+            stack.append(node)
+        }
+        func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+            stack.removeLast()
+        }
+        static func read(_ data: Data) throws -> [Node] {
+            let result = ReferenceXML(); let parser = XMLParser(data: data)
+            parser.delegate = result; parser.shouldResolveExternalEntities = false
+            XCTAssertTrue(parser.parse(), String(describing: parser.parserError))
+            return result.roots.flatMap(\.all)
+        }
+    }
+
+    private func referenceNodes(_ files: [String: Data]) throws -> [ReferenceXML.Node] {
+        var all: [ReferenceXML.Node] = []
+        for (path, bytes) in files where path.hasSuffix("/main.caml") {
+            let nodes = try ReferenceXML.read(bytes)
+            let ids = nodes.compactMap { $0.attributes["id"] }
+            XCTAssertEqual(ids.count, Set(ids).count, "duplicate CAML target in \(path)")
+            let names = Set(nodes.compactMap { $0.attributes["name"] })
+            let directory = String(path.dropLast("main.caml".count))
+            for node in nodes {
+                if let target = node.attributes["targetId"] { XCTAssertTrue(ids.contains(target), target) }
+                if let src = node.attributes["src"] {
+                    XCTAssertTrue(src.hasPrefix("assets/")); XCTAssertFalse(src.contains(".."))
+                    XCTAssertNotNil(files[directory + src], "missing local asset \(src)")
+                }
+                if node.name == "layerName", let target = node.attributes["value"] {
+                    XCTAssertTrue(names.contains(target), "parameter target \(target)")
+                }
+                if node.name == "animation", node.attributes["type"] == "CASpringAnimation" {
+                    XCTAssertNotNil(node.attributes["keyPath"], "spring missing key path")
+                }
+            }
+            all += nodes
+        }
+        return all
+    }
+
+    func testReferenceGyroManosabaEnvelopeStrengthAndIndependentTimedNodes() throws {
+        for strength in PhotoWallpaper.Effects.GyroStrength.allCases {
+            let effects = PhotoWallpaper.Effects(unlock: .slide, gyro: true, gyroStrength: strength, floating: true, spin: true)
+            let url = try PhotoWallpaper.makeArchive(layers: [.init(image: photo(), role: .middle)],
+                                                     screenAspect: 0.5, effects: effects)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let files = try unpack(url)
+            let nodes = try referenceNodes(files)
+            let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
+            XCTAssertEqual(plist["family"] as? String, "Marble")
+            XCTAssertEqual(plist["version"] as? Int, 6)
+            XCTAssertEqual(plist["wantsDeviceMotion"] as? Bool, true)
+            let index = try PropertyListSerialization.propertyList(from: file(PhotoWallpaper.simpleName + "/index.xml", in: files), format: nil) as! [String: Any]
+            XCTAssertEqual(Set(index.keys), ["rootDocument"])
+            XCTAssertEqual(nodes.filter { $0.name == "wallpaperParallaxGroups" }.count, 1)
+            let groups = try XCTUnwrap(nodes.first { $0.name == "wallpaperParallaxGroups" }).children
+            XCTAssertEqual(groups.count, 2)
+            for group in groups {
+                let values = Dictionary(uniqueKeysWithValues: group.children.map { ($0.name, $0.attributes["value"] ?? "") })
+                XCTAssertEqual(values["view"], "Floating")
+                XCTAssertEqual(values["layerName"], "gyro-0")
+                XCTAssertEqual(values["mapMaxTo"], String(Int(Double(strength.rawValue) * 0.7)))
+                XCTAssertEqual(values["mapMinTo"], String(-Int(Double(strength.rawValue) * 0.7)))
+            }
+            let state = try XCTUnwrap(nodes.first { $0.attributes["id"] == "state-0" })
+            XCTAssertEqual(state.name, "CATransformLayer")
+            XCTAssertFalse(state.children.contains { $0.name == "animations" })
+            let floatNode = try XCTUnwrap(nodes.first { $0.attributes["id"] == "float-0" })
+            XCTAssertTrue(floatNode.children.contains { $0.name == "animations" })
+            let spin = try XCTUnwrap(nodes.first { $0.attributes["id"] == "spin-0" })
+            XCTAssertTrue(spin.children.contains { $0.name == "animations" })
+            XCTAssertFalse(nodes.contains { $0.name == "LKState" })
+            let propertyGroups = try XCTUnwrap(nodes.first { $0.name == "wallpaperPropertyGroups" }).children
+            XCTAssertEqual(propertyGroups.count, 4)
+            XCTAssertTrue(propertyGroups.allSatisfy { group in
+                group.children.filter { ["v_home", "v_lock", "v_sleep"].contains($0.name) }.count == 3
+            })
+            try recordEvidence(url, name: "Manosaba-Gyro-strength-\(strength.rawValue)-timed-spin")
+        }
+    }
+
+    func testReferenceHatsuneMikuDistinctScenesPersistentStickerAndSleepState() throws {
+        var lock = WallpaperPhotoLayer(image: photo(.blue)); lock.scene = .lock
+        var home = WallpaperPhotoLayer(image: photo(.red)); home.scene = .home
+        var sticker = WallpaperPhotoLayer(image: photo(.green, transparent: true), role: .middle)
+        sticker.homeOffsetX = 0.4; sticker.homeOffsetY = -0.3
+        let effects = PhotoWallpaper.Effects(unlock: .slide, floating: true, dimOnSleep: true)
+        let url = try PhotoWallpaper.makeArchive(layers: [lock, home, sticker], screenAspect: 0.5, effects: effects)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let files = try unpack(url); let nodes = try referenceNodes(files)
+        let populated = try XCTUnwrap(files.first { $0.key.hasSuffix(PhotoWallpaper.backgroundName + "/main.caml") }).value
+        let tree = try ReferenceXML.read(populated)
+        let states = tree.filter { $0.name == "LKState" }
+        XCTAssertEqual(Set(states.compactMap { $0.attributes["name"] }), ["Locked", "Unlock", "Sleep"])
+        func value(_ state: String, _ target: String, _ key: String) throws -> Double {
+            let root = try XCTUnwrap(states.first { $0.attributes["name"] == state })
+            let assignment = try XCTUnwrap(root.all.first {
+                $0.name == "LKStateSetValue" && $0.attributes["targetId"] == target && $0.attributes["keyPath"] == key
+            })
+            return try XCTUnwrap(Double(try XCTUnwrap(assignment.children.first?.attributes["value"])))
+        }
+        XCTAssertEqual(try value("Locked", "state-0", "opacity"), 1)
+        XCTAssertEqual(try value("Unlock", "state-0", "opacity"), 0)
+        XCTAssertEqual(try value("Locked", "state-1", "opacity"), 0)
+        XCTAssertEqual(try value("Unlock", "state-1", "opacity"), 1)
+        XCTAssertLessThan(try value("Unlock", "state-0", "position.y"), 0)
+        XCTAssertGreaterThan(try value("Locked", "state-1", "position.y"), 844)
+        XCTAssertEqual(try value("Locked", "state-2", "opacity"), 1)
+        XCTAssertEqual(try value("Unlock", "state-2", "opacity"), 1)
+        XCTAssertEqual(try value("Sleep", "state-2", "opacity"), 0.25)
+        XCTAssertNotEqual(try value("Locked", "state-2", "position.x"), try value("Unlock", "state-2", "position.x"))
+        XCTAssertEqual(tree.filter { $0.name == "contents" && $0.attributes["src"] != nil }.count, 3)
+        for layer in [lock, home, sticker] {
+            XCTAssertEqual(tree.filter { $0.attributes["src"] == "assets/\(layer.id.uuidString).png" }.count, 1)
+        }
+        XCTAssertEqual(tree.filter { $0.name == "animation" && $0.attributes["type"] == "CAKeyframeAnimation" }.count, 6)
+        XCTAssertTrue(nodes.contains { $0.name == "LKStateTransition" })
+        try recordEvidence(url, name: "Hatsune-Miku-original-scenes-persistent-sticker")
+    }
+
+    func testReferenceParticlesSpinGradientReplicationBlendBlurAndRealSDFExports() throws {
+        let cases: [(String, PhotoWallpaper.Effects, String)] = [
+            ("Snow_Emitters-snow", .init(particles: .snow), "CAEmitterLayer"),
+            ("Autumn_Horizon-original-leaf", .init(particles: .leaves), "CAEmitterLayer"),
+            ("Snow_Emitters-original-star", .init(particles: .stars), "CAEmitterLayer"),
+            ("Spinning_Squares", .init(spin: true), "CAKeyframeAnimation"),
+            ("Zoro-gradient", .init(gradient: true), "CAGradientLayer"),
+            ("WatchOS_Reflect-replicator", .init(replicate: true), "CAReplicatorLayer"),
+            ("WatchOS_Reflect-screen", .init(blend: .screen), "compositingFilter"),
+            ("WatchOS_Reflect-overlay", .init(blend: .overlay), "compositingFilter"),
+            ("WatchOS_Reflect-blur", .init(blur: true), "CAFilter"),
+            ("Minecraft_Liquid_Glass__beta_", .init(liquidGlass: true), "CASDFGlassDisplacementEffect")
+        ]
+        for (reference, effects, expected) in cases {
+            let url = try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: 0.5, effects: effects)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let files = try unpack(url); let nodes = try referenceNodes(files)
+            XCTAssertTrue(nodes.contains { $0.name == expected || $0.attributes["type"] == expected }, reference)
+            if effects.particles != .none {
+                let cells = nodes.filter { $0.name == "CAEmitterCell" }
+                XCTAssertEqual(cells.count, 1)
+                XCTAssertEqual(cells[0].attributes["yAcceleration"], "200")
+                let bitmap = try file("/assets/mirsa-particle.png", in: files)
+                XCTAssertNotNil(UIImage(data: bitmap))
+                XCTAssertEqual(files.filter { $0.key.hasSuffix("/assets/mirsa-particle.png") }.count, 1)
+            }
+            if effects.spin {
+                XCTAssertTrue(nodes.contains { $0.name == "animation" && $0.attributes["keyPath"] == "transform.rotation.z" &&
+                    $0.attributes["repeatCount"] == "inf" })
+            }
+            if effects.liquidGlass {
+                XCTAssertTrue(nodes.contains { $0.name == "CABackdropLayer" })
+                XCTAssertTrue(nodes.contains { $0.name == "CAFilter" && $0.attributes["filter"] == "displacementMap" })
+                XCTAssertTrue(nodes.contains { $0.name == "CASDFElementLayer" })
+                XCTAssertFalse(nodes.contains { $0.attributes["filter"] == "gaussianBlur" })
+            }
+            try recordEvidence(url, name: reference)
+        }
+    }
+
+    func testUnsupportedDepthGyroAndInvalidSceneOffsetsFailRatherThanSilentlyDropping() throws {
+        let layer = WallpaperPhotoLayer(image: photo())
+        XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5, depth: true,
+                                                            effects: .init(gyro: true)))
+        for invalid in [Double.nan, .infinity, 1.001, -1.001] {
+            var broken = layer; broken.homeOffsetX = invalid
+            XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [broken], screenAspect: 0.5))
+        }
+    }
+
+    func testReferenceA7XLightDarkDistinctBindingsWithoutInventedClockOrGyro() throws {
+        var light = WallpaperPhotoLayer(image: photo(.blue)); light.appearance = .light
+        var dark = WallpaperPhotoLayer(image: photo(.red)); dark.appearance = .dark
+        let url = try PhotoWallpaper.makeArchive(layers: [light, dark], screenAspect: 0.5)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let files = try unpack(url)
+        let plist = try PropertyListSerialization.propertyList(from: file("/Wallpaper.plist", in: files), format: nil) as! [String: Any]
+        XCTAssertEqual(plist["appearanceAware"] as? Bool, true)
+        let bytes = try file(PhotoWallpaper.backgroundName + "/main.caml", in: files)
+        let nodes = try ReferenceXML.read(bytes)
+        let states = nodes.filter { $0.name == "LKState" }
+        XCTAssertEqual(Set(states.compactMap { $0.attributes["name"] }),
+                       ["Locked Light", "Unlock Light", "Sleep Light", "Locked Dark", "Unlock Dark", "Sleep Dark"])
+        for state in states {
+            let isLight = try XCTUnwrap(state.attributes["name"]).hasSuffix(" Light")
+            for (target, visible) in [("state-0", isLight), ("state-1", !isLight)] {
+                let assignment = try XCTUnwrap(state.all.first { $0.name == "LKStateSetValue" &&
+                    $0.attributes["targetId"] == target && $0.attributes["keyPath"] == "opacity" })
+                let value = Double(try XCTUnwrap(assignment.children.first?.attributes["value"]))
+                XCTAssertEqual(value, visible ? 1 : 0)
+            }
+        }
+        XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [light, dark], screenAspect: 0.5,
+                                                            effects: .init(gyro: true)))
+        _ = try referenceNodes(files)
+        try recordEvidence(url, name: "A7X-light-dark-original-colours-no-clock")
+    }
+
+    func testReferenceRisingMrKrabsEmitterHasBottomOriginAndNegativeAcceleration() throws {
+        let url = try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: 0.5,
+                                                 effects: .init(particles: .stars, particleDirection: .rising))
+        defer { try? FileManager.default.removeItem(at: url) }
+        let files = try unpack(url); let nodes = try referenceNodes(files)
+        let emitter = try XCTUnwrap(nodes.first { $0.name == "CAEmitterLayer" })
+        XCTAssertEqual(emitter.attributes["geometryFlipped"], "0")
+        XCTAssertEqual(emitter.attributes["emitterPosition"], "195 840")
+        let cell = try XCTUnwrap(nodes.first { $0.name == "CAEmitterCell" })
+        XCTAssertEqual(cell.attributes["yAcceleration"], "-100")
+        XCTAssertEqual(cell.attributes["xAcceleration"], "0")
+        try recordEvidence(url, name: "Mr-krabs-rising-original-star")
+    }
+
 }
 
 extension WallpaperMakerTests {
@@ -491,10 +864,10 @@ extension WallpaperMakerTests {
     }
     func testGeneratedMotionHasBothDirectionsAndNonfinalStateAssignments() throws {
         let archive = try PhotoWallpaper.makeArchive(layers: [.init(image: photo())], screenAspect: 0.5,
-                                                      effects: .init(unlock: .zoom, gyro: true, floating: true))
+                                                      effects: .init(floating: true))
         defer { try? FileManager.default.removeItem(at: archive) }
         let files = try unpack(archive)
-        let caml = try checkBundle(PhotoWallpaper.simpleName, count: 1, files: files)
+        let caml = try checkBundle(PhotoWallpaper.backgroundName, count: 1, files: files)
         for state in ["Locked", "Unlock", "Sleep"] {
             XCTAssertTrue(caml.contains("fromState=\"*\" toState=\"\(state)\""))
             XCTAssertTrue(caml.contains("fromState=\"\(state)\" toState=\"*\""))
@@ -783,5 +1156,6 @@ final class PosterBoardAccessSafetyTests: XCTestCase {
         XCTAssertEqual(WallpaperMakerStrings.text(.deselectAll, language: .arabic), "شيل تحديد الكل")
         XCTAssertFalse(TendiesConnectionHint.matches("Direct PosterBoard access unavailable (lease -106)."))
     }
+
 }
 #endif

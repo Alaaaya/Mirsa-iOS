@@ -7,7 +7,7 @@ class DiagnosticContractTests(unittest.TestCase):
         r = R / "ios-app"
         journal = (r / "MirsaWallpaperJournal.swift").read_text()
         evidence = journal.split("enum MirsaWallpaperEvidence {", 1)[1]
-        for token in ["maxEvents = 256", "maxLine = 2048", "maxBytes", "NSLock()", "options: .atomic", "st_nlink == 1", "HISTORY ", "session=", "uptime=", "build="]:
+        for token in ["maxEvents = 256", "maxLine = 2048", "maxBytes", "NSLock()", "options: .atomic", "st_nlink == 1", "HISTORY ", "uptime=", "build="]:
             self.assertIn(token, evidence)
         for token in ["URLSession", "removeItem(", "PosterBoardLease(", "grant("]:
             self.assertNotIn(token, evidence)
@@ -72,16 +72,16 @@ class DiagnosticContractTests(unittest.TestCase):
         self.assertIn("defer { try? lease.close() }", inspect)
         self.assertNotIn("lock.unlock()", inspect)
 
-    def test_tools_header_does_not_override_child_identifiers(self):
+    def test_owner_gate_does_not_override_child_identifiers(self):
         ui = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
-        header = ui.split('// One closed tools group:', 1)[1].split('if toolsOpen {', 1)[0]
-        self.assertIn('@State private var toolsOpen = false', ui)
-        self.assertIn('Button { withAnimation { toolsOpen.toggle() } }', header)
-        self.assertIn('.accessibilityIdentifier("wallpaper-tools")', header)
-        # A container identifier inherited by descendants made import a StaticText
-        # with the tools id in the actual iOS simulator accessibility tree.
-        self.assertNotIn('DisclosureGroup(', header)
-        self.assertIn('if toolsOpen {\n                    extraTools()', ui)
+        gate = (R / "ios-app/MirsaOwnerDiagnostics.swift").read_text()
+        self.assertIn('MirsaOwnerDiagnostics(access: diagnosticAccess)', ui)
+        self.assertIn('@State private var expanded = false', gate)
+        self.assertIn('if access.allowed && scenePhase == .active', gate)
+        self.assertIn('if expanded { content().environmentObject(access) }', gate)
+        self.assertIn('.accessibilityIdentifier("owner-diagnostics")', gate)
+        self.assertNotIn('wallpaper-tools', ui)
+        self.assertNotIn('DisclosureGroup(', gate)
         tendies = (R / "ios-app/TendiesView.swift").read_text()
         self.assertIn('.accessibilityIdentifier("wallpaper-import")', tendies)
         self.assertIn('picker.view.accessibilityIdentifier = "wallpaper-document-picker"', tendies)
@@ -105,9 +105,9 @@ class DiagnosticContractTests(unittest.TestCase):
             self.assertIn(icon, main)
         self.assertIn('Text(vm.posterBoardContainer.isEmpty', tools)
         management = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
-        self.assertLess(management.index('mainContent()'), management.index('if toolsOpen {'))
-        self.assertLess(management.index('Button { reload() }'), management.index('if toolsOpen {'))
-        self.assertLess(management.index('Button { confirmCleanup = true }'), management.index('if toolsOpen {'))
+        self.assertLess(management.index('mainContent()'), management.index('MirsaOwnerDiagnostics(access: diagnosticAccess)'))
+        self.assertLess(management.index('Button { reload() }'), management.index('MirsaOwnerDiagnostics(access: diagnosticAccess)'))
+        self.assertLess(management.index('Button { confirmCleanup = true }'), management.index('MirsaOwnerDiagnostics(access: diagnosticAccess)'))
         self.assertLess(management.index('Text(TendiesPageText.text(.yours))'), management.index('mainContent()'))
 
     def test_primary_install_requires_successfully_picked_ids(self):

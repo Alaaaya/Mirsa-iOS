@@ -62,6 +62,7 @@ final class AppsStore: ObservableObject {
     nonisolated static let bgTaskID = "com.alaa.mirsa.apps.refresh"
 
     @Published var apps: [ManagedApp] = []
+    @Published private(set) var legacyInstallDiagnostics: [String] = []
     @Published var account: AccountState? = nil
     @Published var busy: String? = nil
     @Published var progress: Double = 0
@@ -194,11 +195,11 @@ final class AppsStore: ObservableObject {
 
     private func load() {
         let ud = UserDefaults.standard
-        if let stage = ud.string(forKey: "mirsa.install.stage") {
-            let last = ud.string(forKey: "mirsa.install.lastLog") ?? ""
-            error = L.f("err.crashedAt", stage) + (last.isEmpty ? "" : "\n\n" + last)
-            ud.removeObject(forKey: "mirsa.install.stage")
-            ud.removeObject(forKey: "mirsa.install.lastLog")
+        let hadInterruptedInstall = ud.string(forKey: "mirsa.install.stage") != nil
+        legacyInstallDiagnostics = MirsaDiagnosticPrivacy.migrateInstallBreadcrumbs(ud)
+        if hadInterruptedInstall {
+            // Status is useful to everyone; old technical install logs are owner-only.
+            error = tr("An installation was interrupted. Try installing again.", "توقّف التثبيت. جرّب تثبّت من جديد.", ckb: "دامەزراندن پچڕا. دووبارە هەوڵ بدە.", kmr: "Sazkirin hate qutkirin. Dîsa biceribîne.")
         }
         guard let d = try? Data(contentsOf: dbURL),
               let a = try? JSONDecoder().decode([ManagedApp].self, from: d) else { return }

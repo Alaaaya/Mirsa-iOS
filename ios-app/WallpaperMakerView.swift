@@ -27,7 +27,7 @@ struct WallpaperMakerSection: View {
     @State private var progress: Double = 0
     @State private var depth = false
     @State private var autoEffectsApplied = false
-    @State private var effects = PhotoWallpaper.Effects()
+    @State private var effects = PhotoWallpaper.Effects(floating: true)
     @State private var crop = true
     @State private var message: String?
     @State private var description = ""
@@ -218,14 +218,9 @@ struct WallpaperMakerSection: View {
             .clipped()
             .accessibilityLabel(t(.preview))
             Toggle(t(.crop), isOn: $crop)
-            Toggle(t(.depth), isOn: $depth)
+            Toggle(t(.depth), isOn: $depth).disabled(effects.gyro)
             Text(t(.depthHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Picker(t(.unlock), selection: $effects.unlock) {
-                Text(t(.off)).tag(PhotoWallpaper.Effects.Unlock.none)
-                Text(t(.unlockZoom)).tag(PhotoWallpaper.Effects.Unlock.zoom)
-                Text(t(.unlockSlide)).tag(PhotoWallpaper.Effects.Unlock.slide)
-            }
-            Toggle(t(.gyro), isOn: $effects.gyro)
+            referenceEffectControls
             Toggle(t(.floating), isOn: $effects.floating)
             if effects.floating {
                 Picker(t(.motionPreset), selection: $effects.motion) {
@@ -236,6 +231,9 @@ struct WallpaperMakerSection: View {
                     Text(t(.motionFloat)).tag(PhotoWallpaper.Effects.Motion.float)
                 }
             }
+            Text(t(effects.floating || effects.spin || effects.particles != .none ? .animatedPhotos : .sceneOutput))
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("wallpaper-motion-output")
             Text(t(.effectsHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text(t(.reorder)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ForEach($layers) { $layer in
@@ -252,6 +250,24 @@ struct WallpaperMakerSection: View {
                             Text(t(layer.cutoutStatus == .ready ? .cutoutReady : layer.cutoutStatus == .noSubject ? .cutoutNoSubject : layer.cutoutStatus == .unavailable ? .cutoutUnavailable : .cutoutPreparing))
                                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
+                    }
+                    Picker(t(.scene), selection: $layer.scene) {
+                        Text(t(.sceneShared)).tag(WallpaperPhotoLayer.Scene.shared)
+                        Text(t(.sceneLock)).tag(WallpaperPhotoLayer.Scene.lock)
+                        Text(t(.sceneHome)).tag(WallpaperPhotoLayer.Scene.home)
+                    }
+                    Picker(t(.appearance), selection: $layer.appearance) {
+                        Text(t(.appearanceBoth)).tag(WallpaperPhotoLayer.Appearance.both)
+                        Text(t(.appearanceLight)).tag(WallpaperPhotoLayer.Appearance.light)
+                        Text(t(.appearanceDark)).tag(WallpaperPhotoLayer.Appearance.dark)
+                    }.disabled(effects.gyro)
+                    Text(t(.appearanceHelp)).font(.caption).foregroundStyle(.secondary)
+                    Text(t(.sceneHelp)).font(.caption).foregroundStyle(.secondary)
+                    if layer.scene == .shared {
+                        Text(t(.homeHorizontal)).font(.caption)
+                        Slider(value: $layer.homeOffsetX, in: -1...1)
+                        Text(t(.homeVertical)).font(.caption)
+                        Slider(value: $layer.homeOffsetY, in: -1...1)
                     }
                     Toggle(t(.crop), isOn: $layer.crop)
                     Text(t(.zoom)).font(.caption)
@@ -278,7 +294,58 @@ struct WallpaperMakerSection: View {
         .onChange(of: crop) { _, _ in invalidate() }
         .onChange(of: effects) { _, _ in invalidate() }
         // Any manual edit invalidates the previous archive, preventing stale export.
-        .onChange(of: layers.map { "\($0.id):\($0.role.rawValue):\($0.zoom):\($0.x):\($0.y):\($0.crop):\($0.cutoutEnabled)" }) { _, _ in invalidate() }
+        .onChange(of: layers.map { "\($0.id):\($0.role.rawValue):\($0.zoom):\($0.x):\($0.y):\($0.crop):\($0.cutoutEnabled):\($0.scene):\($0.appearance):\($0.homeOffsetX):\($0.homeOffsetY)" }) { _, _ in invalidate() }
+    }
+
+    // Existing compact Form rows only. No separate editor/panel.
+    // Release gate: these controls are not ready until actual export tests + macOS compile pass.
+    private var referenceEffectControls: some View {
+        Group {
+            Picker(t(.unlock), selection: $effects.unlock) {
+                Text(t(.off)).tag(PhotoWallpaper.Effects.Unlock.none)
+                Text(t(.unlockZoom)).tag(PhotoWallpaper.Effects.Unlock.zoom)
+                Text(t(.unlockSlide)).tag(PhotoWallpaper.Effects.Unlock.slide)
+            }.accessibilityIdentifier("wallpaper-unlock-effect")
+            Text(t(.unlockHelp)).font(.caption).foregroundStyle(.secondary)
+            Toggle(t(.gyro), isOn: $effects.gyro)
+                .disabled(depth || layers.contains { $0.appearance != .both }).accessibilityIdentifier("wallpaper-gyro-effect")
+            if effects.gyro {
+                Picker(t(.gyroStrength), selection: $effects.gyroStrength) {
+                    Text(t(.subtle)).tag(PhotoWallpaper.Effects.GyroStrength.subtle)
+                    Text(t(.mediumStrength)).tag(PhotoWallpaper.Effects.GyroStrength.medium)
+                    Text(t(.strong)).tag(PhotoWallpaper.Effects.GyroStrength.strong)
+                }
+            }
+            Text(t(.gyroHelp)).font(.caption).foregroundStyle(.secondary)
+            Toggle(t(.spin), isOn: $effects.spin).accessibilityIdentifier("wallpaper-spin-effect")
+            Text(t(.spinHelp)).font(.caption).foregroundStyle(.secondary)
+            Picker(t(.particles), selection: $effects.particles) {
+                Text(t(.off)).tag(PhotoWallpaper.Effects.Particles.none)
+                Text(t(.snow)).tag(PhotoWallpaper.Effects.Particles.snow)
+                Text(t(.leaves)).tag(PhotoWallpaper.Effects.Particles.leaves)
+                Text(t(.stars)).tag(PhotoWallpaper.Effects.Particles.stars)
+            }.accessibilityIdentifier("wallpaper-particles-effect")
+            if effects.particles != .none {
+                Picker(t(.particleDirection), selection: $effects.particleDirection) {
+                    Text(t(.falling)).tag(PhotoWallpaper.Effects.ParticleDirection.falling)
+                    Text(t(.rising)).tag(PhotoWallpaper.Effects.ParticleDirection.rising)
+                }
+            }
+            Text(t(.particlesHelp)).font(.caption).foregroundStyle(.secondary)
+            Toggle(t(.sleepDim), isOn: $effects.dimOnSleep).accessibilityIdentifier("wallpaper-sleep-effect")
+            Text(t(.sleepHelp)).font(.caption).foregroundStyle(.secondary)
+            Toggle(t(.gradient), isOn: $effects.gradient).accessibilityIdentifier("wallpaper-gradient-effect")
+            Toggle(t(.replicate), isOn: $effects.replicate).accessibilityIdentifier("wallpaper-replicate-effect")
+            Text(t(.replicateHelp)).font(.caption).foregroundStyle(.secondary)
+            Picker(t(.blend), selection: $effects.blend) {
+                Text(t(.normalBlend)).tag(PhotoWallpaper.Effects.Blend.normal)
+                Text(t(.screenBlend)).tag(PhotoWallpaper.Effects.Blend.screen)
+                Text(t(.overlayBlend)).tag(PhotoWallpaper.Effects.Blend.overlay)
+            }
+            Toggle(t(.blur), isOn: $effects.blur)
+            Toggle(t(.liquidGlass), isOn: $effects.liquidGlass).accessibilityIdentifier("wallpaper-glass-effect")
+            Text(t(.glassHelp)).font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private func invalidate() {
@@ -305,11 +372,11 @@ struct WallpaperMakerSection: View {
             invalidate()
             let roles = PhotoWallpaper.defaultRoles(existing: layers.count, adding: images.count)
             layers += zip(images, roles).map { WallpaperPhotoLayer(image: $0, role: $1) }
-            // Several photos only read as separate layers with depth and motion; opaque full-screen
-            // photos otherwise hide each other and look like a single image.
-            if layers.count > 1 && !autoEffectsApplied && !depth && effects == PhotoWallpaper.Effects() {
+            // Never auto-enable unverified unlock/gyro effects. Timed motion is a separate,
+            // visible choice and stays off if the user explicitly switched it off.
+            if layers.count > 1 && !autoEffectsApplied {
                 autoEffectsApplied = true
-                depth = true; effects.gyro = true; effects.unlock = .zoom
+                depth = true
             }
         }
     }
@@ -360,7 +427,9 @@ struct WallpaperMakerSection: View {
         guard !cutoutBusy else { return }
         invalidate(); busy = true; progress = 0
         let id = UUID(); generationID = id
-        let snapshot = layers, source = video, ratio = aspect, cropPhotos = crop, useDepth = depth, chosenEffects = effects
+        let snapshot = layers, source = video, ratio = aspect, cropPhotos = crop, useDepth = depth
+        // Only the supported continuous axis loops are exposed by this maker.
+        let chosenEffects = effects
         generationTask = Task { @MainActor in
             let worker = Task.detached(priority: .userInitiated) {
                 if let source {

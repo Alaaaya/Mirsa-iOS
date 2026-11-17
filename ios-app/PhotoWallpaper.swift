@@ -16,6 +16,13 @@ struct WallpaperPhotoLayer: Identifiable {
     var x: Double = 0
     var y: Double = 0
     var crop: Bool = true
+    /// A single image keeps its identity across lock/home/sleep; only state properties change.
+    enum Scene: String, CaseIterable { case shared, lock, home }
+    var scene: Scene = .shared
+    enum Appearance: String, CaseIterable { case both, light, dark }
+    var appearance: Appearance = .both
+    var homeOffsetX: Double = 0
+    var homeOffsetY: Double = 0
     init(image: UIImage, role: Role = .background, id: UUID = UUID()) {
         self.id = id; self.image = image; self.role = role
     }
@@ -78,9 +85,29 @@ enum PhotoWallpaper {
         enum Unlock: String, CaseIterable { case none, zoom, slide }
         var unlock: Unlock = .none
         var gyro = false
+        enum GyroStrength: Int, CaseIterable { case subtle = 12, medium = 24, strong = 40 }
+        var gyroStrength: GyroStrength = .medium
         var floating = false
         enum Motion: String, CaseIterable { case left, right, up, down, float }
         var motion: Motion = .float
+        var spin = false
+        enum Particles: String, CaseIterable { case none, snow, leaves, stars }
+        var particles: Particles = .none
+        enum ParticleDirection: String, CaseIterable { case falling, rising }
+        var particleDirection: ParticleDirection = .falling
+        /// Sleep is a scene state, not a claim that iOS enables Always On for this package.
+        var dimOnSleep = false
+        var gradient = false
+        var replicate = false
+        enum Blend: String, CaseIterable { case normal, screen, overlay }
+        var blend: Blend = .normal
+        var blur = false
+        var liquidGlass = false
+    }
+
+    static func usesReferenceEngine(layers: [WallpaperPhotoLayer], effects: Effects) -> Bool {
+        effects.gyro || effects.unlock != .none || effects.spin || effects.particles != .none ||
+        effects.dimOnSleep || effects.gradient || effects.replicate || effects.blend != .normal || effects.blur || effects.liquidGlass || layers.contains { $0.appearance != .both || $0.scene != .shared || $0.homeOffsetX != 0 || $0.homeOffsetY != 0 }
     }
 
     static func makeArchive(layers: [WallpaperPhotoLayer], screenAspect: CGFloat,
@@ -90,6 +117,14 @@ enum PhotoWallpaper {
               screenAspect.isFinite, screenAspect >= 0.3, screenAspect <= 2 else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        let referenceEngine = usesReferenceEngine(layers: layers, effects: effects)
+        // Every actual gyro reference uses ParameterizedCA. Never silently drop gyro or clock depth.
+        guard !(depth && effects.gyro), !(effects.gyro && layers.contains { $0.appearance != .both }),
+              layers.allSatisfy({ $0.homeOffsetX.isFinite && $0.homeOffsetY.isFinite &&
+                  (-1...1).contains($0.homeOffsetX) && (-1...1).contains($0.homeOffsetY) }) else {
+            throw CocoaError(.featureUnsupported)
+        }
+        let layered = !effects.gyro && (depth || effects.floating || referenceEngine)
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("photo-wallpaper-" + UUID().uuidString)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -137,11 +172,12 @@ enum PhotoWallpaper {
         try fm.createDirectory(at: wallpaper, withIntermediateDirectories: true)
         // Continuous presets use the on-device-confirmed envelope and point geometry.
         // Static export keeps its original variable-aspect route.
-        let width = effects.floating ? 390 : 1080
-        let height = effects.floating ? 844 : Int((CGFloat(width) / screenAspect / 2).rounded()) * 2
-        let overscan = effects.floating ? 40 : 0
-        let size = CGSize(width: effects.floating ? 1410 : width,
-                          height: effects.floating ? 2772 : height)
+        let pointGeometry = referenceEngine || effects.floating
+        let width = pointGeometry ? 390 : 1080
+        let height = pointGeometry ? 844 : Int((CGFloat(width) / screenAspect / 2).rounded()) * 2
+        let overscan = effects.floating || effects.gyro ? 40 : 0
+        let size = CGSize(width: pointGeometry ? (width + overscan * 2) * 3 : width,
+                          height: pointGeometry ? (height + overscan * 2) * 3 : height)
         let sorted = ordered(layers, depth: depth)
         // Compute descriptor snapshot colour metadata from the user's own rendered composition.
         let thumbnail = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
@@ -172,15 +208,19 @@ enum PhotoWallpaper {
             objects[2] = color; archive["$objects"] = objects
             try PropertyListSerialization.data(fromPropertyList: archive, format: .binary, options: 0).write(to: target)
         }
-        let bundles: [(String, WallpaperPhotoLayer.Role?)] = depth
+        let bundles: [(String, WallpaperPhotoLayer.Role?)] = layered
             ? [(backgroundName, .background), (floatingName, .middle), (foregroundName, .foreground)]
             : [(simpleName, nil)]
         for (name, role) in bundles {
             let ca = wallpaper.appendingPathComponent(name), assets = ca.appendingPathComponent("assets")
             try fm.createDirectory(at: assets, withIntermediateDirectories: true)
-            var nodes = "", motionGroups = ""
+            var nodes = ""
+            var stateLayers: [(Int, WallpaperPhotoLayer)] = []
             for (index, layer) in sorted.enumerated() {
-                guard role == nil || layer.role == role else { continue }
+                // With clock depth OFF, retain manual ordering in the background bundle.
+                // Still emit the three documents required by the proven animation envelope.
+                let exportRole: WallpaperPhotoLayer.Role = depth ? layer.role : .background
+                guard role == nil || exportRole == role else { continue }
                 try Task.checkCancellation()
                 let filename = layer.id.uuidString + ".png"
                 try autoreleasepool {
@@ -190,55 +230,75 @@ enum PhotoWallpaper {
                 let layerName = "layer-\(index)-\(layer.role.rawValue)"
                 let floatAnimation = effects.floating
                     ? continuousAnimation(role: layer.role, preset: effects.motion) : ""
-                // Separate motion wrapper keeps timed floating independent of gyro translation.
-                nodes += """
-                <CALayer name="motion-\(index)" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)">
-                <sublayers><CALayer name="\(layerName)" bounds="0 0 \(width + overscan * 2) \(height + overscan * 2)" position="\(width/2) \(height/2)" contentsFormat="RGBA8">
-                <contents type="CGImage" src="assets/\(filename)"/>\(floatAnimation)
-                </CALayer></sublayers></CALayer>
-                """
-                if effects.gyro {
-                    for axis in ["x", "y"] {
-                        motionGroups += """
-                        <NSDictionary><axis type="string" value="\(axis)"/><image type="string" value="null"/>
-                        <keyPath type="string" value="transform.translation.\(axis)"/><layerName type="string" value="motion-\(index)"/>
-                        <mapMaxTo type="integer" value="\(12 + index * 3)"/><mapMinTo type="integer" value="-\(12 + index * 3)"/>
-                        <title type="string" value="Mirsa"/><view type="string" value="\(role == .background ? "Background" : role == .foreground ? "Foreground" : "Floating")"/></NSDictionary>
-                        """
-                    }
+                if referenceEngine {
+                    stateLayers.append((index, layer))
+                    nodes += referenceLayer(index: index, layer: layer, filename: filename, effects: effects)
+                } else if effects.floating {
+                    // Exact proven hierarchy: root -> state target #1 -> animated image.
+                    // Do not add gyro wrappers or change the position-axis value types.
+                    nodes += """
+                    <CALayer id="#\(index + 2)" name="\(layerName)" bounds="0 0 470 924" position="195 422" contentsFormat="RGBA8">
+                    <contents type="CGImage" src="assets/\(filename)"/>\(floatAnimation)
+                    </CALayer>
+                    """
+                } else {
+                    nodes += """
+                    <CALayer name="motion-\(index)" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)">
+                    <sublayers><CALayer name="\(layerName)" bounds="0 0 \(width + overscan * 2) \(height + overscan * 2)" position="\(width/2) \(height/2)" contentsFormat="RGBA8">
+                    <contents type="CGImage" src="assets/\(filename)"/>
+                    </CALayer></sublayers></CALayer>
+                    """
                 }
             }
-            let caml = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <caml xmlns="http://www.apple.com/CoreAnimation/1.0">
-            <CALayer name="Root Layer" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)" geometryFlipped="1">
-            <sublayers><CALayer id="#1" name="Mirsa Photos" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)">
-            <sublayers>\(nodes)</sublayers></CALayer></sublayers>
-            \(stateXML(effects.unlock, width: width, height: height))
-            <style><wallpaperBackgroundAssetNames type="NSArray"/><wallpaperFloatingAssetNames type="NSArray"/>
-            <wallpaperParallaxGroups type="NSArray">\(motionGroups)</wallpaperParallaxGroups></style>
-            </CALayer></caml>
-            """
+            if effects.gradient && (role == nil || role == .background) { nodes = gradientLayer() + nodes }
+            if effects.liquidGlass && (role == nil || role == .middle) { nodes += liquidGlassLayer() }
+            if effects.particles != .none && (role == nil || role == .middle) {
+                try particlePNG(effects.particles).write(to: assets.appendingPathComponent("mirsa-particle.png"))
+                nodes += particleLayer(effects.particles, direction: effects.particleDirection)
+            }
+            let caml: String
+            if referenceEngine {
+                caml = referenceDocument(nodes: nodes, layers: stateLayers, effects: effects)
+            } else {
+                let states = effects.floating ? continuousStates() : referenceStates(layers: [], effects: Effects())
+                caml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <caml xmlns="http://www.apple.com/CoreAnimation/1.0">
+                <CALayer id="root" name="Root Layer" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)" geometryFlipped="0">
+                <sublayers><CALayer id="#1" name="Mirsa composition" bounds="0 0 \(width) \(height)" position="\(width/2) \(height/2)">
+                <sublayers>\(nodes)</sublayers></CALayer></sublayers>\(states)
+                </CALayer></caml>
+                """
+            }
             try Data(caml.utf8).write(to: ca.appendingPathComponent("main.caml"))
             try Data("""
             <?xml version="1.0" encoding="UTF-8"?>
             <caml xmlns="http://www.apple.com/CoreAnimation/1.0"><MicaAssetManifest><modules type="NSArray"/></MicaAssetManifest></caml>
             """.utf8).write(to: ca.appendingPathComponent("assetManifest.caml"))
-            try plist(["rootDocument": "main.caml", "documentWidth": width, "documentHeight": height,
-                       "documentResizesToView": !effects.floating, "geometryFlipped": !effects.floating,
-                       "loopingEnabled": effects.floating,
-                       "scalesToFitInPlayer": true, "unitsInPixelsInPlayer": !effects.floating], to: ca.appendingPathComponent("index.xml"))
+            var index: [String: Any] = ["rootDocument": "main.caml"]
+            if !effects.gyro {
+                index.merge(["documentWidth": width, "documentHeight": height,
+                    "documentResizesToView": !pointGeometry, "geometryFlipped": !pointGeometry,
+                    "loopingEnabled": effects.floating || effects.spin, "scalesToFitInPlayer": true,
+                    "unitsInPixelsInPlayer": !pointGeometry]) { _, new in new }
+                if pointGeometry {
+                    index["assetManifest"] = "assetManifest.caml"
+                    index["loopStart"] = 0.0
+                    index["loopEnd"] = Double.infinity
+                }
+            }
+            try plist(index, to: ca.appendingPathComponent("index.xml"))
         }
         var route: [String: Any] = ["identifier": 7400, "name": "Mirsa"]
-        if depth {
+        if layered {
             route.merge(["type": "LayeredAnimation", "backgroundAnimationFileName": backgroundName,
                          "floatingAnimationFileNameKey": floatingName, "foregroundAnimationFileName": foregroundName]) { _, new in new }
         } else {
             route.merge(["type": "ParameterizedCA", "assetFileName": simpleName]) { _, new in new }
         }
-        try plist(["assets": ["lockAndHome": ["default": route]], "family": depth ? "WWDC22" : "Marble",
-                   "logicalScreenClass": effects.floating ? "390w-844h@3x~iphone" : "any", "appearanceAware": false, "identifier": 7400,
-                   "version": depth ? 1 : 6, "contentVersion": "1.07", "name": "Mirsa",
+        try plist(["assets": ["lockAndHome": ["default": route]], "family": layered ? "WWDC22" : "Marble",
+                   "logicalScreenClass": layered ? "390w-844h@3x~iphone" : "any", "appearanceAware": sorted.contains { $0.appearance != .both }, "identifier": 7400,
+                   "version": layered ? 1 : 6, "contentVersion": "1.07", "name": "Mirsa",
                    "wantsDeviceMotion": effects.gyro], to: wallpaper.appendingPathComponent("Wallpaper.plist"))
         // Remove archive junk at every level before producing the package.
         if let files = fm.enumerator(at: descriptor, includingPropertiesForKeys: nil) {
@@ -254,6 +314,231 @@ enum PhotoWallpaper {
         do { try PasscodeThemePackager.archiveDirectory(root, to: output) }
         catch { try? fm.removeItem(at: output); throw error }
         return output
+    }
+
+
+    // Structure-only study at CAPlayground/wallpapers@799fcf81d51dd04b9b8248830959eb1f7fe24d57.
+    // No community artwork or external URLs are emitted. All sources are generated UUID assets.
+    // Manosaba_Gyro: ParameterizedCA, named transform layers, typed style dictionaries.
+    // Hatsune-Miku: per-image Locked/Unlock/Sleep numeric assignments with stable identities.
+    // spiderman/Mario_Galaxy_Movie: timed loops coexist with parameter groups.
+    // Snow_Emitters/Autumn_Horizon: CAEmitterLayer + CAEmitterCell + local CGImage.
+    static func referenceLayer(index: Int, layer: WallpaperPhotoLayer, filename: String, effects: Effects) -> String {
+        let pad = effects.gyro || effects.floating ? 40 : 0
+        let motion = effects.floating ? continuousAnimation(role: layer.role, preset: effects.motion) : ""
+        let spin = effects.spin ? spinAnimation() : ""
+        let blend = effects.blend == .normal ? "" :
+            "<compositingFilter type=\"CAFilter\" filter=\"\(effects.blend.rawValue)BlendMode\" name=\"Mirsa blend\"/>"
+        let blur = effects.blur ? "<filters><CAFilter filter=\"gaussianBlur\" name=\"Mirsa blur\" enabled=\"true\" inputRadius=\"12\"/></filters>" : ""
+        let replicaOpen = effects.replicate ? "<CAReplicatorLayer name=\"mirsa-replicator-\(index)\" bounds=\"0 0 390 844\" position=\"195 422\" instanceCount=\"6\" instanceDelay=\"0\" instanceTransform=\"rotate(60deg)\" preservesDepth=\"1\"><sublayers>" : ""
+        let replicaClose = effects.replicate ? "</sublayers></CAReplicatorLayer>" : ""
+        // Position state, gyro translation, timed float and spin get DIFFERENT nodes.
+        // A home transition must not fight an infinite position animation on the same property.
+        return """
+        <CATransformLayer id="state-\(index)" name="state-\(index)" bounds="0 0 390 844" position="195 422">
+        <sublayers><CATransformLayer id="gyro-\(index)" name="gyro-\(index)" bounds="0 0 390 844" position="195 422">
+        <sublayers><CALayer id="float-\(index)" name="float-\(index)" bounds="0 0 390 844" position="195 422">
+        \(motion)<sublayers><CALayer id="spin-\(index)" name="spin-\(index)" bounds="0 0 390 844" position="195 422">
+        \(spin)<sublayers>\(replicaOpen)<CALayer name="layer-\(index)-\(layer.role.rawValue)" bounds="0 0 \(390 + pad * 2) \(844 + pad * 2)" position="195 422" contentsFormat="RGBA8">
+        \(blend)\(blur)<contents type="CGImage" src="assets/\(filename)"/>
+        </CALayer>\(replicaClose)</sublayers></CALayer></sublayers></CALayer></sublayers></CATransformLayer></sublayers></CATransformLayer>
+        """
+    }
+
+    static func spinAnimation() -> String {
+        """
+        <animations><animation type="CAKeyframeAnimation" key="mirsa-spin" keyPath="transform.rotation.z" beginTime="1e-100" duration="16" removedOnCompletion="0" repeatCount="inf" repeatDuration="inf" calculationMode="linear">
+        <values><real value="0"/><real value="\(Double.pi * 2)"/></values>
+        </animation></animations>
+        """
+    }
+
+    /// Shared layer offsets are explicit state changes, not inferred artwork/magic image recognition.
+    static func sceneValues(layer: WallpaperPhotoLayer, effects: Effects) -> [(String, Double, Double, Double)] {
+        let cx = 195.0, cy = 422.0
+        let lockOnly = layer.scene == .lock
+        let homeOnly = layer.scene == .home
+        let slide = effects.unlock == .slide ? 844.0 : 0
+        let lockedY = homeOnly ? cy + slide : cy + (lockOnly ? 0 : slide / 20)
+        let homeY = lockOnly ? cy - slide : cy + layer.homeOffsetY * 422
+        let scale = effects.unlock == .zoom ? 1.06 : 1.0
+        return [
+            ("position.x", cx, cx + layer.homeOffsetX * 195, cx),
+            ("position.y", lockedY, homeY, lockedY),
+            ("transform.scale.xy", scale, 1, scale),
+            ("opacity", homeOnly ? 0 : 1, lockOnly ? 0 : 1, homeOnly ? 0 : (effects.dimOnSleep ? 0.25 : 1))
+        ]
+    }
+
+    static func referenceDocument(nodes: String, layers: [(Int, WallpaperPhotoLayer)], effects: Effects) -> String {
+        let states = effects.gyro ? "" : referenceStates(layers: layers, effects: effects)
+        let style = effects.gyro ? referenceStyle(layers: layers, effects: effects) : ""
+        let children: String
+        if effects.gyro {
+            children = """
+            <CALayer id="background" name="BACKGROUND" bounds="0 0 390 844" position="195 422"/>
+            <CALayer id="floating" name="FLOATING" bounds="0 0 390 844" position="195 422" geometryFlipped="0">
+            <sublayers>\(nodes)</sublayers></CALayer>
+            """
+        } else {
+            children = """
+            <CALayer id="#1" name="Mirsa composition" bounds="0 0 390 844" position="195 422">
+            <sublayers>\(nodes)</sublayers></CALayer>
+            """
+        }
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <caml xmlns="http://www.apple.com/CoreAnimation/1.0">
+        <CALayer id="root" name="Root Layer" bounds="0 0 390 844" position="195 422" geometryFlipped="0">
+        \(style)<sublayers>\(children)</sublayers>\(states)
+        </CALayer></caml>
+        """
+    }
+
+    static func referenceStyle(layers: [(Int, WallpaperPhotoLayer)], effects: Effects) -> String {
+        let gyro = layers.map { index, layer in
+            let rank = layer.role == .background ? 0.4 : layer.role == .middle ? 0.7 : 1.0
+            let amount = Int(Double(effects.gyroStrength.rawValue) * rank)
+            return ["x", "y"].map { axis in
+                """
+                <NSDictionary><axis type="string" value="\(axis)"/><image type="string" value="null"/>
+                <keyPath type="string" value="transform.translation.\(axis)"/><layerName type="string" value="gyro-\(index)"/>
+                <mapMaxTo type="integer" value="\(amount)"/><mapMinTo type="integer" value="-\(amount)"/>
+                <title type="string" value="Mirsa motion"/><view type="string" value="Floating"/></NSDictionary>
+                """
+            }.joined()
+        }.joined()
+        let properties = layers.map { index, layer in
+            sceneValues(layer: layer, effects: effects).map { key, lock, home, sleep in
+                """
+                <NSDictionary><image type="null"/><keyPath type="string" value="\(key)"/>
+                <layerName type="string" value="state-\(index)"/><v_home type="integer" value="\(home)"/>
+                <v_lock type="integer" value="\(lock)"/><v_sleep type="integer" value="\(sleep)"/>
+                <view type="string" value="Floating"/></NSDictionary>
+                """
+            }.joined()
+        }.joined()
+        return """
+        <style><wallpaperParallaxGroups type="NSArray">\(gyro)</wallpaperParallaxGroups>
+        <wallpaperPropertyGroups type="NSArray">\(properties)</wallpaperPropertyGroups></style>
+        """
+    }
+
+    static func referenceStates(layers: [(Int, WallpaperPhotoLayer)], effects: Effects) -> String {
+        let baseNames = ["Locked", "Unlock", "Sleep"]
+        let variants: [String?] = layers.contains { $0.1.appearance != .both } ? ["Light", "Dark"] : [nil]
+        // A7X_dark_and_light_wallpaper: Locked/Unlock/Sleep + Light/Dark state suffixes.
+        // This follows the system appearance, NOT an invented clock/sunrise trigger.
+        let names: [(Int, String, String?)] = variants.flatMap { variant in
+            baseNames.enumerated().map { index, base in
+                (index, base + (variant.map { " " + $0 } ?? ""), variant)
+            }
+        }
+        let states = names.map { stateIndex, name, appearance in
+            let assignments = layers.map { index, layer in
+                sceneValues(layer: layer, effects: effects).map { key, lock, home, sleep in
+                    var value = [lock, home, sleep][stateIndex]
+                    if key == "opacity", let appearance,
+                       layer.appearance != .both, layer.appearance.rawValue.lowercased() != appearance.lowercased() {
+                        value = 0
+                    }
+                    return """
+                    <LKStateSetValue targetId="state-\(index)" keyPath="\(key)">
+                    <value type="real" value="\(value)"/></LKStateSetValue>
+                    """
+                }.joined()
+            }.joined()
+            return """
+            <LKState name="\(name)" initial="\(stateIndex == 0 && appearance != "Dark")" final="false"><elements>\(assignments)</elements></LKState>
+            """
+        }.joined()
+        let transitions = names.flatMap { _, state, _ in
+            [("*", state), (state, "*")].map { from, to in
+                let elements = layers.map { index, layer in
+                    sceneValues(layer: layer, effects: effects).map { key, _, _, _ in
+                        """
+                        <LKStateTransitionElement targetId="state-\(index)" key="\(key)">
+                        <animation type="CASpringAnimation" keyPath="\(key)" mass="1" stiffness="120" damping="20" duration="0.8"/>
+                        </LKStateTransitionElement>
+                        """
+                    }.joined()
+                }.joined()
+                return """
+                <LKStateTransition fromState="\(from)" toState="\(to)"><elements>\(elements)</elements></LKStateTransition>
+                """
+            }
+        }.joined()
+        return "<states>\(states)</states><stateTransitions>\(transitions)</stateTransitions>"
+    }
+
+    /// Zoro/discord use a native CAGradientLayer; these colours are ours.
+    static func gradientLayer() -> String {
+        """
+        <CAGradientLayer id="mirsa-gradient" name="Mirsa gradient" bounds="0 0 390 844" position="195 422" startPoint="0 0" endPoint="1 1">
+        <colors><CGColor value="0.04 0.08 0.18"/><CGColor value="0.20 0.12 0.36"/></colors><type value="axial"/>
+        </CAGradientLayer>
+        """
+    }
+
+    /// Minecraft_Liquid_Glass__beta_: displacementMap driven by an SDF glass effect.
+    /// This is deliberately not relabelled blur. Requires device verification before delivery.
+    static func liquidGlassLayer() -> String {
+        """
+        <CABackdropLayer id="mirsa-glass" name="Mirsa glass" bounds="0 0 120 120" position="195 422" cornerRadius="60" caplayKind="liquidGlass">
+        <filters><CAFilter filter="displacementMap" name="displacementMap" inputSourceSublayerName="sdfLayer" inputOffset="0 0" inputAmount="-80"/></filters>
+        <sublayers><CASDFLayer id="mirsa-sdf" name="sdfLayer" bounds="0 0 120 120" position="60 60" contentsFormat="RGBA8" cornerCurve="circular">
+        <effect type="CASDFGlassDisplacementEffect" height="40" maskOffset="0"/>
+        <sublayers><CASDFElementLayer id="mirsa-sdf-element" name="elementLayer" bounds="0 0 120 120" position="60 60" cornerRadius="60" cornerCurve="continuous" contentsFormat="RGBA8"/></sublayers>
+        </CASDFLayer></sublayers></CABackdropLayer>
+        """
+    }
+
+    static func particleLayer(_ kind: Effects.Particles, direction: Effects.ParticleDirection = .falling) -> String {
+        // The reference envelopes differ in flipped geometry. Keep a single matched snow envelope;
+        // leaf/star choices change only our original bitmap, not an invented unsupported cell type.
+        let rising = direction == .rising
+        let rate = kind == .leaves ? 3 : 10
+        // Mr_krabs_drowning uses unflipped geometry, a bottom emitter and negative acceleration.
+        let flipped = rising ? 0 : 1
+        let emitter = rising ? "195 840" : "-20 0"
+        let acceleration = rising ? -100 : 200
+        let xAcceleration = rising ? 0 : 100
+        let speed = kind == .leaves ? 80 : 200
+        return """
+        <CAEmitterLayer id="mirsa-emitter" name="Mirsa particles" bounds="0 0 390 844" position="195 422" geometryFlipped="\(flipped)" emitterPosition="\(emitter)" emitterSize="0 0" emitterShape="point" emitterMode="volume" renderMode="unordered" birthRate="1">
+        <emitterCells><CAEmitterCell name="Mirsa particle" birthRate="\(rate)" lifetime="5" velocity="\(speed)" emissionRange="3.490658503988659" scale="0.08" spin="0.3490658503988659" xAcceleration="\(xAcceleration)" yAcceleration="\(acceleration)">
+        <contents><CGImage src="assets/mirsa-particle.png"/></contents>
+        </CAEmitterCell></emitterCells></CAEmitterLayer>
+        """
+    }
+
+    /// Original procedural art only, no downloaded symbol image or community artwork.
+    static func particlePNG(_ kind: Effects.Particles) -> Data {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = false
+        return UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).pngData { context in
+            let cg = context.cgContext
+            if kind == .leaves {
+                UIColor.systemOrange.setFill()
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 12, y: 116))
+                path.addCurve(to: CGPoint(x: 116, y: 12), controlPoint1: CGPoint(x: 0, y: 10), controlPoint2: CGPoint(x: 90, y: 0))
+                path.addCurve(to: CGPoint(x: 12, y: 116), controlPoint1: CGPoint(x: 125, y: 100), controlPoint2: CGPoint(x: 70, y: 128))
+                path.fill()
+            } else if kind == .stars {
+                UIColor.white.setFill()
+                let path = UIBezierPath()
+                for i in 0..<10 {
+                    let angle = Double(i) * Double.pi / 5 - Double.pi / 2
+                    let radius = i.isMultiple(of: 2) ? 56.0 : 24.0
+                    let point = CGPoint(x: 64 + cos(angle) * radius, y: 64 + sin(angle) * radius)
+                    if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                }
+                path.close(); path.fill()
+            } else {
+                UIColor.white.setFill()
+                cg.fillEllipse(in: CGRect(x: 12, y: 12, width: 104, height: 104))
+            }
+        }
     }
 
     /// Exact two-real endpoint axis layout from the confirmed Jellyfish-v2 recipe.
@@ -282,31 +567,25 @@ enum PhotoWallpaper {
             "</animations>"
     }
 
-    private static func plist(_ value: [String: Any], to url: URL) throws {
-        try PropertyListSerialization.data(fromPropertyList: value, format: .xml, options: 0).write(to: url)
-    }
-
-    static func stateXML(_ effect: Effects.Unlock, width: Int, height: Int) -> String {
-        let key = effect == .slide ? "position" : "transform"
-        func value(unlock: Bool) -> String {
-            if effect == .slide { return "<value type=\"CGPoint\" value=\"\(width/2) \(height/2 + (unlock ? -30 : 0))\"/>" }
-            let scale = unlock ? "1.06" : "1"
-            return "<value type=\"CATransform3D\" value=\"scale(\(scale), \(scale), 1)\"/>"
-        }
-        let states = ["Locked", "Unlock", "Sleep"].map { state in
-            "<LKState name=\"\(state)\"><elements>" +
-            (effect == .none ? "" : "<LKStateSetValue targetId=\"#1\" keyPath=\"\(key)\" final=\"false\">\(value(unlock: state == "Unlock"))</LKStateSetValue>") +
-            "</elements></LKState>"
+    /// State assignments and six springs copied from the confirmed layered builder.
+    /// These move the parent only; the child keeps looping in Locked/Unlock/Sleep.
+    static func continuousStates() -> String {
+        let names = ["Locked", "Unlock", "Sleep"]
+        let states = names.map { state in
+            "<LKState name=\"\(state)\"><elements><LKStateSetValue final=\"false\" targetId=\"#1\" keyPath=\"position\"><value type=\"CGPoint\" value=\"195 422\"/></LKStateSetValue></elements></LKState>"
         }.joined()
-        let transitions = effect == .none ? "" : ["Locked", "Unlock", "Sleep"].flatMap { state in
+        let transitions = names.flatMap { state in
             [("*", state), (state, "*")].map { from, to in
                 """
-                <LKStateTransition fromState="\(from)" toState="\(to)"><elements>
-                <LKStateTransitionElement targetId="#1" key="\(key)"><animation type="CASpringAnimation" damping="50" mass="2" stiffness="300" velocity="0" duration="0.8" fillMode="backwards"/></LKStateTransitionElement>
-                </elements></LKStateTransition>
+                <LKStateTransition fromState="\(from)" toState="\(to)"><elements><LKStateTransitionElement final="false" key="position" targetId="#1"><animation type="CASpringAnimation" keyPath="position" damping="50" mass="2" stiffness="300" velocity="0" duration="0.8" fillMode="backwards"/></LKStateTransitionElement></elements></LKStateTransition>
                 """
             }
         }.joined()
         return "<states>\(states)</states><stateTransitions>\(transitions)</stateTransitions>"
     }
+
+    private static func plist(_ value: [String: Any], to url: URL) throws {
+        try PropertyListSerialization.data(fromPropertyList: value, format: .xml, options: 0).write(to: url)
+    }
+
 }
