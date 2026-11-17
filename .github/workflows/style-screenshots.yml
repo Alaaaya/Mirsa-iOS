@@ -55,12 +55,19 @@ jobs:
             python3 - <<'PY'
           import json, os, re, shutil
           m = json.load(open("build/raw/manifest.json"))
+          os.makedirs("build/diagnostics", exist_ok=True)
           for t in m:
               for a in t.get("attachments", []):
+                  src = os.path.join("build/raw", a["exportedFileName"])
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
-                  if not name.lower().endswith(".png"): name += ".png"
-                  shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
+                  name = re.sub(r'[^A-Za-z0-9._-]+', "_", name)
+                  with open(src, "rb") as f: head = f.read(8)
+                  if head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff":
+                      if not name.lower().endswith(".png"): name += ".png"
+                      shutil.copy(src, os.path.join("build/shots", name))
+                  else:
+                      shutil.copy(src, os.path.join("build/diagnostics", name + ".txt"))
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY
           fi
@@ -73,6 +80,7 @@ jobs:
           name: tendies-implemented-simulator
           path: |
             build/shots
+            build/diagnostics
             build/crashes
             build/style-ui.log
           if-no-files-found: warn
