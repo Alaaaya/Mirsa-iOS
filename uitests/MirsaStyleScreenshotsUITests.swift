@@ -118,8 +118,30 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             app.buttons["main-tab-Personal Apps Hub"].tap()
             XCTAssertTrue(app.buttons["wallpaper-flash"].waitForNonExistence(timeout: 10), "sixth tab did not leave Tools")
             XCTAssertFalse(app.navigationBars["More"].exists || app.navigationBars["المزيد"].exists, "sixth destination fell under native More")
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "personal-hub-root").firstMatch.waitForExistence(timeout: 10), "sixth tab content missing")
             shot(app, lang + "_442_certificate_sixth_tab")
             XCTAssertTrue(app.buttons["main-tab-Mirsa AI"].isHittable)
+            app.terminate()
+        }
+    }
+
+    /// Classic theme must also expose all six destinations directly, never native More.
+    func testClassicSixTabs() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("tools", lang: lang, extra: ["-mirsa.theme", "classic"])
+            let ids = ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"]
+            for id in ids {
+                let b = app.buttons["main-tab-" + id]
+                XCTAssertTrue(b.waitForExistence(timeout: 10), id)
+                XCTAssertTrue(b.isHittable, id)
+            }
+            app.buttons["main-tab-Personal Apps Hub"].tap()
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "personal-hub-root").firstMatch.waitForExistence(timeout: 10))
+            XCTAssertFalse(app.navigationBars["More"].exists || app.navigationBars["المزيد"].exists)
+            shot(app, lang + "_445_classic_sixth_tab")
+            app.buttons["main-tab-Mirsa AI"].tap()
+            XCTAssertTrue(app.buttons["chat-new"].waitForExistence(timeout: 10))
             app.terminate()
         }
     }

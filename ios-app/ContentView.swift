@@ -625,40 +625,49 @@ struct ContentView: View {
     @State private var chatComposerFocused = false
     @State private var wallpaperMakerFocused = false
 
+    @State private var loadedTabs: Set<AppTab> = []
+
+    @ViewBuilder
+    private func sixTab<C: View>(_ tab: AppTab, @ViewBuilder _ content: () -> C) -> some View {
+        if loadedTabs.contains(tab) || vm.selectedTab == tab {
+            let on = vm.selectedTab == tab
+            content()
+                .opacity(on ? 1 : 0)
+                .allowsHitTesting(on)
+                .accessibilityHidden(!on)
+                .zIndex(on ? 1 : 0)
+        }
+    }
+
     var body: some View {
-        TabView(selection: $vm.selectedTab) {
-            AppsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(L.t("tab"), systemImage: "square.grid.3x3.fill") }
-                .tag(AppTab.apps)
-
-            SourcesTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(tr("Sources", "السورسات"), systemImage: "shippingbox.fill") }
-                .tag(AppTab.sources)
-
-            ForgeChatRoot(embedded: true)
-                .environment(\.layoutDirection, .leftToRight)
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
-                .tabItem { Label(ForgeChatText.title, systemImage: "bubble.left.and.bubble.right") }
-                .modifier(ForgeChatUnreadTabBadge())
-                .tag(AppTab.mirsaAI)
-
-            ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
-                .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
-                .tag(AppTab.pairing)
-
+        // Custom six-tab host: the native TabView folds a sixth tab under "More", so every tab
+        // is kept alive here (lazily, first visit) and only the selected one is shown.
+        ZStack {
+            sixTab(.apps) { AppsTab().modifier(LiquidTabChrome(liquid: liquidTheme)) }
+            sixTab(.sources) { SourcesTab().modifier(LiquidTabChrome(liquid: liquidTheme)) }
+            sixTab(.mirsaAI) {
+                ForgeChatRoot(embedded: true)
+                    .environment(\.layoutDirection, .leftToRight)
+                    .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
+            }
+            sixTab(.pairing) {
+                ToolsTab()
+                    .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
+            }
             // Classic (default) keeps the original store and the main dock; New draws its own single bar.
-            StoreStyleTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle))
-                .tabItem { Label(EncryptedText.tabTitle, systemImage: "lock.shield") }
-                .tag(AppTab.encrypted)
-
-            PersonalAppsHub()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), systemImage: "checkmark.seal") }
-                .tag(AppTab.personalHub)
+            sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle)) }
+            sixTab(.personalHub) {
+                PersonalAppsHub()
+                    .modifier(LiquidTabChrome(liquid: liquidTheme))
+                    .accessibilityIdentifier("personal-hub-root")
+            }
+        }
+        .onAppear { loadedTabs.insert(vm.selectedTab) }
+        .onChange(of: vm.selectedTab) { _, t in loadedTabs.insert(t) }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !liquidTheme && !chatComposerFocused && !wallpaperMakerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
+                ClassicTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
+            }
         }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
@@ -1246,5 +1255,41 @@ struct LiquidTabChrome: ViewModifier {
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }
+    }
+}
+
+
+/// Classic (non-liquid) bottom bar: all six destinations directly, same ids as the liquid dock.
+struct ClassicTabBar: View {
+    @Binding var selection: AppTab
+    let items: [LiquidTabItem]
+    @ObservedObject private var chatStore = ForgeChatStore.shared
+    @ObservedObject private var chatLocal = ForgeChatLocal.shared
+    private var chatUnread: Int { chatLocal.unreadCount(chatStore.threads) }
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(items) { item in
+                let on = selection == item.tab
+                Button { selection = item.tab } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: item.icon).font(.system(size: 20))
+                            .overlay(alignment: .topTrailing) { if item.tab == .mirsaAI { ForgeChatUnreadDot(count: chatUnread).offset(x: 10, y: -6) } }
+                            .frame(height: 24)
+                        Text(item.title).font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .foregroundStyle(on ? Color.accentColor : Color.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 49)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("mirsa-tab-dock")
+        .environment(\.layoutDirection, .leftToRight)
     }
 }
