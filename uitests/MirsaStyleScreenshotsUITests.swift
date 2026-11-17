@@ -135,6 +135,23 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// The actual result card must expose the wallpaper action, never IPA installation or injection.
+    /// Download integrity and existing library import are exercised separately by the unit suite.
+    func testTendiesArtifactCard() {
+        continueAfterFailure = false
+        for lang in ["ar", "en"] {
+            let app = launch("mirsa-ai-chat", lang: lang, extra: ["-MirsaChatFixture", "-MirsaTendiesArtifactFixture"])
+            let add = app.buttons["mirsa.chat.artifact.add-wallpaper"]
+            XCTAssertTrue(add.waitForExistence(timeout: 10))
+            XCTAssertTrue(add.isHittable)
+            XCTAssertEqual(add.label, lang == "ar" ? "أضف للخلفيات" : "Add to wallpapers")
+            XCTAssertTrue(app.staticTexts["Naruto-Space.tendies"].exists)
+            XCTAssertFalse(app.buttons["mirsa.chat.artifact.inject"].exists)
+            shot(app, lang + "_449_tendies_artifact_card")
+            app.terminate()
+        }
+    }
+
     /// Classic theme must also expose all six destinations directly, never native More.
     func testClassicSixTabs() {
         continueAfterFailure = false
