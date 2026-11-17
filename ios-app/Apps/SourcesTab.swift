@@ -661,7 +661,7 @@ struct SourceDetailView: View {
     }
 }
 
-private struct RepoAppRow: View {
+struct RepoAppRow: View {
     let app: RepoApp
     let installed: ManagedApp?
     var onSelectIPA: ((URL) async throws -> Void)? = nil

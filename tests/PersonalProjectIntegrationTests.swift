@@ -207,38 +207,22 @@ final class PersonalProjectIntegrationTests: XCTestCase {
     }
 
 
-    /// Offline simulator fixture, validated through the same IPA verifier as real sources.
-    /// This does not claim a live host download or a device run.
-    func testDiscoveryValidatedIPAAndEmptyArabicSnapshots() async throws {
-        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "PersonalUIFixture", withExtension: "zip"))
-        let facts = try IPAValidator.validate(file: fixture, expectedBundleID: nil, expectedVersion: nil, deviceOS: nil)
-        let raw = DiscoveryCandidate(name: facts.displayName, bundleID: facts.bundleID,
-            developer: "Local test fixture", version: facts.version, minOS: facts.minOS, iconURL: nil,
-            downloadURL: URL(string: "https://downloads.example.org/fixture.ipa"),
-            sourceName: "Offline IPA fixture", sourceURL: "https://downloads.example.org/source.json",
-            origin: .userSource, identity: .nameOnly)
-        let valid = try XCTUnwrap(DiscoveryIPAVerifier.validated(raw, file: fixture,
-            expectedBundleID: facts.bundleID, queryName: facts.displayName))
-        XCTAssertEqual(valid.identity, .bundleVerified)
-        XCTAssertTrue(valid.isDownloadable)
-        let reference = DiscoveryCandidate(name: "FORBIDDEN-REFERENCE-x.com", bundleID: "invalid.reference",
-            developer: "", version: "", minOS: nil, iconURL: nil,
-            downloadURL: URL(string: "https://x.com/reference.ipa"), sourceName: "FORBIDDEN-REFERENCE",
-            sourceURL: "https://x.com", origin: .appleMetadata, identity: .reference)
+    /// Source-only search fixture. Does not claim a live host/device install.
+    func testDiscoverySourceMatchesAndEmptyArabicSnapshots() async throws {
         let store = DiscoveryStore()
-        store.input = facts.displayName
-        store.outcome = DiscoveryOutcome(query: .name(facts.displayName), candidates: [valid, reference],
-            reports: [], ambiguous: false, note: nil)
-        try await snapshot(DiscoveryView(store: store), name: "Arabic-Discovery-real-validated-IPA-offline-fixture",
-            requiredText: [facts.displayName, facts.bundleID, "تنزيل", "لا"],
-            forbiddenText: ["FORBIDDEN-REFERENCE", "x.com", "References", "مراجع"])
-        store.dismiss(valid)
-        XCTAssertEqual(store.states[valid.id], .dismissed)
-        store.outcome = DiscoveryOutcome(query: .name("Absent app"), candidates: [reference],
-            reports: [], ambiguous: false, note: DiscoveryEngine.emptyMessage)
-        try await snapshot(DiscoveryView(store: store), name: "Arabic-Discovery-empty-no-references",
-            requiredText: [DiscoveryEngine.emptyMessage],
-            forbiddenText: ["FORBIDDEN-REFERENCE", "x.com", "References", "مراجع", "تنزيل"])
+        let app = RepoApp(name: "TikTok", bundleID: "com.example.tiktok", developer: "Fixture",
+            subtitle: "", description: "", version: "1", iconURL: nil,
+            downloadURL: URL(string: "https://example.org/tiktok.ipa")!, size: nil, date: nil)
+        store.input = "tIkToK"
+        store.searched = true
+        store.results = [.init(sourceURL: "https://example.org/source.json", sourceName: "Offline source", app: app)]
+        try await snapshot(DiscoveryView(store: store), name: "Arabic-Discovery-source-only-install",
+            requiredText: ["TikTok", "Offline source", "تثبيت"],
+            forbiddenText: ["Apple metadata", "Web search", "Telegram", "بحث الويب"])
+        store.results = []
+        try await snapshot(DiscoveryView(store: store), name: "Arabic-Discovery-source-only-empty",
+            requiredText: ["ما لقيت تطبيقات بهالاسم."],
+            forbiddenText: ["Apple metadata", "Web search", "Telegram", "تثبيت"])
     }
 
     /// SwiftUI exposes virtual accessibility containers, not UILabel subviews.
