@@ -82,6 +82,7 @@ enum PhotoWallpaper {
     }
 
     struct Effects: Equatable {
+        var mechanism: WallpaperMechanism? = nil
         enum Unlock: String, CaseIterable { case none, zoom, slide }
         var unlock: Unlock = .none
         var gyro = false
@@ -106,7 +107,7 @@ enum PhotoWallpaper {
     }
 
     static func usesReferenceEngine(layers: [WallpaperPhotoLayer], effects: Effects) -> Bool {
-        effects.gyro || effects.unlock != .none || effects.spin || effects.particles != .none ||
+        effects.mechanism != nil || effects.gyro || effects.unlock != .none || effects.spin || effects.particles != .none ||
         effects.dimOnSleep || effects.gradient || effects.replicate || effects.blend != .normal || effects.blur || effects.liquidGlass || layers.contains { $0.appearance != .both || $0.scene != .shared || $0.homeOffsetX != 0 || $0.homeOffsetY != 0 }
     }
 
@@ -117,6 +118,7 @@ enum PhotoWallpaper {
               screenAspect.isFinite, screenAspect >= 0.3, screenAspect <= 2 else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        let effects = try normalizedEffects(effects)
         let referenceEngine = usesReferenceEngine(layers: layers, effects: effects)
         // Every actual gyro reference uses ParameterizedCA. Never silently drop gyro or clock depth.
         guard !(depth && effects.gyro), !(effects.gyro && layers.contains { $0.appearance != .both }),
@@ -227,6 +229,13 @@ enum PhotoWallpaper {
                     try render(layer.renderedImage, size: size, crop: crop && layer.crop, zoom: layer.zoom, x: layer.x, y: layer.y)
                         .write(to: assets.appendingPathComponent(filename))
                 }
+                if effects.mechanism?.rawValue == "property:contents" {
+                    // A second bounded crop of the user's own source, not a copied animation asset.
+                    try render(layer.renderedImage, size: size, crop: crop && layer.crop,
+                               zoom: layer.zoom < 3.8 ? layer.zoom + 0.15 : layer.zoom - 0.15,
+                               x: layer.x, y: layer.y)
+                        .write(to: assets.appendingPathComponent(filename.replacingOccurrences(of: ".png", with: "-alternate.png")))
+                }
                 let layerName = "layer-\(index)-\(layer.role.rawValue)"
                 let floatAnimation = effects.floating
                     ? continuousAnimation(role: layer.role, preset: effects.motion) : ""
@@ -250,12 +259,18 @@ enum PhotoWallpaper {
                     """
                 }
             }
-            if effects.gradient && (role == nil || role == .background) { nodes = gradientLayer() + nodes }
-            if effects.liquidGlass && (role == nil || role == .middle) { nodes += liquidGlassLayer() }
+            if effects.gradient && (role == nil || role == .background) {
+                if effects.mechanism?.rawValue == "class:CAGradientLayer" {
+                    // Overlay tint stays observable even with a full-size opaque user photo.
+                    nodes += gradientLayer().replacingOccurrences(of: "startPoint=", with: "opacity=\"0.28\" startPoint=")
+                } else { nodes = gradientLayer() + nodes }
+            }
+            if effects.liquidGlass && (role == nil || role == .middle) { nodes += selectedGlass(effects) }
             if effects.particles != .none && (role == nil || role == .middle) {
                 try particlePNG(effects.particles).write(to: assets.appendingPathComponent("mirsa-particle.png"))
-                nodes += particleLayer(effects.particles, direction: effects.particleDirection)
+                nodes += selectedParticles(effects)
             }
+            if role == nil || role == .middle { nodes += mechanismDecorations(effects) }
             let caml: String
             if referenceEngine {
                 caml = referenceDocument(nodes: nodes, layers: stateLayers, effects: effects)
@@ -279,7 +294,7 @@ enum PhotoWallpaper {
             if !effects.gyro {
                 index.merge(["documentWidth": width, "documentHeight": height,
                     "documentResizesToView": !pointGeometry, "geometryFlipped": !pointGeometry,
-                    "loopingEnabled": effects.floating || effects.spin, "scalesToFitInPlayer": true,
+                    "loopingEnabled": effects.floating || effects.spin || effects.mechanism != nil, "scalesToFitInPlayer": true,
                     "unitsInPixelsInPlayer": !pointGeometry]) { _, new in new }
                 if pointGeometry {
                     index["assetManifest"] = "assetManifest.caml"
@@ -317,6 +332,226 @@ enum PhotoWallpaper {
     }
 
 
+
+    /// A catalogue selection owns its entire preset. Manual switches cannot hide an unsupported
+    /// selection or accidentally combine incompatible loops. Layer geometry is still validated.
+    static func normalizedEffects(_ input: Effects) throws -> Effects {
+        guard let mechanism = input.mechanism else { return input }
+        guard mechanism.isSupported else { throw CocoaError(.featureUnsupported) }
+        var result = Effects(mechanism: mechanism)
+        switch mechanism.rawValue {
+        case "class:CATransformLayer":
+            result.gyro = true; result.gyroStrength = .subtle
+        case "class:wallpaperParallaxGroups":
+            result.gyro = true
+        case "class:wallpaperPropertyGroups":
+            result.gyro = true; result.unlock = .slide
+        case "class:LKState":
+            result.unlock = .zoom
+        case "type:CASpringAnimation":
+            result.unlock = .slide
+        case "class:CAGradientLayer":
+            result.gradient = true
+        case "class:CAReplicatorLayer":
+            result.replicate = true
+        case "class:CABackdropLayer", "class:CASDFLayer", "class:CASDFElementLayer",
+             "filter:displacementMap", "type:CASDFGlassDisplacementEffect":
+            result.liquidGlass = true
+        case "class:CAEmitterLayer", "class:CAEmitterCell", "class:CAEmitterBehavior",
+             "emitterMode:outline", "emitterMode:volume", "emitterShape:line",
+             "emitterShape:point", "emitterShape:rectangle", "renderMode:additive", "renderMode:unordered":
+            result.particles = .stars
+        default: break
+        }
+        return result
+    }
+
+    /// Only fixed compiler-owned keys and finite numeric values enter this generator.
+    /// No scripts, external source names, copied reference images or arbitrary XML input.
+    static func mechanismImage(index: Int, layer: WallpaperPhotoLayer, filename: String,
+                               effects: Effects, fallback: String) -> String {
+        guard let mechanism = effects.mechanism else { return fallback }
+        let key = mechanism.rawValue
+        let id = "mechanism-\(index)"
+        let contents = "<contents type=\"CGImage\" src=\"assets/\(filename)\"/>"
+        var attributes = ""
+        var children = contents
+        let scalar: [String: (Double, Double)] = [
+            "bounds.size.height": (844, 790), "bounds.size.width": (390, 354),
+            "cornerRadius": (0, 90), "position.x": (195, 225), "position.y": (422, 462),
+            "shadowOpacity": (0.2, 0.9), "transform.rotation.x": (-0.16, 0.16),
+            "transform.rotation.y": (-0.22, 0.22), "transform.rotation.z": (-0.12, 0.12),
+            "transform.scale": (1, 1.08), "transform.scale.x": (0.92, 1.08),
+            "transform.scale.xy": (1, 1.12), "transform.translation.x": (-22, 22),
+            "transform.translation.y": (-28, 28), "zPosition": (-20, 20)
+        ]
+        if key.hasPrefix("property:"), let values = scalar[String(key.dropFirst(9))] {
+            let property = String(key.dropFirst(9))
+            children += mechanismAnimation(property: property, values: [values.0, values.1, values.0])
+            if property == "cornerRadius" { attributes += " masksToBounds=\"1\"" }
+            if property == "shadowOpacity" {
+                attributes += " shadowColor=\"0 0 0\" shadowRadius=\"24\" shadowOffset=\"0 16\""
+                // An inset visible image edge makes the animated shadow observable.
+                return "<CALayer id=\"\(id)\" name=\"\(id)\" bounds=\"0 0 350 804\" position=\"195 422\"\(attributes)>\(children)</CALayer>"
+            }
+        } else {
+            switch key {
+            case "property:bounds":
+                children += mechanismVectorAnimation(property: "bounds", type: "CGRect",
+                    values: ["0 0 390 844", "0 0 350 784", "0 0 390 844"])
+            case "property:position":
+                children += mechanismVectorAnimation(property: "position", type: "CGPoint",
+                    values: ["195 422", "220 450", "195 422"])
+            case "property:contents":
+                let alternate = filename.replacingOccurrences(of: ".png", with: "-alternate.png")
+                children += """
+                <animations><animation type="CAKeyframeAnimation" key="mirsa-contents" keyPath="contents" beginTime="1e-100" duration="4" removedOnCompletion="0" repeatCount="inf" calculationMode="discrete">
+                <values><CGImage src="assets/\(filename)"/><CGImage src="assets/\(alternate)"/><CGImage src="assets/\(filename)"/></values>
+                <keyTimes><real value="0"/><real value="0.5"/><real value="1"/></keyTimes></animation></animations>
+                """
+            case "property:anchorPoint":
+                attributes += " anchorPoint=\"0.35 0.5\""
+                children += mechanismAnimation(property: "transform.rotation.z", values: [-0.08, 0.08, -0.08])
+            case "property:backgroundColor":
+                children = "<sublayers><CALayer name=\"mirsa-inset-photo\" bounds=\"0 0 342 796\" position=\"195 422\">\(contents)</CALayer></sublayers>"
+                attributes += " backgroundColor=\"0.08 0.18 0.36\""
+            case "property:continuousCorners":
+                attributes += " continuousCorners=\"1\" cornerRadius=\"72\" masksToBounds=\"1\""
+            case "property:masksToBounds":
+                attributes += " masksToBounds=\"1\" cornerRadius=\"96\""
+            case "property:speed":
+                attributes += " speed=\"0.6\""
+                children += mechanismAnimation(property: "transform.rotation.z", values: [0, 6.283185307179586])
+            case "property:compositingFilter":
+                children = "<compositingFilter type=\"CAFilter\" filter=\"screenBlendMode\" name=\"Mirsa screen\"/>" + children
+            case "class:LKStateAddAnimation": break // serialized as a real state element below
+            case "type:CABasicAnimation":
+                children += """
+                <animations><animation type="CABasicAnimation" key="mirsa-basic" keyPath="transform.translation.y" beginTime="1e-100" duration="3" autoreverses="1" removedOnCompletion="0" repeatCount="inf">
+                <fromValue type="real" value="-18"/><toValue type="real" value="18"/></animation></animations>
+                """
+            case "type:CAKeyframeAnimation":
+                children += mechanismAnimation(property: "transform.translation.x", values: [-24, 8, 24, -24])
+            case "filter:Contrast 1":
+                children = mechanismFilter("colorContrast", name: "Contrast 1", attributes: "inputAmount=\"1.45\"") + children
+            case "filter:Gaussian Blur 1":
+                children = mechanismFilter("gaussianBlur", name: "Gaussian Blur 1", attributes: "inputRadius=\"12\"") + children
+            case "filter:Hue Rotate 1":
+                children = mechanismFilter("colorHueRotate", name: "Hue Rotate 1", attributes: "inputAngle=\"0.8\"") + children
+            case "filter:Saturate 1":
+                children = mechanismFilter("colorSaturate", name: "Saturate 1", attributes: "inputAmount=\"1.8\"") + children
+            case "filter:colorSaturate":
+                children = mechanismFilter("colorSaturate", name: "colorSaturate", attributes: "inputAmount=\"0.25\"") + children
+            case "filter:Sepia 1":
+                children = "<filters><CIFilter filter=\"CISepiaTone\" name=\"Sepia 1\" enabled=\"true\"><inputIntensity type=\"real\" value=\"0.75\"/></CIFilter></filters>" + children
+            case "filter:ciboxBlur":
+                children = "<filters><CIFilter filter=\"CIBoxBlur\" name=\"ciboxBlur\"><inputRadius type=\"real\" value=\"8\"/></CIFilter></filters>" + children
+            case "filter:cigaussianBlur":
+                children = "<filters><CIFilter filter=\"CIGaussianBlur\" name=\"cigaussianBlur\"><inputRadius type=\"real\" value=\"10\"/></CIFilter></filters>" + children
+            case "filter:cicolorControls":
+                children = "<filters><CIFilter filter=\"CIColorControls\" name=\"cicolorControls\"><inputSaturation type=\"real\" value=\"0.4\"/><inputBrightness type=\"real\" value=\"0.05\"/><inputContrast type=\"real\" value=\"1.1\"/></CIFilter></filters>" + children
+            case "type:CAFilter":
+                children = "<compositingFilter type=\"CAFilter\" filter=\"overlayBlendMode\" name=\"Mirsa overlay\"/>" + children
+            default: break
+            }
+        }
+        return "<CALayer id=\"\(id)\" name=\"\(id)\" bounds=\"0 0 390 844\" position=\"195 422\" contentsFormat=\"RGBA8\"\(attributes)>\(children)</CALayer>"
+    }
+
+    static func mechanismFilter(_ filter: String, name: String, attributes: String) -> String {
+        "<filters><CAFilter filter=\"\(filter)\" name=\"\(name)\" enabled=\"true\" \(attributes)/></filters>"
+    }
+
+    static func mechanismAnimation(property: String, values: [Double]) -> String {
+        mechanismVectorAnimation(property: property, type: "real", values: values.map { String($0) })
+    }
+
+    static func mechanismVectorAnimation(property: String, type: String, values: [String]) -> String {
+        let nodes = values.map { "<\(type) value=\"\($0)\"/>" }.joined()
+        return """
+        <animations><animation type="CAKeyframeAnimation" key="mirsa-mechanism" keyPath="\(property)" beginTime="1e-100" duration="8" removedOnCompletion="0" repeatCount="inf" repeatDuration="inf" calculationMode="linear"><values>\(nodes)</values></animation></animations>
+        """
+    }
+
+    /// Non-interpolatable booleans and opacity use state assignments, never an infinite opacity loop.
+    static func mechanismStateElements(index: Int, state: Int, effects: Effects) -> String {
+        guard let raw = effects.mechanism?.rawValue else { return "" }
+        let values: [String: (String, [String])] = [
+            "property:anchorPoint": ("CGPoint", ["0.35 0.5", "0.65 0.5", "0.5 0.5"]),
+            "property:backgroundColor": ("CGColor", ["0.08 0.18 0.36", "0.30 0.12 0.24", "0.02 0.04 0.08"]),
+            "property:continuousCorners": ("integer", ["1", "0", "1"]),
+            "property:hidden": ("integer", ["0", "0", "1"]),
+            "property:masksToBounds": ("integer", ["1", "0", "1"]),
+            "property:opacity": ("real", ["1", "0.8", "0.3"]),
+            "property:speed": ("real", ["0.6", "1.4", "0.2"])
+        ]
+        if let entry = values[raw] {
+            return "<LKStateSetValue targetId=\"mechanism-\(index)\" keyPath=\"\(raw.dropFirst(9))\"><value type=\"\(entry.0)\" value=\"\(entry.1[state])\"/></LKStateSetValue>"
+        }
+        if raw == "property:compositingFilter" {
+            // A missing value is the observed native reset-to-default assignment in Sleep.
+            return state == 2 ? "<LKStateSetValue targetId=\"mechanism-\(index)\" keyPath=\"compositingFilter\"/>" : ""
+        }
+        if raw == "class:LKStateAddAnimation", state == 1 {
+            return """
+            <LKStateAddAnimation targetId="mechanism-\(index)" key="mirsa-state-entry">
+            <animation type="CASpringAnimation" keyPath="transform.translation.y" beginTime="1e-100" duration="1" mass="1" stiffness="100" damping="16" removedOnCompletion="1">
+            <fromValue type="real" value="32"/><toValue type="real" value="0"/></animation></LKStateAddAnimation>
+            """
+        }
+        return ""
+    }
+
+    static func mechanismDecorations(_ effects: Effects) -> String {
+        guard effects.mechanism?.rawValue == "class:CATextLayer" else { return "" }
+        return """
+        <CATextLayer id="mirsa-text" name="Mirsa text" bounds="0 0 260 52" position="195 650" fontSize="30" foregroundColor="1 1 1" alignmentMode="center" wrapped="0" contentsScale="3">
+        <font type="string" value="SFProText-Regular"/><string type="string" value="Mirsa"/></CATextLayer>
+        """
+    }
+
+    static func selectedGlass(_ effects: Effects) -> String {
+        let base = liquidGlassLayer()
+        // Distinct class-focused recipes vary the actual geometry/effect, never just labels.
+        switch effects.mechanism?.rawValue {
+        case "class:CABackdropLayer": return base.replacingOccurrences(of: "inputAmount=\"-80\"", with: "inputAmount=\"-24\"")
+        case "class:CASDFLayer": return base.replacingOccurrences(of: "height=\"40\"", with: "height=\"20\"")
+        case "class:CASDFElementLayer": return base.replacingOccurrences(of: "cornerRadius=\"60\"", with: "cornerRadius=\"28\"")
+        case "filter:displacementMap": return base.replacingOccurrences(of: "inputAmount=\"-80\"", with: "inputAmount=\"-56\"")
+        default: return base
+        }
+    }
+
+    static func selectedParticles(_ effects: Effects) -> String {
+        var xml = particleLayer(effects.particles, direction: effects.particleDirection)
+        switch effects.mechanism?.rawValue {
+        case "class:CAEmitterCell":
+            xml = xml.replacingOccurrences(of: "lifetime=\"5\"", with: "lifetime=\"3\"")
+                .replacingOccurrences(of: "scale=\"0.08\"", with: "scale=\"0.14\"")
+        case "emitterMode:outline":
+            xml = xml.replacingOccurrences(of: "emitterMode=\"volume\"", with: "emitterMode=\"outline\"")
+                .replacingOccurrences(of: "emitterShape=\"point\"", with: "emitterShape=\"rectangle\"")
+                .replacingOccurrences(of: "emitterSize=\"0 0\"", with: "emitterSize=\"300 500\"")
+        case "emitterMode:volume":
+            xml = xml.replacingOccurrences(of: "emitterShape=\"point\"", with: "emitterShape=\"rectangle\"")
+                .replacingOccurrences(of: "emitterSize=\"0 0\"", with: "emitterSize=\"260 420\"")
+        case "emitterShape:line":
+            xml = xml.replacingOccurrences(of: "emitterShape=\"point\"", with: "emitterShape=\"line\"")
+                .replacingOccurrences(of: "emitterSize=\"0 0\"", with: "emitterSize=\"300 0\"")
+        case "emitterShape:point":
+            xml = xml.replacingOccurrences(of: "emitterPosition=\"-20 0\"", with: "emitterPosition=\"195 160\"")
+        case "emitterShape:rectangle":
+            xml = xml.replacingOccurrences(of: "emitterShape=\"point\"", with: "emitterShape=\"rectangle\"")
+                .replacingOccurrences(of: "emitterSize=\"0 0\"", with: "emitterSize=\"300 120\"")
+        case "renderMode:additive":
+            xml = xml.replacingOccurrences(of: "renderMode=\"unordered\"", with: "renderMode=\"additive\"")
+        case "renderMode:unordered":
+            xml = xml.replacingOccurrences(of: "birthRate=\"10\"", with: "birthRate=\"16\"")
+        default: break
+        }
+        return xml
+    }
+
     // Structure-only study at CAPlayground/wallpapers@799fcf81d51dd04b9b8248830959eb1f7fe24d57.
     // No community artwork or external URLs are emitted. All sources are generated UUID assets.
     // Manosaba_Gyro: ParameterizedCA, named transform layers, typed style dictionaries.
@@ -332,6 +567,12 @@ enum PhotoWallpaper {
         let blur = effects.blur ? "<filters><CAFilter filter=\"gaussianBlur\" name=\"Mirsa blur\" enabled=\"true\" inputRadius=\"12\"/></filters>" : ""
         let replicaOpen = effects.replicate ? "<CAReplicatorLayer name=\"mirsa-replicator-\(index)\" bounds=\"0 0 390 844\" position=\"195 422\" instanceCount=\"6\" instanceDelay=\"0\" instanceTransform=\"rotate(60deg)\" preservesDepth=\"1\"><sublayers>" : ""
         let replicaClose = effects.replicate ? "</sublayers></CAReplicatorLayer>" : ""
+        let image = """
+        <CALayer name="layer-\(index)-\(layer.role.rawValue)" bounds="0 0 \(390 + pad * 2) \(844 + pad * 2)" position="195 422" contentsFormat="RGBA8">
+        \(blend)\(blur)<contents type="CGImage" src="assets/\(filename)"/>
+        </CALayer>
+        """
+        let selectedImage = mechanismImage(index: index, layer: layer, filename: filename, effects: effects, fallback: image)
         // Position state, gyro translation, timed float and spin get DIFFERENT nodes.
         // A home transition must not fight an infinite position animation on the same property.
         return """
@@ -339,9 +580,7 @@ enum PhotoWallpaper {
         <sublayers><CATransformLayer id="gyro-\(index)" name="gyro-\(index)" bounds="0 0 390 844" position="195 422">
         <sublayers><CALayer id="float-\(index)" name="float-\(index)" bounds="0 0 390 844" position="195 422">
         \(motion)<sublayers><CALayer id="spin-\(index)" name="spin-\(index)" bounds="0 0 390 844" position="195 422">
-        \(spin)<sublayers>\(replicaOpen)<CALayer name="layer-\(index)-\(layer.role.rawValue)" bounds="0 0 \(390 + pad * 2) \(844 + pad * 2)" position="195 422" contentsFormat="RGBA8">
-        \(blend)\(blur)<contents type="CGImage" src="assets/\(filename)"/>
-        </CALayer>\(replicaClose)</sublayers></CALayer></sublayers></CALayer></sublayers></CATransformLayer></sublayers></CATransformLayer>
+        \(spin)<sublayers>\(replicaOpen)\(selectedImage)\(replicaClose)</sublayers></CALayer></sublayers></CALayer></sublayers></CATransformLayer></sublayers></CATransformLayer>
         """
     }
 
@@ -436,7 +675,7 @@ enum PhotoWallpaper {
         }
         let states = names.map { stateIndex, name, appearance in
             let assignments = layers.map { index, layer in
-                sceneValues(layer: layer, effects: effects).map { key, lock, home, sleep in
+                let sceneAssignments = sceneValues(layer: layer, effects: effects).map { key, lock, home, sleep in
                     var value = [lock, home, sleep][stateIndex]
                     if key == "opacity", let appearance,
                        layer.appearance != .both, layer.appearance.rawValue.lowercased() != appearance.lowercased() {
@@ -447,6 +686,7 @@ enum PhotoWallpaper {
                     <value type="real" value="\(value)"/></LKStateSetValue>
                     """
                 }.joined()
+                return sceneAssignments + mechanismStateElements(index: index, state: stateIndex, effects: effects)
             }.joined()
             return """
             <LKState name="\(name)" initial="\(stateIndex == 0 && appearance != "Dark")" final="false"><elements>\(assignments)</elements></LKState>

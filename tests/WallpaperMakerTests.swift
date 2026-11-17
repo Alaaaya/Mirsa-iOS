@@ -1170,3 +1170,46 @@ final class PosterBoardAccessSafetyTests: XCTestCase {
 
 }
 #endif
+
+extension WallpaperMakerTests {
+    /// Export real packages for every catalogue recipe, not a synthetic CAML fixture.
+    /// This proves serialization only, never that private iOS classes render on a device.
+    func testAllMechanismCatalogueArchivesAndExplicitUnsupportedCases() throws {
+        let options = WallpaperMechanism.allCases
+        XCTAssertEqual(options.count, 70)
+        XCTAssertEqual(Set(options.map(\.rawValue)).count, 70)
+        var report: [[String: Any]] = []
+        for (index, option) in options.enumerated() {
+            try autoreleasepool {
+                let layer = WallpaperPhotoLayer(image: photo())
+                let effect = PhotoWallpaper.Effects(mechanism: option)
+                guard option.isSupported else {
+                    XCTAssertThrowsError(try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5, effects: effect), option.rawValue)
+                    XCTAssertFalse((option.limitation ?? "").isEmpty, option.rawValue)
+                    report.append(["mechanism": option.rawValue, "status": "EXPLICIT_UNSUPPORTED", "reason": option.limitation ?? "", "devicePlaybackVerified": false])
+                    return
+                }
+                let url = try PhotoWallpaper.makeArchive(layers: [layer], screenAspect: 0.5, effects: effect)
+                defer { try? FileManager.default.removeItem(at: url) }
+                let files = try unpack(url)
+                let documents = files.filter { $0.key.hasSuffix("/main.caml") }
+                XCTAssertFalse(documents.isEmpty, option.rawValue)
+                for (path, data) in documents {
+                    let parser = XMLParser(data: data)
+                    XCTAssertTrue(parser.parse(), "\(option.rawValue) \(path) \(String(describing: parser.parserError))")
+                    XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("https://"), option.rawValue)
+                }
+                let xml = documents.values.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n")
+                XCTAssertFalse(option.structuralMarkers.isEmpty, option.rawValue)
+                for marker in option.structuralMarkers {
+                    XCTAssertTrue(xml.contains(marker), "\(option.rawValue) missing actual structural marker \(marker)")
+                }
+                try recordEvidence(url, name: String(format: "mechanism-%02d", index))
+                report.append(["mechanism": option.rawValue, "status": "SWIFT_ARCHIVE_STRUCTURE_OBSERVED", "archive": String(format: "mechanism-%02d.tendies", index), "markers": option.structuralMarkers, "devicePlaybackVerified": false])
+            }
+        }
+        let base = ProcessInfo.processInfo.environment["MIRSA_WALLPAPER_EVIDENCE"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("wallpaper-evidence")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: base.appendingPathComponent("mechanism-report.json"))
+    }
+}
