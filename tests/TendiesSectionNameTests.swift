@@ -41,7 +41,7 @@ final class TendiesSectionNameTests: XCTestCase {
             XCTAssertTrue(WallpaperMakerStrings.text(.compatibility, language: language).contains("18.0"))
             XCTAssertTrue(WallpaperMakerStrings.text(.compatibility, language: language).contains("27.2"))
         }
-        XCTAssertTrue(WallpaperMakerStrings.text(.effectsHelp, language: .english).contains("Preview shows layout only, not system effects"))
+        XCTAssertTrue(WallpaperMakerStrings.text(.effectsHelp, language: .english).contains("The preview shows layout only; system playback depends on iOS"))
     }
 
 }
