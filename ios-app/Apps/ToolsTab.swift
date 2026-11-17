@@ -22,10 +22,10 @@ struct ToolsTab: View {
     var body: some View {
         VStack(spacing: 0) {
             if !chatComposerFocused {
+                // Floats on the page backdrop like the dock; no strip of its own behind it.
                 picker
                     .padding(.horizontal, MirsaSpacing.page)
                     .padding(.vertical, MirsaSpacing.xs)
-                    .background(AuroraBackground().ignoresSafeArea(edges: .top))
             }
             Group {
                 switch section {
@@ -70,6 +70,13 @@ struct ToolsTab: View {
         }
         .padding(4)
         .appsGlassCapsule()
+        .overlay {
+            Capsule()
+                .strokeBorder(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.05)],
+                                             startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+                .allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 12, y: 6)
         .environment(\.layoutDirection, .leftToRight)
     }
 }
