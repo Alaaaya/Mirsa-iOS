@@ -1172,7 +1172,6 @@ struct AppsSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form { Group {
-                MirsaAppIconPickerSection()
                 Section(tr("Admin access", "صلاحية المشرف", ckb: "دەسەڵاتی بەڕێوەبەر", kmr: "Gihîştina rêveber")) {
                     SecureField(tr("One-time code", "كود لمرة وحدة", ckb: "کۆدی یەکجار", kmr: "Koda carekê"), text: $adminCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
                     Button(tr("Claim", "تفعيل", ckb: "چالاک بکە", kmr: "Çalak bike")) { Task { await claim() } }.disabled(adminCode.count < 19)
