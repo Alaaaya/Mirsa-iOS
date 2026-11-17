@@ -82,5 +82,5 @@ jobs:
             build/shots
             build/design-ui.log
             build/design-unit.log
-            build/raw/manifest.json
+            build/raw
           if-no-files-found: error
