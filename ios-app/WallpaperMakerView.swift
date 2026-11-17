@@ -10,9 +10,29 @@ struct WallpaperMakerFocusKey: PreferenceKey {
 }
 
 /// Embedded directly inside the existing Tendies section.
+/// One pencil tap: the row being edited plus what could be read from it.
+struct TendieEditRequest: Identifiable, Equatable {
+    let id = UUID()
+    let item: TendieItem
+    let load: TendieEditLoad
+    static func == (a: TendieEditRequest, b: TendieEditRequest) -> Bool { a.id == b.id }
+}
+
 struct WallpaperMakerSection: View {
     let applyRunning: Bool
     let onImport: (URL) async -> Void
+    var editRequest: TendieEditRequest?
+    /// Replaces the chosen row's file in place. Returns false when nothing was replaced.
+    var onReplace: (TendieItem, URL) async -> Bool
+    var onEditDone: () -> Void
+    @State private var editingItem: TendieItem?
+    init(applyRunning: Bool, editRequest: TendieEditRequest? = nil,
+         onReplace: @escaping (TendieItem, URL) async -> Bool = { _, _ in false },
+         onEditDone: @escaping () -> Void = {},
+         onImport: @escaping (URL) async -> Void) {
+        self.applyRunning = applyRunning; self.editRequest = editRequest
+        self.onReplace = onReplace; self.onEditDone = onEditDone; self.onImport = onImport
+    }
     @State private var layers: [WallpaperPhotoLayer] = WallpaperMakerSection.fixtureLayers()
     @State private var video: URL?
     @State private var generated: URL?
@@ -75,6 +95,17 @@ struct WallpaperMakerSection: View {
 
     var body: some View {
         Group {
+            if let editingItem {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(t(.editing) + " " + editingItem.name, systemImage: "pencil")
+                        .font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    Text(t(.editHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button(t(.editCancel), role: .cancel) { clear(); onEditDone() }
+                        .accessibilityIdentifier("wallpaper-edit-cancel")
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("wallpaper-edit-banner")
+            }
             Text(t(.steps)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 Button {
@@ -151,9 +182,23 @@ struct WallpaperMakerSection: View {
             if let generated {
                 Text(t(.ready)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button { showShare = true } label: { Label(t(.share), systemImage: "square.and.arrow.up") }
-                Button(t(.importFile)) {
-                    Task { await onImport(generated) }
-                }.disabled(applyRunning || busy)
+                if let editingItem {
+                    Button(t(.saveEdit)) { saveEdit(editingItem, archive: generated) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(applyRunning || busy)
+                        .accessibilityIdentifier("wallpaper-edit-save")
+                } else {
+                    Button(t(.importFile)) {
+                        let snapshot = (layers, crop, depth, effects)
+                        Task {
+                            if !snapshot.0.isEmpty {
+                                try? TendieProjectStore.save(layers: snapshot.0, crop: snapshot.1, depth: snapshot.2,
+                                                             effects: snapshot.3, forFileName: generated.lastPathComponent)
+                            }
+                            await onImport(generated)
+                        }
+                    }.disabled(applyRunning || busy)
+                }
             }
             Text(t(.videoHelp)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text(t(.compatibility)).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -184,6 +229,34 @@ struct WallpaperMakerSection: View {
             await prepareForegrounds()
         }
         .onDisappear { clear() }
+        .onChange(of: editRequest?.id) { _, _ in
+            if let request = editRequest { apply(request) }
+        }
+        .onAppear { if let request = editRequest, editingItem == nil { apply(request) } }
+    }
+
+    private func apply(_ request: TendieEditRequest) {
+        clear()
+        let load = request.load
+        layers = load.layers; crop = load.crop; depth = load.depth; effects = load.effects
+        autoEffectsApplied = true
+        editingItem = request.item
+        message = load.effectsUnknown ? t(.editLegacy) : nil
+    }
+
+    private func saveEdit(_ item: TendieItem, archive: URL) {
+        let snapshot = (layers, crop, depth, effects)
+        Task { @MainActor in
+            busy = true
+            let ok = await onReplace(item, archive)
+            busy = false
+            if ok {
+                try? TendieProjectStore.save(layers: snapshot.0, crop: snapshot.1, depth: snapshot.2,
+                                             effects: snapshot.3, forFileName: item.fileName)
+                clear(); onEditDone()
+                message = t(.editSaved)
+            } else { message = t(.error) }
+        }
     }
 
     /// Modal UIKit presentation. A SwiftUI .sheet on this Group would be attached to every Form row
@@ -412,7 +485,7 @@ struct WallpaperMakerSection: View {
         generationID = UUID(); cutoutRunID = UUID(); cutoutBusy = false
         generationTask?.cancel(); planTask?.cancel()
         generationTask = nil; planTask = nil; busy = false; planBusy = false
-        invalidate(); layers = []; autoEffectsApplied = false
+        invalidate(); layers = []; autoEffectsApplied = false; editingItem = nil
         if let video { try? FileManager.default.removeItem(at: video) }
         video = nil
     }

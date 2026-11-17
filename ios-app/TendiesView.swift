@@ -33,6 +33,8 @@ struct TendiesView: View {
     @State private var installStartedThisSession = false
     private func ws(_ k: MirsaWallpaperActionStrings.Key) -> String { MirsaWallpaperActionStrings.text(k) }
     @State private var makerDescriptionFocused = false
+    @State private var editRequest: TendieEditRequest?
+    @State private var scrollToMaker = false
 
     private var videoApplyRunning: Bool {
         if case .running = vm.tendiesFlashPhase { return true }
@@ -184,6 +186,8 @@ struct TendiesView: View {
                         ForEach($vm.tendieItems) { $item in
                             TendieRowView(item: $item) {
                                 selectedDetailItem = item
+                            } onEdit: {
+                                beginEdit(item)
                             } onDelete: {
                                 vm.deleteTendie(item: item)
                             }
@@ -216,9 +220,12 @@ struct TendiesView: View {
                 }
                 OriginalVideoWallpaperBlock(applyRunning: videoApplyRunning)
                 Section {
-                        WallpaperMakerSection(applyRunning: videoApplyRunning) { archive in
+                        WallpaperMakerSection(applyRunning: videoApplyRunning, editRequest: editRequest,
+                                              onReplace: { item, archive in await vm.replaceTendie(item: item, with: archive) },
+                                              onEditDone: { editRequest = nil }) { archive in
                             await vm.importTendieFiles(urls: [archive])
                         }
+                        .id("wallpaper-maker-section")
                 } header: {
                     Label(WallpaperMakerStrings.text(.title), systemImage: "square.3.layers.3d")
                         .font(.subheadline.weight(.semibold)).foregroundStyle(.indigo)
@@ -321,6 +328,11 @@ struct TendiesView: View {
                                  })
                 }
             }
+            .onChange(of: scrollToMaker) { _, go in
+                guard go else { return }
+                scrollToMaker = false
+                withAnimation { scroll.scrollTo("wallpaper-maker-section", anchor: .top) }
+            }
             .onChange(of: vm.tendiesFlashPhase) { _, phase in
                 // Only a copy that finished successfully in this session offers a respring.
                 if installStartedThisSession, vm.tendiesInstalledNew, case .done(ok: true) = phase {
@@ -329,6 +341,7 @@ struct TendiesView: View {
                 } else if case .done = phase { installStartedThisSession = false }
             }
             .onAppear {
+                TendieProjectStore.prune(keeping: vm.tendieItems.map(\.fileName))
                 vm.showSuccessAlert = false
                 vm.successAlertMessage = ""
                 vm.scanDocumentsForTendies()
@@ -391,6 +404,18 @@ struct TendiesView: View {
         }
     }
 
+    private func beginEdit(_ item: TendieItem) {
+        guard !videoApplyRunning else { return }
+        do {
+            let load = try TendieProjectStore.load(fileName: item.fileName, archive: item.fileURL)
+            vm.errorMessage = nil
+            editRequest = TendieEditRequest(item: item, load: load)
+            scrollToMaker = true
+        } catch {
+            vm.errorMessage = WallpaperMakerStrings.text(.notEditable)
+        }
+    }
+
     private func installSelectedNow() {
         guard !videoApplyRunning, !respringPresentation.isPresented, selectedCount >= 1 else { return }
         vm.errorMessage = nil
@@ -411,6 +436,7 @@ struct TendiesView: View {
 struct TendieRowView: View {
     @Binding var item: TendieItem
     let onInspect: () -> Void
+    var onEdit: () -> Void = {}
     let onDelete: () -> Void
 
     var body: some View {
@@ -466,6 +492,18 @@ struct TendieRowView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+
+            Button {
+                onEdit()
+            } label: {
+                Image(systemName: "pencil")
+                    .foregroundColor(.blue)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(WallpaperMakerStrings.text(.editButton))
+            .accessibilityIdentifier("wallpaper-edit-row")
 
             Button(role: .destructive) {
                 onDelete()
