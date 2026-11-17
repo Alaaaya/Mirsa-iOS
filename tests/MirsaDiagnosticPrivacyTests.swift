@@ -3,6 +3,15 @@ import Foundation
 @testable import Mirsa
 
 final class MirsaDiagnosticPrivacyTests: XCTestCase {
+    func testIncrementalLogFilteringPreservesSplitPrivateMaterial() {
+        var safe = MirsaDiagnosticPrivacy.appending(old: [], new: ["-----BEGIN PRIVATE KEY-----"])
+        safe = MirsaDiagnosticPrivacy.appending(old: safe, new: safe + ["shortSecret"])
+        XCTAssertEqual(safe.last, "[private material]")
+        safe = MirsaDiagnosticPrivacy.appending(old: safe, new: safe + ["-----END PRIVATE KEY-----"])
+        safe = MirsaDiagnosticPrivacy.appending(old: safe, new: safe + ["COPY VERIFIED files=2"])
+        XCTAssertEqual(safe.last, "COPY VERIFIED files=2")
+        XCTAssertFalse(safe.joined().contains("shortSecret"))
+    }
     // Synthetic canaries only. Never use live account/session/device information in tests.
     private let secret = "FixtureSecret_OnlyForRegression_924681"
     private let device = "01020304-0506-4708-890a-0b0c0d0e0f10"
