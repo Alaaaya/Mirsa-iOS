@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Pin package test dependencies
+        run: cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+
       - name: Diagnose original IPA workspace lifetime
         run: |
           cat ios-app/Apps/MirsaContainerCleanup.swift ios-app/Apps/MirsaManagedTmp.swift scripts/diagnostics/original-ipa.swift > /tmp/original-ipa.swift
@@ -75,12 +78,31 @@ jobs:
       - name: Generate Xcode project
         run: brew install xcodegen && xcodegen generate
 
+      - name: Install committed dependency lock
+        run: |
+          mkdir -p Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+
       - name: Stamp build number
         run: /usr/libexec/PlistBuddy -c "Add :MirsaBuild string ${{ github.run_number }}" ios-app/Info.plist
 
       - name: Build unsigned IPA
         run: |
           bash build-ipa.sh
+
+      - name: Capture exact device dependency revisions
+        run: python3 scripts/capture_dependency_provenance.py
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-provenance
+          path: |
+            build/dependency-provenance/
+            Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+            vendor/ApplePackage/Package.resolved
+            build/DerivedData/SourcePackages/workspace-state.json
 
       - name: Verify actual IPA upgrade from live 243
         run: python3 scripts/verify_release_upgrade.py build/Mirsa.ipa

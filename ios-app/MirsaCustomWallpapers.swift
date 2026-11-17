@@ -78,7 +78,7 @@ enum MirsaCustomWallpapers {
     static func read(_ url: URL, limit: Int) throws -> Data {
         let before = try identity(url, kind: S_IFREG)
         guard before.st_nlink >= 1, before.st_size >= 0, before.st_size <= Int64(limit) else {
-            throw PosterBoardStore.failure("Oversized or hard-linked wallpaper file.")
+            throw PosterBoardStore.failure("Wallpaper file exceeds bounded read limit.")
         }
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
         guard fd >= 0 else { throw PosterBoardStore.failure("Cannot open wallpaper file safely.") }
@@ -111,7 +111,8 @@ enum MirsaCustomWallpapers {
     }
     /// Bounded manual traversal, no Foundation recursive enumerator following
     /// aliases. The lease's one intended alias is permitted, nothing below it.
-    static func snapshot(_ root: URL, lease: PosterBoardLease? = nil) throws -> Snapshot {
+    static func snapshot(_ root: URL, lease: PosterBoardLease? = nil,
+                         ownedRecord: MirsaWallpaperJournal.Record? = nil) throws -> Snapshot {
         func safe(_ url: URL) throws {
             if let lease {
                 let prefix = lease.effectiveURL.path + "/"
@@ -125,6 +126,17 @@ enum MirsaCustomWallpapers {
         }
         try safe(root)
         let before = try identity(root, kind: S_IFDIR)
+        if let record = ownedRecord {
+            // Only an exact app-private completed journal grants unlink authority.
+            // Payload size/hardlinks are irrelevant to unlink, not to bounded reads.
+            let binding = Snapshot(expected: [:], paths: [], device: UInt64(before.st_dev), inode: UInt64(before.st_ino))
+            guard root.lastPathComponent == record.id,
+                  root.path.hasSuffix("/" + record.relative),
+                  completedJournal([record], id: record.id, container: record.container,
+                                   relative: record.relative, snapshot: binding) != nil else {
+                throw PosterBoardStore.failure("Owned wallpaper root does not match its completed journal.")
+            }
+        }
         var expected: [String: String] = [:], paths: [String] = [], total = 0
         func walk(_ directory: URL, prefix: String, depth: Int) throws {
             guard depth <= 20 else { throw PosterBoardStore.failure("Wallpaper tree too deep.") }
@@ -147,9 +159,18 @@ enum MirsaCustomWallpapers {
                     try walk(url, prefix: relative + "/", depth: depth + 1)
                 case S_IFREG:
                     paths.append("F:" + relative)
-                    let data = try read(url, limit: min(maxFileBytes, maxTreeBytes - total))
-                    total += data.count
-                    expected[relative] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                    if ownedRecord != nil {
+                        // No content read, truncate, chmod or write to a shared inode.
+                        // Repeated snapshots still catch replacement/size/time changes.
+                        guard node.st_nlink >= 1, node.st_size >= 0 else {
+                            throw PosterBoardStore.failure("Invalid owned wallpaper file.")
+                        }
+                        expected[relative] = "unlink:\(node.st_dev):\(node.st_ino):\(node.st_size):\(node.st_nlink):\(node.st_mtimespec.tv_sec):\(node.st_mtimespec.tv_nsec):\(node.st_ctimespec.tv_sec):\(node.st_ctimespec.tv_nsec)"
+                    } else {
+                        let data = try read(url, limit: min(maxFileBytes, maxTreeBytes - total))
+                        total += data.count
+                        expected[relative] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                    }
                 default: throw PosterBoardStore.failure("Special wallpaper node rejected.")
                 }
             }
@@ -546,13 +567,15 @@ enum MirsaCustomWallpapers {
                                                   expected: ["placeholder": "placeholder"])
         try MirsaWallpaperJournal.validatePath(record)
         let target = try grant(relative, lease: lease)
-        let first = try snapshot(target, lease: lease)
-        let owned = completedJournal(records, id: id, container: container, relative: relative, snapshot: first)
-        let candidate = try? payload(target, snapshot: first)
+        let node = try identity(target, kind: S_IFDIR)
+        let binding = Snapshot(expected: [:], paths: [], device: UInt64(node.st_dev), inode: UInt64(node.st_ino))
+        let owned = completedJournal(records, id: id, container: container, relative: relative, snapshot: binding)
+        let first = try snapshot(target, lease: lease, ownedRecord: owned)
+        let candidate: BespokePayload? = owned == nil ? (try? payload(target, snapshot: first)) : nil
         guard owned != nil || recognizedAnime(first, title: candidate?.title) ||
               candidate.map({ bespoke($0, snapshot: first, baseline: baseline) }) == true else { return nil }
         // Metadata read and full classification must refer to one stable tree.
-        guard try snapshot(target, lease: lease) == first else { throw PosterBoardStore.failure("Custom wallpaper changed while classifying.") }
+        guard try snapshot(target, lease: lease, ownedRecord: owned) == first else { throw PosterBoardStore.failure("Custom wallpaper changed while classifying.") }
         let label = owned?.title ?? candidate?.title ?? "Custom wallpaper"
         return Item(title: label.isEmpty ? "Mirsa wallpaper" : String(label.prefix(120)), id: id,
                     container: container, relative: relative, expected: first.expected,
@@ -694,7 +717,12 @@ enum MirsaCustomWallpapers {
                                        snapshot: Snapshot(expected: fresh.expected, paths: fresh.paths,
                                                           device: fresh.device, inode: fresh.inode)) != nil else { throw PosterBoardStore.failure("Wallpaper changed or is no longer proven custom. Nothing deleted.") }
                 let target = try grant(fresh.relative, lease: lease)
-                let final = try snapshot(target, lease: lease)
+                guard let owned = completedJournal(records, id: fresh.id, container: fresh.container,
+                    relative: fresh.relative, snapshot: Snapshot(expected: fresh.expected, paths: fresh.paths,
+                    device: fresh.device, inode: fresh.inode)) else {
+                    throw PosterBoardStore.failure("Completed journal missing before deletion.")
+                }
+                let final = try snapshot(target, lease: lease, ownedRecord: owned)
                 guard final.expected == fresh.expected, final.paths == fresh.paths,
                       final.device == fresh.device, final.inode == fresh.inode,
                       let classified = try classify(id: fresh.id, container: fresh.container, relative: fresh.relative,
