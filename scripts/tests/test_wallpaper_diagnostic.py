@@ -90,14 +90,17 @@ class DiagnosticContractTests(unittest.TestCase):
         ui = (R / "ios-app/TendiesView.swift").read_text()
         main = ui.split('mainContent: {', 1)[1].split('extraTools: {', 1)[0]
         tools = ui.split('extraTools: {', 1)[1].split('// Bound the actual Form viewport', 1)[0]
-        for token in ['ForEach($vm.tendieItems)', 'wallpaper-import', 'OriginalVideoWallpaperBlock(', 'WallpaperMakerSection(']:
+        for token in ['ForEach($vm.tendieItems)', 'OriginalVideoWallpaperBlock(', 'WallpaperMakerSection(']:
             self.assertIn(token, main)
             self.assertNotIn(token, tools)
         self.assertEqual(ui.count('.accessibilityIdentifier("wallpaper-respring")'), 1)
         self.assertIn('wallpaper-install-selected', main)
-        self.assertIn('wallpaper-respring', main)
+        top = ui.split('MirsaWallpaperManagementSection(', 1)[0]
+        self.assertIn('wallpaper-import', top)
+        self.assertIn('wallpaper-respring', top)
+        self.assertNotIn('wallpaper-import', tools)
         self.assertNotIn('wallpaper-respring', tools)
-        self.assertLess(main.index('wallpaper-install-selected'), main.index('wallpaper-respring'))
+        self.assertLess(ui.index('wallpaper-import'), ui.index('wallpaper-respring'))
         self.assertIn('Task { await vm.flashSelectedTendies() }', ui)
         self.assertIn('if selectedCount >= 1 { installSelectedNow(); return }', ui)
         self.assertIn('Button { offerRespring() }', ui)
@@ -112,7 +115,7 @@ class DiagnosticContractTests(unittest.TestCase):
 
     def test_primary_install_requires_successfully_picked_ids(self):
         ui = (R / "ios-app/TendiesView.swift").read_text()
-        primary = ui.split('// Two primary actions side by side.', 1)[1].split('Button { showCustomRequest', 1)[0]
+        primary = ui.split('MirsaWallpaperManagementSection(', 1)[0].split('Button { showCustomRequest', 1)[0]
         self.assertIn('installAfterPicking = true', primary)
         self.assertIn('pickedInstallIDs = []', primary)
         self.assertIn('showFilePicker = true', primary)

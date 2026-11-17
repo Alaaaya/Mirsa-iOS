@@ -577,20 +577,21 @@ struct HeroQuota: View {
                 .lineLimit(1)
             GeometryReader { geo in
                 let fillWidth = geo.size.width * fraction
-                // Position in physical coordinates once; semantic leading can mirror twice.
-                let fillX = layoutDirection == .rightToLeft
-                    ? geo.size.width - fillWidth / 2 : fillWidth / 2
-                ZStack {
-                    Capsule().fill(.white.opacity(0.10))
+                let rtl = layoutDirection == .rightToLeft
+                // Drawing isolated in forced LTR: physical left-to-right HStack, so no double mirroring.
+                HStack(spacing: 0) {
+                    if rtl { Spacer(minLength: 0) }
                     Capsule()
                         .fill(LinearGradient(colors: low
                                              ? [Color(red: 0.96, green: 0.62, blue: 0.04), Color(red: 0.98, green: 0.75, blue: 0.14)]
                                              : [MirsaPalette.accent, Color(red: 0.13, green: 0.83, blue: 0.93)],
                                              startPoint: .leading, endPoint: .trailing))
                         .frame(width: fillWidth, height: geo.size.height)
-                        .position(x: fillX, y: geo.size.height / 2)
+                    if !rtl { Spacer(minLength: 0) }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
+                .background(Capsule().fill(.white.opacity(0.10)))
+                .environment(\.layoutDirection, .leftToRight)
             }
             .frame(height: 5)
         }
