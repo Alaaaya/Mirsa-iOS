@@ -666,6 +666,10 @@ struct ContentView: View {
                     .accessibilityIdentifier("personal-hub-root")
             }
         }
+        // The dock animates its selection pill, not the retained NavigationStacks.
+        // Inheriting its spring shrinks/fades the old stack over the new UIKit bar.
+        // Suppress only selection-change animation inside the content host.
+        .animation(nil, value: vm.selectedTab)
         .onAppear { loadedTabs.insert(vm.selectedTab) }
         .onChange(of: vm.selectedTab) { _, t in loadedTabs.insert(t) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
