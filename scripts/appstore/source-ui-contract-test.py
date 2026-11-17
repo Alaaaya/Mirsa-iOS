@@ -14,6 +14,15 @@ assert '@ObservedObject private var store: SourcesStore' in detail
 assert 'self.store = store' in detail
 assert '.task(id: source.url) { await store.ensureLoaded(source.url) }' in detail
 assert 'store.listing(for: source.url, query: query)' in detail
+assert 'TextField(searchPrompt, text: $query)' in detail
+assert '.safeAreaInset(edge: .top, spacing: 0)' in detail
+assert '.searchable(' not in detail, "Search must not disappear in a collapsed navigation drawer"
+assert '.appsGlass(cornerRadius: MirsaRadius.l)' in detail
+assert 'source-app-search-clear' in detail and 'query = ""' in detail
+for language in ['english', 'arabic', 'german', 'sorani', 'kurmanji']:
+ assert 'case .' + language + ': return ' in detail
+assert r'.environment(\.layoutDirection' not in detail, "Inherit Arabic/Sorani RTL"
+
 assert 'store.loadErrors[source.url]' in detail
 assert 'store.apps[source.url] == nil' in detail
 assert 'List {' in detail and 'ForEach(shown)' in detail

@@ -618,11 +618,46 @@ struct SourceDetailView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $query)
+        // Keep search visible without relying on the navigation drawer, which
+        // can collapse behind the custom glass navigation chrome.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(searchPrompt, text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .accessibilityIdentifier("source-app-search")
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel(MirsaTr.lit("Clear"))
+                    .accessibilityIdentifier("source-app-search-clear")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .appsGlass(cornerRadius: MirsaRadius.l)
+            .padding(.horizontal, MirsaSpacing.page)
+            .padding(.vertical, 8)
+        }
         .task(id: source.url) { await store.ensureLoaded(source.url) }
         .refreshable { await store.refresh(source.url) }
         .navigationTitle(source.name)
         .mirsaScreen()
+    }
+
+    private var searchPrompt: String {
+        switch L.lang {
+        case .english: return "Search apps"
+        case .arabic: return "ابحث عن تطبيق"
+        case .german: return "Apps suchen"
+        case .sorani: return "گەڕان بۆ ئەپ"
+        case .kurmanji: return "Li sepanan bigere"
+        }
     }
 }
 
