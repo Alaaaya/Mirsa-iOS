@@ -102,7 +102,7 @@ struct WallpaperMakerSection: View {
                     WallpaperPhotosPicker { result in
                         mediaPicker = nil
                         receivePhotos(result)
-                    }.interactiveDismissDisabled()
+                    }.interactiveDismissDisabled().pickerHostMarker("photos")
                 case .video:
                     WallpaperVideoPicker { result in
                         mediaPicker = nil
@@ -111,7 +111,7 @@ struct WallpaperMakerSection: View {
                         case .failure: message = t(.error)
                         case .success(let url): setVideo(url)
                         }
-                    }.interactiveDismissDisabled()
+                    }.interactiveDismissDisabled().pickerHostMarker("video")
                 }
             }
             Button { showFiles = true } label: { Label(t(.files), systemImage: "folder") }
@@ -462,6 +462,31 @@ struct WallpaperMakerSection: View {
     }
 }
 
+#if DEBUG
+/// PHPicker content is remote, so its own view is not exposed to accessibility. This marker lives and dies
+/// with one presented sheet instance, letting UI tests detect dismiss/recreate loops.
+private struct PickerHostMarker: ViewModifier {
+    let kind: String
+    @State private var identity = UUID().uuidString
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 2, height: 2)
+                .accessibilityElement()
+                .accessibilityIdentifier("wallpaper-" + kind + "-picker-" + identity)
+        }
+    }
+}
+#endif
+extension View {
+    @ViewBuilder func pickerHostMarker(_ kind: String) -> some View {
+        #if DEBUG
+        modifier(PickerHostMarker(kind: kind))
+        #else
+        self
+        #endif
+    }
+}
+
 /// Only the chosen images are readable. Load copied files, not whole-library permissions.
 struct WallpaperPhotosPicker: UIViewControllerRepresentable {
     let completion: (Result<[UIImage], Error>?) -> Void
@@ -475,8 +500,7 @@ struct WallpaperPhotosPicker: UIViewControllerRepresentable {
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         #if DEBUG
-        // Instance identity lets the UI test detect dismiss/recreate loops, not just a final frame.
-        picker.view.accessibilityIdentifier = "wallpaper-photos-picker-" + UUID().uuidString
+        NSLog("MIRSA-PICKER photos created")
         #endif
         return picker
     }
