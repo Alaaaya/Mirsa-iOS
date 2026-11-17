@@ -53,7 +53,7 @@ struct EncryptedAppsTab: View {
         }
         .task {
             storeLoginAvailable = false
-            storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable()
+            storeLoginAvailable = true
             #if DEBUG
             if AppStoreSectionModel.fixtureAccount != nil { storeLoginAvailable = true }
             #endif
@@ -61,7 +61,7 @@ struct EncryptedAppsTab: View {
         }
         .onChange(of: section) { _, _ in Task { await storeAccount.refresh() } }
         .onReceive(NotificationCenter.default.publisher(for: MirsaStoreIdentityLoader.readyNotification)) { _ in
-            Task { storeLoginAvailable = await MirsaStoreServerClient.shared.loginAvailable(); await storeAccount.refresh() }
+            Task { storeLoginAvailable = true; await storeAccount.refresh() }
         }
         .sheet(isPresented: $showingAppStore, onDismiss: sessionMayHaveChanged) {
             AppStoreAccountView(onDownloaded: { url in

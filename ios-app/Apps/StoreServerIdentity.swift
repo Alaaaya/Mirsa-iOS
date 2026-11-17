@@ -1,8 +1,8 @@
 import Foundation
 
-/// Public builds never reach the App Store login. Backend stays owner-only.
+/// App Store login is open to all users.
 enum MirsaStoreAvailability {
-    static let publicLoginEnabled = false
+    static let publicLoginEnabled = true
 }
 
 extension MirsaStoreServerClient {
@@ -37,13 +37,9 @@ extension MirsaStoreServerClient {
 }
 
 extension MirsaStoreOnDeviceClient {
-    static let shared = MirsaStoreOnDeviceClient(gate: {
-        await MirsaStoreServerClient.shared.loginAvailable()
-    }, stateGate: {
-        await MirsaStoreServerClient.shared.gateState()
-    }, historyGate: {
-        try await MirsaStoreServerClient.shared.authorizeHistory()
-    })
+    /// App Store is open to every user. Apple credentials stay on-device and never reach Mirsa's server.
+    static let shared = MirsaStoreOnDeviceClient(gate: { true },
+        stateGate: { .authorized }, historyGate: { })
 }
 
 /// Bounded, read-only wait for the already-enrolled device identity. Never creates, rotates or resets anything.
