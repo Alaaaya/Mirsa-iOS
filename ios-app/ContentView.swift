@@ -670,8 +670,8 @@ struct ContentView: View {
         }
         // One backdrop for the whole window, under the status bar, every tab and the
         // floating dock, so nothing between the pages and the screen edge shows black.
-        .background { AuroraBackground() }
         .modifier(MirsaWindowBackdropHost())
+        .background { AuroraBackground().ignoresSafeArea() }
         // The dock animates its selection pill, not the retained NavigationStacks.
         // Inheriting its spring shrinks/fades the old stack over the new UIKit bar.
         // Suppress only selection-change animation inside the content host.
