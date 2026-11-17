@@ -4,9 +4,9 @@ from pathlib import Path
 import ast,gzip,hashlib,json,re
 root=Path(__file__).resolve().parents[2]
 s=(root/'ios-app/Apps/SourcesTab.swift').read_text()
-detail=s.split('struct SourceDetailView: View {',1)[1].split('private struct RepoAppRow:',1)[0]
+detail=s.split('struct SourceDetailView: View {',1)[1].split('struct RepoAppRow:',1)[0]
 parent=s.split('struct SourcesTab: View {',1)[1].split('struct SourceDetailView:',1)[0]
-row=s.split('private struct RepoAppRow:',1)[1].split('private struct RepoAppInfo:',1)[0]
+row=s.split('struct RepoAppRow:',1)[1].split('private struct RepoAppInfo:',1)[0]
 assert 'SourceDetailView(source: s, store: store, onSelectIPA: onSelectIPA)' in parent
 assert 'if store.apps.isEmpty' not in parent
 assert '.task { await store.loadMissing() }' in parent
