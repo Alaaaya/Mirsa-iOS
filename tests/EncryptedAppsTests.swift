@@ -115,6 +115,7 @@ final class EncryptedAppsTests: XCTestCase {
         d.append(contentsOf: u32(2))          // MH_EXECUTE
         d.append(contentsOf: u32(1))          // ncmds
         d.append(contentsOf: u32(24))         // sizeofcmds
+        d.append(contentsOf: u32(0))          // flags
         d.append(contentsOf: u32(0))          // reserved
         d.append(contentsOf: u32(0x2C))       // LC_ENCRYPTION_INFO_64
         d.append(contentsOf: u32(24))         // cmdsize
