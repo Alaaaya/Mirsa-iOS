@@ -574,7 +574,7 @@ private struct EncryptedEntryCard: View {
                             Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
                         }
                         .font(MirsaFont.button).foregroundStyle(.white)
-                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
                         .padding(.horizontal, 10)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -586,7 +586,9 @@ private struct EncryptedEntryCard: View {
                 if entry.encryptedBinary == true, entry.hasSinf {
                     Button { Task { await store.decrypt(entry, vm: vm) } } label: {
                         Label(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"), systemImage: "lock.open")
-                            .frame(maxWidth: .infinity)
+                            .font(MirsaFont.button)
+                            .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.mirsaSecondary)
                     .disabled(store.busy != nil)
