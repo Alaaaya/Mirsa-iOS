@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "2.9"
+    MARKETING_VERSION: "3.0"
     CURRENT_PROJECT_VERSION: "6.87.1"
     TARGETED_DEVICE_FAMILY: "1"
     # AirliftFFI is arm64-only (aws-lc-rs / idevice); drop x86_64 simulator slice.
@@ -63,6 +63,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa
         INFOPLIST_FILE: ios-app/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Exposes the FairPlay decryption core (FairPlayDecrypt.h) to Swift.
+        SWIFT_OBJC_BRIDGING_HEADER: ios-app/Mirsa-Bridging-Header.h
         # idevice's static lib pulls in C++ symbols (aws-lc); link libc++.
         OTHER_LDFLAGS: "-lc++"
         # PrivateKits upstream bundles macOS stubs. Resolve untouched platform
