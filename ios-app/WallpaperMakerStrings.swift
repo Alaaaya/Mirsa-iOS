@@ -8,6 +8,7 @@ enum WallpaperMakerStrings {
         case selectAll, deselectAll, collectionsType, suggestedPhotosType, mercuryType, containerType
         case cutout, cutoutHelp, cutoutReady, cutoutNoSubject, cutoutUnavailable, cutoutPreparing, connectionHint, containerUnavailable, copyVerified, applyFailed, respringHelp, motionPreset, motionLeft, motionRight, motionUp, motionDown, motionFloat
         case chooseTendies, importMore, importHint
+        case editing, editHelp, editCancel, saveEdit, editLegacy, editSaved, editButton, notEditable
         case unlock, off, unlockZoom, unlockSlide, gyro, floating, effectsHelp, animatedPhotos, staticPhotos
         case middle, zoom, horizontal, vertical, describe, plan, manualFallback
         case title, steps, photos, video, files, crop, layers, background, foreground, reorder, depth, depthHelp
@@ -25,6 +26,14 @@ enum WallpaperMakerStrings {
         return values[key]![column]
     }
     static let values: [Key: [String]] = [
+        .editing: ["Editing:", "تعديل:", "Bearbeiten:", "Tê guhertin:", "دەستکاری:"],
+        .editHelp: ["Your wallpaper's photos and effects are loaded below. Change anything, press Generate, then Save changes to replace this wallpaper.", "صور الخلفية وتأثيراتها محمّلة تحت. غيّر أي شي، اضغط إنشاء، وبعدين احفظ التعديلات لتستبدل هالخلفية.", "Fotos und Effekte deines Hintergrunds sind unten geladen. Ändere etwas, tippe auf Erstellen und speichere die Änderungen, um ihn zu ersetzen.", "Wêne û bandorên dîwarê te li jêr hatine barkirin. Tiştekî biguherîne, Çêke bike û paşê Guhertinan tomar bike da ku ev dîwar were guhertin.", "وێنە و کاریگەرییەکانی پاشبنەماکەت لە خوارەوە بار کراون. هەرچییەک بگۆڕە، دروستکردن دابگرە، پاشان گۆڕانکارییەکان پاشەکەوت بکە بۆ جێگرتنەوەی."],
+        .editCancel: ["Cancel editing", "إلغاء التعديل", "Bearbeiten abbrechen", "Guhertinê betal bike", "هەڵوەشاندنەوەی دەستکاری"],
+        .saveEdit: ["Save changes (replaces this wallpaper)", "احفظ التعديلات (تستبدل هالخلفية)", "Änderungen speichern (ersetzt diesen Hintergrund)", "Guhertinan tomar bike (vî dîwarî diguherîne)", "گۆڕانکارییەکان پاشەکەوت بکە (ئەم پاشبنەمایە دەگۆڕێت)"],
+        .editLegacy: ["This wallpaper was made before saved settings existed. Its photos are loaded, but the old effects could not be read, so please choose the effects again.", "هالخلفية انعملت قبل ما نحفظ الإعدادات. الصور انحمّلت بس التأثيرات القديمة ما انقرت، فاختار التأثيرات من جديد.", "Dieser Hintergrund entstand, bevor Einstellungen gespeichert wurden. Die Fotos sind geladen, die alten Effekte ließen sich aber nicht lesen. Bitte wähle die Effekte neu.", "Ev dîwar berî tomarkirina mîhengan hatiye çêkirin. Wêne hatin barkirin lê bandorên kevn nehatin xwendin, ji kerema xwe bandoran dîsa hilbijêre.", "ئەم پاشبنەمایە پێش پاشەکەوتکردنی ڕێکخستنەکان دروست کراوە. وێنەکان بار کران بەڵام کاریگەرییە کۆنەکان نەخوێندرانەوە، تکایە کاریگەرییەکان دووبارە هەڵبژێرە."],
+        .editSaved: ["Wallpaper updated.", "انحدّثت الخلفية.", "Hintergrund aktualisiert.", "Dîwar hate nûkirin.", "پاشبنەما نوێ کرایەوە."],
+        .editButton: ["Edit wallpaper", "تعديل الخلفية", "Hintergrund bearbeiten", "Dîwarê biguherîne", "دەستکاریکردنی پاشبنەما"],
+        .notEditable: ["This wallpaper can't be edited because its layers can't be read faithfully. It was not changed.", "ما بقدر أعدّل هالخلفية لأن طبقاتها ما بتنقرا بدقة. ما تغيّرت.", "Dieser Hintergrund kann nicht bearbeitet werden, weil seine Ebenen nicht originalgetreu gelesen werden können. Er wurde nicht verändert.", "Ev dîwar nayê guhertin ji ber ku qatên wê bi rastî nayên xwendin. Nehate guhertin.", "ئەم پاشبنەمایە ناتوانرێت دەستکاری بکرێت چونکە چینەکانی بە دروستی ناخوێندرێنەوە. نەگۆڕدرا."],
         .gyroStrength: ["Tilt strength", "قوة الميلان", "Neigungsstärke", "Hêza xwarbûnê", "هێزی لاربوون"],
         .subtle: ["Subtle", "خفيف", "Dezent", "Hindik", "کەم"],
         .mediumStrength: ["Medium", "وسط", "Mittel", "Navîn", "مامناوەند"],
