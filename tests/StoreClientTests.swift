@@ -330,7 +330,13 @@ final class MirsaStoreClientTests: XCTestCase {
         XCTAssertTrue(text.contains("Phase 2FA"))
         XCTAssertTrue(text.contains("failureType empty"))
         XCTAssertTrue(text.contains("customerMessage MZFinance.BadLogin.Configurator_message"))
-        XCTAssertTrue(text.contains("latest code"))
+        // The app defaults to Arabic; the human guidance follows the active locale.
+        // Exact protocol fields above remain locale-independent.
+        let guidance = tr("Apple did not complete verification. Check your password and use the latest code.",
+                          "Apple ما كملت التحقق. تأكد من كلمة السر واكتب آخر رمز وصلك.",
+                          ckb: "Apple پشتڕاستکردنەوەی تەواو نەکرد. وشەی نهێنی و نوێترین کۆد بپشکنە.",
+                          kmr: "Apple piştrastkirin temam nekir. Şîfre û koda herî nû kontrol bike.")
+        XCTAssertTrue(text.contains(guidance))
         XCTAssertFalse(text.contains("code was rejected"))
     }
 
