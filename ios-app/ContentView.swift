@@ -577,6 +577,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
 // MARK: - Root Tab View
 
 struct ContentView: View {
+    var sourcesStore: SourcesStore = .shared
     @EnvironmentObject var vm: AppViewModel
     @AppStorage("aircard.dont_show_support_on_launch") private var dontShowSupportOnLaunch: Bool = false
     @State private var showSupportPopup: Bool = false
@@ -628,13 +629,13 @@ struct ContentView: View {
                 .tabItem { Label(L.t("tab"), systemImage: "square.grid.3x3.fill") }
                 .tag(AppTab.apps)
 
-            SourcesTab()
+            SourcesTab(store: sourcesStore)
                 .modifier(LiquidTabChrome(liquid: liquidTheme))
                 .tabItem { Label(tr("Sources", "السورسات"), systemImage: "shippingbox.fill") }
                 .tag(AppTab.sources)
 
             ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
+                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused))
                 .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
                 .tag(AppTab.pairing)
 
@@ -1191,21 +1192,17 @@ struct VPNStatusRow: View {
 struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
     var chatEditing: Bool = false
-    var nestedNavigation: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
         if liquid {
-            if nestedNavigation {
-                // A pushed chat destination can lose an ancestor safe-area inset.
-                // Bound the tools NavigationStack itself above the floating dock.
-                content
-                    .toolbar(.hidden, for: .tabBar)
-                    .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
-            } else {
-                content
-                    .toolbar(.hidden, for: .tabBar)
-                    .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: chatEditing ? 0 : MirsaTabBarMetrics.clearance) }
-            }
+            // Reserve physical layout space around the entire tab navigation
+            // stack. Ancestor safeAreaInset can be lost when a destination is
+            // pushed, leaving its last List/ScrollView row behind the dock.
+            // Padding bounds every destination; the system bottom safe area is
+            // retained separately, so no home-indicator inset is subtracted.
+            content
+                .toolbar(.hidden, for: .tabBar)
+                .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }
