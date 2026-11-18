@@ -130,11 +130,7 @@ fn concrete_group(s: &str) -> bool {
 /// to preserve: seed ONLY concrete groups explicitly granted by this profile,
 /// like profile-based signers. An explicit empty/custom key remains authoritative.
 /// Never derive a container ID from a bundle ID, team ID, or a wildcard grant.
-pub(super) fn prepare_app_groups(request: &mut Dictionary, allowed: &Dictionary, preserve: bool) {
-    if !preserve {
-        request.remove(APP_GROUPS);
-        return;
-    }
+pub(super) fn prepare_app_groups(request: &mut Dictionary, allowed: &Dictionary) {
     if request.contains_key(APP_GROUPS) { return; }
     let Some(groups) = allowed.get(APP_GROUPS).and_then(Value::as_array) else { return };
     let concrete: Vec<_> = groups.iter().filter_map(Value::as_string)
@@ -501,7 +497,7 @@ mod profile_group_fallback_tests {
     #[test] fn stripped_app_uses_only_concrete_profile_groups() {
         let mut request=Dictionary::new();
         let allowed=groups(&["group.shared","group.*","group.bad/path"]);
-        prepare_app_groups(&mut request,&allowed,true);
+        prepare_app_groups(&mut request,&allowed);
         assert_eq!(request,groups(&["group.shared"]));
         let (signed,w)=constrain(&request,&allowed,"P","com.example","T",&BTreeMap::new(),false).unwrap();
         assert_eq!(signed[APP_GROUPS],request[APP_GROUPS]); assert!(w.is_empty());
@@ -509,20 +505,14 @@ mod profile_group_fallback_tests {
     #[test] fn originals_and_explicit_custom_empty_groups_are_not_overwritten() {
         for mut request in [groups(&["group.original"]),groups(&[])] {
             let original=request.clone();
-            prepare_app_groups(&mut request,&groups(&["group.profile"]),true);
+            prepare_app_groups(&mut request,&groups(&["group.profile"]));
             assert_eq!(request,original);
-        }
-    }
-    #[test] fn disabled_removes_even_custom_groups_and_does_not_seed() {
-        for mut request in [groups(&["group.custom"]),Dictionary::new()] {
-            prepare_app_groups(&mut request,&groups(&["group.profile"]),false);
-            assert!(!request.contains_key(APP_GROUPS));
         }
     }
     #[test] fn missing_and_wildcard_only_profiles_never_invent_group() {
         for allowed in [Dictionary::new(),groups(&["group.*"]),groups(&["group.bad/path"])] {
             let mut request=Dictionary::new();
-            prepare_app_groups(&mut request,&allowed,true);
+            prepare_app_groups(&mut request,&allowed);
             assert!(!request.contains_key(APP_GROUPS));
         }
     }

@@ -9,7 +9,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 source = (root / "rust-core/src/personal_sign.rs").read_text()
-options = source[source.index("fn default_preserve_app_groups()"):source.index("\nstruct Profile {")]
+options = source[source.index("#[derive(Default, serde::Deserialize)]\npub(crate) struct Options"):source.index("\nstruct Profile {")]
 harness = """
 #![allow(dead_code)]
 OPTIONS
@@ -22,11 +22,7 @@ mod ipa_editor {
 }
 #[path="NESTED"]
 mod nested;
-#[test] fn preserve_option_defaults_on_and_accepts_explicit_off() {
-    assert!(Options::default().preserve_app_groups);
-    assert!(serde_json::from_str::<Options>("{}").unwrap().preserve_app_groups);
-    assert!(!serde_json::from_str::<Options>(r#"{"preserve_app_groups":false}"#).unwrap().preserve_app_groups);
-}
+
 """.replace("OPTIONS", options).replace("NESTED", str(root / "rust-core/src/personal_nested.rs"))
 with tempfile.TemporaryDirectory(prefix="mirsa-appgroups-") as tmp:
     p = Path(tmp)
