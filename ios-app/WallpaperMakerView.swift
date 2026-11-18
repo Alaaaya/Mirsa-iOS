@@ -454,19 +454,32 @@ struct WallpaperMakerSection: View {
         Group {
             Picker(mx(.title), selection: $effects.mechanism) {
                 Text(mx(.manual)).tag(WallpaperMechanism?.none)
-                ForEach(WallpaperMechanism.allCases) { m in
-                    Text(m.title).tag(WallpaperMechanism?.some(m))
+                ForEach(WallpaperEffectCatalog.Group.allCases) { group in
+                    Section(group.title()) {
+                        ForEach(group.entries) { entry in
+                            Text(entry.title()).tag(WallpaperMechanism?.some(entry.mechanism))
+                        }
+                    }
+                }
+                // Keep imported projects intact, without offering internal recipes to new users.
+                if let saved = effects.mechanism, WallpaperEffectCatalog.entry(for: saved) == nil {
+                    Text(WallpaperEffectCatalog.savedEffectTitle()).tag(WallpaperMechanism?.some(saved))
                 }
             }
             .accessibilityIdentifier("wallpaper-mechanism-picker")
             if let m = effects.mechanism {
+                if let entry = WallpaperEffectCatalog.entry(for: m) {
+                    Text(entry.group.subtitle()).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("wallpaper-mechanism-description")
+                }
                 Text(mx(.overrides)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !m.isSupported {
-                    Text(mx(.unsupported) + (m.limitation.map { "\n" + $0 } ?? ""))
+                    Text(mx(.unsupported))
                         .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("wallpaper-mechanism-unsupported")
                 } else if m.isExperimental {
-                    Text(mx(.experimental) + (m.limitation.map { "\n" + $0 } ?? ""))
+                    Text(mx(.experimental))
                         .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("wallpaper-mechanism-experimental")
                 }
