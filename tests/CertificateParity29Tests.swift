@@ -5,6 +5,24 @@ final class CertificateParity29Tests: XCTestCase {
     private var library: ExistingProjectLibrary {
         ExistingProjectLibrary(id: "Main|@rpath/Tweak.dylib", owner: "Main", loadPath: "@rpath/Tweak.dylib", kind: "load", bundledPath: "Frameworks/Tweak.dylib", provenance: "bundledDependency", slices: ["100000c:0"])
     }
+    func testProfileRemovalIsOptInAndPersists() throws {
+        XCTAssertFalse(PersonalProjectOptions().removeEmbeddedProfile)
+        var draft = PersonalProjectDraft()
+        XCTAssertFalse(draft.removeEmbeddedProfile)
+        draft.removeEmbeddedProfile = true
+        let decoded = try JSONDecoder().decode(PersonalProjectDraft.self, from: JSONEncoder().encode(draft))
+        XCTAssertTrue(decoded.removeEmbeddedProfile)
+    }
+    func testProfileRemovalCopyCoversEverySupportedLanguage() {
+        let languages: [AppLanguage] = [.english, .arabic, .german, .kurmanji, .sorani]
+        XCTAssertEqual(Set(languages.map(PersonalProfileOmissionText.title)).count, languages.count)
+        XCTAssertEqual(Set(languages.map(PersonalProfileOmissionText.subtitle)).count, languages.count)
+        XCTAssertEqual(Set(languages.map(PersonalProfileOmissionText.deviceWarning)).count, languages.count)
+        for language in languages {
+            XCTAssertTrue(PersonalProfileOmissionText.title(language).contains("mobileprovision"))
+            XCTAssertFalse(PersonalProfileOmissionText.subtitle(language).isEmpty)
+        }
+    }
     func testNewDefaultsAndSavedInjectionChoices() throws {
         let draft = PersonalProjectDraft()
         XCTAssertEqual(draft.directInjection, false)

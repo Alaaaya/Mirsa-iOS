@@ -49,6 +49,9 @@ struct PersonalProfileVerification: Codable, Equatable {
     }
     var warningText: String { warnings.map(Self.localizedWarning).joined(separator: "\n") }
     static func localizedWarning(_ warning: Warning) -> String {
+        if warning.code == "omitted_profile_not_installed" {
+            return PersonalProfileOmissionText.deviceWarning(AppLanguageStore.snapshot)
+        }
         if warning.code == "encryption_accepted" {
             return PersonalEncryptionWarning.localized(AppLanguageStore.snapshot, [
                 "Encrypted code was kept unchanged. Signing does not decrypt it; installation or launch may fail.",
@@ -474,7 +477,7 @@ enum PersonalCertificateSigner {
         guard result?["ok"] as? Bool == true else {
             throw SideloadError.message(result?["error"] as? String ?? "Personal signing failed.")
         }
-        // Export artifact contains signed application and public profile only,
+        // Export contains the signed app and, unless omitted, its public profile,
         // never P12, password or private key.
         try control.checkpoint()
         progress(PersonalSigningEvent(stage: .packaging))
