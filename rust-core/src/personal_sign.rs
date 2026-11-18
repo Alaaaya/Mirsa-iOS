@@ -322,6 +322,24 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
     }
     let signer = RustCryptoCmsSigner::from_der(&key, &cert, profiles[0].parsed.certificate_chain_der())
         .map_err(|_| "استخدم شهادة Apple RSA مع مفتاحها الخاص المطابق.")?;
+    // The final resource set omits profiles BEFORE signing, never by deleting
+    // sealed files afterwards. The device still needs every assigned profile.
+    if opts.omit_embedded_profile {
+        let mut used: Vec<usize> = assignments.values().copied().collect();
+        used.sort_unstable();
+        used.dedup();
+        let selected: Vec<&[u8]> = used.iter().map(|i| profiles[*i].data.as_slice()).collect();
+        record_omitted_profile_install(opts, &mut status, || {
+            if tokio::runtime::Handle::try_current().is_ok() { return Err("active runtime".into()); }
+            let pairing = read_pairing(&opts.pairing_path)?;
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(err)?;
+            rt.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(20),
+                    crate::sideload::install_personal_profiles(&pairing, &selected))
+                    .await.map_err(|_| "profile install timed out".to_owned())?
+            })
+        });
+    }
     nested::apply_removals(app, opts)?;
     for node in &mut nodes { nested::rewrite(node, &mapping)?; }
     // Explicit deepest-first pass includes Watch/AppClips, which the vendored
@@ -348,6 +366,44 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         "not_checked"
     } else { "checked" }.into();
     Ok(status)
+}
+// Offline export remains possible if the profile is already on the destination.
+// Never claim device installation succeeded when the tunnel is unavailable.
+fn record_omitted_profile_install(
+    opts: &Options, status: &mut Verification, install: impl FnOnce() -> Result<(), String>,
+) {
+    if !opts.omit_embedded_profile { return; }
+    if opts.pairing_path.is_empty() || install().is_err() {
+        status.warnings.push(serde_json::json!({
+            "code": "omitted_profile_not_installed",
+            "message": "Install the provisioning profile on the device before installing this profile-free app."
+        }));
+    }
+}
+
+#[cfg(test)]
+mod omission_install_tests {
+    use super::*;
+    #[test] fn default_signing_never_connects() {
+        let mut status = Verification::default();
+        record_omitted_profile_install(&Options::default(), &mut status, || panic!("unexpected device connection"));
+        assert!(status.warnings.is_empty());
+    }
+    #[test] fn offline_omission_warns_without_connecting() {
+        let mut status = Verification::default();
+        let opts = Options { omit_embedded_profile: true, ..Default::default() };
+        record_omitted_profile_install(&opts, &mut status, || panic!("missing pairing must not connect"));
+        assert_eq!(status.warnings[0]["code"], "omitted_profile_not_installed");
+    }
+    #[test] fn connected_omission_reports_only_real_install_failure() {
+        let opts = Options { omit_embedded_profile: true, pairing_path: "pairing.plist".into(), ..Default::default() };
+        let mut status = Verification::default();
+        record_omitted_profile_install(&opts, &mut status, || Ok(()));
+        assert!(status.warnings.is_empty());
+        record_omitted_profile_install(&opts, &mut status, || Err("no connection".into()));
+        assert_eq!(status.warnings.len(), 1);
+        assert_eq!(status.warnings[0]["code"], "omitted_profile_not_installed");
+    }
 }
 #[cfg(test)]
 mod tests {
