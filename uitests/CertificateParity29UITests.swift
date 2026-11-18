@@ -38,7 +38,7 @@ final class CertificateParity29UITests: XCTestCase {
 
         let rows: [(String, String, String)] = [
             ("Enable Files access", "تمكين الوصول إلى الملفات", "1"),
-            ("Omit embedded profile", "عدم تضمين البروفايل", "0"),
+            ("Remove mobileprovision after signing", "إزالة mobileprovision بعد التوقيع", "0"),
             ("Fix dark icon (iOS 18)", "إصلاح الأيقونة الداكنة (iOS 18)", "1"),
             ("Direct injection (main executable)", "حقن مباشر بالملف الرئيسي", "0"),
             ("New tweaks first", "الإضافات الجديدة أولاً", "0")
