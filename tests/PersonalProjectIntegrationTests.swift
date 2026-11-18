@@ -256,6 +256,55 @@ final class PersonalProjectIntegrationTests: XCTestCase {
         return pieces.joined(separator: "\n")
     }
 
+    /// OCR the original pixels, then isolate each detected line from those same pixels.
+    /// Whole-frame recognition can confuse the small Arabic diacritic dots.
+    /// Cropped passes use neither expected vocabulary nor letter substitutions.
+    private func recognizedPixelText(_ image: CGImage, attachmentName: String, expectedWords: [String]) throws -> String {
+        func recognize(_ pixels: CGImage, languages: [String], vocabulary: [String] = []) throws -> [VNRecognizedTextObservation] {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.recognitionLanguages = languages
+            request.customWords = vocabulary
+            if languages.count > 1 {
+                if #available(iOS 18.0, *) { request.automaticallyDetectsLanguage = true }
+            }
+            try VNImageRequestHandler(cgImage: pixels).perform([request])
+            return request.results ?? []
+        }
+        let lines = try recognize(image, languages: ["ar", "en-US"], vocabulary: expectedWords)
+        var text = lines.flatMap { $0.topCandidates(10).map(\.string) }
+        let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        for (index, line) in lines.enumerated() {
+            let box = line.boundingBox
+            // Vision uses a lower-left origin; CGImage crops use upper-left pixels.
+            let rectangle = CGRect(x: box.minX * bounds.width,
+                                   y: (1 - box.maxY) * bounds.height,
+                                   width: box.width * bounds.width,
+                                   height: box.height * bounds.height)
+                .insetBy(dx: -18, dy: -18).integral.intersection(bounds)
+            let crop = try XCTUnwrap(image.cropping(to: rectangle))
+            let attachment = XCTAttachment(image: UIImage(cgImage: crop))
+            attachment.name = "\(attachmentName)-OCR-line-\(index)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 1
+                let size = CGSize(width: CGFloat(crop.width) * scale, height: CGFloat(crop.height) * scale)
+                let enlarged = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                    context.cgContext.interpolationQuality = .high
+                    UIImage(cgImage: crop).draw(in: CGRect(origin: .zero, size: size))
+                }
+                let pixels = try XCTUnwrap(enlarged.cgImage)
+                // Arabic-only avoids a Latin recognizer treating diacritic dots as noise.
+                let recognized = try recognize(pixels, languages: ["ar"])
+                text += recognized.flatMap { $0.topCandidates(10).map(\.string) }
+            }
+        }
+        return text.joined(separator: "\n")
+    }
+
     private static let layoutKeys = ["mirsa.home.layout.v1.main", "mirsa.home.layout.v1.personal", "mirsa.home.orderIDs",
                                      "mirsa.home.dockIDs", "mirsa.home.wallpaper"]
     /// Snapshots each key now; the returned closure restores the value or removes the key if it was absent.
@@ -312,20 +361,7 @@ final class PersonalProjectIntegrationTests: XCTestCase {
                     _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
                 }
                 if let cg = shot.cgImage {
-                    let req = VNRecognizeTextRequest()
-                    req.recognitionLevel = .accurate
-                    req.usesLanguageCorrection = false
-                    // The actual failed pixels contain the fixture and empty message:
-                    // Vision read "UI" as "Ul" and joined Arabic word spacing.
-                    // Supply the exact expected vocabulary, not fuzzy substitutions.
-                    req.recognitionLanguages = ["ar", "en-US"]
-                    req.customWords = requiredText
-                    if #available(iOS 18.0, *) { req.automaticallyDetectsLanguage = true }
-                    try? VNImageRequestHandler(cgImage: cg).perform([req])
-                    // Keep exact recognition alternatives, including case-sensitive
-                    // Latin identifiers. Do not rewrite I/l, digits, or punctuation.
-                    let ocr = (req.results ?? []).flatMap { $0.topCandidates(10).map(\.string) }.joined(separator: "\n")
-                    text += "\n" + ocr
+                    text += "\n" + (try recognizedPixelText(cg, attachmentName: name, expectedWords: requiredText))
                 }
             }
             XCTAssertFalse(text.isEmpty, "Hosted SwiftUI accessibility tree must not be empty")
