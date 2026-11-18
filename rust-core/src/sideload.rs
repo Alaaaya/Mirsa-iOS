@@ -1068,6 +1068,23 @@ where
     }
 }
 
+/// Install only the already-authorized public profiles used by personal signing.
+/// Uses the same RSD/Lockdown misagent connector as the device profile tools.
+pub(crate) async fn install_personal_profiles(pairing: &[u8], profiles: &[&[u8]]) -> Result<(), String> {
+    use idevice::services::misagent::MisagentClient;
+    let _guard = install_lock().lock().await;
+    let logger = Logger { cb: None, ctx: std::ptr::null_mut() };
+    let mut tunnel = exploit::connect_tunnel(pairing, &logger).await?;
+    let mut client: MisagentClient = dev_connect(&mut tunnel).await?;
+    let mut installed = client.copy_all().await.map_err(|e| format!("misagent: {e:?}"))?;
+    for profile in profiles {
+        if installed.iter().any(|p| p.as_slice() == *profile) { continue; }
+        client.install(profile.to_vec()).await.map_err(|e| format!("misagent install: {e:?}"))?;
+        installed.push(profile.to_vec());
+    }
+    Ok(())
+}
+
 fn plist_to_json(v: &plist::Value) -> serde_json::Value {
     use serde_json::Value as J;
     match v {
