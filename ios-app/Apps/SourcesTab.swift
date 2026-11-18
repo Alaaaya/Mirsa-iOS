@@ -51,6 +51,17 @@ struct RepoApp: Identifiable, Hashable, Sendable {
     var screenshots: [URL] = []
 }
 
+struct RepoNews: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let caption: String
+    let imageURL: URL?
+    let tint: String?
+    let date: Date?
+    let url: URL?
+    let appID: String?
+}
+
 struct RepoSource: Codable, Identifiable, Hashable {
     /// Fixed identity of the built-in Mirsa source.
     static let canonicalID = "mirsa.canonical-source"
@@ -87,6 +98,7 @@ final class SourcesStore: ObservableObject {
 
     @Published var sources: [RepoSource] = [] { didSet { save() } }
     @Published var apps: [String: [RepoApp]] = [:]   // by source url
+    @Published var presentation: [String: DecodedSource] = [:]
     @Published var loading: Set<String> = []
     @Published private(set) var loadErrors: [String: String] = [:]
     private var requests: [String: Task<Bool, Never>] = [:]
@@ -197,6 +209,7 @@ final class SourcesStore: ObservableObject {
         hiddenIDs.remove(id)
         if !sources.contains(where: { MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(src.url) }) {
             apps[src.url] = nil
+            presentation[src.url] = nil
             requests[src.url]?.cancel()
             loadErrors[src.url] = nil
             loading.remove(src.url)
@@ -304,6 +317,7 @@ final class SourcesStore: ObservableObject {
             // Deleting a source while it loads must not resurrect its cache or row.
             guard sources.contains(where: { $0.url == url }) else { return false }
             apps[url] = parsed.apps
+            presentation[url] = parsed
             loadErrors[url] = nil
             for i in sources.indices where sources[i].url == url {
                 var source = sources[i]
@@ -330,6 +344,20 @@ final class SourcesStore: ObservableObject {
         let iconURL: String?
         let tint: String?
         let updated: Date?
+        let headerURL: URL?
+        let subtitle: String?
+        let description: String?
+        let website: URL?
+        let news: [RepoNews]
+    }
+
+    /// Source content is untrusted. Never open executable/custom URL schemes or credential URLs.
+    nonisolated static func contentURL(_ raw: Any?, base: URL) -> URL? {
+        guard let text = raw as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let resolved = URL(string: text, relativeTo: base)?.absoluteURL else { return nil }
+        guard let scheme = resolved.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              resolved.host?.isEmpty == false, resolved.user == nil, resolved.password == nil else { return nil }
+        return resolved
     }
 
     nonisolated static func decodeSource(_ data: Data, base: URL) throws -> DecodedSource {
@@ -342,7 +370,21 @@ final class SourcesStore: ObservableObject {
             name: (root["name"] as? String) ?? (meta["repoName"] as? String) ?? (meta["name"] as? String),
             iconURL: (root["iconURL"] as? String) ?? (root["icon"] as? String) ?? (meta["repoIcon"] as? String),
             tint: (root["tintColor"] as? String) ?? (root["tint"] as? String),
-            updated: parsed.compactMap(\.date).compactMap(Self.date).max())
+            updated: parsed.compactMap(\.date).compactMap(Self.date).max(),
+            headerURL: contentURL(root["headerURL"], base: base),
+            subtitle: root["subtitle"] as? String,
+            description: (root["description"] as? String) ?? (root["localizedDescription"] as? String),
+            website: contentURL(root["website"], base: base),
+            news: ((root["news"] as? [Any]) ?? []).enumerated().compactMap { index, value in
+                guard let item = value as? [String: Any],
+                      let title = item["title"] as? String,
+                      !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return RepoNews(id: "\(index)|\(item["identifier"] as? String ?? title)", title: title,
+                    caption: item["caption"] as? String ?? "",
+                    imageURL: contentURL(item["imageURL"], base: base), tint: item["tintColor"] as? String,
+                    date: (item["date"] as? String).flatMap(Self.date),
+                    url: contentURL(item["url"], base: base), appID: item["appID"] as? String)
+            })
     }
 
     nonisolated static func date(_ s: String) -> Date? {
@@ -584,6 +626,8 @@ struct SourceDetailView: View {
     @ObservedObject private var store: SourcesStore
     @ObservedObject private var apps = AppsStore.shared
     @State private var query = ""
+    @State private var selectedNewsApp: RepoApp?
+    @Environment(\.openURL) private var openURL
 
     init(source: RepoSource, store: SourcesStore = .shared, onSelectIPA: ((URL) async throws -> Void)? = nil) {
         self.source = source
@@ -595,6 +639,14 @@ struct SourceDetailView: View {
         let all = store.listing(for: source.url)
         let shown = store.listing(for: source.url, query: query)
         List {
+            sourceHeader
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            if let metadata = store.presentation[source.url], !metadata.news.isEmpty {
+                newsSection(metadata.news, all: all)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(shown) { app in
                 RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA)
                     .listRowBackground(Color.clear)
@@ -646,8 +698,99 @@ struct SourceDetailView: View {
         }
         .task(id: source.url) { await store.ensureLoaded(source.url) }
         .refreshable { await store.refresh(source.url) }
-        .navigationTitle(source.name)
+        .navigationTitle(currentSource.name)
+        .sheet(item: $selectedNewsApp) { app in
+            NavigationStack {
+                List { RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA) }
+                    .navigationTitle(app.name)
+                    .mirsaScreen()
+            }
+        }
         .mirsaScreen()
+    }
+
+    private var currentSource: RepoSource { store.sources.first { $0.id == source.id } ?? source }
+    private var sourceTint: Color { Color(hex: currentSource.tint) ?? .accentColor }
+
+    private var sourceHeader: some View {
+        let metadata = store.presentation[source.url]
+        return VStack(alignment: .leading, spacing: 14) {
+            if let url = metadata?.headerURL {
+                sourceImage(url, height: 132)
+                    .accessibilityIdentifier("source-detail-banner")
+            }
+            HStack(spacing: 12) {
+                RemoteIcon(url: SourceURLAction.shareableURL(currentSource.iconURL ?? ""), size: 56, corner: 14)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(currentSource.name).font(.title2.bold())
+                    if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            if let description = metadata?.description, !description.isEmpty {
+                Text(description).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let website = metadata?.website {
+                Link(destination: website) {
+                    Label(website.host ?? website.absoluteString, systemImage: "arrow.up.right.square")
+                        .font(.subheadline.weight(.semibold))
+                }.tint(sourceTint).accessibilityIdentifier("source-detail-website")
+            }
+        }
+        .padding(16)
+        .appsGlass(cornerRadius: MirsaRadius.l, tint: sourceTint)
+        .accessibilityIdentifier("source-detail-header")
+    }
+
+    private func sourceImage(_ url: URL, height: CGFloat) -> some View {
+        AsyncImage(url: url) { phase in
+            if let image = phase.image { image.resizable().scaledToFill() }
+            else { Rectangle().fill(sourceTint.opacity(0.12)).overlay { Image(systemName: "photo").foregroundStyle(.secondary) } }
+        }
+        .frame(height: height).frame(maxWidth: .infinity)
+        .clipped().clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityHidden(true)
+    }
+
+    private var newsTitle: String {
+        switch L.lang {
+        case .english: return "Source news"
+        case .arabic: return "أخبار السورس"
+        case .german: return "Neuigkeiten der Quelle"
+        case .sorani: return "هەواڵەکانی سەرچاوە"
+        case .kurmanji: return "Nûçeyên çavkaniyê"
+        }
+    }
+
+    private func newsSection(_ news: [RepoNews], all: [RepoApp]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(newsTitle).font(.headline).accessibilityAddTraits(.isHeader)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(news) { item in
+                        let app = all.first { $0.bundleID == item.appID }
+                        Button {
+                            if let app { selectedNewsApp = app }
+                            else if let url = item.url { openURL(url) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if let image = item.imageURL { sourceImage(image, height: 120) }
+                                if let date = item.date { Text(date, style: .date).font(.caption).foregroundStyle(.secondary) }
+                                Text(item.title).font(.headline).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
+                                if !item.caption.isEmpty { Text(item.caption).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                            }
+                            .frame(width: 252, alignment: .leading).padding(14)
+                            .appsGlass(cornerRadius: MirsaRadius.l, tint: Color(hex: item.tint) ?? sourceTint)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(app == nil && item.url == nil)
+                        .accessibilityIdentifier("source-news-\(item.id)")
+                    }
+                }.padding(.vertical, 4)
+            }
+        }.accessibilityIdentifier("source-detail-news")
     }
 
     private var searchPrompt: String {
