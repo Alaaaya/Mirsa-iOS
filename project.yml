@@ -17,6 +17,9 @@ settings:
     DEVELOPMENT_TEAM: ""
 
 packages:
+  PrivateKits:
+    url: https://github.com/NSAntoine/PrivateKits.git
+    revision: 157c45b2eecad87a8ac6123ef5caaf2c730afd7a
   ApplePackage:
     path: vendor/ApplePackage
   swift-log:
@@ -39,6 +42,8 @@ targets:
         buildPhase: resources
       - path: LiveActivityShared
     dependencies:
+      - package: PrivateKits
+        product: AssetCatalogWrapper
       - package: ApplePackage
       - package: ZIPFoundation
       - package: swift-log
@@ -90,6 +95,8 @@ targets:
       - path: rust-core/tests/fixtures/tweak-import/OwnerTikTokV4.zip
         buildPhase: resources
     dependencies:
+      - package: PrivateKits
+        product: AssetCatalogWrapper
       - target: Mirsa
     settings:
       base:

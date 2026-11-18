@@ -256,7 +256,7 @@ enum IPAEditorService {
         }
     }
 
-    private static func installIcon(png: Data, in app: URL, info: inout [String: Any]) throws {
+    static func installIcon(png: Data, in app: URL, info: inout [String: Any]) throws {
         guard png.count <= 16 * 1024 * 1024,
               let image = UIImage(data: png), image.size.width > 0, image.size.height > 0 else {
             throw SideloadError.message("Choose a valid PNG or JPEG icon.")
