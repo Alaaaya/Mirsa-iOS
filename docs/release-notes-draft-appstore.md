@@ -22,7 +22,7 @@ Login details go directly from your device to Apple, not through Mirsa's server.
 
 You can choose the store country when searching. For a free app your account has not acquired, I added a separate Get free license action. Paid purchases are not supported, and downloading never silently acquires an app.
 
-You can download apps your account owns as encrypted IPA files with their original licensing information and add them to the encrypted list. Mirsa does not decrypt or re-sign these files. Downloading does not guarantee installation or launch. These files are tied to your account and should not be shared.
+You can download apps your account owns as encrypted IPA files with their original licensing information and add them to the encrypted list. From the encrypted list you can also decrypt an app you bought, on this iPhone, and the decrypted copy goes to the Apps tab for editing, tweaks and install. Mirsa does not re-sign the downloaded files themselves. Downloading does not guarantee installation or launch. These files are tied to your account and should not be shared.
 
 I also added requests for Apple's available older version IDs, with selection or manual entry. These are Apple's internal version identifiers, not necessarily familiar version labels. Availability and download eligibility depend on Apple and your account.
 
