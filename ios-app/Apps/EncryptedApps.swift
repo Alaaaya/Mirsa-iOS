@@ -2,13 +2,21 @@ import Foundation
 import UIKit
 import ImageIO
 
-// MARK: - "App Store" tab: App Store IPAs installed exactly as they are.
+// MARK: - "App Store" tab: App Store IPAs installed exactly as they are,
+// or decrypted on this iPhone when the app belongs to the signed-in account.
 //
-// Mirsa never decrypts, re-signs or edits these packages. It reads the package
-// metadata (iTunesMetadata.plist, Info.plist, SC_Info/*.sinf) to show who bought
-// the app, then hands the original file to installation_proxy on Wi-Fi or serves it
-// locally to the iOS installer on cellular. iOS
-// alone decides whether the FairPlay purchase is valid on this device.
+// Install-as-is never decrypts, re-signs or edits a package: Mirsa reads
+// the package metadata (iTunesMetadata.plist, Info.plist, SC_Info/*.sinf)
+// to show who bought the app, then hands the original file to
+// installation_proxy on Wi-Fi or serves it locally to the iOS installer on
+// cellular. iOS alone decides whether the FairPlay purchase is valid on this device.
+//
+// Decrypt is a separate, explicit action (FairPlayDecryptor): it decrypts
+// the stored copy on-device using the account's own licence, keeps the
+// encrypted original untouched, and hands the decrypted IPA to the normal
+// Apps-tab importer for signing and install (edit, tweaks, container,
+// real app, certificate). It only works for apps the signed-in Apple ID
+// bought, because fairplayd finds the licence by the binary's own path.
 
 enum EncryptedText {
     static func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String {
@@ -183,6 +191,7 @@ final class EncryptedAppsStore: ObservableObject {
     @Published var progress: Double = 0
     @Published var installingID: UUID?
     private var installAttemptID: UUID?
+    @Published var decryptingID: UUID?
     @Published var error: String?
     @Published var toast: String?
 
@@ -266,6 +275,53 @@ final class EncryptedAppsStore: ObservableObject {
 
     func icon(_ entry: EncryptedIPAEntry) -> UIImage? {
         UIImage(contentsOfFile: Self.iconURL(entry.id).path)
+    }
+
+    /// Decrypts the stored encrypted IPA on this iPhone (own-account only)
+    /// and hands the decrypted copy to the normal Apps-tab importer, which
+    /// shows the usual install sheet (edit & tweaks, container, real app,
+    /// certificate). The stored encrypted file is kept untouched.
+    func decrypt(_ entry: EncryptedIPAEntry, vm: AppViewModel?) async {
+        guard busy == nil, AppsStore.shared.busy == nil else {
+            error = tr("Finish the current import first.", "خلّص الاستيراد الحالي أولاً.")
+            return
+        }
+        guard entry.encryptedBinary != false else {
+            error = EncryptedText.t("This IPA is not encrypted.", "هالـIPA مو مشفّر.",
+                                    "ئەم IPAیە شفرەکراو نییە.", "Ev IPA ne şîfrekirî ye.")
+            return
+        }
+        guard entry.hasSinf else {
+            error = EncryptedText.t("No purchase licence (sinf) in this IPA. Decryption needs the Apple ID that bought the app.",
+                                    "ما في رخصة شراء (sinf) بهالـIPA. فك التشفير بدو حساب Apple يلي اشترى التطبيق.",
+                                    "هیچ مۆڵەتی کڕین (sinf) لەم IPAیەدا نییە. ڕەمزکردنەوە پێویستی بە Apple IDی کڕیار هەیە.",
+                                    "Di vê IPA de lîsansa kirînê (sinf) tune. Vekirina şîfreyê Apple ID ya kirrîyar dixwaze.")
+            return
+        }
+        busy = EncryptedText.t("Decrypting…", "عم نفك التشفير…",
+                               "ڕەمز دەکرێتەوە…", "Şîfre tê vekirin…")
+        decryptingID = entry.id
+        defer { busy = nil; decryptingID = nil }
+        do {
+            let source = Self.ipaURL(entry.id)
+            let report = try await Task.detached(priority: .userInitiated) {
+                try FairPlayDecryptor.decryptIPA(at: source)
+            }.value
+            defer { MirsaManagedTmp.end(report.workDir) }
+            await AppsStore.shared.importIPA(from: report.outputURL)
+            if let message = AppsStore.shared.error {
+                AppsStore.shared.error = nil
+                self.error = message
+                return
+            }
+            vm?.selectedTab = .apps
+            toast = EncryptedText.t("Decrypted \(entry.name) — ready in the Apps tab",
+                                    "انفك تشفير \(entry.name) — جاهز بتبويب التطبيقات",
+                                    "\(entry.name) ڕەمزکرایەوە — لە بەشی ئەپەکان ئامادەیە",
+                                    "\(entry.name) şîfre hate vekirin — di tabloya Sepanan de amade ye")
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     /// Keeps the existing Wi-Fi tunnel path; cellular serves the same IPA locally, without signing or upload.
