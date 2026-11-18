@@ -280,6 +280,8 @@ final class EncryptedAppsStore: ObservableObject {
         busy = L.t("busy.installing"); apps.busy = busy; progress = 0; installingID = entry.id
         let attemptID = UUID()
         installAttemptID = attemptID
+        let trackToken = InstallTracker.shared.begin(key: "entry:" + entry.id.uuidString, phase: .installing)
+        defer { InstallTracker.shared.end(trackToken) }
         var ok = false
         defer {
             if installAttemptID == attemptID {

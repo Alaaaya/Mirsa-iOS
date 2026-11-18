@@ -157,12 +157,14 @@ struct SetupView: View {
         Button {
             Task { await store.installSelf(vm: vm) }
         } label: {
-            Label(L.t("setup.install"), systemImage: "arrow.down.app.fill")
-                .frame(maxWidth: .infinity)
+            InstallKeyedLabel(key: "self") {
+                Label(L.t("setup.install"), systemImage: "arrow.down.app.fill")
+            }
+            .frame(maxWidth: .infinity)
         }
         .buttonStyle(.mirsaPrimary)
         .controlSize(.large)
-        .disabled(!ready || store.busy != nil)
+        .disabled(!ready || store.busy != nil || InstallTracker.shared.current != nil)
         .padding(.top, 6)
     }
 

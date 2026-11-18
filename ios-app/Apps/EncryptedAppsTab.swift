@@ -562,7 +562,9 @@ private struct EncryptedEntryCard: View {
             }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { onInstall() } label: {
-                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
+                    InstallKeyedLabel(key: "entry:" + entry.id.uuidString) {
+                            Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
+                        }
                         .font(MirsaFont.button).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.75)
                         .padding(.horizontal, 10)

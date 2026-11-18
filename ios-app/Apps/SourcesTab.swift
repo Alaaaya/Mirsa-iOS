@@ -157,7 +157,6 @@ final class SourcesStore: ObservableObject {
         let queue = availableUpdates()
         for (app, location) in queue {
             guard !Task.isCancelled else { break }
-            AppViewModel.shared?.selectedTab = .apps
             if !(await AppsStore.shared.installFromURL(app.downloadURL, location: location, appID: app.bundleID)) { break }
         }
     }
@@ -808,10 +807,15 @@ struct RepoAppRow: View {
     let app: RepoApp
     let installed: ManagedApp?
     var onSelectIPA: ((URL) async throws -> Void)? = nil
+    @ObservedObject private var apps = AppsStore.shared
     @StateObject private var downloader = PersonalIPADownloader()
     @State private var selecting = false
     @State private var selectionError: String?
     @State private var showInfo = false
+    @State private var selectToken: UUID?
+    @ObservedObject private var tracker = InstallTracker.shared
+    /// Identity is the exact URL the user tapped, never a feed-supplied bundle ID.
+    private var requestKey: String { InstallTracker.urlKey(app.downloadURL) }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -826,18 +830,35 @@ struct RepoAppRow: View {
                 }
             }
             Spacer()
-            Button { install() } label: {
-                Text(buttonTitle).lineLimit(1).fixedSize()
+            Button {
+                if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) }
+                else { install() }
+            } label: {
+                InstallKeyedLabel(key: requestKey) {
+                    Text(buttonTitle).lineLimit(1).fixedSize()
+                }
             }
             .buttonStyle(.mirsaSecondary)
             .controlSize(.small)
-            .disabled(selecting || AppsStore.shared.busy != nil)
+            .disabled(!downloading && (selecting || apps.busy != nil || apps.downloadTask != nil || tracker.current != nil))
+            .onChange(of: downloader.fraction) { _, f in
+                if onSelectIPA != nil, downloader.active { tracker.set(selectToken, phase: .downloading, fraction: f) }
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture { showInfo = true }
-        .sheet(isPresented: $showInfo) { RepoAppInfo(app: app, install: install) }
+        .sheet(isPresented: $showInfo) { RepoAppInfo(app: app, requestKey: requestKey, install: install) }
         .alert(tr("Notice", "تنبيه"), isPresented: Binding(get: { selectionError != nil }, set: { if !$0 { selectionError = nil } })) { Button(tr("OK", "تمام")) { selectionError = nil } } message: { Text(selectionError ?? "") }
-        .overlay(alignment: .bottom) { if selecting { ProgressView(value: downloader.fraction).padding(4) } }
+
+    }
+
+    private var downloading: Bool {
+        onSelectIPA != nil ? downloader.active : apps.isDownloading && apps.sourceDownloadURL == app.downloadURL
+    }
+
+    private var downloadFraction: Double? {
+        if onSelectIPA != nil { return downloader.fraction }
+        return apps.downloadHasKnownSize ? apps.progress : nil
     }
 
     private var buttonTitle: String {
@@ -847,30 +868,33 @@ struct RepoAppRow: View {
     }
 
     private func install() {
-        showInfo = false
         if let onSelectIPA {
             guard !selecting else { return }
             selecting = true
             Task { @MainActor in
                 var file: URL?
-                defer { if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }; selecting = false }
+                let token = tracker.begin(key: requestKey, cancel: { downloader.cancel() })
+                selectToken = token
+                defer { tracker.end(token); selectToken = nil; if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }; selecting = false }
                 do {
                     let url = try await downloader.download(app.downloadURL.absoluteString)
                     file = url
+                    tracker.set(token, phase: .preparing)
                     try await onSelectIPA(url)
                 } catch { selectionError = error.localizedDescription }
             }
             return
         }
         let target = installed?.location   // update keeps its place; new apps ask Container or Real
-        AppViewModel.shared?.selectedTab = .apps
-        Task { await AppsStore.shared.installFromURL(app.downloadURL, location: target, appID: app.bundleID) }
+        Task { await apps.installFromURL(app.downloadURL, location: target, appID: app.bundleID) }
     }
 }
 
 private struct RepoAppInfo: View {
     let app: RepoApp
+    let requestKey: String
     let install: () -> Void
+    @ObservedObject private var tracker = InstallTracker.shared
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -882,10 +906,15 @@ private struct RepoAppInfo: View {
                             Text(app.developer).foregroundStyle(.secondary)
                         }
                     }
-                    Button(action: install) {
-                        Text(tr("Install", "ثبّت")).frame(maxWidth: .infinity)
+                    Button {
+                        if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) } else { install() }
+                    } label: {
+                        InstallKeyedLabel(key: requestKey) { Text(tr("Install", "ثبّت")) }
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.mirsaPrimary)
+                    .disabled(!tracker.isActive(requestKey) && tracker.current != nil)
+                    .accessibilityIdentifier("source-detail-install")
                     HStack {
                         if !app.version.isEmpty { Label("v" + app.version, systemImage: "tag") }
                         if let s = app.size { Label(ByteCountFormatter.string(fromByteCount: s, countStyle: .file), systemImage: "internaldrive") }
@@ -925,5 +954,68 @@ private struct SourceRowBackground: ViewModifier {
         // One solid card for both themes; the source colour is a light wash.
         content.appsGlass(cornerRadius: MirsaRadius.l, tint: tint)
             .mirsaAppear()
+    }
+}
+
+/// Inline transfer control. Unknown length stays indeterminate, never a made-up percent.
+struct SourceDownloadIndicator: View {
+    let fraction: Double?
+    var phase: InstallRequest.Phase = .downloading
+    var cancellable = true
+
+    private var cancelLabel: String {
+        switch L.lang {
+        case .english: return "Cancel download"
+        case .arabic: return "إلغاء التحميل"
+        case .german: return "Download abbrechen"
+        case .sorani: return "هەڵوەشاندنەوەی داگرتن"
+        case .kurmanji: return "Daxistinê betal bike"
+        }
+    }
+
+    private var phaseLabel: String {
+        switch (phase, L.lang) {
+        case (.downloading, _): return ""
+        case (.preparing, .english): return "Preparing…"
+        case (.preparing, .arabic): return "عم نجهّز…"
+        case (.preparing, .german): return "Vorbereiten…"
+        case (.preparing, .sorani): return "ئامادە دەکرێت…"
+        case (.preparing, .kurmanji): return "Tê amadekirin…"
+        case (.installing, .english): return "Installing…"
+        case (.installing, .arabic): return "عم نثبّت…"
+        case (.installing, .german): return "Installieren…"
+        case (.installing, .sorani): return "دادەمەزرێت…"
+        case (.installing, .kurmanji): return "Tê sazkirin…"
+        }
+    }
+
+    private var shown: Double? { phase == .downloading ? fraction : nil }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                if let value = shown {
+                    Circle().stroke(Color.accentColor.opacity(0.2), lineWidth: 2)
+                    Circle().trim(from: 0, to: CGFloat(min(1, max(0, value))))
+                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                } else {
+                    ProgressView().controlSize(.mini)
+                }
+                if shown != nil && cancellable { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
+            }
+            .frame(width: 22, height: 22)
+            if let value = shown {
+                Text(min(1, max(0, value)), format: .percent.precision(.fractionLength(0)))
+                    .font(.caption.monospacedDigit())
+            } else if phase != .downloading {
+                Text(phaseLabel).font(.caption).lineLimit(1)
+            }
+        }
+        .frame(minHeight: 30)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(phase == .downloading && cancellable ? cancelLabel : phaseLabel)
+        .accessibilityValue(shown.map { String(Int(min(1, max(0, $0)) * 100)) + "%" } ?? "")
+        .accessibilityIdentifier("source-inline-download")
     }
 }

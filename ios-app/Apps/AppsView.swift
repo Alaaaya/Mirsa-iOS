@@ -1258,18 +1258,24 @@ struct AppsSettingsSheet: View {
 
                 Section {
                     Button {
-                        dismiss()
                         Task { await MirsaUpdater.shared.updateNow(vm: vm) }
-                    } label: { Label(tr("Update Mirsa", "حدّث مرسى"), systemImage: "arrow.triangle.2.circlepath") }
+                    } label: {
+                        InstallKeyedLabel(key: "mirsa-update") {
+                            Label(tr("Update Mirsa", "حدّث مرسى"), systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
                     .disabled(installMode != "certificate" && store.account == nil && !store.hasSavedLogin)
                 } footer: {
                     Text(MirsaTr.f("checks", "\(MirsaUpdater.currentBuild)"))
                 }
                 Section {
                     Button {
-                        dismiss()
                         Task { await store.installSelf(vm: vm) }
-                    } label: { Label(L.t("settings.selfInstall"), systemImage: "arrow.down.app") }
+                    } label: {
+                        InstallKeyedLabel(key: "self") {
+                            Label(L.t("settings.selfInstall"), systemImage: "arrow.down.app")
+                        }
+                    }
                     .disabled(installMode != "certificate" && store.account == nil && !store.hasSavedLogin)
                 } footer: { Text(L.t("settings.selfInstallFoot")) }
 

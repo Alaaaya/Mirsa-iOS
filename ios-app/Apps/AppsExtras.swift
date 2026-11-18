@@ -37,6 +37,7 @@ extension AppsStore {
             if downloadOperationID == operation { downloadOperationID = nil }
         }
         downloadID = id
+        sourceDownloadURL = url
         busy = message
         progress = 0
         downloadHasKnownSize = false
@@ -48,12 +49,14 @@ extension AppsStore {
                 MirsaOperationProgress.shared.update(operation, phase: .downloading,
                     fraction: expected > 0 ? Double(received) / Double(expected) : nil)
                 self.downloadHasKnownSize = expected > 0
+                InstallTracker.shared.set(self.installToken, phase: .downloading, fraction: expected > 0 ? Double(received) / Double(expected) : nil)
                 self.progress = expected > 0 ? min(1, max(0, Double(received) / Double(expected))) : 0
             }
         }
         downloadTask = task
         defer {
             downloadID = nil
+            sourceDownloadURL = nil
             downloadTask = nil
             isDownloading = false
             downloadHasKnownSize = false
@@ -91,6 +94,9 @@ extension AppsStore {
     func installFromURL(_ url: URL, location: AppLocation? = nil, vm: AppViewModel? = nil, appID: String? = nil) async -> Bool {
         let vm = vm ?? AppViewModel.shared
         guard downloadTask == nil, busy == nil else { return false }
+        let token = InstallTracker.shared.begin(key: InstallTracker.urlKey(url), cancel: { [weak self] in self?.cancelDownload() })
+        installToken = token
+        defer { InstallTracker.shared.end(token); if installToken == token { installToken = nil } }
         let file: URL
         do {
             file = try await downloadIPA(from: url, message: tr("Downloading…", "عم ينزّل…"), appID: appID)
@@ -102,10 +108,12 @@ extension AppsStore {
         }
         busy = nil
         defer { try? FileManager.default.removeItem(at: file) }
+        InstallTracker.shared.set(token, phase: .preparing)
         await importIPA(from: file)
         guard let p = pending else { return false }
         let target = location ?? apps.first(where: { $0.id == p.bundleID })?.location
         guard let target else { return true }   // user picks in the sheet
+        InstallTracker.shared.set(token, phase: .installing)
         await commitPending(to: target, vm: vm)
         scheduleExpiryReminders()
         return error == nil
@@ -653,6 +661,8 @@ final class MirsaUpdater: ObservableObject {
         installing = true; defer { installing = false }
         available = nil
         guard store.downloadTask == nil, store.busy == nil else { return }
+        let updToken = InstallTracker.shared.begin(key: "mirsa-update")
+        defer { InstallTracker.shared.end(updToken) }
         let fm = FileManager.default
         do {
             let work = try MirsaManagedTmp.begin("updater")
@@ -660,6 +670,7 @@ final class MirsaUpdater: ObservableObject {
             try fm.createDirectory(at: work, withIntermediateDirectories: true)
             let ipa = try await updaterDownload(url)
             defer { MirsaManagedTmp.end(ipa.deletingLastPathComponent()) }
+            InstallTracker.shared.set(updToken, phase: .preparing)
             let verified = try await Self.verifiedUpdate(ipa)
             guard UpdaterMetadata.isNewer(remote: verified.build, installed: Self.currentBuild) else {
                 throw NSError(domain: "Mirsa", code: 2, userInfo: [NSLocalizedDescriptionKey: "Update build is not newer"])
@@ -680,6 +691,7 @@ final class MirsaUpdater: ObservableObject {
                 throw NSError(domain: "Mirsa", code: 2, userInfo: [NSLocalizedDescriptionKey: tr("The downloaded update is not newer than this copy.", "التحديث اللي نزل مو أحدث من نسختك.")])
             }
             store.busy = nil
+            InstallTracker.shared.set(updToken, phase: .installing)
             await store.installSelf(vm: vm, from: app)
         } catch {
             store.busy = nil
