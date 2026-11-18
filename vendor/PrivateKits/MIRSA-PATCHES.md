@@ -1,0 +1,4 @@
+Vendored from NSAntoine/PrivateKits at 157c45b2eecad87a8ac6123ef5caaf2c730afd7a, MIT license retained.
+Only source change is an explicit .rawData case in Representation.uiView returning the existing empty view. The upstream enum already has this case but its UIKit preview switch omits it, causing a real device and simulator compile error with Xcode 26.3. No asset editing or validation behavior is weakened.
+
+The certificate validation workflow copies CoreUI/CoreSVG TBDs from the actual selected target SDK before resolving this package. The upstream stubs have desktop install names and lack simulator exports. Missing SDK stubs fail validation; no platforms or symbols are fabricated. The copied files and their digests are retained in the CI artifact. Production package consumers must use the same SDK preparation script.
