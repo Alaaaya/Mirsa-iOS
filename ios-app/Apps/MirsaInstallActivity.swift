@@ -53,13 +53,52 @@ final class MirsaInstallActivity {
     }
 
     func setPhase(_ phase: Phase, title: String? = nil) {
-        if activity == nil, let title { begin(title: title, phase: phase); return }
+        if activity == nil, let title { begin(title: title, phase: phase) }
         guard var value = state else { return }
         value.phase = phase
         value.progress = nil
         if let title { value.title = String(title.prefix(100)) }
         state = value
-        publish(value)
+        // Import/editor readiness is terminal too, not a running install. Previously
+        // these callers only updated the widget, leaving it active indefinitely.
+        switch phase {
+        case .ready, .completed, .failed:
+            end(phase: phase, immediate: false)
+        case .cancelled:
+            end(phase: phase, immediate: true)
+        default:
+            publish(value)
+        }
+    }
+
+    /// Sweep OS-retained activities even when our in-memory reference was lost.
+    /// Background launch preserves a fresh download for URLSession reattachment.
+    /// Foreground also removes orphans and already-ended lock-screen summaries.
+    func reconcileActivities(foreground: Bool) {
+        for existing in Activity<MirsaDownloadAttributes>.activities {
+            let current = existing.attributes.operationID == operationID
+            let terminal: Bool
+            switch existing.content.state.phase {
+            case .ready, .completed, .failed, .cancelled: terminal = true
+            default: terminal = false
+            }
+            let expired = existing.content.staleDate.map { $0 <= Date() } ?? false
+            guard terminal || existing.activityState == .stale || expired ||
+                    (foreground && (!current || existing.activityState == .ended)) else { continue }
+            endedIDs.insert(existing.attributes.operationID)
+            if current {
+                activity = nil
+                state = nil
+            }
+            var finalState = existing.content.state
+            if !terminal { finalState.phase = .cancelled; finalState.progress = nil }
+            let previous = updates
+            updates = Task {
+                await previous?.value
+                await existing.end(ActivityContent(state: finalState, staleDate: Date()),
+                                   dismissalPolicy: .immediate)
+            }
+        }
     }
 
     func updateBytes(received: Int64, expected: Int64, operationID: String?) {
@@ -126,8 +165,9 @@ final class MirsaInstallActivity {
         let previous = updates
         updates = Task {
             await previous?.value
-            await activity.end(ActivityContent(state: finalState, staleDate: nil),
-                               dismissalPolicy: immediate ? .immediate : .after(Date().addingTimeInterval(60)))
+            let dismissAt = Date().addingTimeInterval(5)
+            await activity.end(ActivityContent(state: finalState, staleDate: dismissAt),
+                               dismissalPolicy: immediate ? .immediate : .after(dismissAt))
         }
         self.activity = nil
         state = nil
