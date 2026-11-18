@@ -664,6 +664,36 @@ mod tests {
     }
 
     #[test]
+    fn omission_preserves_watch_clip_and_framework_final_envelopes() {
+        let f=Fixture::new();let app=f.bundle("App.app","test.app");
+        let watch=f.bundle("App.app/Watch/Watch.app","test.watch");
+        let clip=f.bundle("App.app/AppClips/Clip.app","test.clip");
+        let framework=f.bundle("App.app/Frameworks/Helper.framework","test.framework");
+        let mut settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
+        settings.omit_embedded_mobileprovision=true;
+        settings.embedded_mobileprovision=Some(b"selected");
+        // Match personal_sign's explicit deepest-first inventory, including
+        // Watch and AppClips (not discovered recursively by this library).
+        for bundle in [&watch,&clip,&framework,&app] {
+            fs::write(bundle.join("embedded.mobileprovision"),b"old").unwrap();
+        }
+        for bundle in [&watch,&clip,&framework,&app] {
+            sign_bundle(bundle,&settings).unwrap();
+        }
+        for bundle in [&watch,&clip,&framework,&app] {
+            assert_sealed_profile(bundle,None);
+        }
+        let resources=Value::from_file(app.join("_CodeSignature/CodeResources")).unwrap();
+        let files2=resources.as_dictionary().unwrap()["files2"].as_dictionary().unwrap();
+        assert!(!files2.keys().any(|key|key.ends_with("embedded.mobileprovision")));
+        for relative in ["Watch/Watch.app/_CodeSignature/CodeResources","AppClips/Clip.app/_CodeSignature/CodeResources"] {
+            let sealed=files2[relative].as_dictionary().unwrap();
+            let bytes=fs::read(app.join(relative)).unwrap();
+            assert_eq!(sealed["hash2"].as_data().unwrap(),sha2::Sha256::digest(&bytes).as_slice());
+        }
+    }
+
+    #[test]
     fn embedded_profile_absent_no_override_stays_absent() {
         let f=Fixture::new();let app=f.bundle("App.app","test.app");
         let settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
