@@ -25,7 +25,7 @@ final class SourceCatalogTests: XCTestCase {
     }
 
     func testSourceNewsPresentationAndSafeRelativeLinks() throws {
-        let feed = Data(#"{"name":"Mirsa","headerURL":"banner.png","subtitle":"Welcome","description":"My source","website":"https://x.com/rasmtk30","news":[{"identifier":"welcome","title":"Hello","caption":"New source","imageURL":"news.png","tintColor":"#123456","date":"2026-11-18","appID":"test.sample","url":"https://example.org/story"},{"title":"Unsafe","imageURL":"file:///private/test","url":"javascript:alert(1)"},{"caption":"Missing title"},42],"apps":[]}"#.utf8)
+        let feed = Data(##"{"name":"Mirsa","headerURL":"banner.png","subtitle":"Welcome","description":"My source","website":"https://x.com/rasmtk30","news":[{"identifier":"welcome","title":"Hello","caption":"New source","imageURL":"news.png","tintColor":"#123456","date":"2026-11-18","appID":"test.sample","url":"https://example.org/story"},{"title":"Unsafe","imageURL":"file:///private/test","url":"javascript:alert(1)"},{"caption":"Missing title"},42],"apps":[]}"##.utf8)
         let parsed = try SourcesStore.decodeSource(feed, base: URL(string: "https://example.org/source.json")!)
         XCTAssertEqual(parsed.headerURL?.absoluteString, "https://example.org/banner.png")
         XCTAssertEqual(parsed.subtitle, "Welcome")
