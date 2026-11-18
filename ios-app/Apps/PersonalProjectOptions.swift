@@ -25,9 +25,11 @@ struct PersonalProjectOptions: Sendable {
     var removeAppClips = false
     var strictProfile = false
     var gameMode: PersonalGameMode = .keep
+    var fixDarkIcon = false
     var fixWhiteIcon = false
     var newTweaksFirst = false
-    var useLoader = false
+    var useLoader = true
+    var iconPNG: Data? = nil
     var customEntitlements: Data? = nil
     var exportExtension = "ipa"
     /// Explicit opt-in: strips UIDeviceFamily, MinimumOSVersion and UIRequiredDeviceCapabilities from the project COPY.
@@ -61,9 +63,10 @@ struct PersonalProjectDraft: Codable, Equatable {
     var newTweaksFirst: Bool? = nil
     var workspaceNote: String? = nil
     var exportExtension: String? = nil
+    var iconPNG: Data? = nil
     var customEntitlements: Data? = nil
     var customEntitlementsName: String? = nil
-    var directInjection: Bool? = nil
+    var directInjection: Bool? = false
     /// component id (uuid:path) -> InjectionMethod raw value. Absent = migrate from legacy directInjection.
     var injectionMethods: [String: String]? = nil
     /// component id -> selected process target ids for separate_extension (decoded optional, backward compatible).
@@ -97,4 +100,6 @@ struct ExistingLibraryEdit: Codable, Equatable, Sendable {
     var owner: String
     var removed: [String] = []
     var order: [String] = []
+    /// Optional so plans saved before disable support still decode.
+    var disabled: [String]? = nil
 }
