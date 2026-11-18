@@ -1,4 +1,4 @@
-name: Source news simulator verification
+name: Tendies implemented simulator verification
 on:
   workflow_dispatch:
     inputs:
@@ -45,10 +45,7 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testSourceNewsLiveArabicAndEnglish -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testSourceNewsApprovedBrandingArabicAndEnglish test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
-      - name: Source model native tests
-        if: always()
-        run: bash scripts/appstore/package-tests.sh
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesViewportAndReturn -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testMirsaAIBottomTab -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testClassicSixTabs -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesArtifactCard -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFloatingDockAllThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testAppIconPickerAllIcons -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testChatImageFullscreen -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testRespringStandalone -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesSelectedApplyVisible -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerPickersStayIndependent -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testNonownerHasNoDiagnostics test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
       - name: Export named screenshots
         if: always()
         run: |
@@ -80,7 +77,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: source-news-simulator
+          name: tendies-implemented-simulator
           path: |
             build/shots
             build/diagnostics
