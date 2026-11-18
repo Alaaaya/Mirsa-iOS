@@ -1,0 +1,2 @@
+Vendored from NSAntoine/PrivateKits at 157c45b2eecad87a8ac6123ef5caaf2c730afd7a, MIT license retained.
+Only source change is an explicit .rawData case in Representation.uiView returning the existing empty view. The upstream enum already has this case but its UIKit preview switch omits it, causing a real device and simulator compile error with Xcode 26.3. No asset editing or validation behavior is weakened.
