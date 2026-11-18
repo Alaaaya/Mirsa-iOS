@@ -333,7 +333,7 @@ enum FairPlayDecryptor {
         let archive = try Archive(url: dest, accessMode: .create)
         for entry in files {
             if entry.isDir {
-                try archive.addEntry(with: entry.rel + "/", type: .directory, uncompressedSize: 0,
+                try archive.addEntry(with: entry.rel + "/", type: .directory, uncompressedSize: Int64(0),
                                      compressionMethod: .none) { _, _ in Data() }
             } else {
                 let size = (try fm.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber)?.int64Value ?? 0
