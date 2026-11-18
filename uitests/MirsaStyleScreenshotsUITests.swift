@@ -61,6 +61,31 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.2)
     }
 
+    func testSourceNewsApprovedBrandingArabicAndEnglish() {
+        for lang in ["ar", "en"] {
+            let app = launch("source-news-fixture", lang: lang)
+            XCTAssertTrue(app.descendants(matching: .any)["source-detail-news"].waitForExistence(timeout: 30))
+            shot(app, "\(lang)_source-news-approved-branding")
+            app.swipeUp()
+            shot(app, "\(lang)_source-news-approved-branding-bottom")
+            app.terminate()
+        }
+    }
+
+    func testSourceNewsLiveArabicAndEnglish() {
+        for lang in ["ar", "en"] {
+            let app = launch("source-news-live", lang: lang)
+            XCTAssertTrue(app.descendants(matching: .any)["source-detail-header"].waitForExistence(timeout: 60))
+            XCTAssertTrue(app.textFields["source-app-search"].exists)
+            // Live source may legitimately omit branding/news. Capture exactly what it serves.
+            Thread.sleep(forTimeInterval: 10)
+            shot(app, "\(lang)_source-news-live")
+            app.swipeUp()
+            shot(app, "\(lang)_source-news-live-bottom")
+            app.terminate()
+        }
+    }
+
     private func run(lang: String) {
         for page in Self.pages {
             let app = launch(page, lang: lang)
