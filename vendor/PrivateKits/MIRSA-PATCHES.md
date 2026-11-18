@@ -1,0 +1,15 @@
+Vendored from NSAntoine/PrivateKits at 157c45b2eecad87a8ac6123ef5caaf2c730afd7a, MIT license retained.
+Only source change is an explicit .rawData case in Representation.uiView returning the existing empty view. The upstream enum already has this case but its UIKit preview switch omits it, causing a real device and simulator compile error with Xcode 26.3. No asset editing or validation behavior is weakened.
+
+The certificate validation workflow copies CoreUI/CoreSVG TBDs from the actual selected target SDK before resolving this package. The upstream stubs have desktop install names and lack simulator exports. Missing SDK stubs fail validation; no platforms or symbols are fabricated. The copied files and their digests are retained in the CI artifact. Production package consumers must use the same SDK preparation script.
+
+Superseding native-e failure repair, bcd67431. Xcode 26.3 public device AND simulator SDKs have no CoreUI private stub. The previous SDK-copy strategy fails closed but cannot build, so it is replaced. Upstream macOS CoreUI/CoreSVG unsafe linker flags are removed from the three consuming targets. Mirsa project.yml chooses unchanged platform-specific CoreUI/CoreSVG linker stubs for BOTH application and unit-test targets with SDK-qualified OTHER_LDFLAGS. These flags apply in normal production and simulator builds without any prep step. The four stubs are byte-for-byte pinned to OpenSwiftUIProject/DarwinPrivateFrameworks 511cc728141f57dc325753f23898568ccd49c339 with original MIT license and SHA256/source manifest under LinkerStubs. No exports/platform tags are fabricated or edited locally. Upstream simulator stubs target iOS18 and CoreSVG18.5; app minimum remains18.0 so actual link warnings/runtime compatibility must be inspected. Native fixture/link evidence still pending.
+
+Native-f simulator linking repair, sole 9d278232. Device Release app built successfully with the real selected SDK. Simulator Debug automatically materialized AssetCatalogWrapper as a separate PackageProduct framework, whose link step does not inherit the app/test target's platform stub flags. Full original logs show 11 unresolved CoreUI/CoreSVG symbols in that package link, before app or test compilation. The one consumed AssetCatalogWrapper product is now explicitly static so its code is resolved by the app/test final linker where both genuine platform stubs are selected. No fake symbols, dynamic lookup, undefined-symbol suppression, or target rewriting. Swift PackageDescription library(name:type:targets:) documentation was checked. Other package products remain unchanged. Actual simulator validation remains required.
+
+Native g exposed an Xcode static diamond diagnostic because both Mirsa and its
+hosted unit test bundle directly depended on AssetCatalogWrapper. The product
+remains static; only Mirsa owns this dependency. Hosted tests still import and
+exercise the actual module via the host build products, rather than linking a
+second copy or disabling the diamond diagnostic. Native test compilation is
+required to validate module/symbol visibility, no pass is asserted locally.

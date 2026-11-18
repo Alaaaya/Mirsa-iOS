@@ -165,10 +165,12 @@ struct LiquidTabBar: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.mirsaPress)
+                .accessibilityIdentifier("mirsa-tab-" + item.tab.rawValue)
             }
         }
         .padding(6)
         .frame(height: MirsaTabBarMetrics.height)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mirsa-tab-dock")
         .environment(\.layoutDirection, .leftToRight)
         .modifier(MirsaSolidCard(shape: Capsule(), tint: nil, elevation: 1.2))
