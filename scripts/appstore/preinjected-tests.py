@@ -45,6 +45,8 @@ edition="2021"
 [dependencies]
 serde={version="1",features=["derive"]}
 serde_json="1"
+plist="=1.10.1"
+apple-codesign-quick={path="''' + str(ROOT / 'rust-core/vendor/apple-codesign-quick') + '''"}
 zip={version="=2.4.2",default-features=false,features=["deflate"]}
 ''')
         subprocess.run(['cargo','test','--manifest-path',str(work / 'Cargo.toml'),'--','--nocapture'], check=True,
