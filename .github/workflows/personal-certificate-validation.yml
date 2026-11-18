@@ -28,7 +28,8 @@ jobs:
       - name: Test profile omission device-result policy
         run: python3 scripts/test-profile-omission.py
       - name: Test profile omission resource seals
-        run: cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib bundle::tests::
+        run: |
+          cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib bundle::tests::
       - name: Test Rust validation
         run: cargo test --manifest-path rust-core/Cargo.toml --lib
       - name: Build Rust device library
