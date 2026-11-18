@@ -49,6 +49,23 @@ mkdir -p build/Mirsa.app/Frameworks
 xcrun -sdk iphoneos clang -arch arm64 -dynamiclib -miphoneos-version-min=16.0 \
     -install_name @rpath/MirsaProbe.dylib -o build/Mirsa.app/Frameworks/MirsaProbe.dylib ios-app/Probe/probe.c
 
+# Preserve a minimal own-app group in the delivered executable, matching the
+# device-proven access path. This is not a provisioning grant.
+cat > build/MirsaWallpaper.entitlements <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.security.application-groups</key><array><string>group.com.alaa.mirsa</string></array></dict></plist>
+PLIST
+codesign --force --sign - --entitlements build/MirsaWallpaper.entitlements build/Mirsa.app
+codesign --verify --strict build/Mirsa.app
+codesign -d --entitlements :- build/Mirsa.app > build/wallpaper-signature.plist
+python3 - <<'VERIFY'
+import plistlib
+with open("build/wallpaper-signature.plist", "rb") as f:
+    assert plistlib.load(f) == {"com.apple.security.application-groups": ["group.com.alaa.mirsa"]}
+print("WALLPAPER OWN GROUP SIGNATURE PASS; no debug entitlement")
+VERIFY
+
 mkdir -p build/Payload
 cp -R build/Mirsa.app build/Payload/Mirsa.app
 

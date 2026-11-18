@@ -1128,7 +1128,7 @@ async fn dev_tool(pairing_path: String, kind: String, arg: String, out_path: Str
                 d.insert(
                     "ReturnAttributes".into(),
                     plist::Value::Array(
-                        ["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "StaticDiskUsage", "DynamicDiskUsage"]
+                        ["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "CFBundleShortVersionString", "CFBundleVersion", "ApplicationType", "StaticDiskUsage", "DynamicDiskUsage"]
                             .iter()
                             .map(|s| plist::Value::String(s.to_string()))
                             .collect(),

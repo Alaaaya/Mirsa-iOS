@@ -13,6 +13,16 @@ public enum TendiePosterType: String, Codable, CaseIterable {
     case mercury = "Mercury"
     case container = "App Container"
 
+    // Keep Codable raw values stable. These labels are app-owned, not Photos UI.
+    public var displayName: String {
+        switch self {
+        case .collections: return WallpaperMakerStrings.text(.collectionsType)
+        case .suggestedPhotos: return WallpaperMakerStrings.text(.suggestedPhotosType)
+        case .mercury: return WallpaperMakerStrings.text(.mercuryType)
+        case .container: return WallpaperMakerStrings.text(.containerType)
+        }
+    }
+
     public var systemIcon: String {
         switch self {
         case .collections: return "paintpalette.fill"

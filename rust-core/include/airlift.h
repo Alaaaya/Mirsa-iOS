@@ -155,6 +155,12 @@ int32_t al_device_respring(const char *pairing_path,
                           void *ctx,
                           char **out_error);
 
+// Read lockdown UniqueDeviceID over the pairing tunnel (LocalDevVPN). Blocks.
+// Returns 0 with *out_udid set (free with al_string_free), non-zero with *out_error.
+int32_t al_device_udid(const char *pairing_path,
+                       char **out_udid,
+                       char **out_error);
+
 // ---------------------------------------------------------------------------
 // Target Host Configuration
 // ---------------------------------------------------------------------------

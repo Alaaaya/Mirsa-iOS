@@ -1,7 +1,47 @@
 import XCTest
+import ZIPFoundation
 @testable import Mirsa
 
 final class TendiesEngineTests: XCTestCase {
+
+    private func fixtureArchive(_ paths: [String], in root: URL) throws -> URL {
+        let url = root.appendingPathComponent(UUID().uuidString + ".zip")
+        let archive = try Archive(url: url, accessMode: .create)
+        for path in paths {
+            let data = Data("fixture".utf8)
+            try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { position, size in
+                data.subdata(in: Int(position)..<(Int(position) + size))
+            }
+        }
+        return url
+    }
+
+    func testArchivePreflightRejectsTraversalAliasesAndCaseCollisionsBeforeWrites() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for paths in [["../escape"], ["/absolute"], ["a//b"], ["a/./b"],
+                      ["C:/file"], ["a\\b"], ["A/file", "a/FILE"]] {
+            let archive = try fixtureArchive(paths, in: root)
+            XCTAssertThrowsError(try TendiesEngine.shared.validateArchive(archive), paths.joined(separator: ","))
+        }
+    }
+
+    func testValidatedExtractorChecksCRCAndKeepsFunctionalHiddenMetadataOnly() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = ["descriptors/id/versions/file", ".DS_Store", "__MACOSX/._x",
+                     "descriptors/id/.com.apple.posterkit.provider.contents.configurableOptions.plist"]
+        let archive = try fixtureArchive(paths, in: root)
+        let destination = root.appendingPathComponent("extracted")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try TendiesEngine.shared.extractValidatedArchive(archive, to: destination)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent(paths[0]).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent(paths[3]).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent(".DS_Store").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("__MACOSX").path))
+    }
 
     func testInspectTendiesDescriptorDiscovery() throws {
         let inspectURL = URL(fileURLWithPath: "/tmp/inspect_tendies")
@@ -26,6 +66,39 @@ final class TendiesEngineTests: XCTestCase {
         XCTAssertTrue(folderNames.contains("26930337-4424-4CF6-9A2D-4AE0A0BB84E9"))
         XCTAssertTrue(folderNames.contains("8896EDDD-2E0D-4E52-9D95-8479F318E4C6"))
         XCTAssertTrue(folderNames.contains("2B1A15F7-CDA1-4BC9-B1CA-4063A869E251"))
+    }
+
+    func testFreshDescriptorRewritesArchivedUUIDKeepsWallpaperIdentityAndRequiredHiddenMetadata() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let oldID = UUID().uuidString
+        let source = root.appendingPathComponent(oldID)
+        let staging = root.appendingPathComponent("prepared")
+        try fm.createDirectory(at: source, withIntermediateDirectories: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        let hidden = ".com.apple.posterkit.provider.contents.configurableOptions.plist"
+        let metadata: [String: Any] = ["descriptor": oldID, "url": "file:///descriptors/" + oldID + "/versions/1",
+                                      "identifier": 7400, "wallpaperRepresentingIdentifier": "7400",
+                                      "nested": [["descriptor": oldID]]]
+        let original = try PropertyListSerialization.data(fromPropertyList: metadata, format: .binary, options: 0)
+        try original.write(to: source.appendingPathComponent(hidden))
+        try Data("junk".utf8).write(to: source.appendingPathComponent(".DS_Store"))
+        let engine = TendiesEngine.shared
+        let first = try engine.prepareDescriptor(source, in: staging)
+        let second = try engine.prepareDescriptor(source, in: staging)
+        XCTAssertNotEqual(first.lastPathComponent, oldID)
+        XCTAssertNotEqual(first.lastPathComponent, second.lastPathComponent)
+        XCTAssertNotNil(UUID(uuidString: first.lastPathComponent))
+        XCTAssertFalse(fm.fileExists(atPath: first.appendingPathComponent(".DS_Store").path))
+        let updated = try XCTUnwrap(try PropertyListSerialization.propertyList(
+            from: Data(contentsOf: first.appendingPathComponent(hidden)), format: nil) as? [String: Any])
+        XCTAssertEqual(updated["descriptor"] as? String, first.lastPathComponent)
+        XCTAssertEqual(updated["url"] as? String, "file:///descriptors/" + first.lastPathComponent + "/versions/1")
+        XCTAssertEqual(updated["identifier"] as? Int, 7400)
+        XCTAssertEqual(updated["wallpaperRepresentingIdentifier"] as? String, "7400")
+        XCTAssertEqual(try Data(contentsOf: source.appendingPathComponent(hidden)), original)
     }
 
     func testSyntheticDescriptorFolderDetection() throws {

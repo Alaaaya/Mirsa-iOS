@@ -37,14 +37,22 @@ private func testSoftware(price: Double? = 0, id: Int64 = 42) -> Software {
 }
 private final class StoreTestAuth: MirsaStoreAuthentication {
     var calls: [String] = []
+    var passwords: [String] = []
     var twoFactor = false
     var diagnostic: MirsaStoreAuthDiagnostic?
     var paused: CheckedContinuation<Account, Error>?
     var pause = false
+    var didPause: (() -> Void)?
     func authenticate(email: String, password: String, code: String) async throws -> Account {
         calls.append(code)
+        passwords.append(password)
         if let diagnostic { throw diagnostic }
-        if pause { return try await withCheckedThrowingContinuation { paused = $0 } }
+        if pause {
+            return try await withCheckedThrowingContinuation {
+                paused = $0
+                didPause?()
+            }
+        }
         if twoFactor && code != "123456" { throw AuthenticationError.verificationCodeRequired }
         return testOwner()
     }
@@ -60,6 +68,7 @@ private final class StoreTestEngine: MirsaStoreEngine {
     var manifests = 0
     var seenVersion: String?
     var failManifest = false
+    var versionApps: [Software] = []
     var versionsResult = ["123", "456"]
     var output: DownloadOutput {
         get throws {
@@ -85,7 +94,7 @@ private final class StoreTestEngine: MirsaStoreEngine {
         if failManifest { throw ApplePackageError.licenseRequired }
         return try output
     }
-    func versions(account: inout Account, bundleID: String) async throws -> [String] { versionsResult }
+    func versions(account: inout Account, app: Software) async throws -> [String] { versionApps.append(app); return versionsResult }
 }
 private final class StoreTestPackages: MirsaStorePackages {
     var calls = 0
@@ -97,7 +106,202 @@ private final class StoreTestPackages: MirsaStorePackages {
     }
 }
 
+/// Simulates a paused writer that flushes one last chunk while cancellation unwinds.
+private final class LifecycleTestPackages: MirsaStorePackages {
+    let folder = StoreResumeStore.root.appendingPathComponent(UUID().uuidString)
+    let run = StoreTransferRun()
+    let started: XCTestExpectation
+    var finished = false
+    init(started: XCTestExpectation) { self.started = started }
+    func cancel() { run.requestDiscard() }
+    func fetch(output: DownloadOutput, bundleID: String) async throws -> URL {
+        try StoreResumeStore.prepare(folder)
+        try Data([1]).write(to: StoreResumeStore.partial(folder))
+        defer {
+            // The purge must be AFTER this last write, not merely after cancel().
+            try? StoreResumeStore.prepare(folder)
+            try? Data([2]).write(to: StoreResumeStore.partial(folder))
+            finished = true
+        }
+        run.pause()
+        started.fulfill()
+        await run.waitWhilePaused()
+        try Task.checkCancellation()
+        throw CancellationError()
+    }
+}
+
+private actor StoreAccountGatePause {
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private(set) var entered = false
+    func wait() async -> Bool {
+        entered = true
+        return await withCheckedContinuation { continuation = $0 }
+    }
+    func resume() { continuation?.resume(returning: true); continuation = nil }
+}
+
 final class MirsaStoreClientTests: XCTestCase {
+    func testSignOutTerminatesPausedDownloadAndReleasesBusyBeforePurging() async throws {
+        let packages = LifecycleTestPackages(started: expectation(description: "paused writer"))
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: StoreTestEngine(), packages: packages)
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let task = Task { try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())) }
+        await fulfillment(of: [packages.started], timeout: 5)
+        try await client.signOut()
+        XCTAssertTrue(packages.finished)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packages.folder.path))
+        do { _ = try await task.value; XCTFail("download survived logout") } catch {}
+        // No UI task cancellation is needed, and login must no longer be busy.
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+    }
+
+    func testBothAccountSwitchPathsQuiesceWriterPurgePartialsAndRetainSession() async throws {
+        // Exercise beginAddAccount and selectAccount independently with an active writer.
+        for add in [true, false] {
+            let base = StoreTestVault()
+            let packages = LifecycleTestPackages(started: expectation(description: "switch writer"))
+            let local = MirsaStoreClient(vault: StoreTestVault(), engine: StoreTestEngine(), packages: packages)
+            _ = try await local.signIn(email: "owner@example.invalid", password: "fixture-password")
+            let otherID = UUID().uuidString
+            let registry = try JSONSerialization.data(withJSONObject: ["ids": ["legacy", otherID], "selected": "legacy"])
+            try base.write(registry, key: "native.accounts.registry")
+            let client = MirsaStoreOnDeviceClient(gate: { true }, vault: base, factory: { _ in local })
+            let task = Task { try await client.downloadOwnedApp(MirsaStoreApp(testSoftware())) }
+            await fulfillment(of: [packages.started], timeout: 5)
+            if add { _ = try await client.beginAddAccount() }
+            else { try await client.selectAccount(id: otherID) }
+            XCTAssertTrue(packages.finished)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: packages.folder.path))
+            do { _ = try await task.value; XCTFail("download survived switch") } catch {}
+            let account = try await local.currentAccount()
+            XCTAssertNotNil(account)
+            _ = try await local.signIn(email: "owner@example.invalid", password: "fixture-password")
+        }
+    }
+
+    func testAccountVaultNamespacesNeverOverlapAndLegacySessionRemainsInPlace() throws {
+        let base = StoreTestVault()
+        let legacy = MirsaStoreAccountVault(base: base, id: "legacy")
+        let other = MirsaStoreAccountVault(base: base, id: UUID().uuidString)
+        for key in ["account", "machine", "challenge"] {
+            try legacy.write(Data("old".utf8), key: key)
+            try other.write(Data("new".utf8), key: key)
+            XCTAssertEqual(try legacy.read(key), Data("old".utf8))
+            XCTAssertEqual(try other.read(key), Data("new".utf8))
+            try other.remove(key)
+            XCTAssertEqual(try legacy.read(key), Data("old".utf8))
+        }
+        XCTAssertEqual(base.data["native.account"], Data("old".utf8))
+    }
+
+    func testAccountSwitchDuringAuthorizationKeepsCapturedAccountAndGUID() async throws {
+        let base = StoreTestVault(), pause = StoreAccountGatePause()
+        let engineA = StoreTestEngine(), engineB = StoreTestEngine()
+        let vaultA = MirsaStoreAccountVault(base: base, id: "legacy")
+        try vaultA.write(try JSONEncoder().encode(testOwner()), key: "account")
+        let clientA = MirsaStoreClient(vault: vaultA, engine: engineA, packages: StoreTestPackages())
+        let clientB = MirsaStoreClient(vault: StoreTestVault(), engine: engineB, packages: StoreTestPackages())
+        let client = MirsaStoreOnDeviceClient(gate: { await pause.wait() }, vault: base,
+            factory: { $0 == "legacy" ? clientA : clientB })
+        let pending = Task { try await client.currentAccount() }
+        while !(await pause.entered) { await Task.yield() }
+        let secondID = try await client.beginAddAccount()
+        await pause.resume()
+        let captured = try await pending.value
+        XCTAssertEqual(captured?.email, "owner@example.invalid")
+        let selected = try await client.selectedAccountID()
+        XCTAssertEqual(selected, secondID)
+        XCTAssertEqual(engineA.guids.count, 1)
+        XCTAssertTrue(engineB.guids.isEmpty)
+        try await client.selectAccount(id: "legacy")
+        XCTAssertEqual(base.removed.filter { $0 == "native.account" }.count, 0)
+    }
+
+    func testSeparateSavedClientsKeepIndependentSessionsAndStableGUIDs() async throws {
+        let base = StoreTestVault()
+        let id = UUID().uuidString
+        let firstVault = MirsaStoreAccountVault(base: base, id: "legacy")
+        let secondVault = MirsaStoreAccountVault(base: base, id: id)
+        var secondOwner = testOwner()
+        secondOwner.passwordToken = "second-fixture-token"
+        secondOwner.directoryServicesIdentifier = "456"
+        secondOwner.store = "143480"
+        try firstVault.write(try JSONEncoder().encode(testOwner()), key: "account")
+        try secondVault.write(try JSONEncoder().encode(secondOwner), key: "account")
+        try firstVault.write(Data("AABBCCDDEEFF".utf8), key: "machine")
+        try secondVault.write(Data("112233445566".utf8), key: "machine")
+        let engineA = StoreTestEngine(), engineB = StoreTestEngine()
+        let first = MirsaStoreClient(vault: firstVault, engine: engineA, packages: StoreTestPackages())
+        let second = MirsaStoreClient(vault: secondVault, engine: engineB, packages: StoreTestPackages())
+        _ = try await first.currentAccount()
+        _ = try await second.currentAccount()
+        XCTAssertEqual(engineA.guids, ["AABBCCDDEEFF"])
+        XCTAssertEqual(engineB.guids, ["112233445566"])
+        try await second.signOut()
+        let retained = try await first.currentAccount()
+        let removed = try await second.currentAccount()
+        XCTAssertNotNil(retained)
+        XCTAssertNil(removed)
+        let owner = try JSONDecoder().decode(Account.self, from: firstVault.read("account")!)
+        XCTAssertEqual(owner.passwordToken, "fixture-token")
+        XCTAssertEqual(owner.directoryServicesIdentifier, "123")
+        XCTAssertEqual(owner.store, "143443")
+    }
+
+    func testExpectedAccountMismatchFailsBeforeAuthorizationOrAppleRequest() async throws {
+        let base = StoreTestVault(), engine = StoreTestEngine()
+        let local = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        // A false gate would throw staging_denied if reached. Mismatch must win before that await.
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { false }, vault: base)
+        let app = MirsaStoreApp(testSoftware())
+        _ = try await client.beginAddAccount()
+        do {
+            _ = try await client.downloadOwnedApp(app, expectedAccountID: "legacy")
+            XCTFail("Cross-account download accepted")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .operationCancelled) }
+        do {
+            _ = try await client.acquireFreeAppAndDownload(app, expectedAccountID: "legacy")
+            XCTFail("Cross-account acquisition accepted")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .operationCancelled) }
+        do {
+            _ = try await client.currentAccount(expectedAccountID: "legacy")
+            XCTFail("Cross-account summary accepted")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .operationCancelled) }
+        XCTAssertEqual(engine.manifests, 0)
+        XCTAssertEqual(engine.acquisitions, 0)
+        XCTAssertTrue(engine.guids.isEmpty)
+    }
+
+    func testAccountSelectionSurvivesClientRecreationWithoutSigningOut() async throws {
+        let base = StoreTestVault()
+        let first = MirsaStoreOnDeviceClient(gate: { true }, vault: base)
+        let id = try await first.beginAddAccount()
+        let second = MirsaStoreOnDeviceClient(gate: { true }, vault: base)
+        let selected = try await second.selectedAccountID()
+        XCTAssertEqual(selected, id)
+        try await second.selectAccount(id: "legacy")
+        let third = MirsaStoreOnDeviceClient(gate: { true }, vault: base)
+        let restored = try await third.selectedAccountID()
+        XCTAssertEqual(restored, "legacy")
+        XCTAssertTrue(base.removed.isEmpty)
+    }
+
+    func testVersionListUsesSelectedAppWithoutIPhoneLookupPrecheck() async throws {
+        let engine = StoreTestEngine()
+        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        let selected = MirsaStoreApp(testSoftware())
+        // A redundant lookup would return a different app and block this valid selection.
+        engine.app = testSoftware(id: 999)
+        let versions = try await client.availableVersions(selected)
+        XCTAssertEqual(versions, ["123", "456"])
+        XCTAssertTrue(engine.lookupCountries.isEmpty)
+        XCTAssertEqual(engine.versionApps.map(\.id), [selected.id])
+        XCTAssertEqual(engine.versionApps.map(\.bundleID), [selected.bundleID])
+        XCTAssertEqual(engine.acquisitions, 0)
+    }
+
     func testSafeAuthDiagnosticReachesUIAndClearsFailedChallenge() async throws {
         let vault = StoreTestVault(), engine = StoreTestEngine()
         engine.auth.diagnostic = MirsaStoreAuthDiagnostic(.init(stage: .authentication,
@@ -115,6 +319,25 @@ final class MirsaStoreClientTests: XCTestCase {
         XCTAssertNil(vault.data["challenge"])
         XCTAssertNil(vault.data["account"])
         XCTAssertEqual(engine.auth.calls.count, 1)
+    }
+
+    func testTwoFactorDiagnosticAlertKeepsSafeExactResponseFields() {
+        let error = MirsaStoreAuthDiagnostic(.init(stage: .authentication, httpStatus: 200,
+            loginPhase: .verificationCode, responseMessage: .configurator, failureState: .empty))
+        let text = error.localizedDescription
+        XCTAssertTrue(text.contains("[authentication]"))
+        XCTAssertTrue(text.contains("HTTP 200"))
+        XCTAssertTrue(text.contains("Phase 2FA"))
+        XCTAssertTrue(text.contains("failureType empty"))
+        XCTAssertTrue(text.contains("customerMessage MZFinance.BadLogin.Configurator_message"))
+        // The app defaults to Arabic; the human guidance follows the active locale.
+        // Exact protocol fields above remain locale-independent.
+        let guidance = tr("Apple did not complete verification. Check your password and use the latest code.",
+                          "Apple ما كملت التحقق. تأكد من كلمة السر واكتب آخر رمز وصلك.",
+                          ckb: "Apple پشتڕاستکردنەوەی تەواو نەکرد. وشەی نهێنی و نوێترین کۆد بپشکنە.",
+                          kmr: "Apple piştrastkirin temam nekir. Şîfre û koda herî nû kontrol bike.")
+        XCTAssertTrue(text.contains(guidance))
+        XCTAssertFalse(text.contains("code was rejected"))
     }
 
     func testSignoutAttemptsBothSecretsAndCancelsDownloadEvenOnKeychainFailure() async throws {
@@ -173,6 +396,8 @@ final class MirsaStoreClientTests: XCTestCase {
         guard case .signedIn(let summary) = result else { return XCTFail("login missing") }
         XCTAssertEqual(summary.country, "DE")
         XCTAssertNotNil(vault.data["account"])
+        XCTAssertEqual(try JSONDecoder().decode(Account.self, from: vault.data["account"]!).password, "")
+        XCTAssertFalse(String(data: vault.data["account"]!, encoding: .utf8)!.contains("fixture-password"))
         XCTAssertEqual(engine.guids.first?.count, 12)
         let restored = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         let current = try await restored.currentAccount()
@@ -186,26 +411,99 @@ final class MirsaStoreClientTests: XCTestCase {
     func testTwoFactorReusesOneSAPSession() async throws {
         let engine = StoreTestEngine()
         engine.auth.twoFactor = true
-        let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
+        let vault = StoreTestVault()
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
         XCTAssertEqual(first, .verificationRequired)
+        XCTAssertNil(vault.data["challenge"])
+        do { _ = try await client.verify(code: "123"); XCTFail("Malformed code accepted") }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .invalidVerificationCode) }
+        XCTAssertEqual(engine.auth.calls, [""])
         let second = try await client.verify(code: "123456")
         guard case .signedIn = second else { return XCTFail("verification missing") }
+        XCTAssertEqual(engine.auth.passwords, ["fixture-password", "fixture-password"])
         XCTAssertEqual(engine.authCreations, 1)
         XCTAssertEqual(engine.auth.calls, ["", "123456"])
     }
+    func testChangedPasswordAndDuplicateCodeNeverReachSession() async throws {
+        let engine = StoreTestEngine()
+        engine.auth.twoFactor = true
+        let vault = StoreTestVault()
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        do { _ = try await client.verify(code: "123456", password: "changed-password"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .verificationPasswordChanged) }
+        XCTAssertEqual(engine.auth.calls, [""])
+        do { _ = try await client.verify(code: "999999", password: "fixture-password"); XCTFail() } catch {}
+        do { _ = try await client.verify(code: " 999999 ", password: "fixture-password"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .duplicateVerificationCode) }
+        XCTAssertEqual(engine.auth.calls, ["", "999999"])
+        _ = try await client.verify(code: "123456", password: "fixture-password")
+        XCTAssertEqual(engine.auth.passwords, Array(repeating: "fixture-password", count: 3))
+        XCTAssertNil(vault.data["challenge"])
+    }
+
+    func test5020TerminatesChallengeWithoutAnotherAppleRequest() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        engine.auth.twoFactor = true
+        let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        engine.auth.diagnostic = MirsaStoreAuthDiagnostic(.init(stage: .authentication,
+            httpStatus: 200, appleCode: "5020", loginPhase: .verificationCode))
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail() }
+        catch let error as MirsaStoreAuthDiagnostic { XCTAssertEqual(error.appleCode, "5020") }
+        engine.auth.diagnostic = nil
+        do { _ = try await client.verify(code: "654321", password: "fixture-password"); XCTFail() }
+        catch { XCTAssertEqual(error as? MirsaStoreError, .signedOut) }
+        XCTAssertEqual(engine.auth.calls, ["", "123456"])
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertNil(vault.data["account"])
+    }
+
+    func testNativeOwnerGateDeniesBeforeAppleAuthentication() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { false }, vault: vault)
+        do {
+            _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+            XCTFail("Owner restriction bypassed")
+        } catch { XCTAssertEqual(error as? MirsaStoreServerError, .code("staging_denied")) }
+        XCTAssertEqual(engine.authCreations, 0)
+        XCTAssertTrue(vault.data.isEmpty)
+    }
+    func testNativeOwnerGateUsesLocalSessionForLatinVerification() async throws {
+        let engine = StoreTestEngine(), vault = StoreTestVault()
+        engine.auth.twoFactor = true
+        let local = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
+        let client = MirsaStoreOnDeviceClient(local: local, gate: { true }, vault: vault)
+        let first = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
+        XCTAssertEqual(first, .verificationRequired)
+        XCTAssertNil(vault.data["challenge"])
+        do {
+            _ = try await client.verify(code: "182737", password: "")
+            XCTFail("Changed verification password accepted")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .verificationPasswordChanged) }
+        // The UI sends only the code; use the original memory-only challenge password.
+        let second = try await client.verify(code: "123456")
+        guard case .signedIn = second else { return XCTFail("No local session") }
+        XCTAssertEqual(engine.authCreations, 1)
+        XCTAssertEqual(engine.auth.calls, ["", "123456"])
+        XCTAssertNil(vault.data["challenge"])
+        XCTAssertEqual(try JSONDecoder().decode(Account.self, from: vault.data["account"]!).password, "")
+    }
+
     func testTwoFactorSubmissionLimitAndSignoutClearsChallenge() async throws {
         let engine = StoreTestEngine()
         engine.auth.twoFactor = true
         let client = MirsaStoreClient(vault: StoreTestVault(), engine: engine, packages: StoreTestPackages())
         _ = try await client.signIn(email: "owner@example.invalid", password: "fixture-password")
-        for _ in 0..<3 {
-            do { _ = try await client.verify(code: "999999"); XCTFail("wrong code accepted") } catch {}
+        for code in ["999999", "888888", "777777"] {
+            do { _ = try await client.verify(code: code, password: "fixture-password"); XCTFail("wrong code accepted") } catch {}
         }
-        do { _ = try await client.verify(code: "123456"); XCTFail("expired challenge accepted") } catch {}
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("expired challenge accepted") } catch {}
         XCTAssertEqual(engine.auth.calls.count, 4)
         try await client.signOut()
-        do { _ = try await client.verify(code: "123456"); XCTFail("signed out challenge accepted") } catch {}
+        do { _ = try await client.verify(code: "123456", password: "fixture-password"); XCTFail("signed out challenge accepted") } catch {}
     }
     func testAcquisitionUsesFreshAccountRegionAndRejectsUnknownOrPaidPrice() async throws {
         let engine = StoreTestEngine()
@@ -254,15 +552,20 @@ final class MirsaStoreClientTests: XCTestCase {
     func testSignoutDuringInFlightLoginCannotResurrectAccount() async throws {
         let vault = StoreTestVault(), engine = StoreTestEngine()
         engine.auth.pause = true
+        let suspended = expectation(description: "Authentication suspended")
+        engine.auth.didPause = { suspended.fulfill() }
         let client = MirsaStoreClient(vault: vault, engine: engine, packages: StoreTestPackages())
         let login = Task { try await client.signIn(email: "owner@example.invalid", password: "fixture-password") }
-        for _ in 0..<1000 {
-            if engine.auth.paused != nil { break }
-            await Task.yield()
-        }
+        await fulfillment(of: [suspended], timeout: 10)
         guard let paused = engine.auth.paused else { login.cancel(); return XCTFail("did not suspend") }
-        do { _ = try await client.search(term: "x", country: "DE"); XCTFail("concurrent request") }
-        catch { XCTAssertEqual(error as? MirsaStoreError, .busy) }
+        // Read-only search now queues behind commerce work. A second login
+        // still rejects immediately; awaiting a queued search here would prevent
+        // this test from ever releasing its deliberately paused authentication.
+        do {
+            _ = try await client.signIn(email: "second@example.invalid", password: "fixture-password")
+            XCTFail("concurrent login")
+        } catch { XCTAssertEqual(error as? MirsaStoreError, .busy) }
+        XCTAssertEqual(engine.auth.calls.count, 1)
         try await client.signOut()
         paused.resume(returning: testOwner())
         do { _ = try await login.value; XCTFail("account resurrected") } catch {}
@@ -319,5 +622,95 @@ final class MirsaStorePackageTests: XCTestCase {
             try add(manifest, path: "Payload/Fixture.app/SC_Info/Manifest.plist", archive: archive)
         }
         XCTAssertThrowsError(try AppleStorePackages.assemble(url, output: output, bundleID: "com.example.fixture"))
+    }
+}
+
+final class StoreLibraryPolicyTests: XCTestCase {
+    private func catalog(price: Double? = 0, currency: String? = "EUR", country: String = "de", id: Int64 = 42, bundle: String = "com.example.fixture") -> StoreCatalogItem {
+        StoreCatalogItem(app: MirsaStoreApp(id: id, bundleID: bundle, name: "Fixture", version: "2.0", price: price, artworkURL: ""), country: country, currency: currency, releaseNotes: "Latest only", minimumOSVersion: "28.0", screenshots: [], rating: nil, ratingCount: nil, sizeBytes: nil)
+    }
+    func testNumericMarketingVersionsAndUnknowns() {
+        XCTAssertEqual(StoreVersionPolicy.newer("1.10", than: "1.9"), true)
+        XCTAssertEqual(StoreVersionPolicy.newer("10.0", than: "9.99"), true)
+        XCTAssertEqual(StoreVersionPolicy.newer("1.0.0", than: "01"), false)
+        XCTAssertEqual(StoreVersionPolicy.newer("1.0", than: "1.0.1"), false)
+        XCTAssertEqual(StoreVersionPolicy.newer("27.0.1", than: "27.0"), true)
+        for invalid in ["", "1..2", "1-beta", " 1", "1.", "1,2"] {
+            XCTAssertNil(StoreVersionPolicy.newer(invalid, than: "1"))
+            XCTAssertNil(StoreVersionPolicy.newer("1", than: invalid))
+        }
+    }
+    func testPriceTransitionRequiresMatchingIdentityStoreAndCurrency() {
+        var wish = StoreWishItem(appID: 42, bundleID: "com.example.fixture", name: "Fixture", country: "de", currency: "EUR", price: 2.99)
+        XCTAssertFalse(wish.observe(catalog(currency: "USD")))
+        XCTAssertFalse(wish.observe(catalog(country: "us")))
+        XCTAssertFalse(wish.observe(catalog(id: 43)))
+        XCTAssertFalse(wish.observe(catalog(bundle: "com.wrong")))
+        XCTAssertFalse(wish.observe(catalog(price: nil)))
+        XCTAssertEqual(wish.price, 2.99)
+        XCTAssertTrue(wish.observe(catalog()))
+        wish.notified = true
+        XCTAssertFalse(wish.observe(catalog()))
+        XCTAssertFalse(wish.observe(catalog(price: 1.99)))
+        XCTAssertTrue(wish.observe(catalog()))
+    }
+    func testFreeAtFirstObservationDoesNotNotifyAndInvalidPriceIsNotFree() {
+        var wish = StoreWishItem(appID: 42, bundleID: "com.example.fixture", name: "Fixture", country: "de", currency: "EUR", price: 0)
+        XCTAssertFalse(wish.observe(catalog()))
+        XCTAssertFalse(wish.observe(catalog(price: -.infinity)))
+        XCTAssertFalse(wish.observe(catalog(price: -1)))
+        XCTAssertFalse(wish.observe(catalog(price: .nan)))
+    }
+    func testLatestMetadataNeverAssignedToOlderExternalID() {
+        let item = catalog()
+        XCTAssertEqual(item.notes(forVersion: nil), "Latest only")
+        XCTAssertEqual(item.minimumOS(forVersion: nil), "28.0")
+        XCTAssertNil(item.notes(forVersion: "123"))
+        XCTAssertNil(item.minimumOS(forVersion: "123"))
+    }
+    func testLookupUnknownAndMismatchedResultFailClosed() throws {
+        let valid = Data(#"{"results":[{"trackId":42,"bundleId":"com.example.fixture","trackName":"Fixture","version":"2.0","price":0,"currency":"EUR","screenshotUrls":["https://is1-ssl.mzstatic.com/image.jpg","https://evil.invalid/image.jpg","http://is1-ssl.mzstatic.com/image.jpg"]}]}"#.utf8)
+        let item = try StoreCatalog.decode(valid, appID: 42, bundleID: "com.example.fixture", country: "DE")
+        XCTAssertEqual(item.country, "de")
+        XCTAssertEqual(item.screenshots.count, 1)
+        XCTAssertThrowsError(try StoreCatalog.decode(valid, appID: 43, bundleID: nil, country: "de"))
+        XCTAssertThrowsError(try StoreCatalog.decode(Data(#"{"results":[]}"#.utf8), appID: 42, bundleID: nil, country: "de"))
+        XCTAssertThrowsError(try StoreCatalog.decode(Data(#"{"error":"quota"}"#.utf8), appID: 42, bundleID: nil, country: "de"))
+        XCTAssertThrowsError(try StoreCatalog.decode(valid, appID: 42, bundleID: nil, country: "unknown"))
+    }
+    func testCleanupDefaultUnconfirmedSavedActiveAndPinnedAlwaysPreserved() {
+        XCTAssertTrue(StoreIPACleanupPolicy.mayDelete(enabled: true, confirmed: true, saved: false, active: false, pinned: false))
+        XCTAssertFalse(StoreIPACleanupPolicy.mayDelete(enabled: false, confirmed: true, saved: false, active: false, pinned: false))
+        XCTAssertFalse(StoreIPACleanupPolicy.mayDelete(enabled: true, confirmed: false, saved: false, active: false, pinned: false))
+        XCTAssertFalse(StoreIPACleanupPolicy.mayDelete(enabled: true, confirmed: true, saved: true, active: false, pinned: false))
+        XCTAssertFalse(StoreIPACleanupPolicy.mayDelete(enabled: true, confirmed: true, saved: false, active: true, pinned: false))
+        XCTAssertFalse(StoreIPACleanupPolicy.mayDelete(enabled: true, confirmed: true, saved: false, active: false, pinned: true))
+    }
+}
+
+// Cold-launch history must initialize ApplePackage under the account GUID,
+// including the real TLS getter that traps on an unset iOS device identifier.
+final class StoreHistoryColdLaunchTests: XCTestCase {
+    func testHistoryLeaseInitializesTLSAndSerializesAccounts() async throws {
+        let firstGUID = "112233445566"
+        let secondGUID = "AABBCCDDEEFF"
+        try await MirsaStoreGUIDLease.shared.run(guid: firstGUID) {
+            XCTAssertEqual(Configuration.deviceIdentifier, firstGUID)
+            _ = Configuration.tlsConfiguration
+            try await Task.sleep(nanoseconds: 20_000_000)
+            XCTAssertEqual(Configuration.deviceIdentifier, firstGUID)
+        }
+        try await MirsaStoreGUIDLease.shared.run(guid: secondGUID) {
+            XCTAssertEqual(Configuration.deviceIdentifier, secondGUID)
+            _ = Configuration.tlsConfiguration
+        }
+        enum Expected: Error { case stop }
+        do {
+            try await MirsaStoreGUIDLease.shared.run(guid: firstGUID) { throw Expected.stop }
+            XCTFail("expected operation failure")
+        } catch Expected.stop {}
+        try await MirsaStoreGUIDLease.shared.run(guid: secondGUID) {
+            XCTAssertEqual(Configuration.deviceIdentifier, secondGUID)
+        }
     }
 }

@@ -109,11 +109,11 @@ final class CertificateParity29UITests: XCTestCase {
     func testEnglishPushedSourceLastRowClearsDock() { verifySourcesDock("en") }
     func testArabicPushedSourceLastRowClearsDock() { verifySourcesDock("ar") }
 
-    func testAllFiveRealTabsScrollBoundsClearDock() {
+    func testAllSixRealTabsScrollBoundsClearDock() {
         let app = launchDock("en")
         let dock = app.otherElements["mirsa-tab-dock"]
-        for tab in ["Apps", "Sources", "Pairing", "Encrypted", "Personal Apps Hub"] {
-            let button = app.buttons["mirsa-tab-" + tab]
+        for tab in ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"] {
+            let button = app.buttons["main-tab-" + tab]
             XCTAssertTrue(button.exists && button.isHittable)
             button.tap()
             let containers = app.descendants(matching: .any).matching(NSPredicate(

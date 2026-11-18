@@ -1,0 +1,233 @@
+"""2.6 keeps video first in the same section and verifies actual copy destinations."""
+import pathlib
+import unittest
+
+R = pathlib.Path(__file__).resolve().parents[2]
+
+class VideoWallpaperTests(unittest.TestCase):
+    def test_video_before_tendies_in_one_section(self):
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertLess(view.index("OriginalVideoWallpaperBlock("), view.index("WallpaperMakerSection("))
+        tools = (R / "ios-app/Apps/ToolsTab.swift").read_text()
+        self.assertIn("case .wallpapers: TendiesView()", tools)
+        self.assertNotIn("videoWallpaper", tools)
+
+    def test_no_unverified_transport_success_or_preferences_mutations(self):
+        engine = (R / "ios-app/TendiesEngine.swift").read_text()
+        self.assertNotIn("PosterBoardStore.install(", engine)
+        self.assertIn("MirsaPosterCopy.copyExclusive(", engine)
+        self.assertNotIn("FileComplete", engine)
+        copy = (R / "ios-app/MirsaPosterCopy.swift").read_text()
+        self.assertIn("readback == expected", copy)
+        self.assertIn("sourcePaths == targetPaths", copy)
+        self.assertIn("verifyCopyAttributes(source: source, target: target)", copy)
+        self.assertIn("errno == ENOENT", copy)
+        self.assertIn("fm.copyItem(at: source, to: target)", copy)
+        for source in [engine, copy, (R / "ios-app/PosterBoardStore.swift").read_text()]:
+            self.assertNotIn('preferences["PBF_LOCALE_DID_CHANGE"] =', source)
+            self.assertNotIn("unprotectedUserDefaults.original.plist", source)
+            self.assertNotIn("removeItem(at: container)", source)
+        self.assertIn("gallery unverified", engine)
+
+    def test_local_discovery_never_falls_back_to_remote_transport(self):
+        engine = (R / "ios-app/TendiesEngine.swift").read_text()
+        discovery = engine.split("public func detectPosterBoardContainer", 1)[1].split("// MARK:", 1)[0]
+        self.assertIn("MirsaPosterDiscovery.discover", discovery)
+        self.assertIn("MirsaWallpaperJournal.queued", discovery)
+        journal = (R / "ios-app/MirsaWallpaperJournal.swift").read_text()
+        self.assertIn("try exclusiveWaiting(timeout: timeout, isCancelled:", journal)
+        for forbidden in ["al_find_app_container", "withCheckedThrowingContinuation", "withCString", "Wi-Fi/LocalDevVPN"]:
+            self.assertNotIn(forbidden, discovery)
+        store = (R / "ios-app/PosterBoardStore.swift").read_text()
+        providers = store.split("static func providers(", 1)[1].split("static func manifest(", 1)[0]
+        self.assertIn('return ["com.apple.WallpaperKit.CollectionsPoster"]', providers)
+        destination = (R / "ios-app/MirsaPosterCopy.swift").read_text().split("static func destination(", 1)[1].split("static func relativePaths(", 1)[0]
+        self.assertNotIn("PosterBoardStore.layout(", destination)
+        self.assertNotIn("createDirectory", destination)
+
+    def test_journal_precedes_copy_and_delete_requires_exact_ownership(self):
+        engine = (R / "ios-app/TendiesEngine.swift").read_text().split("public func flashTendies(", 1)[1]
+        self.assertLess(engine.index("MirsaWallpaperJournal.save(record)"), engine.index("MirsaPosterCopy.copyExclusive("))
+        self.assertLess(engine.index("MirsaPosterCopy.copyExclusive("), engine.index("record.copied = true"))
+        source = (R / "ios-app/MirsaWallpaperJournal.swift").read_text()
+        delete = source.split("static func delete(", 1)[1].split("static func cleanup(", 1)[0]
+        removal = delete.index("removeItem(at: target)")
+        for guard in ["record.container == requested.container", "record.relative == requested.relative",
+                      "record.copied", "validateIdentity(", "grantTree(record", "UInt64(info.st_dev) == record.device",
+                      "UInt64(info.st_ino) == record.inode", "final.st_ino == info.st_ino",
+                      "lease.permits(target)"]:
+            self.assertLess(delete.index(guard), removal)
+        # PosterBoard may mutate contents after respring; ownership is identity, not hashes.
+        self.assertNotIn("actual == record.expected", delete)
+        self.assertLess(delete.index("try lease.close()"), delete.index("try removeJournal(record)"))
+        cleanup = source.split("static func cleanup(", 1)[1]
+        self.assertNotIn("removeItem(at: target)", cleanup)
+        self.assertNotIn("removeItem(at: container)", cleanup)
+        self.assertIn("let missing = try absent(target)", cleanup)
+        self.assertIn("if missing { try removeJournal(record)", cleanup)
+        self.assertLess(cleanup.index("try safeLocal(work)"), cleanup.index("removeItem(at: url)"))
+        self.assertLess(cleanup.index("UUID(uuidString: url.lastPathComponent)"), cleanup.index("removeItem(at: url)"))
+        self.assertLess(cleanup.index("MirsaPosterCopy.relativePaths(url)"), cleanup.index("removeItem(at: url)"))
+
+    def test_refresh_is_single_local_webview_and_separately_confirmed(self):
+        source = (R / "ios-app/MirsaWallpaperRespringView.swift").read_text()
+        self.assertEqual(source.count("WKWebView(frame:"), 1)
+        self.assertIn(".nonPersistent()", source)
+        self.assertIn("func dismantleUIView", source)
+        self.assertIn("uiView.stopLoading()", source)
+        self.assertNotIn("uiView.reload()", source)
+        self.assertNotIn("URLSession", source)
+        self.assertNotIn("https://", source)
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertEqual(view.count("MirsaWallpaperRespringView(event:"), 1)
+        self.assertEqual(view.count(".alert("), 1)
+        self.assertIn(".alert(item: $wallpaperPrompt) { prompt in", view)
+        confirmation = view.split("case .respring:", 1)[1].split(".onChange(of: vm.tendiesFlashPhase)", 1)[0]
+        self.assertIn("message: Text(ws(.respringBody))", confirmation)
+        self.assertIn(".destructive(Text(ws(.respringConfirm)))", confirmation)
+        self.assertIn("let ok = respringArmed", confirmation)
+        self.assertIn("respringArmed = false", confirmation)
+        self.assertIn("if ok {", confirmation)
+        self.assertIn("respringPresentation.start", confirmation)
+        self.assertNotIn("Task.sleep", confirmation)
+        self.assertIn(".cancel(Text(ws(.respringLater)))", confirmation)
+        self.assertIn("REFRESH TAP", confirmation)
+        self.assertIn("REFRESH PROMPT offered", view)
+        self.assertNotIn("showRespringConfirm", view)
+        self.assertNotIn("showInstallConfirm", view)
+        # Successful copy must not summon the ancestor's Notice alert while
+        # this view is presenting the explicit restart warning.
+        model = (R / "ios-app/AppViewModel.swift").read_text().split("func flashSelectedTendies()", 1)[1].split("func respringDevice()", 1)[0]
+        success = model.split("tendiesFlashPhase = .done(ok: true)", 1)[1].split("} catch", 1)[0]
+        self.assertNotIn("errorMessage =", success)
+        self.assertNotIn("errorMessage = WallpaperMakerStrings.text(.copyVerified)", success)
+        self.assertIn('tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified))', success)
+
+
+    def test_probe26_exact_respring_payload_lifecycle_and_presentation(self):
+        import hashlib
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertIn('Button { offerRespring() } label:', view)
+        self.assertLess(view.index('accessibilityIdentifier("wallpaper-flash")'),
+                        view.index('accessibilityIdentifier("wallpaper-respring")'))
+        # Owner keeps the same respring action visible on the main page.
+        self.assertLess(view.index('accessibilityIdentifier("wallpaper-respring")'),
+                        view.index('extraTools: {'))
+        self.assertIn('@StateObject private var respringPresentation', view)
+        self.assertIn('.fullScreenCover(isPresented: $respringPresentation.isPresented', view)
+        self.assertGreater(view.index('.fullScreenCover('), view.index('} // ScrollViewReader'))
+        self.assertIn('ZStack(alignment: .topTrailing)', view)
+        self.assertIn('}.interactiveDismissDisabled()', view)
+        self.assertIn('Button(ws(.cancel)) { respringPresentation.isPresented = false }', view)
+        self.assertIn('MirsaWallpaperEvidence.record(line)', view)
+        self.assertNotIn('preparingRespring', view)
+        self.assertNotIn('showRespringOverlay', view)
+        self.assertNotIn('DispatchQueue.main.async { vm.tendiesFlashLog.append(line) }', view)
+        self.assertIn('guard !videoApplyRunning, !respringPresentation.isPresented', view)
+        source = (R / "ios-app/MirsaWallpaperRespringView.swift").read_text()
+        document = source.split('    static let document = #"""', 1)[1].split('    """#', 1)[0]
+        self.assertEqual(hashlib.sha256(document.encode()).hexdigest(),
+                         '3fe67875d1e7cc5d1ddba5c9fcb96a0aee024d85bba4e0392fbc0f3a9a3cdcef')
+        native = source.split('    func makeCoordinator()', 1)[1].split('    // Same underlying stages', 1)[0]
+        self.assertEqual(hashlib.sha256(native.encode()).hexdigest(),
+                         '30e7e22f0c0885129577d018f442efbbaac30fd5d9be33a344c696c037775056')
+        start = source.split('func start(log:', 1)[1]
+        self.assertLess(start.index('MirsaWallpaperEvidence.record(line)'), start.index('isPresented = true'))
+        self.assertIn('REFRESH BLOCKED', start)
+        self.assertEqual(start.count('isPresented = true'), 1)
+        self.assertNotIn('Task.sleep', source)
+        self.assertNotIn('WKScriptMessageHandler', source)
+
+    def test_successful_deletes_share_one_confirmed_respring_route(self):
+        ui = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
+        self.assertEqual(ui.count('onDeleted()'), 2)
+        for method, next_method, operation in [
+            ('deleteJournalItem', 'reload', 'MirsaWallpaperJournal.delete'),
+            ('delete', 'cleanup', 'MirsaCustomWallpapers.delete'),
+        ]:
+            body = ui.split('private func ' + method + '(', 1)[1].split('private func ' + next_method + '(', 1)[0]
+            self.assertLess(body.index('try ' + operation), body.index('done: { err in'))
+            completion = body.split('done: { err in', 1)[1]
+            failure, success = completion.split('else {', 1)
+            self.assertIn('if let err', failure)
+            self.assertNotIn('onDeleted()', failure)
+            self.assertEqual(success.count('onDeleted()'), 1)
+            self.assertIn('DELETE RESULT success', success)
+            self.assertNotIn('.alert(', body)
+        for method, next_method in [('reconcile', 'deleteJournalItem'), ('cleanup', None)]:
+            body = ui.split('private func ' + method + '(', 1)[1]
+            if next_method:
+                body = body.split('private func ' + next_method + '(', 1)[0]
+            self.assertNotIn('onDeleted()', body)
+        cancel_actions = [line for line in ui.splitlines() if 'role: .cancel)' in line]
+        self.assertTrue(cancel_actions)
+        self.assertTrue(all('onDeleted' not in line for line in cancel_actions))
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertIn('onDeleted: { offerRespring() }', view)
+        self.assertIn('Button { offerRespring() } label:', view)
+        self.assertIn('installStartedThisSession, vm.tendiesInstalledNew, case .done(ok: true)', view)
+        self.assertEqual(view.count('respringPresentation.start'), 1)
+        self.assertEqual(view.count('MirsaWallpaperRespringView(event:'), 1)
+
+    def test_scoped_strategies_never_enable_library_parent_rename(self):
+        source = (R / "ios-app/PosterBoardAccess.m").read_text()
+        for label in ["class13-traversal", "class7-symlink", "class2-stage", "class2-subpath", "class12-geod-traversal"]:
+            self.assertIn(label, source)
+        self.assertIn('CFSTR("com.apple.security.application-groups")', source)
+        self.assertIn('CFSTR("get-task-allow")', source)
+        self.assertNotIn('group.com.kamui.escape', source)
+        self.assertNotIn('removeItem', source)
+        self.assertNotIn('class2_parent', source)
+        self.assertIn('transport staging is not destination verification', source)
+        self.assertIn('backup retained', source)
+
+    def test_layout_bounds_viewport_and_tests_actual_bars(self):
+        view = (R / "ios-app/TendiesView.swift").read_text()
+        self.assertIn('.safeAreaInset(edge: .bottom', view)
+        self.assertIn('anchor: .center', view)
+        self.assertNotIn('Button(selectedAll ? "Deselect All"', view)
+        self.assertNotIn('posterType.rawValue', view)
+        tests = (R / "uitests/MirsaStyleScreenshotsUITests.swift").read_text()
+        self.assertIn('for theme in ["liquid", "classic"]', tests)
+        self.assertIn('app.tabBars.firstMatch', tests)
+        self.assertIn('respring.frame.maxY, wallpaperVisibleBottom', tests)
+        self.assertIn('MirsaWallpaperFlashLogFixture', tests)
+        self.assertIn('PosterBoardAccessSafetyTests', (R / ".github/workflows/forge-validation.yml").read_text())
+
+    def test_local_apply_is_once_only_and_respring_explicit(self):
+        model = (R / "ios-app/AppViewModel.swift").read_text().split("func flashSelectedTendies()", 1)[1].split("func respringDevice()", 1)[0]
+        self.assertIn("guard tendiesFlashPhase != .running", model)
+        self.assertLess(model.index("tendiesFlashPhase = .running"), model.index("try await"))
+        self.assertNotIn("triggerNeoSpring", model)
+        engine = (R / "ios-app/TendiesEngine.swift").read_text()
+        self.assertIn("checksum == entry.checksum", engine)
+        self.assertNotIn("al_zip_extract_all", engine)
+        self.assertIn("extractValidatedArchive", engine)
+
+    def test_upgrade_advances_live_25(self):
+        guard = (R / "scripts/verify_release_upgrade.py").read_text()
+        self.assertIn('== "2.6"', guard)
+        self.assertIn('previous = "6.1.1"', guard)
+        self.assertIn('> 401', guard)
+        self.assertIn('MIRSA_VERSION: "2.6"', (R / ".github/workflows/unsigned-ipa.yml").read_text())
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class WallpaperListPerformanceTests(unittest.TestCase):
+    def test_list_does_not_decode_thumbnails_or_walk_diagnostic_assets(self):
+        source = (R / "ios-app/MirsaCustomWallpapers.swift").read_text()
+        listing = source.split("private static func list(", 1)[1].split("static func list(log:", 1)[0]
+        self.assertNotIn("previewThumbnail(", listing)
+        self.assertNotIn("MirsaWallpaperDiagnostics.shallow", listing)
+        self.assertNotIn("catalogProbe", listing)
+        self.assertIn("if info.apple", listing)
+        lazy = source.split("static func thumbnail(", 1)[1].split("/// UI must", 1)[0]
+        self.assertLess(lazy.index("descriptorInfo"), lazy.index("previewThumbnail"))
+        self.assertIn("queued(timeout: 2)", lazy)
+        self.assertIn("defer { try? lease.close() }", lazy)
+        self.assertIn('if name.hasPrefix(".") { continue }', source)
+        view = (R / "ios-app/MirsaWallpaperManagementView.swift").read_text()
+        self.assertIn("!Task.isCancelled, generation == thumbnailGeneration", view)
+        self.assertIn(".task(id:", view)

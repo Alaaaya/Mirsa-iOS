@@ -83,6 +83,23 @@ Bi hûrgilî binivîse tu çi dixwazî, û heke wêneyekî tiştê di hişê te 
 
 enum ForgeChatTransient: Error { case failed(String) }
 
+struct ForgeChatConversationConflict: Error, Equatable {
+    let code: String
+
+    static func response(status: Int, code: String) -> Self? {
+        guard status == 409, !ChatAttachmentError.isAttachmentCode(code) else { return nil }
+        return Self(code: code.isEmpty ? "conversation_conflict" : code)
+    }
+
+    var message: String {
+        tr5("This send was not accepted because of a conversation conflict. Your text and attachments are saved. Review the conversation, then send the same text to retry. No need to upload the attachments again.",
+           "الإرسال ما انقبل بسبب تعارض بالمحادثة. نصّك ومرفقاتك محفوظين. راجع المحادثة، وبعدين ابعت نفس النص لتعيد المحاولة. ما في داعي ترفع المرفقات من جديد.",
+           de: "Die Nachricht wurde wegen eines Konflikts im Gespräch nicht angenommen. Text und Anhänge sind gespeichert. Prüfe das Gespräch und sende denselben Text erneut. Du musst die Anhänge nicht erneut hochladen.",
+           ckb: "گفتوگۆکە گۆڕاوە یان پێویستی بە پشتڕاستکردنەوە هەیە. نامە و هاوپێچەکانت پاشەکەوت کراون، نەنێردراون. گفتوگۆکە بپشکنە، پاشان هەمان دەق بنێرەوە. پێویست ناکات هاوپێچەکان دووبارە بار بکەیتەوە.",
+           kmr: "Sohbet guherî an pejirandin dixwaze. Peyam û pêvekên te hatine tomarkirin, nehatine şandin. Sohbetê kontrol bike, paşê heman nivîsê dîsa bişîne. Pêdivî bi barkirina pêvekan ji nû ve tune ye.")
+    }
+}
+
 enum ForgeChatImage {
     /// Re-encode: strips metadata, max 1600px side and 1 MiB.
     static func prepare(_ data: Data) -> Data? {
@@ -145,12 +162,24 @@ enum ForgeChatImage {
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Make me a tweak that hides the dock labels."),
                 ForgeChatMessage(id: UUID(), threadID: t, role: "kat", text: "Got it. I'll build it and send it here when it's ready."),
                 ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: "Thanks, no rush.")]]
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaTendiesArtifactFixture") {
+                // Actual authenticated backend artifact metadata; no issued URL or network access.
+                let artifact = ForgeChatArtifact(id: UUID(), kind: "tendies", name: "Naruto-Space.tendies",
+                    size: 1_349_699, sha256: "8720c01d9d5f486e03500441b9b75bf202c8147573c45367625143ef1370acf1", expiresAt: nil)
+                let result = ForgeChatResult(inboxID: nil, tweakID: nil, bundleID: nil, name: nil, version: nil, artifact: artifact)
+                messages[t] = [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: nil, result: result)]
+            }
+            #endif
             ackedThreads.insert(t)
             return
         }
         defer { startRetrying() }; outgoing = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? []
         sentEcho = UserDefaults.standard.data(forKey: echoKey).flatMap { try? JSONDecoder().decode([ForgeChatOutgoing].self, from: $0) } ?? []
         for echo in sentEcho { ackedThreads.insert(echo.threadID) }
+        if let paused = outgoing.first(where: { $0.conversationConflict != nil }) {
+            error = ForgeChatConversationConflict(code: paused.conversationConflict ?? "").message
+        }
     }
     private func saveEcho() {
         #if DEBUG
@@ -190,6 +219,10 @@ enum ForgeChatImage {
         if r.status == 200 { lastDiagnostic = nil; return r.data }
         let code = (try? JSONSerialization.jsonObject(with: r.data) as? [String: Any])?["error"] as? String ?? ""
         if code == "message_too_long" { lastDiagnostic = code; throw ForgeChatTransient.failed(code) }
+        if let conflict = ForgeChatConversationConflict.response(status: r.status, code: code) {
+            lastDiagnostic = "HTTP \(r.status) \(code)"
+            throw conflict
+        }
         if let ids = body["attachmentIDs"] as? [String], !ids.isEmpty, [401, 404, 409, 410, 422, 503].contains(r.status) || (r.status == 403 && !retryBind) {
             lastDiagnostic = "HTTP \(r.status) \(code)"
             throw ChatAttachmentError(status: r.status, code: code)
@@ -218,22 +251,42 @@ enum ForgeChatImage {
     var pendingThreadIDs: [UUID] { var seen = Set<UUID>(); return (outgoing + sentEcho).map(\.threadID).filter { id in !threads.contains { t in t.id == id } && seen.insert(id).inserted } }
     func hasInFlight(_ id: UUID) -> Bool { outgoing.contains { $0.threadID == id } }
 
-    func send(threadID: UUID?, text: String, jpeg: Data?, attachmentIDs: [UUID] = []) {
+    @discardableResult
+    func send(threadID: UUID?, text: String, jpeg: Data?, attachmentIDs: [UUID] = [], replyTo: ForgeChatReplyRef? = nil) -> UUID? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
-        guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return }
-        if let tid = threadID, deleting.contains(tid) { return }
+        guard !t.isEmpty else { return nil }
+        guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return nil }
+        if let tid = threadID, deleting.contains(tid) { return nil }
         let ids = ChatAttachmentRules.sendIDs(attachmentIDs)
+        // Only an explicit Send of the same text can resume a paused conflict.
+        // Reuse the saved attachment IDs when the composer has no new chips.
+        // Never synthesize approval text or assign a second message UUID.
+        if let tid = threadID, let index = outgoing.firstIndex(where: {
+            $0.threadID == tid && $0.conversationConflict != nil && $0.text == t &&
+            jpeg == nil && (ids.isEmpty || ids == ($0.attachmentIDs ?? []))
+        }) {
+            let id = outgoing[index].id
+            outgoing[index].conversationConflict = nil
+            saveOutgoing()
+            Task { await flush() }
+            startRetrying()
+            return id
+        }
         // Never the legacy image together with attachmentIDs.
         let img = ids.isEmpty ? jpeg.flatMap { ForgeChatImage.prepare($0) }?.base64EncodedString() : nil
         let tid = threadID ?? UUID()
         let confirmed = messages[tid] ?? []
         let pending = ForgeChatTimeline.pending(outgoing: outgoing, echoes: sentEcho, confirmed: confirmed, threadID: tid)
         let anchor = ForgeChatTimeline.orderedIDs(confirmed: confirmed, pending: pending).last
-        outgoing.append(ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: !serverKnows(tid), text: t, imageBase64: img, afterMessageID: anchor, attachmentIDs: ids.isEmpty ? nil : ids))
+        let newID = UUID()
+        // Mirsa 2.2: the quote is kept on this device under the message's own UUID (same UUID once the server confirms it).
+        if let replyTo { ForgeChatLocal.shared.setReply(replyTo, for: newID) }
+        outgoing.append(ForgeChatOutgoing(id: newID, threadID: tid, newThread: !serverKnows(tid), text: t, imageBase64: img, afterMessageID: anchor, attachmentIDs: ids.isEmpty ? nil : ids))
         saveOutgoing()
+        UserDefaults.standard.set(true, forKey: ForgeChatLocal.usedKey)
         Task { await flush() }
         startRetrying()
+        return newID
     }
 
     private var retrying = false
@@ -242,11 +295,11 @@ enum ForgeChatImage {
         #if DEBUG
         if testRequest != nil { return }
         #endif
-        guard !retrying, !outgoing.isEmpty else { return }
+        guard !retrying, outgoing.contains(where: { $0.conversationConflict == nil }) else { return }
         retrying = true
         Task { [weak self] in
             var delay: UInt64 = 5
-            while let self, !self.outgoing.isEmpty {
+            while let self, self.outgoing.contains(where: { $0.conversationConflict == nil }) {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 await self.flush()
                 delay = min(delay * 2, 60)
@@ -261,18 +314,29 @@ enum ForgeChatImage {
         // One attempt per saved message per pass. A failed older row stays saved but
         // cannot starve later rows, including messages appended while a request awaits.
         var attempted = Set<UUID>()
-        while let o = outgoing.first(where: { !deleting.contains($0.threadID) && !attempted.contains($0.id) }) {
+        while let o = outgoing.first(where: { !deleting.contains($0.threadID) && $0.conversationConflict == nil && !attempted.contains($0.id) }) {
             attempted.insert(o.id)
             var body: [String: Any] = ["action": "chat-send", "id": o.id.uuidString.lowercased(), "threadID": o.threadID.uuidString.lowercased(), "newThread": !serverKnows(o.threadID), "text": o.text, "language": AppLanguageStore.snapshot.rawValue]
             if let ids = o.attachmentIDs, !ids.isEmpty {
                 body["attachmentIDs"] = ChatAttachmentRules.sendIDs(ids).map { $0.uuidString.lowercased() } // same IDs on every retry
             } else if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
+            if ForgeChatFeatures.serverReplyAndReactions, let ref = ForgeChatLocal.shared.replies[o.id] {
+                body["replyToMessageID"] = ref.messageID.uuidString.lowercased() // PROPOSED field, off until Kat confirms
+            }
             do {
                 let sent = try await call(body)
                 if deleting.contains(o.threadID) { continue } // delete started mid-send; delete waits for flush and wipes it
                 ackedThreads.insert(o.threadID); let echo = ForgeChatTimeline.acceptedEcho(o); sentEcho.removeAll { $0.id == o.id }; sentEcho.append(echo); saveEcho()
                 outgoing.removeAll { $0.id == o.id }; saveOutgoing(); if outgoing.isEmpty { error = nil }
                 if let ids = o.attachmentIDs, !ids.isEmpty { applySentAttachments(sent, threadID: o.threadID) }
+            } catch let conflict as ForgeChatConversationConflict {
+                if let index = outgoing.firstIndex(where: { $0.id == o.id }) {
+                    outgoing[index].conversationConflict = conflict.code
+                    saveOutgoing()
+                }
+                self.error = conflict.message
+                // Preserve text, UUID and valid uploaded IDs. Do not invalidate
+                // attachments, restore unusable chips, auto-confirm or auto-retry.
             } catch let a as ChatAttachmentError {
                 if a.isTransient || a.status == 401 || a.status == 403 {
                     self.error = a.message
@@ -357,7 +421,16 @@ enum ForgeChatImage {
         guard let d = try? await call(["action": "chat-list"]), let w0 = try? JSONDecoder().decode(W.self, from: d) else { return }
         let w = (threads: w0.threads.compactMap(\.value).filter { !deleting.contains($0.id) && deleteEpoch[$0.id] == epochs[$0.id] }, ())
         let sorted = w.threads.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+        MirsaRequestReadyNotifications.activeStore = self
+        await MirsaRequestReadyNotifications.observe(sorted)
         if sorted != threads { threads = sorted }
+    }
+
+    /// Preserve the same delete-epoch guard as foreground refresh.
+    func mergeReadyNotificationThreads(_ incoming: [ForgeChatThread]) {
+        let known = Set(threads.map(\.id))
+        let fresh = incoming.filter { !deleting.contains($0.id) && (deleteEpoch[$0.id] == nil || known.contains($0.id)) }
+        if fresh != threads { threads = fresh.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") } }
     }
 
     func read(_ id: UUID) async {
@@ -377,6 +450,13 @@ enum ForgeChatImage {
         }
         // Publish confirmed rows before retiring echoes. One stable UUID stays visible throughout.
         let ids = Set(merged.map(\.id))
+        // A timed-out send may already have reached the server. Its canonical UUID
+        // in chat-read confirms delivery even when the POST never returned locally.
+        if outgoing.contains(where: { $0.threadID == id && ids.contains($0.id) }) {
+            outgoing.removeAll { $0.threadID == id && ids.contains($0.id) }
+            saveOutgoing()
+            if outgoing.isEmpty && error == ForgeChatText.failed { error = nil }
+        }
         if sentEcho.contains(where: { ids.contains($0.id) }) {
             sentEcho.removeAll { ids.contains($0.id) }; saveEcho()
         }
@@ -403,6 +483,8 @@ struct ForgeChatRoot: View {
     @State private var open: ForgeOpenThread?
     @State private var toDelete: UUID?
     @State private var showIDHelp = false
+    @ObservedObject private var local = ForgeChatLocal.shared
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -417,7 +499,8 @@ struct ForgeChatRoot: View {
                 }
                 ForEach(store.threads) { t in
                     Button { open = ForgeOpenThread(id: t.id) } label: { ForgeChatRowChevron {
-                        HStack(spacing: 12) { MirsaSailMark().frame(width: 34, height: 34); VStack(alignment: .leading, spacing: 6) { Text(ForgeChatText.cleanTitle(t.title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { MirsaChatStatusPill(raw: s) } } }.padding(.vertical, 6)
+                        HStack(spacing: 12) { MirsaSailMark().frame(width: 34, height: 34); VStack(alignment: .leading, spacing: 6) { Text(ForgeChatText.cleanTitle(t.title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(2); if let s = t.status, !ForgeChatText.status(s).isEmpty { MirsaChatStatusPill(raw: s) } }
+                            if local.isUnread(t) { Spacer(minLength: 0); Circle().fill(MirsaChatTheme.blue).frame(width: 11, height: 11).accessibilityLabel(ForgeChatExtrasText.newMessages).accessibilityIdentifier("chat-row-unread") } }.padding(.vertical, 6)
                     } }.buttonStyle(.plain)
                     .listRowBackground(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.07)).overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5)))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -426,6 +509,10 @@ struct ForgeChatRoot: View {
                 }
             }
             .scrollContentBackground(.hidden).listRowSpacing(10).background(AuroraBackground().ignoresSafeArea()).preferredColorScheme(.dark)
+            .onChange(of: store.threads) { _, t in
+                local.baselineIfNeeded(t)
+                if !t.isEmpty { UserDefaults.standard.set(true, forKey: ForgeChatLocal.usedKey) }
+            }
             .confirmationDialog(ForgeChatText.deleteTitle, isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
                 Button(ForgeChatText.deleteAction, role: .destructive) { if let id = toDelete { Task { await store.deleteThread(id) } }; toDelete = nil }
                 Button(ForgeChatText.cancel, role: .cancel) { toDelete = nil }
@@ -450,7 +537,7 @@ struct ForgeChatRoot: View {
             }
             .task { // poll only while this screen is visible
                 await store.flush()
-                while !Task.isCancelled { await store.refreshThreads(); try? await Task.sleep(nanoseconds: 15_000_000_000) }
+                while !Task.isCancelled { if scenePhase == .active { await store.refreshThreads() }; try? await Task.sleep(nanoseconds: 15_000_000_000) }
             }
         }
     }
@@ -467,8 +554,41 @@ struct ForgeChatRowChevron<Content: View>: View {
     }
 }
 
-/// Mirsa sail mark used as the assistant avatar (vector, no asset needed).
+/// Mirsa's own app icon, read once from the bundle (CFBundleIcons), so the chat avatar always matches the installed icon.
+enum MirsaAppIconImage {
+    static let image: UIImage? = {
+        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+              let p = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = p["CFBundleIconFiles"] as? [String] else { return UIImage(named: "AppIcon") }
+        for f in files.reversed() { if let i = UIImage(named: f) { return i } }
+        return UIImage(named: "AppIcon")
+    }()
+}
+
+/// Assistant avatar: the Mirsa AI artwork (asset MirsaAIAvatar, round), then the app icon, then the vector sail mark.
 struct MirsaSailMark: View {
+    private static let avatar = UIImage(named: "MirsaAIAvatar")
+    var body: some View {
+        if let img = Self.avatar {
+            Image(uiImage: img).resizable().interpolation(.high).aspectRatio(1, contentMode: .fit)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+        } else if let img = MirsaAppIconImage.image {
+            GeometryReader { g in
+                Image(uiImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                    .frame(width: g.size.width, height: g.size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: g.size.width * 0.225, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: g.size.width * 0.225, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 0.5))
+            }
+            .accessibilityHidden(true)
+        } else {
+            MirsaSailVector()
+        }
+    }
+}
+
+/// Vector fallback when the bundle icon cannot be read.
+private struct MirsaSailVector: View {
     var body: some View {
         ZStack {
             Circle().fill(Color(red: 0.055, green: 0.165, blue: 0.33))
@@ -546,6 +666,17 @@ struct ForgeChatThreadView: View {
     @State private var attachNote: String?
     @State private var copiedTick = 0
     @State private var showCopied = false
+    // Mirsa 2.2: reply, long-press menu, edit/delete.
+    @ObservedObject private var local = ForgeChatLocal.shared
+    @State private var replyTo: ForgeChatReplyRef?
+    @State private var editingID: UUID?
+    @State private var menuTarget: ForgeChatMenuTarget?
+    // Mirsa 2.3: the reactions tip shows once above the composer when the chat opens; ✕ hides it for good.
+    @AppStorage("mirsa.chat.reactionsTipDismissed") private var reactionsTipDismissed = false
+    @State private var deleteTarget: ForgeChatMenuTarget?
+    @State private var jumpTo: UUID?
+    @State private var flashID: UUID?
+    @State private var actionError: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var msgs: [ForgeChatMessage] { store.messages[threadID] ?? [] }
     private var queued: [ForgeChatOutgoing] {
@@ -557,12 +688,62 @@ struct ForgeChatThreadView: View {
         let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
+    @AppStorage(MirsaChatBackground.key) private var blackChatBackground = false
     private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
     private var draftCount: Int { ForgeChatText.messageCount(text) }
     private var attachmentsUI: Bool { ChatAttachmentConfig.uiEnabled }
     private var attachmentsReady: Bool { !attachmentsUI || drafts.readyIDs(threadID) != nil }
-    private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && attachmentsReady }
+    private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && (editingID != nil || attachmentsReady) }
+    private var threadStatus: String { (store.threads.first { $0.id == threadID }?.status ?? "").lowercased() }
+    /// Edit only while nothing has started on it: the newest row, a user message, and the request not yet being built.
+    private func canEdit(_ id: UUID) -> Bool {
+        ForgeChatFeatures.serverEditDelete && ForgeChatMutationPolicy.canMutate(messageID: id, messages: msgs, hasPending: !queued.isEmpty, status: threadStatus)
+    }
+    private func messageText(_ id: UUID) -> String? {
+        if let m = msgs.first(where: { $0.id == id }) { return m.text }
+        return queued.first { $0.id == id }?.text
+    }
+    private func openMenu(id: UUID, text: String, isUser: Bool, confirmed: Bool) {
+        menuTarget = ForgeChatMenuTarget(id: id, threadID: threadID, text: text, isUser: isUser,
+                                         canEdit: isUser && confirmed && canEdit(id),
+                                         canDelete: isUser && confirmed && canEdit(id),
+                                         reactable: confirmed)
+    }
+    private func startReply(id: UUID, text: String?, isUser: Bool) {
+        editingID = nil
+        withAnimation(.easeOut(duration: 0.18)) { replyTo = ForgeChatReplyRef(messageID: id, snippet: ForgeChatLocal.snippet(text), fromUser: isUser) }
+        composerFocused = true
+    }
+    private func reaction(_ id: UUID) -> String? {
+        if ForgeChatFeatures.serverReplyAndReactions { return msgs.first { $0.id == id }?.reaction }
+        return local.reactions[id]
+    }
+    private func quote(_ id: UUID, confirmed: Bool) -> ForgeChatReplyRef? {
+        guard confirmed, ForgeChatFeatures.serverReplyAndReactions else { return local.replies[id] }
+        guard let m = msgs.first(where: { $0.id == id }), let target = m.replyToMessageID else { return nil }
+        return ForgeChatReplyRef(messageID: target, snippet: ForgeChatLocal.snippet(m.replyQuoteText), fromUser: m.replyQuoteRole == "user")
+    }
+    /// Quote above, reaction below, swipe right to reply, long press for the menu.
+    @ViewBuilder private func chrome<C: View>(id: UUID, text: String?, isUser: Bool, confirmed: Bool, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+            if let ref = quote(id, confirmed: confirmed) {
+                ForgeChatQuote(ref: ref, exists: messageText(ref.messageID) != nil || ref.messageID == id) { jumpTo = ref.messageID }
+            }
+            content()
+                .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
+            if let e = reaction(id) {
+                ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.white.opacity(flashID == id ? 0.12 : 0)).padding(-6)
+                .animation(.easeOut(duration: 0.5), value: flashID)
+        }
+        // The whole row, empty space beside the bubble included, takes the swipe.
+        .modifier(ForgeChatSwipeToReply(enabled: menuTarget == nil) { startReply(id: id, text: text, isUser: isUser) })
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -575,13 +756,15 @@ struct ForgeChatThreadView: View {
                                 switch row {
                                 case .message(let m): bubble(m)
                                 case .pending(let o, let sending):
-                                    VStack(alignment: .trailing, spacing: 4) {
-                                        if let ids = o.attachmentIDs, !ids.isEmpty {
-                                            ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
+                                    chrome(id: o.id, text: o.text, isUser: true, confirmed: false) {
+                                        VStack(alignment: .trailing, spacing: 4) {
+                                            if let ids = o.attachmentIDs, !ids.isEmpty {
+                                                ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
+                                            }
+                                            userBubble(o.text)
+                                            if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) }
                                         }
-                                        userBubble(o.text)
-                                        if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) }
-                                    }.frame(maxWidth: .infinity, alignment: .trailing)
+                                    }
                                 }
                             }
                             .id(row.id)
@@ -603,6 +786,13 @@ struct ForgeChatThreadView: View {
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
                 .onChange(of: rows.map(\.id)) { _, _ in pinToBottom(proxy) }
+                .onChange(of: jumpTo) { _, target in
+                    guard let target else { return }
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
+                    flashID = target
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { if flashID == target { flashID = nil } }
+                    jumpTo = nil
+                }
                 .onChange(of: msgs.last?.text) { _, _ in pinToBottom(proxy) }
                 .onChange(of: composerFocused) { _, focused in if focused { pinToBottom(proxy, after: 0.35) } }
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in pinToBottom(proxy) }
@@ -620,13 +810,27 @@ struct ForgeChatThreadView: View {
         // This also tracks the keyboard's safe area without fixed device heights.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if attachmentsUI { attachmentTray }
+                if !reactionsTipDismissed {
+                    ForgeChatReactionsTip { withAnimation(.easeOut(duration: 0.18)) { reactionsTipDismissed = true } }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                if let editingID {
+                    ForgeChatComposerContext(title: ForgeChatExtrasText.editing, line: ForgeChatLocal.snippet(messageText(editingID)), icon: "pencil") {
+                        withAnimation(.easeOut(duration: 0.18)) { self.editingID = nil; text = "" }
+                    }.transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if let replyTo {
+                    ForgeChatComposerContext(title: replyTo.fromUser ? ForgeChatExtrasText.replyToYou : ForgeChatExtrasText.replyToMirsa,
+                                             line: replyTo.snippet, icon: "arrowshape.turn.up.left") {
+                        withAnimation(.easeOut(duration: 0.18)) { self.replyTo = nil }
+                    }.transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                if attachmentsUI && editingID == nil { attachmentTray }
                 if let jpeg, let img = UIImage(data: jpeg) {
                     HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
                         Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(MirsaChatTheme.muted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
                 }
                 inputBar
-                if let e = store.error {
+                if let e = actionError ?? store.error {
                     Text(e).font(.caption).foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 18).padding(.bottom, 6)
@@ -634,15 +838,55 @@ struct ForgeChatThreadView: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .background(.ultraThinMaterial.opacity(0.85))
+            // Same Aurora as the conversation behind it (screen-aligned slice), not a flat gray material.
+            .background { if blackChatBackground { Color.black.ignoresSafeArea(edges: .bottom) } else { MirsaAuroraSlice().ignoresSafeArea(edges: .bottom) } }
         }
-        .background(AuroraBackground().ignoresSafeArea())
+        .background { if blackChatBackground { Color.black.ignoresSafeArea() } else { AuroraBackground().ignoresSafeArea() } }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $reportTarget) { m in
             ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
                 .environment(\.layoutDirection, .leftToRight)
         }
         .alert(ForgeChatText.reportThanks, isPresented: $reportDone) {}
+        .overlay {
+            if let t = menuTarget {
+                ForgeChatMessageMenu(target: t, current: reaction(t.id),
+                    onReact: { e in
+                        if ForgeChatFeatures.serverReplyAndReactions {
+                            let selected = reaction(t.id) == e ? nil : e
+                            Task {
+                                let result = await store.sendReaction(threadID: t.threadID, messageID: t.id, reaction: selected)
+                                if result != .ok { actionError = ForgeChatText.reportFailed }
+                            }
+                        } else {
+                            local.toggleReaction(e, on: t.id)
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        closeMenu()
+                    },
+                    onCopy: { UIPasteboard.general.string = t.text; closeMenu() },
+                    onReply: { closeMenu(); startReply(id: t.id, text: t.text, isUser: t.isUser) },
+                    onEdit: { closeMenu(); replyTo = nil; editingID = t.id; text = t.text; composerFocused = true },
+                    onDelete: { closeMenu(); deleteTarget = t },
+                    onClose: closeMenu)
+                .transition(.opacity)
+                .zIndex(10)
+            }
+        }
+        .confirmationDialog(ForgeChatExtrasText.deleteTitle, isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible) {
+            Button(ForgeChatExtrasText.delete, role: .destructive) {
+                guard let t = deleteTarget else { return }
+                deleteTarget = nil
+                Task {
+                    let r = await store.deleteMessage(threadID: t.threadID, messageID: t.id)
+                    actionError = r == .ok ? nil : ForgeChatExtrasText.deleteFailed
+                }
+            }
+            Button(ForgeChatText.cancel, role: .cancel) { deleteTarget = nil }
+        }
+        .onAppear { markSeen() }
+        .onDisappear { markSeen() }
+        .onChange(of: store.threads) { _, _ in markSeen() }
         .preference(key: ForgeChatComposerFocusKey.self, value: composerFocused)
         .onAppear {
             if shortID.isEmpty { shortID = String(ForgeClient.deviceID().prefix(8)) }
@@ -673,7 +917,7 @@ struct ForgeChatThreadView: View {
         .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
-            while !Task.isCancelled && !ForgeChatStore.fixture { await store.read(threadID); try? await Task.sleep(nanoseconds: 8_000_000_000) }
+            while !Task.isCancelled && !ForgeChatStore.fixture { if scenePhase == .active { await store.read(threadID) }; try? await Task.sleep(nanoseconds: 8_000_000_000) } // stops reading in the background
         }
     }
 
@@ -743,6 +987,11 @@ struct ForgeChatThreadView: View {
         .accessibilityHint(ForgeChatText.shortIDHelp)
     }
 
+    private func closeMenu() {
+        withAnimation(.easeOut(duration: 0.18)) { menuTarget = nil }
+    }
+    private func markSeen() { local.markSeen(threadID, updatedAt: store.threads.first { $0.id == threadID }?.updatedAt) }
+
     private func pinToBottom(_ proxy: ScrollViewProxy, animated: Bool = true, after delay: Double = 0) {
         let go = {
             if animated && !reduceMotion { withAnimation(.easeOut(duration: 0.3)) { proxy.scrollTo("bottom", anchor: .bottom) } }
@@ -757,10 +1006,25 @@ struct ForgeChatThreadView: View {
             Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
                 .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
             if !shortID.isEmpty { shortIDCapsule }
+            blackBackgroundToggle
             Spacer()
         }
         .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
+    }
+
+    /// Small circle next to the thread id: pure black chat background or the original gradient. Visual 28pt, hit target 44pt.
+    private var blackBackgroundToggle: some View {
+        Button { blackChatBackground.toggle() } label: {
+            Image(systemName: blackChatBackground ? "moon.fill" : "moon")
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                .frame(width: 28, height: 28).background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5))
+                .frame(width: 44, height: 44).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(MirsaChatBackground.label(black: blackChatBackground))
+        .accessibilityIdentifier("chat-black-background")
     }
 
     private var inputBar: some View {
@@ -783,15 +1047,25 @@ struct ForgeChatThreadView: View {
                 }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 Button {
                     started = true
+                    if let eid = editingID {
+                        let newText = text
+                        Task {
+                            let r = await store.editMessage(threadID: threadID, messageID: eid, text: newText)
+                            if r == .ok { editingID = nil; text = ""; actionError = nil } else { actionError = ForgeChatExtrasText.editFailed }
+                        }
+                        return
+                    }
+                    let quote = replyTo
+                    replyTo = nil
                     if attachmentsUI {
                         drafts.expireStale(threadID)
                         guard let ids = drafts.readyIDs(threadID) else { attachNote = ChatAttachmentText.needsUpload; return }
                         // Same draft thread UUID the uploads used; the first send still says newThread true.
-                        store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids)
+                        store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids, replyTo: quote)
                         drafts.clearAfterSend(threadID); attachNote = nil
                         text = ""; jpeg = nil; photo = nil
                     } else {
-                        store.send(threadID: threadID, text: text, jpeg: jpeg)
+                        store.send(threadID: threadID, text: text, jpeg: jpeg, replyTo: quote)
                         text = ""; jpeg = nil; photo = nil
                     }
                 } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
@@ -821,24 +1095,26 @@ struct ForgeChatThreadView: View {
 
     @ViewBuilder private func bubble(_ m: ForgeChatMessage) -> some View {
         if m.role == "user" {
-            VStack(alignment: .trailing, spacing: 8) {
-                if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
-                if let a = m.attachments, !a.isEmpty { ChatAttachmentStrip(metas: a, threadID: m.threadID) }
-                if let t = m.text, !t.isEmpty { userBubble(t) }
-            }.frame(maxWidth: .infinity, alignment: .trailing)
+            chrome(id: m.id, text: m.text, isUser: true, confirmed: true) {
+                VStack(alignment: .trailing, spacing: 8) {
+                    if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
+                    if let a = m.attachments, !a.isEmpty { ChatAttachmentStrip(metas: a, threadID: m.threadID) }
+                    if let t = m.text, !t.isEmpty { userBubble(t) }
+                }
+            }
         } else {
-            assistantBlock {
+            chrome(id: m.id, text: m.text, isUser: false, confirmed: true) { assistantBlock {
                 VStack(alignment: .leading, spacing: 8) {
                     if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
                     if let a = m.attachments, !a.isEmpty { ChatAttachmentStrip(metas: a, threadID: m.threadID, alignment: .leading) }
-                    if let t = m.text, !t.isEmpty { Text(t).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading) }
+                    if let t = m.text, !t.isEmpty { Text(ForgeChatMarkdown.attributed(t)).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading) }
                     if m.role == "result" {
                         if m.result?.artifact == nil { Label(ForgeChatText.resultSaved, systemImage: "checkmark.shield").font(.caption).foregroundStyle(.green) }
                         if let n = m.result?.name { Text(n).font(.caption.bold()) }
                         if let a = m.result?.artifact { ForgeChatArtifactCard(threadID: m.threadID, artifact: a) }
                     }
                 }
-            }
+            } }
             Button { reportTarget = m } label: {
                 Label(ForgeChatText.reportButton, systemImage: "exclamationmark.bubble").font(.caption).foregroundStyle(MirsaChatTheme.muted)
                     .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(.ultraThinMaterial.opacity(0.6)))
@@ -852,7 +1128,7 @@ struct ForgeChatImageView: View {
     let messageID: UUID
     @State private var image: UIImage?
     var body: some View {
-        Group { if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 200).cornerRadius(8) } else { ProgressView().frame(height: 60) } }
+        Group { if let image { MirsaTappableImage(image: image) } else { ProgressView().frame(height: 60) } }
             .task { image = await ForgeChatStore.shared.image(messageID) }
     }
 }
@@ -925,5 +1201,64 @@ struct ForgeChatReportSheet: View {
         .presentationDetents([.height(350)])
         .presentationBackground { AuroraBackground() }
         .preferredColorScheme(.dark)
+    }
+}
+
+/// The slice of the full-screen Aurora that sits under this view, so a bar over the chat
+/// shows exactly the colours of the background around it (both instances follow the same clock).
+struct MirsaAuroraSlice: View {
+    var body: some View {
+        GeometryReader { g in
+            let f = g.frame(in: .global)
+            let screen = UIScreen.main.bounds.size
+            AuroraBackground()
+                .frame(width: screen.width, height: screen.height)
+                .offset(x: -f.minX, y: -f.minY)
+                .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        }
+        .clipped()
+        .allowsHitTesting(false)
+    }
+}
+
+
+/// Mirsa 2.3: one-time reactions tip above the Mirsa AI composer, same text as before in all four languages.
+struct ForgeChatReactionsTip: View {
+    let onDismiss: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "hand.tap").foregroundStyle(MirsaPalette.accentGradient)
+            Text(ForgeChatExtrasText.reactionsHint).font(.footnote).foregroundStyle(.white.opacity(0.92))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(MirsaChatTheme.muted)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(ForgeChatText.close)
+            .accessibilityIdentifier("chat-reactions-tip-close")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MirsaPalette.cardRaised))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(MirsaPalette.accent.opacity(0.4), lineWidth: 0.8))
+        .padding(.horizontal, 14).padding(.top, 8)
+        .accessibilityIdentifier("chat-reactions-tip")
+    }
+}
+
+
+/// Per-device choice for the Mirsa AI chat background. Default is the original gradient.
+enum MirsaChatBackground {
+    static let key = "mirsa.chat.blackBackground.v1"
+    static func label(black: Bool) -> String {
+        let on = black
+        switch L.lang {
+        case .english: return on ? "Use gradient background" : "Use black background"
+        case .german: return on ? "Farbverlauf-Hintergrund verwenden" : "Schwarzen Hintergrund verwenden"
+        case .arabic: return on ? "استخدم الخلفية المتدرجة" : "استخدم الخلفية السوداء"
+        case .kurmanji: return on ? "Paşxaneya gradient bikar bîne" : "Paşxaneya reş bikar bîne"
+        case .sorani: return on ? "پاشبنەمای گرادیەنت بەکاربهێنە" : "پاشبنەمای ڕەش بەکاربهێنە"
+        }
     }
 }

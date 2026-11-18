@@ -6,6 +6,8 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/Sources/MirsaStoreKit" "$WORK/Tests/MirsaStoreKitTests"
 cp "$ROOT"/ios-app/AppStore/*.swift "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/StoreClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+cp "$ROOT/tests/StoreRangeLogicTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
+cp "$ROOT/tests/StoreResumableDownloadTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/tests/StoreServerTransportTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/tests/StoreServerClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/ios-app/Apps/RealAppDeletion.swift" "$WORK/Sources/MirsaStoreKit/"
@@ -57,4 +59,20 @@ from pathlib import Path
 p=Path(sys.argv[1]);p.write_text(p.read_text().replace("__APPLEPACKAGE_PATH__", sys.argv[2]))
 PYTHON
 cd "$WORK"
-swift test
+# Bound the entire offline suite, including a wedged XCTest/continuation.
+# An unsigned macOS runner must never prompt for a real Keychain or Apple login.
+python3 - <<'WATCHDOG'
+import os, signal, subprocess, sys
+process = subprocess.Popen(["swift", "test", "--parallel"], start_new_session=True)
+try:
+    sys.exit(process.wait(timeout=600))
+except subprocess.TimeoutExpired:
+    print("Offline backend suite exceeded 600 seconds; terminating its process group.", flush=True)
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    sys.exit(124)
+WATCHDOG

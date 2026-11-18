@@ -51,6 +51,8 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.alaa.mirsa.apps.refresh</string>
+		<string>com.alaa.mirsa.store.wishlist.refresh</string>
+		<string>com.alaa.mirsa.announcements.refresh</string>
 	</array>
 	<!-- Apps tab Container: guest apps run inside Mirsa's process, so iOS
 	     reads their privacy prompts from Mirsa's Info.plist. Without these
@@ -85,6 +87,14 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>mirsa</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.alaa.mirsa.container</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mirsa-container</string>
 			</array>
 		</dict>
 	</array>

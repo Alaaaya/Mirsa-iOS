@@ -450,11 +450,12 @@ struct CompactLogView: View {
     let lines: [String]
     var onClear: (() -> Void)? = nil
     @State private var copied: Bool = false
+    private var safeLines: [String] { lines }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(title)
+                Text(MirsaDiagnosticPrivacy.line(title))
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -468,7 +469,7 @@ struct CompactLogView: View {
                     .padding(.trailing, 6)
                 }
                 Button {
-                    UIPasteboard.general.string = lines.joined(separator: "\n")
+                    MirsaDiagnosticPrivacy.copy(lines, write: { UIPasteboard.general.string = $0 })
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     var t = Transaction()
                     t.disablesAnimations = true
@@ -496,13 +497,14 @@ struct CompactLogView: View {
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.borderless)
+                .accessibilityIdentifier("diagnostics-copy")
                 .transaction { $0.animation = nil }
             }
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
+                        ForEach(Array(safeLines.enumerated()), id: \.offset) { idx, line in
                             Text(line)
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(logLineColor(line))
@@ -520,9 +522,9 @@ struct CompactLogView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
                 )
-                .onChange(of: lines.count) { _, _ in
-                    if !lines.isEmpty {
-                        proxy.scrollTo(lines.count - 1, anchor: .bottom)
+                .onChange(of: safeLines.count) { _, _ in
+                    if !safeLines.isEmpty {
+                        proxy.scrollTo(safeLines.count - 1, anchor: .bottom)
                     }
                 }
             }
@@ -618,54 +620,90 @@ struct ContentView: View {
         }
         incoming = nil
     }
-    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
-    private var liquidTheme: Bool { theme == MirsaTheme.liquid.rawValue }
+    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue // theme only recolors; the floating dock is shared by every theme
+    private var liquidTheme: Bool { true }
+    @AppStorage(StoreStyle.key) private var storeStyle = StoreStyle.fallback.rawValue
+    /// The single-bar App Store (main dock hidden there) belongs to the New store style only.
+    private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
     @State private var chatComposerFocused = false
+    @State private var wallpaperMakerFocused = false
+
+    @State private var loadedTabs: Set<AppTab> = []
+
+    @ViewBuilder
+    private func sixTab<C: View>(_ tab: AppTab, @ViewBuilder _ content: @escaping () -> C) -> some View {
+        if loadedTabs.contains(tab) || vm.selectedTab == tab {
+            let on = vm.selectedTab == tab
+            GeometryReader { viewport in
+                content()
+                    // Bound the UIKit navigation/Form host to its offered viewport.
+                    // Its intrinsic content must not widen the shared ZStack/dock.
+                    .frame(width: viewport.size.width, height: viewport.size.height)
+            }
+                // NavigationStack owns UIKit-backed bars that can escape opacity alone.
+                // Keep the subtree/state alive, but clip inactive tabs to an empty viewport.
+                .frame(width: on ? nil : 0, height: on ? nil : 0)
+                .clipped()
+                .opacity(on ? 1 : 0)
+                .allowsHitTesting(on)
+                .accessibilityHidden(!on)
+                .zIndex(on ? 1 : 0)
+        }
+    }
 
     var body: some View {
-        TabView(selection: $vm.selectedTab) {
-            AppsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(L.t("tab"), systemImage: "square.grid.3x3.fill") }
-                .tag(AppTab.apps)
-
-            SourcesTab(store: sourcesStore)
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(tr("Sources", "السورسات"), systemImage: "shippingbox.fill") }
-                .tag(AppTab.sources)
-
-            ToolsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused))
-                .tabItem { Label(L.t("tools.tab"), systemImage: "wand.and.stars") }
-                .tag(AppTab.pairing)
-
-            EncryptedAppsTab()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(EncryptedText.tabTitle, systemImage: "lock.shield") }
-                .tag(AppTab.encrypted)
-
-            PersonalAppsHub()
-                .modifier(LiquidTabChrome(liquid: liquidTheme))
-                .tabItem { Label(tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), systemImage: "checkmark.seal") }
-                .tag(AppTab.personalHub)
+        // Custom six-tab host: the native TabView folds a sixth tab under "More", so every tab
+        // is kept alive here (lazily, first visit) and only the selected one is shown.
+        ZStack {
+            sixTab(.apps) { AppsTab().modifier(LiquidTabChrome(liquid: liquidTheme)) }
+            sixTab(.sources) { SourcesTab(store: sourcesStore).modifier(LiquidTabChrome(liquid: liquidTheme)) }
+            sixTab(.mirsaAI) {
+                ForgeChatRoot(embedded: true)
+                    .environment(\.layoutDirection, .leftToRight)
+                    .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused, nestedNavigation: true))
+            }
+            sixTab(.pairing) {
+                ToolsTab()
+                    .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
+            }
+            // Classic (default) keeps the original store and the main dock; New draws its own single bar.
+            sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle)) }
+            sixTab(.personalHub) {
+                PersonalAppsHub()
+                    .modifier(LiquidTabChrome(liquid: liquidTheme))
+                    .accessibilityIdentifier("personal-hub-root")
+            }
         }
+        // One backdrop for the whole window, under the status bar, every tab and the
+        // floating dock, so nothing between the pages and the screen edge shows black.
+        .modifier(MirsaWindowBackdropHost())
+        .background { AuroraBackground().ignoresSafeArea() }
+        // The dock animates its selection pill, not the retained NavigationStacks.
+        // Inheriting its spring shrinks/fades the old stack over the new UIKit bar.
+        // Suppress only selection-change animation inside the content host.
+        .animation(nil, value: vm.selectedTab)
+        .onAppear { loadedTabs.insert(vm.selectedTab) }
+        .onChange(of: vm.selectedTab) { _, t in loadedTabs.insert(t) }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
-            if liquidTheme && !chatComposerFocused {
-                LiquidTabBar(selection: $vm.selectedTab, items: [
-                    LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
-                    LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
-                    LiquidTabItem(tab: .pairing, title: L.t("tools.tab"), icon: "wand.and.stars"),
-                    LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
-                    LiquidTabItem(tab: .personalHub, title: tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), icon: "checkmark.seal"),
-                ])
+            // In the New store style the App Store tab draws its own single bottom bar (its
+            // sections plus a Mirsa menu back to the other tabs), so the main dock steps aside there.
+            if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
+                LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
                 .ignoresSafeArea(.keyboard)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in vm.selectedTab = .encrypted }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
+        .onPreferenceChange(WallpaperMakerFocusKey.self) { wallpaperMakerFocused = $0 }
         .onOpenURL { url in
+            if url.scheme == "mirsa", url.host == "wishlist" {
+                vm.selectedTab = .encrypted
+                NotificationCenter.default.post(name: Notification.Name("mirsa.store.wishlist.open"), object: nil)
+                return
+            }
             if OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]); return }
-            // mirsa://launch?bundle=… from a Home Screen shortcut.
+            // New mirsa-container links and legacy mirsa links share the launch route.
             if HomeShortcut.handle(url) { vm.selectedTab = .apps; return }
             // Document handoff uses a private snapshot before the provider relinquishes access.
             guard url.isFileURL, url.pathExtension.lowercased() == "ipa" else { return }
@@ -741,6 +779,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            HomeShortcut.applicationReady()
             vm.showSuccessAlert = false
             vm.successAlertMessage = ""
 
@@ -751,6 +790,7 @@ struct ContentView: View {
 // MARK: - Pairing Tab
 
 struct PairingTab: View {
+    @StateObject private var diagnosticAccess = MirsaDiagnosticAccess()
     @EnvironmentObject var vm: AppViewModel
     @State private var showDeleteConfirm = false
     @State private var showCredits = false
@@ -1039,16 +1079,16 @@ struct PairingTab: View {
                     }
                 }
 
-                if !vm.log.isEmpty {
-                    Section {
-                        CompactLogView(
-                            title: "Activity Log (\(vm.log.count) lines)",
-                            lines: vm.log,
-                            onClear: { vm.log.removeAll() }
-                        )
+                MirsaOwnerDiagnostics(access: diagnosticAccess) {
+                    if !vm.log.isEmpty {
+                        CompactLogView(title: "Activity Log", lines: vm.log, onClear: { vm.log.removeAll() })
+                    }
+                    if !AppsStore.shared.legacyInstallDiagnostics.isEmpty {
+                        CompactLogView(title: "Previous installation", lines: AppsStore.shared.legacyInstallDiagnostics)
                     }
                 }
             }.listRowBackground(MirsaPalette.row) }
+            .modifier(MirsaDiagnosticAccessLifecycle(access: diagnosticAccess))
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 60)
             }
@@ -1189,20 +1229,36 @@ struct VPNStatusRow: View {
 
 /// Liquid Glass theme: hide the system tab bar (a floating glass bar replaces it)
 /// and keep content clear of it.
+extension LiquidTabItem {
+    /// The app's main tabs, shared by the floating dock and the App Store bar's Mirsa menu.
+    @MainActor static var mainTabs: [LiquidTabItem] {
+        [
+            LiquidTabItem(tab: .apps, title: L.t("tab"), icon: "square.grid.2x2"),
+            LiquidTabItem(tab: .sources, title: tr("Sources", "السورسات"), icon: "shippingbox"),
+            LiquidTabItem(tab: .mirsaAI, title: ForgeChatText.title, icon: "bubble.left.and.bubble.right"),
+            LiquidTabItem(tab: .pairing, title: L.t("tools.tab"), icon: "wand.and.stars"),
+            LiquidTabItem(tab: .encrypted, title: EncryptedText.tabTitle, icon: "lock.shield"),
+            LiquidTabItem(tab: .personalHub, title: tr("Certificate", "الشهادة", ckb: "بڕوانامە", kmr: "Sertîfîka"), icon: "checkmark.seal"),
+        ]
+    }
+}
+
 struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
     var chatEditing: Bool = false
+    var nestedNavigation: Bool = false
+    /// The tab draws its own bottom bar (App Store): hide the main bar in every theme
+    /// and reserve no extra clearance; the tab's own bar insets the content.
+    var ownsBottomBar: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
-        if liquid {
-            // Reserve physical layout space around the entire tab navigation
-            // stack. Ancestor safeAreaInset can be lost when a destination is
-            // pushed, leaving its last List/ScrollView row behind the dock.
-            // Padding bounds every destination; the system bottom safe area is
-            // retained separately, so no home-indicator inset is subtracted.
+        if ownsBottomBar {
+            content.toolbar(.hidden, for: .tabBar)
+        } else if liquid {
             content
                 .toolbar(.hidden, for: .tabBar)
                 .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+                .background(AuroraBackground().ignoresSafeArea())
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }

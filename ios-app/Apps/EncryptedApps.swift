@@ -6,7 +6,8 @@ import ImageIO
 //
 // Mirsa never decrypts, re-signs or edits these packages. It reads the package
 // metadata (iTunesMetadata.plist, Info.plist, SC_Info/*.sinf) to show who bought
-// the app, then hands the original file to installation_proxy unchanged. iOS
+// the app, then hands the original file to installation_proxy on Wi-Fi or serves it
+// locally to the iOS installer on cellular. iOS
 // alone decides whether the FairPlay purchase is valid on this device.
 
 enum EncryptedText {
@@ -181,6 +182,7 @@ final class EncryptedAppsStore: ObservableObject {
     @Published var busy: String?
     @Published var progress: Double = 0
     @Published var installingID: UUID?
+    private var installAttemptID: UUID?
     @Published var error: String?
     @Published var toast: String?
 
@@ -231,6 +233,7 @@ final class EncryptedAppsStore: ObservableObject {
             let snapshot = try await Task.detached(priority: .userInitiated) { try OpenInIPA.snapshot(url) }.value
             defer { OpenInIPA.remove(snapshot) }
             let entry = try await Self.adopt(file: snapshot, move: false)
+            StoreIPAProtection.markSaved(id: entry.id)
             add(entry)
         } catch { self.error = error.localizedDescription }
     }
@@ -265,38 +268,75 @@ final class EncryptedAppsStore: ObservableObject {
         UIImage(contentsOfFile: Self.iconURL(entry.id).path)
     }
 
-    /// Installs the stored file as-is through the existing device tunnel (Wi-Fi + LocalDevVPN + pairing).
+    /// Keeps the existing Wi-Fi tunnel path; cellular serves the same IPA locally, without signing or upload.
     func install(_ entry: EncryptedIPAEntry, vm: AppViewModel?) async {
         guard busy == nil, AppsStore.shared.busy == nil else {
             error = tr("Finish the current import first.", "خلّص الاستيراد الحالي أولاً.")
             return
         }
         let apps = AppsStore.shared
-        apps.error = nil
-        guard await apps.realAppNetworkReady(vm) else {
-            error = apps.error ?? EncryptedText.t("Installing needs Wi-Fi + LocalDevVPN", "التثبيت بدو واي فاي + LocalDevVPN",
-                                                  "دامەزراندن پێویستی بە Wi-Fi + LocalDevVPN هەیە", "Sazkirin Wi-Fi + LocalDevVPN dixwaze")
-            apps.error = nil
-            return
+        // Reserve before the first await, including path resolution, so repeated
+        // taps or a certificate install cannot race this handoff.
+        busy = L.t("busy.installing"); apps.busy = busy; progress = 0; installingID = entry.id
+        let attemptID = UUID()
+        installAttemptID = attemptID
+        let trackToken = InstallTracker.shared.begin(key: "entry:" + entry.id.uuidString, phase: .installing)
+        defer { InstallTracker.shared.end(trackToken) }
+        var ok = false
+        defer {
+            if installAttemptID == attemptID {
+                busy = nil; apps.busy = nil; installingID = nil
+                installAttemptID = nil
+                if !ok { progress = 0 }
+            }
         }
-        let path = Self.ipaURL(entry.id).path
+        apps.error = nil
+        let cellular = await WiFiPathMonitor.shared.resolve() == .notWifi
+        if !cellular {
+            guard await apps.realAppNetworkReady(vm) else {
+                error = apps.error ?? EncryptedText.t("Installing needs Wi-Fi + LocalDevVPN", "التثبيت بدو واي فاي + LocalDevVPN",
+                                                      "دامەزراندن پێویستی بە Wi-Fi + LocalDevVPN هەیە", "Sazkirin Wi-Fi + LocalDevVPN dixwaze")
+                apps.error = nil
+                return
+            }
+        }
+        let file = Self.ipaURL(entry.id)
+        let path = file.path
         guard FileManager.default.fileExists(atPath: path) else {
             error = InstallErrorText.sanitize("MIRSA_SOURCE_IPA_MISSING", arabic: L.isArabic); return
         }
-        busy = L.t("busy.installing"); progress = 0; installingID = entry.id
-        var ok = false
-        defer { busy = nil; installingID = nil; if !ok { progress = 0 } }
+        if cellular {
+            do {
+                // An OTA transfer can outlive this callback. Conservatively preserve
+                // its source against optional cleanup even if later installs succeed.
+                StoreIPAProtection.markSaved(id: entry.id)
+                try await EncryptedLocalInstall.handoff(file)
+                guard installAttemptID == attemptID else { return }
+                // Receiving bytes is not installation proof, especially when an
+                // older copy with the same bundle ID already exists.
+                progress = 0
+                toast = EncryptedLocalInstall.unconfirmed
+            } catch {
+                guard installAttemptID == attemptID else { return }
+                if error is CancellationError { toast = EncryptedLocalInstall.unconfirmed }
+                else { self.error = error.localizedDescription }
+            }
+            return
+        }
         do {
             _ = try await Task.detached {
                 try SideloadService.installStoreIPA(ipaPath: path) { f, _ in
                     Task { @MainActor in
-                        EncryptedAppsStore.shared.progress = f
+                        guard self.installAttemptID == attemptID else { return }
+                        self.progress = f
                     }
                 }
             }.value
             ok = true
             if let i = entries.firstIndex(where: { $0.id == entry.id }) { entries[i].installedAt = Date(); save() }
             toast = L.f("toast.installed", entry.name)
+            // Tunnel installation returned confirmed success; OTA handoff never reaches here.
+            if StoreIPAProtection.mayClean(entry, confirmed: true) { delete(entry) }
         } catch {
             self.error = AppsStore.friendly(error)
         }

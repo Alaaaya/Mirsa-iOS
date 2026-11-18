@@ -22,9 +22,10 @@ struct IPAEditorView: View {
         self.store = store
         let original = (try? IPAEditorService.info(in: pending.workDir.appendingPathComponent("x/Payload")
             .appendingPathComponent(pending.extractedApp.lastPathComponent))) ?? [:]
-        let initial = pending.editOptions ?? IPAEditOptions(displayName: pending.name, version: pending.version,
+        var initial = pending.editOptions ?? IPAEditOptions(displayName: pending.name, version: pending.version,
                                                            bundleID: pending.bundleID,
                                                            minimumVersion: original["MinimumOSVersion"] as? String ?? "")
+        if let preselected = store.injectTweakIDs { initial.tweakIDs.formUnion(preselected) }
         _options = State(initialValue: initial)
         _changeBundleID = State(initialValue: initial.bundleID != (original["CFBundleIdentifier"] as? String ?? pending.bundleID))
     }
@@ -96,6 +97,7 @@ struct IPAEditorView: View {
         .environment(\.layoutDirection, .leftToRight)
         .preferredColorScheme(.dark)
         .interactiveDismissDisabled(saving)
+        .onAppear { store.injectTweakIDs = nil }
     }
 
     private var identityPanel: some View {

@@ -7,7 +7,9 @@
 
 import UIKit
 import Foundation
+import Darwin
 import AirliftFFI
+import ZIPFoundation
 
 public final class TendiesEngine {
     public static let shared = TendiesEngine()
@@ -31,29 +33,16 @@ public final class TendiesEngine {
             }
         }
 
+        let item = try await inspectTendie(from: sourceURL)
+        try storeTendie(from: sourceURL, fileName: item.fileName)
+        return item
+    }
+
+    /// Inspect a candidate without publishing it over an existing wallpaper.
+    func inspectTendie(from sourceURL: URL) async throws -> TendieItem {
+        try validateArchive(sourceURL)
         let fileName = sourceURL.lastPathComponent
         let baseName = (fileName as NSString).deletingPathExtension
-        let destinationURL = Self.tendiesStorageDirectory.appendingPathComponent(fileName)
-
-        if sourceURL.standardizedFileURL.path != destinationURL.standardizedFileURL.path {
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try? FileManager.default.removeItem(at: destinationURL)
-            }
-            do {
-                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-            } catch {
-                let fileData = try Data(contentsOf: sourceURL)
-                try fileData.write(to: destinationURL, options: .atomic)
-            }
-        }
-
-        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
-            throw NSError(
-                domain: "TendiesEngine",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to store wallpaper file at \(destinationURL.path)"]
-            )
-        }
 
         // Staging extraction to inspect contents
         let tempExtractDir = FileManager.default.temporaryDirectory
@@ -63,19 +52,7 @@ public final class TendiesEngine {
             try? FileManager.default.removeItem(at: tempExtractDir)
         }
 
-        let extractRC = destinationURL.path.withCString { arcC in
-            tempExtractDir.path.withCString { dstC in
-                al_zip_extract_all(arcC, dstC)
-            }
-        }
-
-        guard extractRC == 0 else {
-            throw NSError(
-                domain: "TendiesEngine",
-                code: Int(extractRC),
-                userInfo: [NSLocalizedDescriptionKey: "Failed to extract .tendies zip archive (code \(extractRC))"]
-            )
-        }
+        try extractValidatedArchive(sourceURL, to: tempExtractDir)
 
         // Analyze file structure
         var isContainer = false
@@ -126,7 +103,8 @@ public final class TendiesEngine {
 
         // Use findDescriptorsWithExtensions to get accurate descriptor count and poster type
         let foundDescriptors = findDescriptorsWithExtensions(in: tempExtractDir, defaultExt: "com.apple.WallpaperKit.CollectionsPoster")
-        descriptorCount = max(foundDescriptors.count, 1)
+        guard !foundDescriptors.isEmpty else { throw PosterBoardStore.failure("Archive contains no wallpaper descriptors.") }
+        descriptorCount = foundDescriptors.count
 
         if let first = foundDescriptors.first {
             if first.ext == "com.apple.MercuryPoster" || first.ext == "com.apple.Posters.MercuryPosterApp" {
@@ -168,6 +146,154 @@ public final class TendiesEngine {
         )
     }
 
+    /// Copy privately, then atomically publish. Never unlink a working archive first.
+    func storeTendie(from sourceURL: URL, fileName: String) throws {
+        let fm = FileManager.default
+        guard !fileName.isEmpty, fileName != ".", fileName != "..",
+              (fileName as NSString).lastPathComponent == fileName else {
+            throw PosterBoardStore.failure("Invalid wallpaper filename.")
+        }
+        let destination = Self.tendiesStorageDirectory.appendingPathComponent(fileName)
+        guard fm.fileExists(atPath: sourceURL.path) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError)
+        }
+        guard sourceURL.standardizedFileURL != destination.standardizedFileURL else { return }
+        let staged = Self.tendiesStorageDirectory.appendingPathComponent(".import-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: staged) }
+        try fm.copyItem(at: sourceURL, to: staged)
+        let result = staged.withUnsafeFileSystemRepresentation { source in
+            destination.withUnsafeFileSystemRepresentation { target in
+                Darwin.rename(source!, target!)
+            }
+        }
+        guard result == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    }
+
+    /// Validate before either import or flash invokes the native ZIP extractor.
+    func validateArchive(_ url: URL) throws {
+        try validateEntries(Archive(url: url, accessMode: .read))
+    }
+
+    private func validateEntries(_ archive: Archive) throws {
+        var total: UInt64 = 0, count = 0
+        var paths = Set<String>()
+        for entry in archive {
+            count += 1
+            let size = UInt64(entry.uncompressedSize)
+            guard size <= 536_870_912, total <= 536_870_912 - size else {
+                throw PosterBoardStore.failure("Oversized wallpaper archive.")
+            }
+            total += size
+            let canonicalEntry = entry.type == .directory && entry.path.hasSuffix("/")
+                ? String(entry.path.dropLast()) : entry.path
+            let parts = canonicalEntry.split(separator: "/", omittingEmptySubsequences: false)
+            guard !canonicalEntry.isEmpty, !parts.contains(""), !parts.contains(where: { $0.contains(":") }),
+                  !entry.path.isEmpty, !entry.path.hasPrefix("/"), !entry.path.contains("\\"),
+                  !entry.path.contains("\0"), !parts.contains(".."), !parts.contains("."),
+                  entry.type == .file || entry.type == .directory,
+                  paths.insert(canonicalEntry.precomposedStringWithCanonicalMapping.lowercased()).inserted, count <= 8192 else {
+                throw PosterBoardStore.failure("Unsafe wallpaper archive.")
+            }
+        }
+        guard count > 0 else { throw PosterBoardStore.failure("Empty wallpaper archive.") }
+    }
+
+    /// Compare canonical path components, not slash-suffixed URL strings.
+    /// Foundation can retain a trailing directory slash or a /var alias on one
+    /// URL but not its child. Resolve both sides identically without accepting
+    /// an equal root, sibling prefix, traversal, or a symlink out of the root.
+    static func archiveDestination(_ target: URL, isStrictlyInside root: URL) -> Bool {
+        guard root.isFileURL, target.isFileURL,
+              !root.pathComponents.contains(".."), !target.pathComponents.contains("..") else { return false }
+        // Foundation may leave symlinks unresolved when a descendant does not
+        // exist yet. Resolve the nearest existing ancestor with realpath, then
+        // append only the missing components. Never treat a dangling symlink
+        // or an inaccessible existing ancestor as a missing directory.
+        func canonicalComponents(_ url: URL) -> [String]? {
+            var cursor = url.standardizedFileURL
+            var missing: [String] = []
+            while true {
+                if let resolved = realpath(cursor.path, nil) {
+                    defer { free(resolved) }
+                    let ancestor = URL(fileURLWithPath: String(cString: resolved)).pathComponents
+                    return ancestor + Array(missing.reversed())
+                }
+                guard errno == ENOENT else { return nil }
+                var info = stat()
+                guard lstat(cursor.path, &info) != 0, errno == ENOENT else { return nil }
+                let component = cursor.lastPathComponent
+                guard !component.isEmpty, cursor.path != "/" else { return nil }
+                missing.append(component)
+                cursor.deleteLastPathComponent()
+            }
+        }
+        guard let base = canonicalComponents(root), let child = canonicalComponents(target) else { return false }
+        return child.count > base.count && Array(child.prefix(base.count)) == base
+    }
+
+    /// The validated parser also extracts, so native parser disagreements cannot
+    /// turn a checked pathname into an unchecked filesystem write.
+    func extractValidatedArchive(_ url: URL, to root: URL) throws {
+        let archive = try Archive(url: url, accessMode: .read)
+        try validateEntries(archive)
+        let fm = FileManager.default
+        let rootInfo = try root.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard rootInfo.isDirectory == true, rootInfo.isSymbolicLink != true,
+              try fm.contentsOfDirectory(atPath: root.path).isEmpty else {
+            throw PosterBoardStore.failure("Extraction requires a fresh empty private directory.")
+        }
+        var actualTotal: UInt64 = 0
+        var directories: [(Entry, URL)] = []
+        for entry in archive {
+            let parts = entry.path.split(separator: "/")
+            let hiddenJunk = parts.contains { part in
+                part == "__MACOSX" || (part.hasPrefix(".") &&
+                    part != ".com.apple.posterkit.provider.contents.configurableOptions.plist")
+            }
+            if hiddenJunk { continue }
+            let target = root.appendingPathComponent(entry.path)
+            guard Self.archiveDestination(target, isStrictlyInside: root) else {
+                throw PosterBoardStore.failure("Archive destination escaped its private root.")
+            }
+            if entry.type == .directory {
+                try fm.createDirectory(at: target, withIntermediateDirectories: true)
+                directories.append((entry, target))
+                continue
+            }
+            // First bounded streaming pass retains the existing runtime size/CRC
+            // protections. The public URL extractor then applies ZIP permissions
+            // and mtime using the pinned library, not private ZIP internals.
+            var actualSize: UInt64 = 0
+            let checksum = try archive.extract(entry) { chunk in
+                let next = UInt64(chunk.count)
+                guard actualSize <= UInt64(entry.uncompressedSize),
+                      next <= UInt64(entry.uncompressedSize) - actualSize,
+                      actualTotal <= 536_870_912, next <= 536_870_912 - actualTotal else {
+                    throw PosterBoardStore.failure("Oversized wallpaper data.")
+                }
+                actualSize += next
+                actualTotal += next
+            }
+            guard actualSize == UInt64(entry.uncompressedSize), checksum == entry.checksum else {
+                throw PosterBoardStore.failure("Wallpaper checksum mismatch.")
+            }
+            let writtenCRC = try archive.extract(entry, to: target)
+            let written = try target.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
+            guard writtenCRC == entry.checksum, written.isRegularFile == true,
+                  written.isSymbolicLink != true, written.fileSize == Int(actualSize) else {
+                throw PosterBoardStore.failure("Extracted wallpaper readback mismatch.")
+            }
+        }
+        // Defer explicit directory attributes until children exist, deepest first,
+        // so child creation cannot change archived directory dates.
+        for (entry, target) in directories.sorted(by: { $0.1.pathComponents.count > $1.1.pathComponents.count }) {
+            guard try archive.extract(entry, to: target) == entry.checksum else {
+                throw PosterBoardStore.failure("Directory checksum mismatch.")
+            }
+        }
+    }
+
+
     // MARK: - Downsample Thumbnail
 
     private func downsample(image: UIImage, maxDimension: CGFloat) -> UIImage {
@@ -187,34 +313,13 @@ public final class TendiesEngine {
     // MARK: - Auto-detect PosterBoard Container
 
     public func detectPosterBoardContainer(pairingPath: String) async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var outContainer: UnsafeMutablePointer<CChar>? = nil
-                var outError: UnsafeMutablePointer<CChar>? = nil
-
-                let rc = pairingPath.withCString { pairC in
-                    "com.apple.PosterBoard".withCString { bundleC in
-                        al_find_app_container(pairC, bundleC, nil, nil, &outContainer, &outError)
-                    }
-                }
-
-                if rc == 0, let p = outContainer {
-                    let containerStr = String(cString: p)
-                    al_string_free(p)
-                    continuation.resume(returning: containerStr)
-                } else {
-                    let errStr = outError.flatMap { p in
-                        let s = String(cString: p)
-                        al_string_free(p)
-                        return s
-                    } ?? "Failed to find PosterBoard container"
-                    continuation.resume(throwing: NSError(
-                        domain: "TendiesEngine",
-                        code: Int(rc),
-                        userInfo: [NSLocalizedDescriptionKey: errStr]
-                    ))
-                }
-            }
+        // Local package installation must remain local on offline/cellular.
+        // Access/entitlement failure is not a tunnel or Wi-Fi problem.
+        return try await MirsaWallpaperJournal.queued {
+                if let cached = UserDefaults.standard.string(forKey: "aircard.posterboard_container"),
+                   let path = try? PosterBoardStore.canonicalContainer(cached),
+                   try MirsaPosterDiscovery.identifiesPosterBoard(path, log: { _ in }) { return path }
+                return try MirsaPosterDiscovery.discover(log: { _ in })
         }
     }
 
@@ -237,6 +342,7 @@ public final class TendiesEngine {
 
     // MARK: - Flash Tendies to Device
 
+    @discardableResult
     public func flashTendies(
         items: [TendieItem],
         containerPath: String,
@@ -244,149 +350,218 @@ public final class TendiesEngine {
         pairingPath: String,
         log: @escaping (String) -> Void,
         progress: @escaping (Double) -> Void
-    ) async throws {
-        guard !items.isEmpty else {
-            log("⚠️ No wallpapers selected to flash")
-            return
-        }
-
-        var normalizedContainer = containerPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalizedContainer.hasSuffix("/") {
-            normalizedContainer = String(normalizedContainer.dropLast())
-        }
-        if normalizedContainer.isEmpty {
-            throw NSError(
-                domain: "TendiesEngine",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "PosterBoard Container path is required."]
-            )
-        }
-
-        let majorVer = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        let structVersion = (majorVer <= 16) ? 59 : 61
-
-        log("🚀 Starting PosterBoard injection into \(normalizedContainer)")
-        log("ℹ️ Target PosterBoard structure version: \(structVersion) (iOS \(majorVer))")
-
-        let totalItems = Double(items.count)
-
-        for (itemIndex, item) in items.enumerated() {
-            log("\n📦 [\(itemIndex + 1)/\(items.count)] Processing '\(item.name)'…")
-
-            let tempStageDir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("tendie_flash_\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: tempStageDir, withIntermediateDirectories: true)
-            defer {
-                try? FileManager.default.removeItem(at: tempStageDir)
+    ) async throws -> [String] {
+        let output = log
+        let diagnosticStream = MirsaDiagnosticPrivacy.Stream()
+        let log: (String) -> Void = { line in
+            // Synchronous persistence before the async UI log, so respring cannot erase it.
+            if ["INSTALL", "COPY", "JOURNAL", "CLEANUP"].contains(where: { line.hasPrefix($0) }) {
+                if !MirsaWallpaperEvidence.record(line) { output("EVIDENCE WRITE FAILED; persistent diagnostics unavailable") }
             }
+            output(diagnosticStream.line(line))
+        }
+        log("INSTALL BEGIN items=" + String(items.count) + " container=" + containerPath)
+        // Completion means byte-for-byte verified copy, not unobserved gallery registration.
+        guard !items.isEmpty else { throw PosterBoardStore.failure("No wallpapers selected.") }
+        let normalized = try PosterBoardStore.canonicalContainer(containerPath)
+        do {
+            return try await MirsaWallpaperJournal.queued(onWait: {
+                log("INSTALL WAIT current wallpaper operation finishing; installation pending")
+            }) {
+                        let sink = ProbeProgress(log)
+                        defer { sink.finish() }
+                        let fm = FileManager.default
+                        try MirsaWallpaperJournal.safeLocal(MirsaWallpaperJournal.work)
+                        let stage = MirsaWallpaperJournal.work.appendingPathComponent(UUID().uuidString)
+                        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+                        defer { try? fm.removeItem(at: stage) }
+                        var all: [(url: URL, ext: String, title: String)] = []
+                        for (index, item) in items.enumerated() {
+                            try self.validateArchive(item.fileURL)
+                            let folder = stage.appendingPathComponent(String(index))
+                            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                            try self.extractValidatedArchive(item.fileURL, to: folder)
+                            let found = self.findDescriptorsWithExtensions(in: folder, defaultExt: item.posterType.extensionBundleId)
+                            guard !found.isEmpty else { throw PosterBoardStore.failure("Archive contains no wallpaper descriptors.") }
+                            for descriptor in found {
+                                guard descriptor.ext == MirsaPosterCopy.provider ||
+                                      descriptor.ext == "com.apple.Posters.CollectionsPosterApp" else {
+                                    throw PosterBoardStore.failure("This verified install path supports Collections wallpapers only.")
+                                }
+                                _ = try MirsaPosterNormalize.normalize(source: descriptor.url, packageRoot: folder,
+                                                                       identifier: Int.random(in: 10_000...99_999))
+                                all.append((descriptor.url, descriptor.ext, item.name))
+                            }
+                            progress(Double(index + 1) / Double(items.count + 1))
+                        }
+                        guard try MirsaPosterDiscovery.identifiesPosterBoard(normalized, log: log) else {
+                            throw PosterBoardStore.failure("PosterBoard metadata identity not confirmed.")
+                        }
+                        let lease = try PosterBoardLease(path: normalized, log: log)
+                        do {
+                            try PosterBoardStore.validateIdentity(lease.effectiveURL, lease: lease)
+                            let parent = try MirsaPosterCopy.destination(lease: lease)
+                            log("INSTALL DESTINATION " + parent)
+                            // Reconcile only matching journals, never unrelated records.
+                            // Each absence is freshly proved under this install lease.
+                            let matching = try MirsaWallpaperJournal.records().filter { record in
+                                items.contains(where: { $0.name == record.title })
+                            }
+                            try MirsaWallpaperJournal.reconcileForInstall(matching, confirmed: {
+                                try MirsaWallpaperJournal.confirmedInstalled($0, lease: lease)
+                            }, archiveAbsent: {
+                                try MirsaWallpaperJournal.archiveAbsentForReinstall($0, lease: lease, log: log)
+                            })
+                            let remaining = try MirsaWallpaperJournal.records()
+                            guard !remaining.contains(where: { !$0.copied }) else {
+                                throw PosterBoardStore.failure("An incomplete Mirsa installation exists. Use owned cleanup after reviewing its log; do not blindly reinstall.")
+                            }
+                            // A wallpaper with a journal is skipped ONLY when every one of its journals is
+                            // proven installed (exact root identity under THIS lease). Anything else stays fatal.
+                            var skipped: [String] = []
+                            for title in Set(all.map { $0.title }) {
+                                let records = remaining.filter { $0.title == title }
+                                if records.isEmpty { continue }
+                                let wanted = all.filter { $0.title == title }.count
+                                var proven = records.count >= wanted
+                                if proven {
+                                    for record in records where !(try MirsaWallpaperJournal.confirmedInstalled(record, lease: lease)) {
+                                        proven = false
+                                        break
+                                    }
+                                }
+                                guard proven else {
+                                    throw PosterBoardStore.failure("This wallpaper already has a Mirsa installation journal. Review or remove that exact installation first.")
+                                }
+                                skipped.append(title)
+                                log("INSTALL SKIP already installed and verified: " + MirsaWallpaperDiagnostics.quoted(title))
+                            }
+                            skipped.sort()
+                            all = all.filter { !skipped.contains($0.title) }
+                            for descriptor in all {
+                                let expected = try PosterBoardStore.manifest(descriptor.url)
+                                if let encoded = try? JSONSerialization.data(withJSONObject: expected, options: [.sortedKeys]) {
+                                    log("INSTALL SOURCE title=" + MirsaWallpaperDiagnostics.quoted(descriptor.title) +
+                                        " manifestSHA256=" + MirsaWallpaperDiagnostics.digest(encoded) +
+                                        " files=" + String(expected.count))
+                                }
+                                let id = UUID().uuidString
+                                let relative = parent + "/" + id
+                                var record = MirsaWallpaperJournal.Record(id: id, title: descriptor.title,
+                                    container: normalized, relative: relative, expected: expected)
+                                try MirsaWallpaperJournal.validatePath(record)
+                                guard lease.grant(relative), lease.permits(lease.effectiveURL.appendingPathComponent(relative)) else {
+                                    throw PosterBoardStore.failure("Exact descriptor destination denied.")
+                                }
+                                // Durable intent BEFORE any system write. Partial copies are retained.
+                                try MirsaWallpaperJournal.save(record)
+                                let target = lease.effectiveURL.appendingPathComponent(relative)
+                                log("COPY INTENT uuid=" + id + " relative=" + relative)
+                                try MirsaPosterCopy.copyExclusive(source: descriptor.url, target: target, expected: expected, log: log)
+                                let attrs = try fm.attributesOfItem(atPath: target.path)
+                                guard let device = attrs[.systemNumber] as? NSNumber,
+                                      let inode = attrs[.systemFileNumber] as? NSNumber else {
+                                    throw PosterBoardStore.failure("Copied root identity unavailable; journal retained.")
+                                }
+                                MirsaWallpaperEvidence.observe(target, context: "post-copy uuid=" + id, log: log)
+                                record.device = device.uint64Value
+                                record.inode = inode.uint64Value
+                                record.paths = try MirsaPosterCopy.typedPaths(target)
+                                record.copied = true
+                                try MirsaWallpaperJournal.save(record)
+                                log("COPY VERIFIED " + id + " files=" + String(expected.count) + "; gallery unverified.")
+                            }
+                            try lease.close()
+                            if all.isEmpty {
+                                log("INSTALL NOTHING NEW all selected wallpapers were already installed; lease closed.")
+                            } else {
+                                log("COPY READY lease closed. Confirm Respring to refresh the wallpaper picker.")
+                            }
+                            progress(1)
+                            return skipped
+                        } catch { try? lease.close(); throw error }
+            }
+        } catch {
+            log("INSTALL ERROR " + error.localizedDescription)
+            throw error
+        }
+    }
 
-            let extractRC = item.fileURL.path.withCString { arcC in
-                tempStageDir.path.withCString { dstC in
-                    al_zip_extract_all(arcC, dstC)
+    /// Prepare an isolated new descriptor without changing the imported archive.
+    /// Numeric wallpaper/provider identities are deliberately preserved together;
+    /// only references to this descriptor's directory identity are replaced.
+    func prepareDescriptor(_ source: URL, in stagingRoot: URL) throws -> URL {
+        let fm = FileManager.default
+        _ = try PosterBoardStore.manifest(source) // rejects every symlink, including hidden ones
+        let oldID = source.lastPathComponent
+        let newID = UUID().uuidString
+        let destination = stagingRoot.appendingPathComponent(newID, isDirectory: true)
+        try fm.createDirectory(at: destination, withIntermediateDirectories: false)
+        do {
+            var scanError: Error?
+            guard let scan = fm.enumerator(at: source, includingPropertiesForKeys: [.isDirectoryKey],
+                                           errorHandler: { _, error in scanError = error; return false }) else {
+                throw PosterBoardStore.failure("Cannot enumerate wallpaper descriptor.")
+            }
+            for case let file as URL in scan {
+                let name = file.lastPathComponent
+                // This dot-prefixed Apple plist is functional, not Finder debris.
+                let allowedHidden = name == ".com.apple.posterkit.provider.contents.configurableOptions.plist"
+                if name == "__MACOSX" || (name.hasPrefix(".") && !allowedHidden) {
+                    if (try file.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true { scan.skipDescendants() }
+                    continue
                 }
-            }
-            guard extractRC == 0 else {
-                log("❌ Failed to extract '\(item.name)'")
-                continue
-            }
-
-            log("  🖼 Locating wallpaper descriptors…")
-            let descriptors = findDescriptorsWithExtensions(in: tempStageDir, defaultExt: item.posterType.extensionBundleId)
-            log("  ✨ Found \(descriptors.count) descriptor(s) to install")
-
-            for (descIndex, descItem) in descriptors.enumerated() {
-                let targetUUID = UUID().uuidString.uppercased()
-                let randomizedID = Int.random(in: 10000...99999)
-                log("  [\(descIndex + 1)/\(descriptors.count)] Descriptor \(targetUUID) for \(descItem.ext)…")
-
-                // Update plist identifiers for templates/videos without suggestionMetadata
-                updatePlistIdentifiers(in: descItem.url, randomizedID: randomizedID)
-
-                // 1. Primary destination: matches descriptor extension bundle ID
-                let primaryParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(descItem.ext)/descriptors"
-                try await injectDescriptorFolder(
-                    folderURL: descItem.url,
-                    targetParentDir: primaryParentDir,
-                    destName: targetUUID,
-                    pairingPath: pairingPath,
-                    log: log
-                )
-
-                // 2. On iOS 18+, also dual-inject to modern .Posters.<Name>App container if applicable
-                var modernExt: String? = nil
-                if descItem.ext == "com.apple.WallpaperKit.CollectionsPoster" {
-                    modernExt = "com.apple.Posters.CollectionsPosterApp"
-                } else if descItem.ext == "com.apple.MercuryPoster" {
-                    modernExt = "com.apple.Posters.MercuryPosterApp"
+                let relative = String(file.path.dropFirst(source.path.count + 1))
+                let target = destination.appendingPathComponent(relative)
+                if (try file.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true {
+                    try fm.createDirectory(at: target, withIntermediateDirectories: true)
+                    continue
                 }
-
-                if let modernExt = modernExt, majorVer >= 18 {
-                    let modernParentDir = "\(normalizedContainer)/Library/Application Support/PRBPosterExtensionDataStore/\(structVersion)/Extensions/\(modernExt)/descriptors"
-                    try? await injectDescriptorFolder(
-                        folderURL: descItem.url,
-                        targetParentDir: modernParentDir,
-                        destName: targetUUID,
-                        pairingPath: pairingPath,
-                        log: log
-                    )
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let original = try Data(contentsOf: file)
+                let bytes: Data
+                if let object = try? PropertyListSerialization.propertyList(from: original, format: nil) {
+                    let updated = remapDescriptorIdentity(object, oldID: oldID, newID: newID)
+                    bytes = try PropertyListSerialization.data(fromPropertyList: updated, format: .binary, options: 0)
+                } else if let text = String(data: original, encoding: .utf8) {
+                    bytes = Data(remapDescriptorString(text, oldID: oldID, newID: newID).utf8)
+                } else {
+                    bytes = original
                 }
+                try bytes.write(to: target, options: .atomic)
             }
-
-            progress(Double(itemIndex + 1) / (totalItems + 1))
+            if let scanError { throw scanError }
+            _ = try PosterBoardStore.manifest(destination)
+            return destination
+        } catch {
+            try? fm.removeItem(at: destination)
+            throw error
         }
+    }
 
-        // Always force PosterBoard cache refresh and file protections reset
-        log("\n🔄 Forcing PosterBoard cache refresh and file protections reset…")
-        let stagePrefDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tendie_pref_\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: stagePrefDir, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: stagePrefDir)
+    private func remapDescriptorString(_ value: String, oldID: String, newID: String) -> String {
+        if value == oldID { return newID }
+        // A UUID is unambiguous even embedded in archived URL strings. Do not
+        // globally replace short package names/numbers in artwork or metadata.
+        if UUID(uuidString: oldID) != nil {
+            return value.replacingOccurrences(of: oldID, with: newID, options: .caseInsensitive)
         }
+        return value.replacingOccurrences(of: "/" + oldID + "/", with: "/" + newID + "/")
+    }
 
-        let prefPlistURL = stagePrefDir.appendingPathComponent("com.apple.PosterBoard.unprotectedUserDefaults.plist")
-        let prefDict: [String: Any] = [
-            "PBF_RESET_FILE_PROTECTIONS": true,
-            "PBF_LOCALE_DID_CHANGE": true,
-            "PersistedPosterContainerBundleIdentifiers": [
-                "com.apple.Posters.CollectionsPosterApp",
-                "com.apple.WallpaperKit.CollectionsPoster",
-                "com.apple.MercuryPoster",
-                "com.apple.Posters.MercuryPosterApp",
-                "com.apple.PhotosUIPrivate.PhotosPosterProvider"
-            ],
-            "CompletedPosterBundleIdentifierMigrations": [
-                "com.apple.Posters.UnityPosterApp.ExtragalacticPoster",
-                "com.apple.Posters.WeatherPosterApp.WeatherPoster",
-                "com.apple.Posters.UnityPosterApp.Unity2025Poster",
-                "com.apple.Posters.UnityPosterApp.UnityPosterExtension",
-                "com.apple.Posters.UnityPosterApp.RhizomePoster",
-                "com.apple.Posters.KaleidoscopePosterApp.KaleidoscopePoster"
-            ]
-        ]
-        let plistData = try PropertyListSerialization.data(fromPropertyList: prefDict, format: .binary, options: 0)
-        try plistData.write(to: prefPlistURL)
-
-        let targetPrefDir = "\(normalizedContainer)/Library/Preferences"
-        try await writeDirectoryTree(
-            sourceBaseDir: stagePrefDir,
-            targetBaseDir: targetPrefDir,
-            pairingPath: pairingPath,
-            log: log
-        )
-
-        // Also write to mobile global preferences for system daemon lookup
-        let mobilePrefDir = "/var/mobile/Library/Preferences"
-        try? await writeDirectoryTree(
-            sourceBaseDir: stagePrefDir,
-            targetBaseDir: mobilePrefDir,
-            pairingPath: pairingPath,
-            log: log
-        )
-        log("✅ PosterBoard preferences staged for reload")
-
-        progress(1.0)
-        log("\n🎉 All wallpapers injected successfully! Open Lock Screen settings or long-press lockscreen to choose your new wallpaper.")
+    private func remapDescriptorIdentity(_ object: Any, oldID: String, newID: String) -> Any {
+        if let string = object as? String {
+            return remapDescriptorString(string, oldID: oldID, newID: newID)
+        }
+        if let array = object as? [Any] {
+            return array.map { remapDescriptorIdentity($0, oldID: oldID, newID: newID) }
+        }
+        if let dictionary = object as? [String: Any] {
+            // Keyed-archive UIDs, numeric wallpaper IDs and all non-string values
+            // survive unchanged. Never partially randomize Wallpaper.plist.
+            return dictionary.mapValues { remapDescriptorIdentity($0, oldID: oldID, newID: newID) }
+        }
+        return object
     }
 
     // MARK: - Tree Writer Helper
@@ -702,7 +877,7 @@ public final class TendiesEngine {
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return [(ext: defaultExt, url: rootURL)] }
+        ) else { return [] }
 
         while let itemURL = enumerator.nextObject() as? URL {
             var isDir: ObjCBool = false
@@ -719,6 +894,6 @@ public final class TendiesEngine {
             }
         }
 
-        return results.isEmpty ? [(ext: defaultExt, url: rootURL)] : results
+        return results
     }
 }

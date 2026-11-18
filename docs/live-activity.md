@@ -16,8 +16,16 @@ credentials and certificates are never sent to the widget. Percent updates are
 coalesced (at most one per second) and serialized with final states. Success or
 failure ends the activity with a brief lock-screen summary; cancellation ends it
 immediately. A background-completed IPA without an in-memory continuation is
-shown as ready to continue, not installed. Stale data is labeled as last known
-status after 90 seconds without an update.
+shown as ready to continue, not installed. Import/editor readiness also ends the
+activity rather than publishing a permanently active ready state. Terminal
+summaries expire and dismiss after five seconds; cancellation is immediate.
+Launch clears stale/terminal activities retained by iOS. Foreground also dismisses
+orphaned activities and old ended summaries, without stopping the underlying
+download or installation. A fresh background download is preserved on background
+launch so its URLSession callback can reattach. Stale data is labeled as last known
+status after 90 seconds without an update; staleDate marks content stale, it does
+not itself dismiss the activity. After force-quit, cleanup needs the next app
+launch because there is no push server to end a stranded activity remotely.
 
 ## Important limitations
 
