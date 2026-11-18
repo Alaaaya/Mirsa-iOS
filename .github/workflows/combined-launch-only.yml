@@ -46,7 +46,10 @@ jobs:
           xcrun simctl install "$DEVICE" "$APP"
           xcrun simctl launch "$DEVICE" com.alaa.mirsa
           sleep 25
-          xcrun simctl spawn "$DEVICE" launchctl list | grep -q com.alaa.mirsa || { echo "app not running (crashed)"; exit 1; }
+          # Consume launchctl output completely before matching. grep -q can
+          # terminate its producer with SIGPIPE and falsely fail under pipefail.
+          xcrun simctl spawn "$DEVICE" launchctl list > launchctl-list.txt
+          awk '$1 ~ /^[1-9][0-9]*$/ && index($3, "com.alaa.mirsa") { running=1 } END { exit !running }' launchctl-list.txt || { cat launchctl-list.txt; echo "app has no running launchd PID"; exit 1; }
           xcrun simctl io "$DEVICE" screenshot launch.png
           echo "launch ok"
       - name: Verify wallpaper ownership regressions
