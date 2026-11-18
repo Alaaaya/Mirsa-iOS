@@ -126,6 +126,21 @@ const APP_GROUPS: &str = "com.apple.security.application-groups";
 fn concrete_group(s: &str) -> bool {
     s.starts_with("group.") && valid_id(s) && s.len() > "group.".len()
 }
+/// Preserve requested groups by default. Unsigned/stripped apps have no request
+/// to preserve: seed ONLY concrete groups explicitly granted by this profile,
+/// like profile-based signers. An explicit empty/custom key remains authoritative.
+/// Never derive a container ID from a bundle ID, team ID, or a wildcard grant.
+pub(super) fn prepare_app_groups(request: &mut Dictionary, allowed: &Dictionary, preserve: bool) {
+    if !preserve {
+        request.remove(APP_GROUPS);
+        return;
+    }
+    if request.contains_key(APP_GROUPS) { return; }
+    let Some(groups) = allowed.get(APP_GROUPS).and_then(Value::as_array) else { return };
+    let concrete: Vec<_> = groups.iter().filter_map(Value::as_string)
+        .filter(|s| concrete_group(s)).map(|s| Value::String(s.into())).collect();
+    if !concrete.is_empty() { request.insert(APP_GROUPS.into(), Value::Array(concrete)); }
+}
 fn group_authorized(s: &str, allowed: &Dictionary) -> bool {
     concrete_group(s) && allowed.get(APP_GROUPS).and_then(Value::as_array)
         .is_some_and(|a| a.iter().any(|v| v.as_string().is_some_and(|p| matches_id(p,s))))
@@ -470,6 +485,45 @@ mod app_group_mapping_tests {
             assert_eq!(out["keychain-access-groups"].as_array().unwrap()[1].as_string(),Some("PREFIX.com.gestaltx"));
             assert_eq!(out["com.apple.developer.team-identifier"].as_string(),Some("TEAM"));
             assert_eq!(out["application-identifier"].as_string(),Some(format!("PREFIX.{id}").as_str()));
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod profile_group_fallback_tests {
+    use super::*;
+    fn groups(v: &[&str]) -> Dictionary {
+        let mut d=Dictionary::new();
+        d.insert(APP_GROUPS.into(),Value::Array(v.iter().map(|s| Value::String((*s).into())).collect()));
+        d
+    }
+    #[test] fn stripped_app_uses_only_concrete_profile_groups() {
+        let mut request=Dictionary::new();
+        let allowed=groups(&["group.shared","group.*","group.bad/path"]);
+        prepare_app_groups(&mut request,&allowed,true);
+        assert_eq!(request,groups(&["group.shared"]));
+        let (signed,w)=constrain(&request,&allowed,"P","com.example","T",&BTreeMap::new(),false).unwrap();
+        assert_eq!(signed[APP_GROUPS],request[APP_GROUPS]); assert!(w.is_empty());
+    }
+    #[test] fn originals_and_explicit_custom_empty_groups_are_not_overwritten() {
+        for mut request in [groups(&["group.original"]),groups(&[])] {
+            let original=request.clone();
+            prepare_app_groups(&mut request,&groups(&["group.profile"]),true);
+            assert_eq!(request,original);
+        }
+    }
+    #[test] fn disabled_removes_even_custom_groups_and_does_not_seed() {
+        for mut request in [groups(&["group.custom"]),Dictionary::new()] {
+            prepare_app_groups(&mut request,&groups(&["group.profile"]),false);
+            assert!(!request.contains_key(APP_GROUPS));
+        }
+    }
+    #[test] fn missing_and_wildcard_only_profiles_never_invent_group() {
+        for allowed in [Dictionary::new(),groups(&["group.*"]),groups(&["group.bad/path"])] {
+            let mut request=Dictionary::new();
+            prepare_app_groups(&mut request,&allowed,true);
+            assert!(!request.contains_key(APP_GROUPS));
         }
     }
 }
