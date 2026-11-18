@@ -12,14 +12,28 @@ enum ExistingLibraryPlan {
             ?? (owner.split(separator: "/").last.map(String.init) ?? owner)
     }
 
+    static func isVerifiedRuntime(_ lib: ExistingProjectLibrary) -> Bool {
+        lib.kind == "runtime" && lib.provenance == "verifiedMirsaRuntime" && lib.owner == "Frameworks/MirsaLoadOrder.txt"
+    }
+
+    static func ownerLabel(_ owner: String) -> String {
+        if owner == "Frameworks/MirsaLoadOrder.txt" {
+            return tr5("Mirsa runtime list", "قائمة تحميل مرسى", de: "Mirsa-Laufzeitliste", ckb: "لیستی بارکردنی میرسا", kmr: "Lîsteya barkirina Mirsa")
+        }
+        return isMain(owner) ? tr("Main executable", "الملف الرئيسي", ckb: "فایلی سەرەکی", kmr: "Pelê sereke") : frameworkName(owner)
+    }
+
     static func provenanceLabel(_ lib: ExistingProjectLibrary) -> String {
-        isMain(lib.owner)
+        if isVerifiedRuntime(lib) {
+            return tr5("Via verified Mirsa runtime", "عبر محمّل مرسى المتحقق منه", de: "Über verifizierte Mirsa-Laufzeit", ckb: "لە ڕێگەی بارکەری پشتڕاستکراوەی میرسا", kmr: "Bi barkera piştrastkirî ya Mirsa")
+        }
+        return isMain(lib.owner)
             ? tr("Via main executable", "عبر الملف الرئيسي", ckb: "لە ڕێگەی فایلی سەرەکییەوە", kmr: "Bi riya pelê sereke")
             : tr("Via ", "عبر ", ckb: "لە ڕێگەی ", kmr: "Bi riya ") + frameworkName(lib.owner)
     }
 
     static func stateLabel(_ lib: ExistingProjectLibrary) -> String {
-        lib.provenance == "bundledDependency"
+        lib.bundledPath != nil
             ? tr("Bundled in the app", "موجودة داخل التطبيق", ckb: "لەناو ئەپەکەدایە", kmr: "Di nav sepanê de ye")
             : tr("Location unresolved", "المكان غير محدد", ckb: "شوێنەکەی دیارینەکراوە", kmr: "Cih nehatiye diyarkirin")
     }
@@ -52,27 +66,43 @@ enum ExistingLibraryPlan {
     }
 
     private static func normalized(_ edits: [ExistingLibraryEdit]) -> [ExistingLibraryEdit] {
-        edits.filter { !$0.removed.isEmpty || !$0.order.isEmpty }
+        edits.filter { !$0.removed.isEmpty || !$0.order.isEmpty || !($0.disabled ?? []).isEmpty }
     }
 
     static func toggleRemoved(_ lib: ExistingProjectLibrary, in edits: [ExistingLibraryEdit]) -> [ExistingLibraryEdit] {
         var out = edits
         var e = out.first { $0.owner == lib.owner } ?? ExistingLibraryEdit(owner: lib.owner)
         if let i = e.removed.firstIndex(of: lib.loadPath) { e.removed.remove(at: i) }
-        else { e.removed.append(lib.loadPath); e.order.removeAll { $0 == lib.loadPath } }
+        else { e.removed.append(lib.loadPath); e.disabled?.removeAll { $0 == lib.loadPath }; e.order.removeAll { $0 == lib.loadPath } }
         out.removeAll { $0.owner == lib.owner }
         out.append(e)
         return normalized(out)
     }
 
+    static func isDisabled(_ lib: ExistingProjectLibrary, in edits: [ExistingLibraryEdit]) -> Bool {
+        edits.first { $0.owner == lib.owner }?.disabled?.contains(lib.loadPath) ?? false
+    }
+
+    static func toggleDisabled(_ lib: ExistingProjectLibrary, in edits: [ExistingLibraryEdit]) -> [ExistingLibraryEdit] {
+        guard lib.kind != "file" else { return edits }
+        var out = edits
+        var e = out.first { $0.owner == lib.owner } ?? ExistingLibraryEdit(owner: lib.owner)
+        var disabled = e.disabled ?? []
+        if let i = disabled.firstIndex(of: lib.loadPath) { disabled.remove(at: i) }
+        else { disabled.append(lib.loadPath); e.removed.removeAll { $0 == lib.loadPath }; e.order.removeAll { $0 == lib.loadPath } }
+        e.disabled = disabled.isEmpty ? nil : disabled
+        out.removeAll { $0.owner == lib.owner }; out.append(e)
+        return normalized(out)
+    }
+
     /// Moves a kept library up (-1) or down (+1) among the kept libraries of its owner. Writes a full order list.
     static func move(_ lib: ExistingProjectLibrary, by delta: Int, libs: [ExistingProjectLibrary], in edits: [ExistingLibraryEdit]) -> [ExistingLibraryEdit] {
-        var kept = effective(libs, owner: lib.owner, edits: edits).filter { !$0.removed }.map(\.lib.loadPath)
+        var kept = effective(libs, owner: lib.owner, edits: edits).filter { !$0.removed && $0.lib.kind != "file" && !isDisabled($0.lib, in: edits) }.map(\.lib.loadPath)
         guard let i = kept.firstIndex(of: lib.loadPath), kept.indices.contains(i + delta) else { return edits }
         kept.swapAt(i, i + delta)
         var out = edits.filter { $0.owner != lib.owner }
         let removed = edits.first { $0.owner == lib.owner }?.removed ?? []
-        out.append(ExistingLibraryEdit(owner: lib.owner, removed: removed, order: kept))
+        out.append(ExistingLibraryEdit(owner: lib.owner, removed: removed, order: kept, disabled: edits.first { $0.owner == lib.owner }?.disabled))
         return normalized(out)
     }
 
@@ -95,7 +125,7 @@ struct ExistingLibrariesCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Button { withAnimation(.easeOut(duration: 0.25)) { open.toggle() } } label: {
                 HStack {
-                    Label(tr("Existing libraries", "المكتبات الموجودة", ckb: "کتێبخانە هەبووەکان", kmr: "Pirtûkxaneyên heyî"), systemImage: "books.vertical").font(.subheadline.weight(.semibold))
+                    Label(tr5("Already present", "موجودة مسبقاً", de: "Bereits vorhanden", ckb: "پێشتر هەیە", kmr: "Jixwe heyî"), systemImage: "books.vertical").font(.subheadline.weight(.semibold))
                     Spacer()
                     Text("\(libraries.count)").foregroundStyle(.secondary)
                     Image(systemName: open ? "chevron.up" : "chevron.down")
@@ -106,20 +136,22 @@ struct ExistingLibrariesCard: View {
                 ForEach(owners, id: \.self) { owner in
                     let rows = ExistingLibraryPlan.effective(libraries, owner: owner, edits: edits)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(ExistingLibraryPlan.isMain(owner) ? tr("Main executable", "الملف الرئيسي", ckb: "فایلی سەرەکی", kmr: "Pelê sereke") : ExistingLibraryPlan.frameworkName(owner))
+                        Text(ExistingLibraryPlan.ownerLabel(owner))
                             .font(.caption.weight(.semibold))
                         ForEach(Array(rows.enumerated()), id: \.element.lib.id) { idx, row in
-                            let keptIdx = rows.prefix(idx).filter { !$0.removed }.count
-                            let keptCount = rows.filter { !$0.removed }.count
+                            let keptIdx = rows.prefix(idx).filter { !$0.removed && $0.lib.kind != "file" && !ExistingLibraryPlan.isDisabled($0.lib, in: edits) }.count
+                            let keptCount = rows.filter { !$0.removed && $0.lib.kind != "file" && !ExistingLibraryPlan.isDisabled($0.lib, in: edits) }.count
                             HStack(spacing: 8) {
                                 VStack(alignment: .leading, spacing: 2) {
+                                    Text(URL(fileURLWithPath: row.lib.loadPath).lastPathComponent).font(.subheadline.weight(.medium))
+                                        .strikethrough(row.removed)
                                     Text(row.lib.loadPath).font(.caption2.monospaced()).lineLimit(2)
                                         .strikethrough(row.removed)
                                     Text(ExistingLibraryPlan.provenanceLabel(row.lib) + " · " + ExistingLibraryPlan.stateLabel(row.lib))
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
-                                if !row.removed {
+                                if !row.removed && row.lib.kind != "file" && !ExistingLibraryPlan.isDisabled(row.lib, in: edits) {
                                     Button { edits = ExistingLibraryPlan.move(row.lib, by: -1, libs: libraries, in: edits) } label: { Image(systemName: "arrow.up") }
                                         .disabled(keptIdx == 0)
                                         .accessibilityLabel(tr("Move up", "تحريك لفوق", ckb: "بۆ سەرەوە", kmr: "Biçe jor"))
@@ -127,15 +159,34 @@ struct ExistingLibrariesCard: View {
                                         .disabled(keptIdx >= keptCount - 1)
                                         .accessibilityLabel(tr("Move down", "تحريك لتحت", ckb: "بۆ خوارەوە", kmr: "Biçe jêr"))
                                 }
+                                if row.lib.kind != "file" {
+                                Toggle(isOn: Binding(get: { !ExistingLibraryPlan.isDisabled(row.lib, in: edits) }, set: { enabled in
+                                    if enabled == ExistingLibraryPlan.isDisabled(row.lib, in: edits) { edits = ExistingLibraryPlan.toggleDisabled(row.lib, in: edits) }
+                                })) {
+                                    Text(tr5("Enabled", "مفعّلة", de: "Aktiv", ckb: "چالاکە", kmr: "Çalak"))
+                                }.labelsHidden().disabled(row.removed)
+                                    .accessibilityLabel(tr5("Enable library", "تفعيل المكتبة", de: "Bibliothek aktivieren", ckb: "چالاککردنی کتێبخانە", kmr: "Pirtûkxaneyê çalak bike"))
                                 Button { if row.removed { edits = ExistingLibraryPlan.toggleRemoved(row.lib, in: edits) } else { pendingRemove = row.lib } } label: {
                                     Image(systemName: row.removed ? "arrow.uturn.backward" : "trash")
                                 }.tint(row.removed ? .green : .red)
                                 .accessibilityLabel(row.removed ? tr("Restore", "استرجاع", ckb: "گەڕاندنەوە", kmr: "Vegerîne") : tr("Remove", "إزالة", ckb: "لابردن", kmr: "Rakirin"))
+                                } else {
+                                    Text(tr5("File only", "ملف فقط", de: "Nur Datei", ckb: "تەنها فایل", kmr: "Tenê pel"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
                             }
                             .buttonStyle(.borderless)
                             .opacity(row.removed ? 0.55 : 1)
                         }
                     }
+                }
+                Text(tr5("Some entries may be original app libraries, not tweaks. Files without a detected load command are read-only.", "بعض الملفات ممكن تكون مكتبات أصلية للتطبيق، مو تويكات. الملف اللي ما لقينا أمر تحميل إلو بيظهر للعرض بس.", de: "Einige Einträge können originale App-Bibliotheken sein, keine Tweaks. Dateien ohne erkannten Ladebefehl sind schreibgeschützt.", ckb: "هەندێک فایل ڕەنگە کتێبخانەی ئەسڵیی ئەپ بن، نەک تویک. فایلە بێ فەرمانی بارکردن تەنها پیشان دەدرێن.", kmr: "Hin pel dikarin pirtûkxaneyên orîjînal ên sepanê bin, ne tweak. Pelên bê fermana barkirinê tenê tên nîşandan."))
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text(tr5("Disabling removes the load command but keeps the file. Deleting also removes an unshared standalone dylib when safe. This cannot disable code loaded dynamically by the app.", "التعطيل بيوقف أمر التحميل وبيخلّي الملف. الحذف بيشيل ملف dylib غير المشترك إذا كان آمن. التحميل الديناميكي من التطبيق ما بيتعطّل بهالطريقة.", de: "Deaktivieren entfernt den Ladebefehl, behält aber die Datei. Löschen entfernt sichere, nicht geteilte dylibs. Dynamisches Laden durch die App wird nicht verhindert.", ckb: "ناچالاککردن فەرمانی بارکردن لادەبات، فایلەکە دەمێنێتەوە. سڕینەوە فایلە سەلامەت و ناهاوبەشەکان لادەبات. بارکردنی داینامیکی ڕاناگیرێت.", kmr: "Neçalakirin fermana barkirinê radike, pel dimîne. Jêbirin pelên ewle û ne hevpar radike. Barkirina dînamîk nayê rawestandin."))
+                    .font(.caption2).foregroundStyle(.secondary)
+                if libraries.contains(where: { ExistingLibraryPlan.isVerifiedRuntime($0) }) {
+                    Text(tr5("Verified Mirsa runtime entries are controlled by their runtime list, not by main executable load commands. Disabling or removing an entry removes it from that list and keeps its bundled file. Shared dependencies cannot be disabled this way. Other loaders remain read-only unless their format is verified.", "الملفات التابعة لمحمّل مرسى المتحقق منه بتتحكّم فيها قائمة التحميل، مو أوامر الملف الرئيسي. التعطيل أو الإزالة بيشيلها من القائمة وبيخلّي الملف. المكتبة اللي غيرها محتاجها ما بتنطفي بهالطريقة. المحمّلات التانية بتضل للعرض بس لنتحقق من صيغتها.", de: "Verifizierte Mirsa-Laufzeiteinträge werden über ihre Liste gesteuert. Deaktivieren oder Entfernen behält die Datei. Geteilte Abhängigkeiten lassen sich so nicht deaktivieren. Andere Loader bleiben ohne Formatprüfung schreibgeschützt.", ckb: "دانە پشتڕاستکراوەکانی بارکەری میرسا بە لیست کۆنترۆڵ دەکرێن. ناچالاککردن یان لابردن فایلەکە دەپارێزێت. پشتبەستنە هاوبەشەکان ناچالاک ناکرێن. بارکەرەکانی تر تا پشتڕاستکردنەوە تەنها پیشان دەدرێن.", kmr: "Daneyên barkera Mirsa ya piştrastkirî bi lîsteyê tên kontrolkirin. Neçalakirin an rakirin pel diparêze. Girêdanên hevpar nayên neçalakirin. Barkerên din heta piştrastkirinê tenê tên xwendin."))
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 if !edits.isEmpty {
                     Button { edits = ExistingLibraryPlan.reset() } label: {
