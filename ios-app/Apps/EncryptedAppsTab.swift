@@ -360,10 +360,10 @@ struct EncryptedAppsTab: View {
         HStack(alignment: .top, spacing: MirsaSpacing.s) {
             Image(systemName: "lock.shield.fill").font(.system(size: MirsaIconSize.l))
                 .foregroundStyle(MirsaPalette.accentSoft).frame(width: MirsaIconSize.well)
-            Text(t("Install App Store IPAs exactly as they are. Mirsa does not sign, change or decrypt them. They only open on an iPhone signed in to the Apple ID that bought them.",
-                   "ثبّت ملفات IPA من App Store متل ما هي. مرسى ما بيوقّعها ولا بيعدّلها ولا بيفك تشفيرها. بتشتغل بس على آيفون مسجّل دخول بنفس حساب Apple يلي اشتراها.",
-                   "IPAکانی App Store وەک خۆیان دابمەزرێنە. Mirsa واژۆیان ناکات، دەستکارییان ناکات و ڕەمزیان ناکاتەوە. تەنها لەسەر ئایفۆنێک دەکرێنەوە کە بە هەمان Apple ID کە کڕیویەتی چووبێتە ژوورەوە.",
-                   "IPA yên App Store wekî xwe saz bike. Mirsa wan îmze nake, naguherîne û şîfreya wan venake. Tenê li ser iPhone ku bi heman Apple ID ya ku ew kirî ketiye vedibin."))
+            Text(t("Install App Store IPAs exactly as they are — no signing, no changes — and they only open on an iPhone signed in to the Apple ID that bought them. If the app is yours, you can also decrypt it on this iPhone to edit it or inject tweaks: the decrypted copy goes to the Apps tab.",
+                   "ثبّت ملفات IPA من App Store متل ما هي — بلا توقيع وبلا تعديل — وبتشتغل بس على آيفون مسجّل دخول بنفس حساب Apple يلي اشتراها. وإذا التطبيق إلك، فيك كمان تفك تشفيره على هالآيفون لتعدّله أو تحقن تويكس: النسخة المفكوكة بتروح على تبويب التطبيقات.",
+                   "IPAکانی App Store وەک خۆیان دابمەزرێنە — بەبێ واژۆ و بەبێ دەستکاری — و تەنها لەسەر ئایفۆنێک دەکرێنەوە کە بە هەمان Apple ID کە کڕیویەتی چووبێتە ژوورەوە. ئەگەر ئەپەکە هی خۆتە، دەتوانیت لەسەر ئەم ئایفۆنە ڕەمزی بکەیتەوە بۆ دەستکاریکردن یان چەسپاندنی تویک: کۆپییە ڕەمزکراوەکە دەچێتە بەشی ئەپەکان.",
+                   "IPA yên App Store wekî xwe saz bike — bê îmze û bê guhertin — û tenê li ser iPhone ku bi heman Apple ID ya ku ew kirî ketiye vedibin. Heke sepan ya te ye, tu dikarî li ser vê iPhone şîfreya wê vekî da ku biguherînî an tweak bixî: kopiya vekirî diçe tabloya Sepanan."))
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -391,6 +391,11 @@ struct EncryptedAppsTab: View {
                          "ما بينتهي بعد 7 أيام، وما بدو إعادة توقيع.",
                          "دوای ٧ ڕۆژ بەسەرناچێت و پێویستی بە دووبارە واژۆکردن نییە.",
                          "Piştî 7 rojan naqede û ji nû ve îmzekirin ne pêwîst e."))
+            benefitRow("lock.open",
+                       t("Decrypt an app you bought, on this iPhone, to edit it or inject tweaks. The decrypted copy goes to the Apps tab.",
+                         "فك تشفير تطبيق اشتريته، على هالآيفون، لتعدّله أو تحقن تويكس. النسخة المفكوكة بتروح على تبويب التطبيقات.",
+                         "ئەپێک کە کڕیوتە لەسەر ئەم ئایفۆنە ڕەمز بکەرەوە بۆ دەستکاریکردن یان چەسپاندنی تویک. کۆپییە ڕەمزکراوەکە دەچێتە بەشی ئەپەکان.",
+                         "Sepanek ku te kirî li ser vê iPhone şîfre veke da ku biguherînî an tweak bixî. Kopiya vekirî diçe tabloya Sepanan."))
         }
         .padding(MirsaSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -560,6 +565,9 @@ private struct EncryptedEntryCard: View {
                 .padding(10)
                 .background(StoreLuxe.failed.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            if store.decryptingID == entry.id {
+                ProgressView().tint(MirsaPalette.accentSoft)
+            }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { onInstall() } label: {
                     InstallKeyedLabel(key: "entry:" + entry.id.uuidString) {
@@ -575,6 +583,15 @@ private struct EncryptedEntryCard: View {
                 .buttonStyle(.mirsaPress)
                 .disabled(store.busy != nil)
                 .opacity(store.busy != nil ? 0.55 : 1)
+                if entry.encryptedBinary == true, entry.hasSinf {
+                    Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                        Label(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"), systemImage: "lock.open")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.mirsaSecondary)
+                    .disabled(store.busy != nil)
+                    .accessibilityIdentifier("encrypted-decrypt")
+                }
                 // Share and Delete are icon-only so long labels never wrap mid-word; VoiceOver keeps the full label.
                 StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
                     .labelStyle(.iconOnly).frame(width: 64)
