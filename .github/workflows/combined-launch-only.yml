@@ -21,6 +21,8 @@ jobs:
         with:
           workspaces: rust-core
           key: simulator
+      - name: Verify imported IPA pre-existing library safety
+        run: python3 scripts/appstore/preinjected-tests.py
       - name: Build simulator FFI
         env:
           IPHONEOS_DEPLOYMENT_TARGET: "18.0"
