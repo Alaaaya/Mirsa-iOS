@@ -307,7 +307,7 @@ final class PersonalProjectIntegrationTests: XCTestCase {
             // NavigationStack content is not exposed through the hosted accessibility tree on the simulator
             // (only the bar title is). Fall back to OCR of the actually drawn pixels; assertions stay unchanged.
             if !requiredText.allSatisfy({ text.contains($0) }) {
-                let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 2
+                let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 3
                 let shot = UIGraphicsImageRenderer(size: window.bounds.size, format: fmt).image { _ in
                     _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
                 }
