@@ -51,6 +51,17 @@ struct RepoApp: Identifiable, Hashable, Sendable {
     var screenshots: [URL] = []
 }
 
+struct RepoNews: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let caption: String
+    let imageURL: URL?
+    let tint: String?
+    let date: Date?
+    let url: URL?
+    let appID: String?
+}
+
 struct RepoSource: Codable, Identifiable, Hashable {
     /// Fixed identity of the built-in Mirsa source.
     static let canonicalID = "mirsa.canonical-source"
@@ -87,6 +98,7 @@ final class SourcesStore: ObservableObject {
 
     @Published var sources: [RepoSource] = [] { didSet { save() } }
     @Published var apps: [String: [RepoApp]] = [:]   // by source url
+    @Published var presentation: [String: DecodedSource] = [:]
     @Published var loading: Set<String> = []
     @Published private(set) var loadErrors: [String: String] = [:]
     private var requests: [String: Task<Bool, Never>] = [:]
@@ -145,7 +157,6 @@ final class SourcesStore: ObservableObject {
         let queue = availableUpdates()
         for (app, location) in queue {
             guard !Task.isCancelled else { break }
-            AppViewModel.shared?.selectedTab = .apps
             if !(await AppsStore.shared.installFromURL(app.downloadURL, location: location, appID: app.bundleID)) { break }
         }
     }
@@ -197,6 +208,7 @@ final class SourcesStore: ObservableObject {
         hiddenIDs.remove(id)
         if !sources.contains(where: { MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(src.url) }) {
             apps[src.url] = nil
+            presentation[src.url] = nil
             requests[src.url]?.cancel()
             loadErrors[src.url] = nil
             loading.remove(src.url)
@@ -304,6 +316,7 @@ final class SourcesStore: ObservableObject {
             // Deleting a source while it loads must not resurrect its cache or row.
             guard sources.contains(where: { $0.url == url }) else { return false }
             apps[url] = parsed.apps
+            presentation[url] = parsed
             loadErrors[url] = nil
             for i in sources.indices where sources[i].url == url {
                 var source = sources[i]
@@ -330,6 +343,20 @@ final class SourcesStore: ObservableObject {
         let iconURL: String?
         let tint: String?
         let updated: Date?
+        let headerURL: URL?
+        let subtitle: String?
+        let description: String?
+        let website: URL?
+        let news: [RepoNews]
+    }
+
+    /// Source content is untrusted. Never open executable/custom URL schemes or credential URLs.
+    nonisolated static func contentURL(_ raw: Any?, base: URL) -> URL? {
+        guard let text = raw as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let resolved = URL(string: text, relativeTo: base)?.absoluteURL else { return nil }
+        guard let scheme = resolved.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              resolved.host?.isEmpty == false, resolved.user == nil, resolved.password == nil else { return nil }
+        return resolved
     }
 
     nonisolated static func decodeSource(_ data: Data, base: URL) throws -> DecodedSource {
@@ -342,7 +369,21 @@ final class SourcesStore: ObservableObject {
             name: (root["name"] as? String) ?? (meta["repoName"] as? String) ?? (meta["name"] as? String),
             iconURL: (root["iconURL"] as? String) ?? (root["icon"] as? String) ?? (meta["repoIcon"] as? String),
             tint: (root["tintColor"] as? String) ?? (root["tint"] as? String),
-            updated: parsed.compactMap(\.date).compactMap(Self.date).max())
+            updated: parsed.compactMap(\.date).compactMap(Self.date).max(),
+            headerURL: contentURL(root["headerURL"], base: base),
+            subtitle: root["subtitle"] as? String,
+            description: (root["description"] as? String) ?? (root["localizedDescription"] as? String),
+            website: contentURL(root["website"], base: base),
+            news: ((root["news"] as? [Any]) ?? []).enumerated().compactMap { index, value in
+                guard let item = value as? [String: Any],
+                      let title = item["title"] as? String,
+                      !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return RepoNews(id: "\(index)|\(item["identifier"] as? String ?? title)", title: title,
+                    caption: item["caption"] as? String ?? "",
+                    imageURL: contentURL(item["imageURL"], base: base), tint: item["tintColor"] as? String,
+                    date: (item["date"] as? String).flatMap(Self.date),
+                    url: contentURL(item["url"], base: base), appID: item["appID"] as? String)
+            })
     }
 
     nonisolated static func date(_ s: String) -> Date? {
@@ -584,6 +625,8 @@ struct SourceDetailView: View {
     @ObservedObject private var store: SourcesStore
     @ObservedObject private var apps = AppsStore.shared
     @State private var query = ""
+    @State private var selectedNewsApp: RepoApp?
+    @Environment(\.openURL) private var openURL
 
     init(source: RepoSource, store: SourcesStore = .shared, onSelectIPA: ((URL) async throws -> Void)? = nil) {
         self.source = source
@@ -595,6 +638,14 @@ struct SourceDetailView: View {
         let all = store.listing(for: source.url)
         let shown = store.listing(for: source.url, query: query)
         List {
+            sourceHeader
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            if let metadata = store.presentation[source.url], !metadata.news.isEmpty {
+                newsSection(metadata.news, all: all)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(shown) { app in
                 RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA)
                     .listRowBackground(Color.clear)
@@ -618,22 +669,153 @@ struct SourceDetailView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $query)
+        // Keep search visible without relying on the navigation drawer, which
+        // can collapse behind the custom glass navigation chrome.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(searchPrompt, text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .accessibilityIdentifier("source-app-search")
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel(MirsaTr.lit("Clear"))
+                    .accessibilityIdentifier("source-app-search-clear")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .appsGlass(cornerRadius: MirsaRadius.l)
+            .padding(.horizontal, MirsaSpacing.page)
+            .padding(.vertical, 8)
+        }
         .task(id: source.url) { await store.ensureLoaded(source.url) }
         .refreshable { await store.refresh(source.url) }
-        .navigationTitle(source.name)
+        .navigationTitle(currentSource.name)
+        .sheet(item: $selectedNewsApp) { app in
+            NavigationStack {
+                List { RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA) }
+                    .navigationTitle(app.name)
+                    .mirsaScreen()
+            }
+        }
         .mirsaScreen()
+    }
+
+    private var currentSource: RepoSource { store.sources.first { $0.id == source.id } ?? source }
+    private var sourceTint: Color { Color(hex: currentSource.tint) ?? .accentColor }
+
+    private var sourceHeader: some View {
+        let metadata = store.presentation[source.url]
+        return VStack(alignment: .leading, spacing: 14) {
+            if let url = metadata?.headerURL {
+                sourceImage(url, height: 132)
+                    .accessibilityIdentifier("source-detail-banner")
+            }
+            HStack(spacing: 12) {
+                RemoteIcon(url: SourceURLAction.shareableURL(currentSource.iconURL ?? ""), size: 56, corner: 14)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(currentSource.name).font(.title2.bold())
+                    if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            if let description = metadata?.description, !description.isEmpty {
+                Text(description).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let website = metadata?.website {
+                Link(destination: website) {
+                    Label(website.host ?? website.absoluteString, systemImage: "arrow.up.right.square")
+                        .font(.subheadline.weight(.semibold))
+                }.tint(sourceTint).accessibilityIdentifier("source-detail-website")
+            }
+        }
+        .padding(16)
+        .appsGlass(cornerRadius: MirsaRadius.l, tint: sourceTint)
+        .accessibilityIdentifier("source-detail-header")
+    }
+
+    private func sourceImage(_ url: URL, height: CGFloat) -> some View {
+        AsyncImage(url: url) { phase in
+            if let image = phase.image { image.resizable().scaledToFill() }
+            else { Rectangle().fill(sourceTint.opacity(0.12)).overlay { Image(systemName: "photo").foregroundStyle(.secondary) } }
+        }
+        .frame(height: height).frame(maxWidth: .infinity)
+        .clipped().clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityHidden(true)
+    }
+
+    private var newsTitle: String {
+        switch L.lang {
+        case .english: return "Source news"
+        case .arabic: return "أخبار السورس"
+        case .german: return "Neuigkeiten der Quelle"
+        case .sorani: return "هەواڵەکانی سەرچاوە"
+        case .kurmanji: return "Nûçeyên çavkaniyê"
+        }
+    }
+
+    private func newsSection(_ news: [RepoNews], all: [RepoApp]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(newsTitle).font(.headline).accessibilityAddTraits(.isHeader)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(news) { item in
+                        let app = all.first { $0.bundleID == item.appID }
+                        Button {
+                            if let app { selectedNewsApp = app }
+                            else if let url = item.url { openURL(url) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if let image = item.imageURL { sourceImage(image, height: 120) }
+                                if let date = item.date { Text(date, style: .date).font(.caption).foregroundStyle(.secondary) }
+                                Text(item.title).font(.headline).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
+                                if !item.caption.isEmpty { Text(item.caption).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                            }
+                            .frame(width: 252, alignment: .leading).padding(14)
+                            .appsGlass(cornerRadius: MirsaRadius.l, tint: Color(hex: item.tint) ?? sourceTint)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(app == nil && item.url == nil)
+                        .accessibilityIdentifier("source-news-\(item.id)")
+                    }
+                }.padding(.vertical, 4)
+            }
+        }.accessibilityIdentifier("source-detail-news")
+    }
+
+    private var searchPrompt: String {
+        switch L.lang {
+        case .english: return "Search apps"
+        case .arabic: return "ابحث عن تطبيق"
+        case .german: return "Apps suchen"
+        case .sorani: return "گەڕان بۆ ئەپ"
+        case .kurmanji: return "Li sepanan bigere"
+        }
     }
 }
 
-private struct RepoAppRow: View {
+struct RepoAppRow: View {
     let app: RepoApp
     let installed: ManagedApp?
     var onSelectIPA: ((URL) async throws -> Void)? = nil
+    @ObservedObject private var apps = AppsStore.shared
     @StateObject private var downloader = PersonalIPADownloader()
     @State private var selecting = false
     @State private var selectionError: String?
     @State private var showInfo = false
+    @State private var selectToken: UUID?
+    @ObservedObject private var tracker = InstallTracker.shared
+    /// Identity is the exact URL the user tapped, never a feed-supplied bundle ID.
+    private var requestKey: String { InstallTracker.urlKey(app.downloadURL) }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -648,18 +830,35 @@ private struct RepoAppRow: View {
                 }
             }
             Spacer()
-            Button { install() } label: {
-                Text(buttonTitle).lineLimit(1).fixedSize()
+            Button {
+                if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) }
+                else { install() }
+            } label: {
+                InstallKeyedLabel(key: requestKey) {
+                    Text(buttonTitle).lineLimit(1).fixedSize()
+                }
             }
             .buttonStyle(.mirsaSecondary)
             .controlSize(.small)
-            .disabled(selecting || AppsStore.shared.busy != nil)
+            .disabled(!downloading && (selecting || apps.busy != nil || apps.downloadTask != nil || tracker.current != nil))
+            .onChange(of: downloader.fraction) { _, f in
+                if onSelectIPA != nil, downloader.active { tracker.set(selectToken, phase: .downloading, fraction: f) }
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture { showInfo = true }
-        .sheet(isPresented: $showInfo) { RepoAppInfo(app: app, install: install) }
+        .sheet(isPresented: $showInfo) { RepoAppInfo(app: app, requestKey: requestKey, install: install) }
         .alert(tr("Notice", "تنبيه"), isPresented: Binding(get: { selectionError != nil }, set: { if !$0 { selectionError = nil } })) { Button(tr("OK", "تمام")) { selectionError = nil } } message: { Text(selectionError ?? "") }
-        .overlay(alignment: .bottom) { if selecting { ProgressView(value: downloader.fraction).padding(4) } }
+
+    }
+
+    private var downloading: Bool {
+        onSelectIPA != nil ? downloader.active : apps.isDownloading && apps.sourceDownloadURL == app.downloadURL
+    }
+
+    private var downloadFraction: Double? {
+        if onSelectIPA != nil { return downloader.fraction }
+        return apps.downloadHasKnownSize ? apps.progress : nil
     }
 
     private var buttonTitle: String {
@@ -669,30 +868,33 @@ private struct RepoAppRow: View {
     }
 
     private func install() {
-        showInfo = false
         if let onSelectIPA {
             guard !selecting else { return }
             selecting = true
             Task { @MainActor in
                 var file: URL?
-                defer { if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }; selecting = false }
+                let token = tracker.begin(key: requestKey, cancel: { downloader.cancel() })
+                selectToken = token
+                defer { tracker.end(token); selectToken = nil; if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }; selecting = false }
                 do {
                     let url = try await downloader.download(app.downloadURL.absoluteString)
                     file = url
+                    tracker.set(token, phase: .preparing)
                     try await onSelectIPA(url)
                 } catch { selectionError = error.localizedDescription }
             }
             return
         }
         let target = installed?.location   // update keeps its place; new apps ask Container or Real
-        AppViewModel.shared?.selectedTab = .apps
-        Task { await AppsStore.shared.installFromURL(app.downloadURL, location: target, appID: app.bundleID) }
+        Task { await apps.installFromURL(app.downloadURL, location: target, appID: app.bundleID) }
     }
 }
 
 private struct RepoAppInfo: View {
     let app: RepoApp
+    let requestKey: String
     let install: () -> Void
+    @ObservedObject private var tracker = InstallTracker.shared
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -704,10 +906,15 @@ private struct RepoAppInfo: View {
                             Text(app.developer).foregroundStyle(.secondary)
                         }
                     }
-                    Button(action: install) {
-                        Text(tr("Install", "ثبّت")).frame(maxWidth: .infinity)
+                    Button {
+                        if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) } else { install() }
+                    } label: {
+                        InstallKeyedLabel(key: requestKey) { Text(tr("Install", "ثبّت")) }
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.mirsaPrimary)
+                    .disabled(!tracker.isActive(requestKey) && tracker.current != nil)
+                    .accessibilityIdentifier("source-detail-install")
                     HStack {
                         if !app.version.isEmpty { Label("v" + app.version, systemImage: "tag") }
                         if let s = app.size { Label(ByteCountFormatter.string(fromByteCount: s, countStyle: .file), systemImage: "internaldrive") }
@@ -747,5 +954,68 @@ private struct SourceRowBackground: ViewModifier {
         // One solid card for both themes; the source colour is a light wash.
         content.appsGlass(cornerRadius: MirsaRadius.l, tint: tint)
             .mirsaAppear()
+    }
+}
+
+/// Inline transfer control. Unknown length stays indeterminate, never a made-up percent.
+struct SourceDownloadIndicator: View {
+    let fraction: Double?
+    var phase: InstallRequest.Phase = .downloading
+    var cancellable = true
+
+    private var cancelLabel: String {
+        switch L.lang {
+        case .english: return "Cancel download"
+        case .arabic: return "إلغاء التحميل"
+        case .german: return "Download abbrechen"
+        case .sorani: return "هەڵوەشاندنەوەی داگرتن"
+        case .kurmanji: return "Daxistinê betal bike"
+        }
+    }
+
+    private var phaseLabel: String {
+        switch (phase, L.lang) {
+        case (.downloading, _): return ""
+        case (.preparing, .english): return "Preparing…"
+        case (.preparing, .arabic): return "عم نجهّز…"
+        case (.preparing, .german): return "Vorbereiten…"
+        case (.preparing, .sorani): return "ئامادە دەکرێت…"
+        case (.preparing, .kurmanji): return "Tê amadekirin…"
+        case (.installing, .english): return "Installing…"
+        case (.installing, .arabic): return "عم نثبّت…"
+        case (.installing, .german): return "Installieren…"
+        case (.installing, .sorani): return "دادەمەزرێت…"
+        case (.installing, .kurmanji): return "Tê sazkirin…"
+        }
+    }
+
+    private var shown: Double? { phase == .downloading ? fraction : nil }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                if let value = shown {
+                    Circle().stroke(Color.accentColor.opacity(0.2), lineWidth: 2)
+                    Circle().trim(from: 0, to: CGFloat(min(1, max(0, value))))
+                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                } else {
+                    ProgressView().controlSize(.mini)
+                }
+                if shown != nil && cancellable { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
+            }
+            .frame(width: 22, height: 22)
+            if let value = shown {
+                Text(min(1, max(0, value)), format: .percent.precision(.fractionLength(0)))
+                    .font(.caption.monospacedDigit())
+            } else if phase != .downloading {
+                Text(phaseLabel).font(.caption).lineLimit(1)
+            }
+        }
+        .frame(minHeight: 30)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(phase == .downloading && cancellable ? cancelLabel : phaseLabel)
+        .accessibilityValue(shown.map { String(Int(min(1, max(0, $0)) * 100)) + "%" } ?? "")
+        .accessibilityIdentifier("source-inline-download")
     }
 }

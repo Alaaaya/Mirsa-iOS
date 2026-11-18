@@ -11,6 +11,16 @@ def inspect(path):
         assert len(plists) == 1, plists
         name = plists[0]
         info = plistlib.loads(z.read(name))
+        def primary_only(value):
+            if isinstance(value, dict):
+                assert "CFBundleAlternateIcons" not in value, "Alternate app icons must not ship"
+                for child in value.values():
+                    primary_only(child)
+            elif isinstance(value, list):
+                for child in value:
+                    primary_only(child)
+        primary_only(info)
+        assert not any("/MirsaIcon" in n for n in z.namelist()), "Alternate icon resources must not ship"
         executable = name.rsplit("/", 1)[0] + "/" + info["CFBundleExecutable"]
         magic = z.read(executable)[:4]
         assert magic in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"), magic

@@ -1,0 +1,12 @@
+RESTORATION-PROOF
+removal commit 3036e03 removed Tendies screen from ToolsTab/ContentView/TendiesView; original Photos feature commit 943581e (31c1076 docs)
+TendiesView.swift now byte-identical to 3036e03^ (git blob):
+1a0288de8dbdda5539750fc10463acb2c6e0ed6e
+1a0288de8dbdda5539750fc10463acb2c6e0ed6e
+ios-app/VideoWallpaper.swift old 9cb5cd2f0212cae5dc9c5e61db5b5933dfad7232 cur 9cb5cd2f0212cae5dc9c5e61db5b5933dfad7232
+IDENTICAL
+ios-app/TendiesEngine.swift old ae7afdc343489df9fc8fdf495f50c77fa693aeea cur ae7afdc343489df9fc8fdf495f50c77fa693aeea
+IDENTICAL
+ios-app/TendiesModel.swift old 0fb1172efd871599d8d5e3406cb6408862a8587c cur 0fb1172efd871599d8d5e3406cb6408862a8587c
+IDENTICAL
+Files import and de/ckb/kmr strings in TendiesView removed (not in original). ToolsTab tab label uses tr() with ar/en/ckb/kmr. Inspector changes untouched.

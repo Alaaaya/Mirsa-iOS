@@ -95,9 +95,9 @@ struct ForgeView: View {
         }
         .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
         .navigationBarTitleDisplayMode(.inline).mirsaScreen()
-        .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
+        .fileImporter(isPresented: $picking, allowedContentTypes: IPAPick.types) { r in
             guard case .success(let url) = r else { return }
-            Task { await handle(url) }
+            Task { do { let c = try await IPAPick.privateCopy(url); await handle(c) } catch { self.error = error.localizedDescription } }
         }
         .task { await store.refreshNames() }
         .confirmationDialog(forgeDeleteMessage(toDelete?.appName ?? ""), isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }), titleVisibility: .visible) {
@@ -141,6 +141,9 @@ struct ForgeProjectView: View {
     let id: UUID
     @ObservedObject private var store = ForgeStore.shared
     @State private var prompt = ""
+    @State private var attachments = ForgeAttachmentState()
+    private var attachedClasses: [String] { attachments.classes(for: id) }
+    private var attachedBinding: Binding<[String]> { Binding(get: { attachments.classes(for: id) }, set: { attachments.set($0, for: id) }) }
     @State private var error: String?
     @State private var note: String?
     @State private var shareURL: URL?
@@ -163,6 +166,7 @@ struct ForgeProjectView: View {
 
     @State private var importingDylib = false
     @State private var publishing = false
+    @State private var porting = false
     var body: some View { if let p = store.project(id) { content(p) } else { Text("") } }
 
     private func run(_ work: @escaping () async throws -> Void) { let startedVersion = store.project(id)?.currentVersion?.id; Task { error = nil; needsInspector = false; note = nil; fullLog = nil; failedVersionID = nil; do { try await work() } catch let f as ForgeBuildFailure { self.error = f.summary; self.fullLog = f.log; self.failedVersionID = startedVersion } catch ForgeClient.Failure.inspectorNeeded(let m) { self.error = m; self.needsInspector = true } catch { self.error = error.localizedDescription } } }
@@ -178,9 +182,17 @@ struct ForgeProjectView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: $prompt).frame(height: 90).scrollContentBackground(.hidden).padding(6).background(Color.black.opacity(0.3)).cornerRadius(10).foregroundStyle(.white)
                         .overlay(alignment: .topLeading) { if prompt.isEmpty { Text(tr("Describe the tweak you want…", "اوصف التويك اللي بدك ياه…", ckb: "تویکەکە باس بکە…", kmr: "Tweaka xwe vebêje…")).foregroundStyle(.white.opacity(0.4)).padding(.horizontal, 12).padding(.vertical, 14).allowsHitTesting(false) } }
+                    if !attachedClasses.isEmpty {
+                        HStack { Image(systemName: "paperclip"); Text(ForgeCaptureContext.chipText(attachedClasses.count)).font(.caption); Spacer(); Button(ForgeCaptureContext.removeText()) { attachments.clear(id) }.font(.caption) }
+                            .padding(8).background(Color.white.opacity(0.1)).cornerRadius(10)
+                    }
                     forgeButton("square.and.arrow.down.on.square", ForgeDylibText.importTitle) { importingDylib = true }
                     HStack {
-                        forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run { try await store.generate(id, prompt: prompt); prompt = "" } }
+                        forgeButton("sparkles", tr("Create", "أنشئ", ckb: "دروست بکە", kmr: "Çêke")) { run {
+                            let outgoing = attachments.wirePrompt(prompt, for: id)
+                            guard outgoing.count <= ForgeCaptureContext.promptLimit else { throw ForgeClient.Failure.message(ForgeCaptureContext.reasonText(.tooLong)) }
+                            try await store.generate(id, prompt: outgoing); prompt = ""; attachments.clear(id)
+                        } }
                         Menu {
                             Button(tr("Inject inspector", "احقن المفتش", ckb: "پشکنەر بچەسپێنە", kmr: "Lêkolîner bixe")) { run { let ipa = try await store.injectInspector(id); NotificationCenter.default.post(name: .mirsaIncomingIPA, object: ipa) } }
                                 .disabled(!store.builderReady)
@@ -188,8 +200,16 @@ struct ForgeProjectView: View {
                         } label: { forgeLabel("scope", tr("Inspector", "المفتش", ckb: "پشکنەر", kmr: "Lêkolîner")) }
                     }
                 }.padding(14).appsGlass(cornerRadius: MirsaRadius.l)
-                ForgeFeaturesView(id: id, prompt: $prompt, showInspector: $showInspector)
+                ForgeFeaturesView(id: id, prompt: $prompt, attachedClasses: attachedBinding, showInspector: $showInspector)
                 ForgePreciseSection(id: id, prompt: $prompt)
+                if let queued = store.queuedNotice {
+                    HStack(alignment: .top) {
+                        Image(systemName: "tray.full")
+                        Text(queued).font(.footnote)
+                        Spacer()
+                        Button { store.queuedNotice = nil } label: { Image(systemName: "xmark") }.frame(width: 44, height: 44)
+                    }.padding(12).appsGlass(cornerRadius: MirsaRadius.l)
+                }
                 if let notice = store.fixNotice {
                     HStack(alignment: .top) {
                         Image(systemName: "checkmark.shield")
@@ -226,7 +246,10 @@ struct ForgeProjectView: View {
                         forgeButton("chevron.left.forwardslash.chevron.right", tr("Edit code", "عدّل الكود", ckb: "کۆد", kmr: "Kod")) { draft = v.code; editing = true }
                         forgeButton("arrow.triangle.2.circlepath", tr("App updated", "التطبيق تحدّث", ckb: "ئەپ نوێبوو", kmr: "App nû bû")) { updating = true }
                         forgeButton("globe", ForgePublishSheet.title) { publishing = true }
+                        forgeButton("arrow.left.arrow.right", ForgePortText.title) { porting = true }
                     }
+                    ForgeGuideSubtitle(feature: .port)
+                    ForgeBlackBoxCard()
                     ForgeGuideSubtitle(feature: .publish)
                     if !v.explain.isEmpty { Text(v.explain).font(.footnote).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
                     if p.versions.contains(where: { $0.importedInfo != nil }) { ForgeImportedDylibsView(id: id, versions: p.versions.filter { $0.importedInfo != nil }, openInspector: { showInspector = true }).padding(14).appsGlass(cornerRadius: MirsaRadius.l) }
@@ -259,6 +282,7 @@ struct ForgeProjectView: View {
         .navigationBarHidden(true)
         .mirsaScreen()
         .sheet(isPresented: $importingDylib) { ForgeDylibImportSheet(id: id) }
+        .sheet(isPresented: $porting) { ForgePortView(projectID: id) }
         .sheet(isPresented: $publishing) { ForgePublishSheet(id: id) { note = $0 } }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url, onDeb: debID.map { d in { Task { @MainActor in try? await Task.sleep(nanoseconds: 600_000_000); run { shareURL = try await store.exportDeb(d) } } } }) }
         .confirmationDialog(tr("Edit version", "تعديل النسخة", ckb: "دەستکاری وەشان", kmr: "Guhertoyê biguherîne"), isPresented: $versionMenu) {
@@ -283,9 +307,9 @@ struct ForgeProjectView: View {
             NavigationView { TextEditor(text: $draft).font(.system(.footnote, design: .monospaced)).padding()
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(tr("Save", "حفظ", ckb: "پاشەکەوت", kmr: "Tomar bike")) { store.editCode(id, code: draft); editing = false } } } }
         }
-        .fileImporter(isPresented: $updating, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
+        .fileImporter(isPresented: $updating, allowedContentTypes: IPAPick.types) { r in
             guard case .success(let url) = r else { return }
-            run { let c = try await store.updateTarget(id, ipa: url); note = c ? tr("New app version found, rebuilt.", "لقيت نسخة جديدة وعاد بنيت.", ckb: "وەشانی نوێ دۆزرایەوە.", kmr: "Guhertoya nû hat dîtin.") : tr("Rebuilt.", "عاد بنيت.", ckb: "دووبارە دروستکرا.", kmr: "Ji nû ve hat çêkirin.") }
+            run { let url = try await IPAPick.privateCopy(url); let c = try await store.updateTarget(id, ipa: url); note = c ? tr("New app version found, rebuilt.", "لقيت نسخة جديدة وعاد بنيت.", ckb: "وەشانی نوێ دۆزرایەوە.", kmr: "Guhertoya nû hat dîtin.") : tr("Rebuilt.", "عاد بنيت.", ckb: "دووبارە دروستکرا.", kmr: "Ji nû ve hat çêkirin.") }
         }
     }
 }

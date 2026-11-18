@@ -56,20 +56,34 @@ public enum Bag {
 
         APLogger.logRequest(method: "GET", url: url.absoluteString, headers: headers)
 
-        let request = try HTTPClient.Request(
-            url: url.absoluteString,
-            method: .GET,
-            headers: .init(headers),
-        )
-
-        let response: HTTPClient.Response
-        do {
-            let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
-            response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
-        } catch { throw AuthenticationServiceError.wrapping(error, stage: .bag, transport: true) }
-        guard response.status == .ok else {
-            throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+        // Bag routing can move between Apple pods. Resolve a bounded, Apple-only
+        // chain explicitly even when the caller correctly disables automatic redirects.
+        var target = url
+        var finalResponse: HTTPClient.Response?
+        for hop in 0...3 {
+            _ = try Authenticator.approvedEndpoint(target)
+            let request = try HTTPClient.Request(url: target.absoluteString, method: .GET,
+                                                 headers: .init(headers), body: .none)
+            let response: HTTPClient.Response
+            do {
+                let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
+                response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
+            } catch { throw AuthenticationServiceError.wrapping(error, stage: .bag, transport: true) }
+            if [301, 302, 303, 307, 308].contains(Int(response.status.code)) {
+                guard hop < 3, let location = response.headers.first(name: "location"),
+                      let next = URL(string: location, relativeTo: target)?.absoluteURL else {
+                    throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+                }
+                target = try Authenticator.approvedEndpoint(next)
+                continue
+            }
+            guard response.status == .ok else {
+                throw AuthenticationServiceError(stage: .bag, httpStatus: Int(response.status.code))
+            }
+            finalResponse = response
+            break
         }
+        guard let response = finalResponse else { throw AuthenticationServiceError(stage: .bag) }
 
         APLogger.logResponse(
             status: response.status.code,
@@ -132,22 +146,13 @@ public enum Bag {
         return url
     }
 
-    /// The bag advertises the native auth endpoint without the `/fast/` sub-path
-    /// that the login flow requires; the no-trailing-slash variant 301s to an
-    /// HTML page. The legacy authenticate route also requires its trailing
-    /// slash; the bare route can return a bodyless 301 without Location.
+    /// Keep Apple's advertised native route verbatim. `/native` and
+    /// `/native/fast/` are different services, not slash variants. Rewriting
+    /// the former to the latter can reject an otherwise valid signed request.
+    /// Only the legacy MZFinance route needs a trailing slash.
     static func normalizedAuthEndpoint(from urlString: String) -> URL? {
         guard var comps = URLComponents(string: urlString) else { return nil }
-        if comps.host == "auth.itunes.apple.com" {
-            var path = comps.path
-            while path.hasSuffix("/") {
-                path.removeLast()
-            }
-            if !path.hasSuffix("/fast") {
-                path += "/fast"
-            }
-            comps.path = path + "/"
-        } else if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
+        if comps.scheme?.lowercased() == "https", let host = comps.host?.lowercased() {
             let legacyHost =
                 host == "buy.itunes.apple.com" || host.range(of: "^p[0-9]+-buy[.]itunes[.]apple[.]com$", options: .regularExpression) != nil
             if legacyHost, comps.path == "/WebObjects/MZFinance.woa/wa/authenticate" {

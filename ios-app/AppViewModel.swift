@@ -9,7 +9,17 @@ import AirliftFFI
 final class AppViewModel: ObservableObject {
 
     /// Static sink for Rust log lines — set in init so AirliftApp can forward them.
-    static var sharedLogSink: ((String) -> Void)? = nil
+    private static var diagnosticSink: ((String) -> Void)?
+    static var sharedLogSink: ((String) -> Void)? {
+        get { diagnosticSink }
+        set {
+            if let sink = newValue {
+                let stream = MirsaDiagnosticPrivacy.Stream()
+                diagnosticSink = { sink(stream.line($0)) }
+            }
+            else { diagnosticSink = nil }
+        }
+    }
     static weak var shared: AppViewModel? = nil
 
     // MARK: - Pairing
@@ -41,7 +51,11 @@ final class AppViewModel: ObservableObject {
     @Published var cards: [CardItem] = []
     @Published var cardFlashPhase: FlashPhase = .idle
     @Published var cardFlashProgress: Double = 0
-    @Published var cardFlashLog: [String] = []
+    @Published private var safe_cardFlashLog: [String] = []
+    var cardFlashLog: [String] {
+        get { safe_cardFlashLog }
+        set { safe_cardFlashLog = MirsaDiagnosticPrivacy.appending(old: safe_cardFlashLog, new: newValue) }
+    }
 
     enum FlashPhase: Equatable {
         case idle, running, done(ok: Bool)
@@ -69,7 +83,11 @@ final class AppViewModel: ObservableObject {
 
     @Published var passthmFlashPhase: FlashPhase = .idle
     @Published var passthmFlashProgress: Double = 0
-    @Published var passthmFlashLog: [String] = []
+    @Published private var safe_passthmFlashLog: [String] = []
+    var passthmFlashLog: [String] {
+        get { safe_passthmFlashLog }
+        set { safe_passthmFlashLog = MirsaDiagnosticPrivacy.appending(old: safe_passthmFlashLog, new: newValue) }
+    }
 
     // MARK: - Tendies / Wallpapers tab
     @Published var tendieItems: [TendieItem] = []
@@ -77,8 +95,23 @@ final class AppViewModel: ObservableObject {
     @Published var isDetectingContainer: Bool = false
     @Published var resetPBProtections: Bool = true
     @Published var tendiesFlashPhase: FlashPhase = .idle
+    /// Titles skipped by the last install because they were proven already installed.
+    @Published var tendiesSkippedTitles: [String] = []
+    /// False when the last install had nothing new (everything skipped): no respring offer.
+    @Published var tendiesInstalledNew = true
     @Published var tendiesFlashProgress: Double = 0
-    @Published var tendiesFlashLog: [String] = []
+    @Published private var safe_tendiesFlashLog: [String] = []
+    var tendiesFlashLog: [String] {
+        get { safe_tendiesFlashLog }
+        set {
+            let sanitized = MirsaDiagnosticPrivacy.appending(old: safe_tendiesFlashLog, new: newValue)
+            let previousCount = safe_tendiesFlashLog.count
+            safe_tendiesFlashLog = sanitized
+            if sanitized.count > previousCount {
+                MirsaWallpaperEvidence.captureVisible(Array(sanitized.dropFirst(previousCount)))
+            }
+        }
+    }
     @Published var isNeoSpringing: Bool = false
 
     // MARK: - AirCard UI States & Properties
@@ -102,7 +135,11 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Shared
     @Published var errorMessage: String? = nil
-    @Published var log: [String] = []
+    @Published private var safe_log: [String] = []
+    var log: [String] {
+        get { safe_log }
+        set { safe_log = MirsaDiagnosticPrivacy.appending(old: safe_log, new: newValue) }
+    }
     @Published var showDeletePairingConfirm: Bool = false
 
     private let storageKeys = [
@@ -116,6 +153,8 @@ final class AppViewModel: ObservableObject {
 
     init() {
         Self.shared = self
+        tendiesFlashLog = MirsaWallpaperEvidence.restored()
+        MirsaWallpaperEvidence.record("SESSION OPEN; restored evidence only, gallery/respring unverified")
         refreshPairingFile()
         loadSavedCards()
         refreshNetworkStatus()
@@ -152,36 +191,43 @@ final class AppViewModel: ObservableObject {
         scanDocumentsForTendies()
     }
 
+    private var tendiesScanRunning = false
+
     func scanDocumentsForTendies() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let tendiesDir = TendiesEngine.tendiesStorageDirectory
-        
-        var foundURLs: [URL] = []
-        if let rootItems = try? FileManager.default.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
-            for u in rootItems where u.pathExtension.lowercased() == "tendies" {
-                let target = tendiesDir.appendingPathComponent(u.lastPathComponent)
-                if u.path != target.path && !FileManager.default.fileExists(atPath: target.path) {
-                    try? FileManager.default.copyItem(at: u, to: target)
+        // onAppear and the Documents scanner can arrive together. Copying a large
+        // .tendies archive here used to block the main actor (and dock animation).
+        guard !tendiesScanRunning else { return }
+        tendiesScanRunning = true
+        Task { @MainActor in
+            defer { tendiesScanRunning = false }
+            let foundURLs = await Task.detached(priority: .utility) {
+                let fm = FileManager.default
+                let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let tendiesDir = TendiesEngine.tendiesStorageDirectory
+                var found: [URL] = []
+                if let roots = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
+                    for source in roots where source.pathExtension.lowercased() == "tendies" {
+                        let target = tendiesDir.appendingPathComponent(source.lastPathComponent)
+                        if source.path != target.path && !fm.fileExists(atPath: target.path) {
+                            // Failed copies must not be imported as if they succeeded.
+                            do { try fm.copyItem(at: source, to: target) }
+                            catch { continue }
+                        }
+                        found.append(target)
+                    }
                 }
-                foundURLs.append(target)
-            }
-        }
-        if let storedItems = try? FileManager.default.contentsOfDirectory(at: tendiesDir, includingPropertiesForKeys: nil) {
-            for u in storedItems where u.pathExtension.lowercased() == "tendies" {
-                if !foundURLs.contains(u) {
-                    foundURLs.append(u)
+                if let stored = try? fm.contentsOfDirectory(at: tendiesDir, includingPropertiesForKeys: nil) {
+                    for url in stored where url.pathExtension.lowercased() == "tendies" {
+                        if !found.contains(url) { found.append(url) }
+                    }
                 }
+                return found
+            }.value
+            // Check current state AFTER the worker returns, not a stale pre-scan snapshot.
+            let newURLs = foundURLs.filter { url in
+                !tendieItems.contains(where: { $0.fileName == url.lastPathComponent })
             }
-        }
-
-        let newURLs = foundURLs.filter { url in
-            !tendieItems.contains(where: { $0.fileName == url.lastPathComponent })
-        }
-
-        guard !newURLs.isEmpty else { return }
-
-        Task {
-            await self.importTendieFiles(urls: newURLs)
+            if !newURLs.isEmpty { await importTendieFiles(urls: newURLs) }
         }
     }
 
@@ -1252,16 +1298,27 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func importTendieFiles(urls: [URL]) async {
-        guard !urls.isEmpty else { return }
+    @discardableResult
+    func importTendieFiles(urls: [URL]) async -> [UUID] {
+        guard !urls.isEmpty else { return [] }
+        var importedIDs: [UUID] = []
         var importedCount = 0
         var lastImportedName = ""
         for url in urls {
             do {
-                let item = try await TendiesEngine.shared.importTendie(from: url)
+                let imported = try await TendiesEngine.shared.importTendie(from: url)
                 await MainActor.run {
+                    var item = imported
+                    // A Documents scan may finish after an explicit import/edit.
+                    // Reconcile against CURRENT state instead of replacing its identity.
+                    if let existing = self.tendieItems.first(where: { $0.fileName == item.fileName }) {
+                        item.id = existing.id
+                        item.name = existing.name
+                        item.isSelected = existing.isSelected
+                    }
                     self.tendieItems.removeAll(where: { $0.fileName == item.fileName })
                     self.tendieItems.append(item)
+                    importedIDs.append(item.id)
                     self.saveTendieItems()
                     importedCount += 1
                     lastImportedName = item.name
@@ -1271,6 +1328,40 @@ final class AppViewModel: ObservableObject {
                     self.errorMessage = "Failed to import \(url.lastPathComponent): \(error.localizedDescription)"
                 }
             }
+        }
+        return importedIDs
+    }
+
+    /// Replaces one existing row's file with a freshly generated archive. Same row, same id and selection;
+    /// the stored file is only swapped after the new archive validated and imported.
+    @MainActor
+    func replaceTendie(item: TendieItem, with archive: URL) async -> Bool {
+        let fm = FileManager.default
+        let staging = fm.temporaryDirectory.appendingPathComponent("tendie_replace_" + UUID().uuidString, isDirectory: true)
+        do {
+            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+            defer { try? fm.removeItem(at: staging) }
+            let named = staging.appendingPathComponent(item.fileName)
+            try fm.copyItem(at: archive, to: named)
+            var fresh = try await TendiesEngine.shared.inspectTendie(from: named)
+            guard let index = tendieItems.firstIndex(where: { $0.id == item.id }) else {
+                // Row was deleted meanwhile: neither resurrect it nor touch its file.
+                return false
+            }
+            let current = tendieItems[index]
+            fresh.id = current.id
+            fresh.name = current.name
+            fresh.isSelected = current.isSelected
+            fresh.relativePath = current.relativePath
+            // No suspension between the identity check, atomic file swap and row update.
+            try TendiesEngine.shared.storeTendie(from: named, fileName: current.relativePath)
+            tendieItems[index] = fresh
+            saveTendieItems()
+            try? fm.removeItem(at: archive)
+            return true
+        } catch {
+            errorMessage = WallpaperMakerStrings.text(.error)
+            return false
         }
     }
 
@@ -1282,15 +1373,6 @@ final class AppViewModel: ObservableObject {
 
     func autoDetectPosterBoardContainer(silent: Bool = false) async {
         let pairingPath = PairingController.pairingFilePath()
-        guard FileManager.default.fileExists(atPath: pairingPath) else {
-            if !silent {
-                await MainActor.run {
-                    self.errorMessage = "No pairing file active. Pair your device first in the Pairing tab."
-                }
-            }
-            return
-        }
-
         await MainActor.run { self.isDetectingContainer = true }
         defer {
             Task { @MainActor in self.isDetectingContainer = false }
@@ -1305,25 +1387,28 @@ final class AppViewModel: ObservableObject {
         } catch {
             if !silent {
                 await MainActor.run {
-                    self.errorMessage = "Auto-detect failed: \(error.localizedDescription)\nEnsure LocalDevVPN is connected and device is unlocked."
+                    self.tendiesFlashLog.append(error.localizedDescription)
+                    self.errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .containerUnavailable)
                 }
             }
         }
     }
 
     func flashSelectedTendies() async {
+        guard tendiesFlashPhase != .running else { return }
         let selected = tendieItems.filter { $0.isSelected }
         guard !selected.isEmpty else {
             errorMessage = "No wallpapers selected to flash."
             return
         }
 
+        // Set the shared operation gate before discovery can suspend.
+        tendiesFlashPhase = .running
+        tendiesFlashProgress = 0
+        tendiesFlashLog = []
+        tendiesSkippedTitles = []
+        tendiesInstalledNew = true
         let pairingPath = PairingController.pairingFilePath()
-        guard FileManager.default.fileExists(atPath: pairingPath) else {
-            errorMessage = "No pairing file active. Please pair your device first."
-            return
-        }
-
         var container = posterBoardContainer.trimmingCharacters(in: .whitespacesAndNewlines)
         if container.isEmpty {
             do {
@@ -1331,17 +1416,15 @@ final class AppViewModel: ObservableObject {
                 self.posterBoardContainer = container
                 UserDefaults.standard.set(container, forKey: "aircard.posterboard_container")
             } catch {
-                errorMessage = "PosterBoard container could not be found automatically. Ensure LocalDevVPN is connected and iPhone is unlocked."
+                tendiesFlashPhase = .done(ok: false)
+                tendiesFlashLog.append(error.localizedDescription)
+                errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .containerUnavailable)
                 return
             }
         }
 
-        tendiesFlashPhase = .running
-        tendiesFlashProgress = 0
-        tendiesFlashLog = []
-
         do {
-            try await TendiesEngine.shared.flashTendies(
+            let skipped = try await TendiesEngine.shared.flashTendies(
                 items: selected,
                 containerPath: container,
                 resetProtections: resetPBProtections,
@@ -1357,18 +1440,19 @@ final class AppViewModel: ObservableObject {
                     }
                 }
             )
+            tendiesSkippedTitles = skipped
+            tendiesInstalledNew = selected.contains { !skipped.contains($0.name) }
             tendiesFlashPhase = .done(ok: true)
             tendiesFlashProgress = 1.0
-            tendiesFlashLog.append("🎉 Wallpapers applied successfully!")
-            tendiesFlashLog.append("⚡ Triggering NeoSpring respring...")
+            if tendiesInstalledNew { tendiesFlashLog.append(WallpaperMakerStrings.text(.copyVerified)) }
+            // Copy success is already in the log. Do not open ContentView's
+            // Notice alert over the separate respring confirmation.
+            // Respring remains an explicit user action via TendiesView's prompt.
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.isNeoSpringing = true
-                RespringHelper.triggerNeoSpring()
-            }
         } catch {
             tendiesFlashLog.append("❌ Error: \(error.localizedDescription)")
             tendiesFlashPhase = .done(ok: false)
+            errorMessage = WallpaperMakerStrings.text(TendiesConnectionHint.matches(error.localizedDescription) ? .connectionHint : .applyFailed)
         }
     }
 

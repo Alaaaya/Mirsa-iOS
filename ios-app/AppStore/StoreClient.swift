@@ -8,12 +8,19 @@ actor MirsaStoreClient {
     private let vault: any MirsaStoreVault
     private let engine: any MirsaStoreEngine
     private let packages: any MirsaStorePackages
+    private var machineGUID = ""
     private var prepared = false
     private var busy = false
+    private var invalidating = false
+    private var activeDownload: Task<URL, Error>?
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
     private var generation: UInt64 = 0
     private struct Challenge {
         let session: any MirsaStoreAuthentication
         let email: String
+        // Memory-only, discarded with this five-minute challenge. Never persisted.
+        let password: String
+        var submittedCodes: Set<String> = []
         let id: UUID
         let expires: Date
         var attempts: Int
@@ -32,8 +39,8 @@ actor MirsaStoreClient {
     }
 
     func search(term: String, country: String, limit: Int = 25) async throws -> [MirsaStoreApp] {
-        let run = try begin()
-        defer { busy = false }
+        let run = try await beginQueued()
+        defer { finishOperation() }
         let country = try MirsaStorePolicy.country(country)
         guard Configuration.storeId(for: country) != nil, !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               term.utf8.count <= 256 else { throw MirsaStoreError.invalidInput }
@@ -46,7 +53,7 @@ actor MirsaStoreClient {
 
     func signIn(email: String, password: String) async throws -> MirsaStoreLogin {
         let run = try begin()
-        defer { busy = false }
+        defer { finishOperation() }
         challenge = nil
         try vault.remove("challenge")
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -56,8 +63,7 @@ actor MirsaStoreClient {
             let session = try await engine.authentication()
             try check(run)
             let id = UUID()
-            try vault.write(Data(password.utf8), key: "challenge")
-            challenge = Challenge(session: session, email: email, id: id,
+            challenge = Challenge(session: session, email: email, password: password, id: id,
                                   expires: Date().addingTimeInterval(300), attempts: 0)
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 300_000_000_000)
@@ -76,23 +82,27 @@ actor MirsaStoreClient {
     }
 
     /// Retains the *same* SAP signer, routing and cookies for a bounded 2FA continuation.
-    func verify(code: String) async throws -> MirsaStoreLogin {
+    func verify(code: String, password: String? = nil) async throws -> MirsaStoreLogin {
         let run = try begin()
-        defer { busy = false }
+        defer { finishOperation() }
         guard var pending = challenge, pending.expires > Date(), pending.attempts < 3 else {
             challenge = nil
             try vault.remove("challenge")
             throw MirsaStoreError.signedOut
         }
-        guard code.utf8.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else {
-            throw MirsaStoreError.invalidInput
-        }
+        guard let code = MirsaStoreCode.valid(code) else { throw MirsaStoreError.invalidVerificationCode }
+        // The UI submits only the code. The original password stays in this short-lived,
+        // memory-only challenge, never in another text field or persistent storage.
+        if let password, password != pending.password { throw MirsaStoreError.verificationPasswordChanged }
+        guard !pending.submittedCodes.contains(code) else { throw MirsaStoreError.duplicateVerificationCode }
         pending.attempts += 1
+        pending.submittedCodes.insert(code)
         challenge = pending
         do { return try await authenticate(code: code, run: run) }
         catch {
             // Keep the same session for a corrected code, but never beyond three submissions.
-            if (challenge?.attempts ?? 3) >= 3 {
+            let diagnostic = safe(error) as? MirsaStoreAuthDiagnostic
+            if diagnostic?.appleCode == "5020" || (challenge?.attempts ?? 3) >= 3 {
                 challenge = nil
                 try? vault.remove("challenge")
             }
@@ -100,10 +110,34 @@ actor MirsaStoreClient {
         }
     }
 
-    func signOut() throws {
+    /// Invalidates suspended work synchronously, including safe(error) inside that work.
+    /// Never wait for our own commerce reservation from this internal path.
+    private func invalidateSession() {
         generation &+= 1
         challenge = nil
+        activeDownload?.cancel()
         packages.cancel()
+    }
+
+    /// Account switching preserves the session, but terminates writers before deleting partials.
+    func stopDownloadsAndPurge() async throws {
+        guard !invalidating else { throw MirsaStoreError.busy }
+        invalidating = true
+        defer { invalidating = false }
+        let hadDownload = activeDownload != nil
+        invalidateSession()
+        if hadDownload && busy {
+            await withCheckedContinuation { idleWaiters.append($0) }
+        }
+        StoreResumeStore.clearAll()
+    }
+
+    func signOut() async throws {
+        try await stopDownloadsAndPurge()
+        try removeSession()
+    }
+
+    private func removeSession() throws {
         // Keep the stable machine identifier; deleting it on each logout changes identity.
         var deletionError: Error?
         do { try vault.remove("account") } catch { deletionError = error }
@@ -113,8 +147,8 @@ actor MirsaStoreClient {
 
     /// Explicit free-license action only. Download never silently acquires or purchases.
     func acquireFreeApp(_ app: MirsaStoreApp) async throws {
-        let run = try begin()
-        defer { busy = false }
+        let run = try await beginQueued()
+        defer { finishOperation() }
         var owner = try requiredAccount()
         do {
             let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
@@ -127,12 +161,24 @@ actor MirsaStoreClient {
         } catch { throw safe(error) }
     }
 
+    /// Public fresh metadata in the current account store. Never acquires a licence.
+    func freeAppForRecovery(_ app: MirsaStoreApp) async throws -> MirsaStoreApp {
+        let run = try await beginQueued()
+        defer { finishOperation() }
+        let owner = try requiredAccount()
+        let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
+        try check(run)
+        guard fresh.id == app.id, fresh.bundleID == app.bundleID else { throw MirsaStoreError.invalidPackage }
+        try MirsaStorePolicy.requireFree(fresh.price)
+        return MirsaStoreApp(fresh)
+    }
+
     func availableVersions(_ app: MirsaStoreApp) async throws -> [String] {
-        let run = try begin()
-        defer { busy = false }
+        let run = try await beginQueued()
+        defer { finishOperation() }
         var owner = try requiredAccount()
         do {
-            let versions = try await engine.versions(account: &owner, bundleID: app.bundleID)
+            let versions = try await engine.versions(account: &owner, app: app.software)
             try check(run)
             try persist(owner)
             return try versions.map {
@@ -142,11 +188,94 @@ actor MirsaStoreClient {
         } catch { throw safe(error) }
     }
 
+    private var versionNameCache: [String: MirsaStoreServerClient.VersionMetadata] = [:]
+
+    /// Read-only metadata has its own snapshots, never the commerce reservation.
+    private func versionName(_ app: MirsaStoreApp, id: String, run: UInt64) async throws -> MirsaStoreServerClient.VersionMetadata {
+        try check(run)
+        var owner = try requiredAccount()
+        let cacheKey = String(generation) + ":" + String(app.id) + ":" + id
+        if let cached = versionNameCache[cacheKey] { return cached }
+        do {
+            let name = try await engine.versionMetadata(account: &owner, app: app.software, version: id)
+            try check(run)
+            guard !name.isEmpty, name.utf8.count <= 128,
+                  !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw MirsaStoreError.invalidPackage
+            }
+            let entry = MirsaStoreServerClient.VersionMetadata(externalVersionID: id, status: "ready", version: name)
+            versionNameCache[cacheKey] = entry
+            return entry
+        } catch {
+            try check(run)
+            return .init(externalVersionID: id, status: "unavailable", version: nil)
+        }
+    }
+
+    func versionMetadata(_ app: MirsaStoreApp, externalVersionIDs: [String]) async throws -> [MirsaStoreServerClient.VersionMetadata] {
+        guard !externalVersionIDs.isEmpty, externalVersionIDs.count <= 20,
+              Set(externalVersionIDs).count == externalVersionIDs.count,
+              externalVersionIDs.allSatisfy(MirsaStoreServerClient.numericVersion) else { throw MirsaStoreError.invalidInput }
+        try prepare()
+        let run = generation
+        try check(run)
+        let ids = externalVersionIDs
+        var entries: [MirsaStoreServerClient.VersionMetadata] = []
+        // Bound active requests to six; each child owns an independent account copy.
+        try await withThrowingTaskGroup(of: MirsaStoreServerClient.VersionMetadata.self) { group in
+            var cursor = 0
+            for _ in 0..<min(6, ids.count) {
+                let id = ids[cursor]; cursor += 1
+                group.addTask { try await self.versionName(app, id: id, run: run) }
+            }
+            while let entry = try await group.next() {
+                try check(run)
+                entries.append(entry)
+                if cursor < ids.count {
+                    let id = ids[cursor]; cursor += 1
+                    group.addTask { try await self.versionName(app, id: id, run: run) }
+                }
+            }
+        }
+        return entries
+    }
+
+    /// One explicit free Get action, one serial reservation and the SAME mutated account.
+    /// Never called by a background download or for a paid/unknown-price app.
+    func acquireFreeAppAndDownload(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
+        let run = try await beginQueued()
+        defer { finishOperation() }
+        var owner = try requiredAccount()
+        let version = try MirsaStorePolicy.version(externalVersionID)
+        var completed: URL?
+        do {
+            let fresh = try await engine.lookup(bundleID: app.bundleID, country: try country(owner))
+            try check(run)
+            guard fresh.id == app.id, fresh.bundleID == app.bundleID else { throw MirsaStoreError.invalidPackage }
+            try MirsaStorePolicy.requireFree(fresh.price)
+            try await engine.acquire(account: &owner, app: fresh)
+            try check(run)
+            // Retain refreshed buy-response cookies even when downloading later fails.
+            try persist(owner)
+            let output = try await engine.manifest(account: &owner, app: fresh, version: version)
+            try check(run)
+            try validate(output: output, app: app, version: version)
+            try persist(owner)
+            let url = try await fetchPackage(output: output, bundleID: app.bundleID, account: owner.email)
+            completed = url
+            try check(run)
+            return url
+        } catch {
+            if let completed { MirsaManagedTmp.end(completed.deletingLastPathComponent()) }
+            throw safe(error)
+        }
+    }
+
     /// Returns a local encrypted IPA with the account's original SINF, not a decrypted/re-signed app.
     /// Caller may hand this URL to the local importer. No automatic install or sharing.
     func downloadOwnedApp(_ app: MirsaStoreApp, externalVersionID: String? = nil) async throws -> URL {
-        let run = try begin()
-        defer { busy = false }
+        let run = try await beginQueued()
+        defer { finishOperation() }
         var owner = try requiredAccount()
         let version = try MirsaStorePolicy.version(externalVersionID)
         var completed: URL?
@@ -158,7 +287,7 @@ actor MirsaStoreClient {
             try check(run)
             try validate(output: output, app: app, version: version)
             try persist(owner)
-            let url = try await packages.fetch(output: output, bundleID: app.bundleID)
+            let url = try await fetchPackage(output: output, bundleID: app.bundleID, account: owner.email)
             completed = url
             try check(run)
             return url
@@ -168,12 +297,28 @@ actor MirsaStoreClient {
         }
     }
 
+    private func fetchPackage(output: DownloadOutput, bundleID: String, account: String) async throws -> URL {
+        let packages = self.packages
+        let task = Task {
+            try await StoreResumeContext.$account.withValue(account) {
+                try Task.checkCancellation()
+                return try await packages.fetch(output: output, bundleID: bundleID)
+            }
+        }
+        activeDownload = task
+        defer { activeDownload = nil }
+        return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+    }
+
+    private func finishOperation() {
+        busy = false
+        let waiters = idleWaiters; idleWaiters = []
+        waiters.forEach { $0.resume() }
+    }
+
     private func authenticate(code: String, run: UInt64) async throws -> MirsaStoreLogin {
         guard let pending = challenge else { throw MirsaStoreError.signedOut }
-        guard let bytes = try vault.read("challenge"), let password = String(data: bytes, encoding: .utf8) else {
-            throw MirsaStoreError.signedOut
-        }
-        let owner = try await pending.session.authenticate(email: pending.email, password: password, code: code)
+        let owner = try await pending.session.authenticate(email: pending.email, password: pending.password, code: code)
         try check(run)
         guard challenge?.id == pending.id, pending.expires > Date() else {
             throw MirsaStoreError.operationCancelled
@@ -206,11 +351,23 @@ actor MirsaStoreClient {
             try vault.write(Data(guid.utf8), key: "machine")
         }
         try vault.remove("challenge")
+        if let account = try loadAccount(), !account.password.isEmpty { try persist(account) }
+        machineGUID = guid
         engine.configure(guid: guid)
         prepared = true
     }
+    /// Wait without owning a reservation. Cancellation/logout cannot release another task's lock.
+    private func beginQueued() async throws -> UInt64 {
+        let expectedGeneration = generation
+        while busy {
+            try check(expectedGeneration)
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try check(expectedGeneration)
+        return try begin()
+    }
     private func begin() throws -> UInt64 {
-        guard !busy else { throw MirsaStoreError.busy }
+        guard !busy, !invalidating else { throw MirsaStoreError.busy }
         try prepare()
         busy = true
         return generation
@@ -218,6 +375,51 @@ actor MirsaStoreClient {
     private func check(_ run: UInt64) throws {
         guard run == generation, !Task.isCancelled else { throw MirsaStoreError.operationCancelled }
     }
+    func purchaseHistory() async throws -> [MirsaStorePurchase] {
+        try Task.checkCancellation()
+        // Tabs remain mounted and metadata/search may still own the commerce
+        // reservation. History is read-only: wait without cancelling that work.
+        // Capture generation BEFORE suspending so logout cannot cross this wait.
+        let expectedGeneration = generation
+        let deadline = Date().addingTimeInterval(60)
+        while busy {
+            try check(expectedGeneration)
+            guard Date() < deadline else {
+                throw PurchaseHistoryDiagnostic(stage: .setup, detail: "waiting for active App Store operation timed out")
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        try check(expectedGeneration)
+        let run: UInt64
+        do { run = try begin() }
+        catch MirsaStoreError.keychain {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "account Keychain unavailable; unlock device")
+        } catch is DecodingError {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid saved account record")
+        }
+        defer { finishOperation() }
+        let owner: Account
+        do { owner = try requiredAccount() }
+        catch MirsaStoreError.signedOut {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "missing account session; sign in from Account tab")
+        } catch MirsaStoreError.keychain {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "account Keychain unavailable; unlock device")
+        } catch is DecodingError {
+            throw PurchaseHistoryDiagnostic(stage: .setup, detail: "invalid saved account record")
+        }
+        // History also initializes ApplePackage TLS/SAP. Hold the same GUID lease
+        // as commerce before any factory can read the process-global identity.
+        let historyGUID = machineGUID
+        let result = try await MirsaStoreGUIDLease.shared.run(guid: historyGUID) {
+            try await MirsaStorePurchaseHistory.fetch(owner: owner, guid: historyGUID)
+        }
+        try check(run)
+        guard try requiredAccount().directoryServicesIdentifier == owner.directoryServicesIdentifier else {
+            throw MirsaStoreError.operationCancelled
+        }
+        return result
+    }
+
     private func loadAccount() throws -> Account? {
         guard let data = try vault.read("account") else { return nil }
         return try JSONDecoder().decode(Account.self, from: data)
@@ -234,7 +436,9 @@ actor MirsaStoreClient {
         MirsaStoreAccount(email: owner.email, country: try country(owner), name: owner.firstName)
     }
     private func persist(_ owner: Account) throws {
-        try vault.write(try JSONEncoder().encode(owner), key: "account")
+        var session = owner
+        session.password = ""
+        try vault.write(try JSONEncoder().encode(session), key: "account")
     }
     private func validate(output: DownloadOutput, app: MirsaStoreApp, version: String?) throws {
         guard let url = URL(string: output.downloadURL) else { throw MirsaStoreError.untrustedURL }
@@ -250,6 +454,17 @@ actor MirsaStoreClient {
         }
     }
     private func safe(_ error: Error) -> Error {
+        if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic }
+        if let diagnostic = error as? StoreProductDiagnostic {
+            if diagnostic.requiresReauthentication {
+                // Explicit owner policy: drop only the rejected Apple store session.
+                // Preserve stable machine identity, saved apps, signing accounts and all files.
+                invalidateSession()
+                StoreResumeStore.clearAll()
+                do { try removeSession() } catch { return MirsaStoreError.serviceUnavailable }
+            }
+            return diagnostic
+        }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic }
         if let diagnostic = error as? AuthenticationServiceError { return MirsaStoreAuthDiagnostic(diagnostic) }
         if let error = error as? MirsaStoreError { return error }
