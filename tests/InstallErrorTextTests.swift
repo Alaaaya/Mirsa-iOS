@@ -2,6 +2,24 @@ import XCTest
 @testable import Mirsa
 
 final class InstallErrorTextTests: XCTestCase {
+    func testOnlyExactChangedSelfBuildSuppressesInterruptedAlert() {
+        XCTAssertTrue(InstallErrorText.completedSelfUpdate(expected: "476", previous: "472", current: "476"))
+        XCTAssertFalse(InstallErrorText.completedSelfUpdate(expected: "476", previous: "476", current: "476"))
+        XCTAssertFalse(InstallErrorText.completedSelfUpdate(expected: "476", previous: "472", current: "472"))
+        XCTAssertFalse(InstallErrorText.completedSelfUpdate(expected: nil, previous: nil, current: "476"))
+        XCTAssertFalse(InstallErrorText.completedSelfUpdate(expected: "", previous: "472", current: "476"))
+    }
+    func testNextStepMatchesRecordedCauseNotBlanketVPNAdvice() {
+        for (cause, expected) in [("session expired 1100", "Apple ID"),
+                                   ("RemoteXPC timed out", "LocalDevVPN"),
+                                   ("maximum apps reached", "احذف"),
+                                   ("provisioning failed", "شهادة"),
+                                   ("cancelled", "انلغت"),
+                                   ("unknown error 42", "انسخ السجل")] {
+            XCTAssertTrue(InstallErrorText.nextStep(for: cause, arabic: true).contains(expected))
+        }
+        XCTAssertTrue(InstallErrorText.interrupted(arabic: true).contains("ممكن التحديث اكتمل"))
+    }
     func testOnlyConfirmedSourceAbsenceSuggestsRedownload() {
         XCTAssertEqual(InstallErrorText.sanitize("MIRSA_SOURCE_IPA_MISSING", arabic: false),
                        "The original IPA is missing. Import the IPA again or download it from its link.")

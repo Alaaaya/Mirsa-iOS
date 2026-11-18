@@ -3,6 +3,39 @@ import Foundation
 /// One presentation boundary for install, renewal and signing diagnostics.
 /// Keep the useful stage/OS reason, not Rust source locations or sandbox paths.
 enum InstallErrorText {
+    /// A terminated process is not an installation-proxy failure. In particular,
+    /// replacing Mirsa itself ends the process before Swift defer blocks execute.
+    static func completedSelfUpdate(expected: String?, previous: String?, current: String) -> Bool {
+        guard let expected, let previous, !expected.isEmpty, !previous.isEmpty else { return false }
+        return expected == current && previous != current
+    }
+
+    static func interrupted(arabic: Bool) -> String {
+        arabic
+            ? "انتهت جلسة مرسى أثناء التثبيت، وما تسجّل سبب خطأ. إذا كنت عم تحدّث مرسى، شيّك رقم النسخة بالإعدادات أولاً؛ ممكن التحديث اكتمل. إذا التطبيق المطلوب مو مثبت، جرّب من جديد."
+            : "Mirsa closed during installation; no failure reason was recorded. If you were updating Mirsa, check its version in Settings first; the update may have completed. Retry only if the requested app is not installed."
+    }
+
+    static func nextStep(for raw: String, arabic: Bool) -> String {
+        let text = raw.lowercased()
+        if text.contains("1100") || text.contains("session expired") || text.contains("not signed in") {
+            return arabic ? "سجّل خروج من Apple ID داخل مرسى وسجّل دخول من جديد، وبعدين جرّب." : "Sign out of Apple ID in Mirsa, sign in again, then retry."
+        }
+        if text.contains("timed out") || text.contains("remotexpc") || text.contains("device connection failed") {
+            return arabic ? "وصّل على الواي فاي وشغّل LocalDevVPN وتأكد من ملف الاقتران، وبعدين جرّب." : "Connect to Wi-Fi, enable LocalDevVPN and check the pairing file, then retry."
+        }
+        if text.contains("maximum") && text.contains("app") || text.contains("applicationlimit") {
+            return arabic ? "وصلت لحد التطبيقات المسموح. احذف تطبيق موقّع بنفس Apple ID وبعدين جرّب." : "The app limit was reached. Remove an app signed with this Apple ID, then retry."
+        }
+        if text.contains("provision") || text.contains("certificate") {
+            return arabic ? "راجع حالة شهادة Apple ID والتوقيع داخل مرسى، وبعدين أعد التوقيع والتثبيت." : "Check the Apple ID certificate and signing status in Mirsa, then sign and install again."
+        }
+        if text.contains("cancelled") || text.contains("canceled") {
+            return arabic ? "انلغت العملية. ابدأ التثبيت من جديد إذا لسا بدك تثبّت التطبيق." : "The operation was cancelled. Start it again if you still want to install."
+        }
+        return arabic ? "انسخ السجل من هالتنبيه وابعتو مع وصف اللي صار قبل ما تعيد المحاولة." : "Copy the log from this alert and send it with what happened before retrying."
+    }
+
     static func sanitize(_ raw: String, arabic: Bool) -> String {
         if raw == "MIRSA_SOURCE_IPA_MISSING" {
             return arabic ? "ملف التثبيت الأصلي مو موجود. استورد ملف الـIPA أو حمّله من الرابط من جديد." : "The original IPA is missing. Import the IPA again or download it from its link."
