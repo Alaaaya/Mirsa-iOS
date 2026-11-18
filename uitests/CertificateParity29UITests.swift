@@ -61,12 +61,25 @@ final class CertificateParity29UITests: XCTestCase {
         for (en, ar, expected) in rows {
             let title = lang == "ar" ? ar : en
             let control = app.switches.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            let editor = app.scrollViews["mirsa.project.editor-scroll"]
+            let export = app.buttons["mirsa.project.sign"]
+            // AX can report a labelled switch hittable while its thumb is below
+            // the fixed export bar. Scroll the actual tap point into clear view.
+            func thumbIsClear() -> Bool {
+                guard control.exists, control.isHittable else { return false }
+                let point = control.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).screenPoint
+                return editor.frame.contains(point)
+                    && point.y > editor.frame.minY + 20
+                    && point.y < min(editor.frame.maxY, export.frame.minY) - 20
+            }
             for _ in 0..<20 {
-                if control.exists && control.isHittable { break }
-                app.swipeUp()
+                if thumbIsClear() { break }
+                editor.swipeUp()
             }
             XCTAssertTrue(control.exists, "Missing real editor toggle \(title)")
-            XCTAssertTrue(control.isHittable, "Unreachable editor toggle \(title)")
+            XCTAssertTrue(thumbIsClear(), "Editor toggle thumb obscured by export bar \(title)")
+            guard thumbIsClear() else { return }
+            screenshot("certificate-29-\(lang)-\(en)-before-tap")
             XCTAssertEqual(control.value as? String, expected, "Unexpected initial value \(title)")
             // The AX switch includes its multiline label. Target the actual
             // trailing switch thumb, not the Arabic label's bounding-box center.
