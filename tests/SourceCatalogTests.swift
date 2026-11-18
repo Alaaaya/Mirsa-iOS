@@ -24,6 +24,37 @@ final class SourceCatalogTests: XCTestCase {
         return SourcesStore(defaults: defaults, load: load)
     }
 
+    func testSourceNewsPresentationAndSafeRelativeLinks() throws {
+        let feed = Data(#"{"name":"Mirsa","headerURL":"banner.png","subtitle":"Welcome","description":"My source","website":"https://x.com/rasmtk30","news":[{"identifier":"welcome","title":"Hello","caption":"New source","imageURL":"news.png","tintColor":"#123456","date":"2026-11-18","appID":"test.sample","url":"https://example.org/story"},{"title":"Unsafe","imageURL":"file:///private/test","url":"javascript:alert(1)"},{"caption":"Missing title"},42],"apps":[]}"#.utf8)
+        let parsed = try SourcesStore.decodeSource(feed, base: URL(string: "https://example.org/source.json")!)
+        XCTAssertEqual(parsed.headerURL?.absoluteString, "https://example.org/banner.png")
+        XCTAssertEqual(parsed.subtitle, "Welcome")
+        XCTAssertEqual(parsed.description, "My source")
+        XCTAssertEqual(parsed.website?.host, "x.com")
+        XCTAssertEqual(parsed.news.count, 2)
+        XCTAssertEqual(parsed.news.first?.appID, "test.sample")
+        XCTAssertEqual(parsed.news.first?.imageURL?.absoluteString, "https://example.org/news.png")
+        XCTAssertNotNil(parsed.news.first?.date)
+        XCTAssertNil(parsed.news.last?.url)
+        XCTAssertNil(parsed.news.last?.imageURL)
+        XCTAssertTrue(parsed.apps.isEmpty)
+        XCTAssertNil(SourcesStore.contentURL("https://user:secret@example.org", base: URL(string: "https://example.org")!))
+    }
+
+    func testSourceNewsMissingAndRefreshClearsRemovedMetadata() async throws {
+        var branded = true
+        let store = makeStore { request in
+            let json = branded ? #"{"headerURL":"banner.png","news":[{"title":"News"}],"apps":[]}"# : #"{"apps":[]}"#
+            return (Data(json.utf8), self.response(request.url!))
+        }
+        await store.refresh(ryp0)
+        XCTAssertEqual(store.presentation[ryp0]?.news.count, 1)
+        branded = false
+        await store.refresh(ryp0)
+        XCTAssertTrue(store.presentation[ryp0]?.news.isEmpty == true)
+        XCTAssertNil(store.presentation[ryp0]?.headerURL)
+    }
+
     func testFullAppTestersJSONCountSearchAndInstallURLs() async throws {
         let data = try fixture("apptesters")
         XCTAssertEqual(data.count, 10_392_165)
