@@ -442,7 +442,6 @@ enum PersonalCertificateSigner {
                                       "remove_watch": options.removeWatchApp,
                                       "remove_app_clips": options.removeAppClips,
                                       "strict_profile": options.strictProfile,
-                                      "preserve_app_groups": options.preserveAppGroups,
                                       "custom_entitlements_path": try customEntitlementsPath(options, stage: stage),
                                       "profiles": try options.additionalProfiles.enumerated().map { index, data in
                                           let url = stage.appendingPathComponent("profile-extra-\(index).mobileprovision")

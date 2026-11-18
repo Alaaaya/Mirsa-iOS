@@ -455,7 +455,6 @@ struct PersonalProjectDetailView: View {
             toggle(personalText("Remove old embedded profile", "إزالة البروفايل المضمّن القديم"), personalText("Only the old one. Signing still embeds your new profile.", "القديم بس. التوقيع لسا بيضمّن البروفايل الجديد تبعك."), $draft.removeEmbeddedProfile)
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
-            toggle(personalText("Preserve App Group", "الحفاظ على App Group"), personalText("Keeps shared containers allowed by your profile. If the app has no group declaration, uses concrete groups from the profile. Cannot add permissions your profile lacks.", "بيحافظ على الحاويات المشتركة المسموحة ببروفايلك. إذا التطبيق ما فيه مجموعات معلنة، بيستخدم مجموعات البروفايل المحددة. ما بيضيف صلاحية مو موجودة بالبروفايل."), Binding(get: { draft.preserveAppGroups ?? true }, set: { draft.preserveAppGroups = $0 }))
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
             toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }))
@@ -635,7 +634,6 @@ struct PersonalProjectDetailView: View {
         options.removeWatchApp = draft.removeWatchApp
         options.removeExtensions = draft.removeExtensions ?? false
         options.removeAppClips = draft.removeAppClips ?? false
-        options.preserveAppGroups = draft.preserveAppGroups ?? true
         options.strictProfile = draft.strictProfile ?? false
         options.gameMode = draft.gameMode ?? .keep
         options.fixWhiteIcon = draft.fixWhiteIcon ?? false
