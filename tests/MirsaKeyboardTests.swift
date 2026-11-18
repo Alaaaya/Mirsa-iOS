@@ -29,6 +29,17 @@ final class MirsaKeyboardTests: XCTestCase {
         XCTAssertFalse(MirsaKeyboardDismissal.KeyboardWindowAnchor.isTextInteraction(UIView()))
     }
 
+    func testRetargetedHostingTouchExcludesNativeEditorHitWithoutForcingFocus() {
+        let host = UIView()
+        let editor = UITextView()
+        let canvas = UIView()
+        editor.addSubview(canvas)
+        XCTAssertTrue(MirsaKeyboardDismissal.KeyboardWindowAnchor.isTextTouch(deliveredView: host, hitView: canvas))
+        XCTAssertTrue(MirsaKeyboardDismissal.KeyboardWindowAnchor.isTextTouch(deliveredView: canvas, hitView: host))
+        XCTAssertFalse(MirsaKeyboardDismissal.KeyboardWindowAnchor.isTextTouch(deliveredView: host, hitView: UIButton()))
+        XCTAssertFalse(editor.isFirstResponder)
+    }
+
     func testWindowRecognizerDoesNotCancelControlsAndDetaches() throws {
         let window = UIWindow()
         let anchor = MirsaKeyboardDismissal.KeyboardWindowAnchor()

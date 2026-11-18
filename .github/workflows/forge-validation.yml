@@ -25,6 +25,24 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Container scheme ownership and section labels
+        run: |
+          python3 scripts/tests/test_container_scheme.py
+          python3 scripts/tests/test_video_wallpaper.py
+          python3 scripts/tests/test_wallpaper_diagnostic.py
+          python3 scripts/tests/test_diagnostic_privacy.py
+          python3 -m unittest discover -s scripts/tests -p test_updater_packaging.py -v
+      - name: Staged wallpaper layout contract (offline)
+        run: node --test backend/wallpaper-layout/staged.test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Announcement security and persistence tests
+        run: |
+          python -m pip install -r backend/announcements/requirements.txt
+          cd backend/announcements
+          python -m compileall -q .
+          python -m unittest -v
       - name: Select newest Xcode
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
@@ -44,6 +62,8 @@ jobs:
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
       - name: Swift ForgeDeb tests
+        env:
+          TEST_RUNNER_MIRSA_WALLPAPER_EVIDENCE: ${{ github.workspace }}/build/wallpaper-evidence
         run: |
           set -o pipefail
           brew install xcodegen
@@ -57,9 +77,28 @@ jobs:
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")))')
           xcrun simctl boot "$DEVICE" || true
-          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MirsaTests/ForgeDebTests -only-testing:MirsaTests/ForgeFeatureTests -only-testing:MirsaTests/ForgeInspectorTests -only-testing:MirsaTests/ForgeFixInboxTests -only-testing:MirsaTests/ForgeDylibImportTests -only-testing:MirsaTests/ForgeDylibInspectorTests -only-testing:MirsaTests/ForgeDylibDownloadTests -only-testing:MirsaTests/ForgeDylibStoreTests -only-testing:MirsaTests/ForgeServerMessageTests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee swift.log | tail -40
+          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:MirsaTests/ForgeDebTests -only-testing:MirsaTests/ForgeFeatureTests -only-testing:MirsaTests/ForgeInspectorTests -only-testing:MirsaTests/ForgeFixInboxTests -only-testing:MirsaTests/ForgeDylibImportTests -only-testing:MirsaTests/ForgeDylibInspectorTests -only-testing:MirsaTests/ForgeDylibDownloadTests -only-testing:MirsaTests/ForgeDylibStoreTests -only-testing:MirsaTests/ForgeServerMessageTests -only-testing:MirsaTests/ForgeQueuedTests -only-testing:MirsaTests/ForgeMarkdownTests -only-testing:MirsaTests/ChatAttachmentRulesTests -only-testing:MirsaTests/TendiesSectionNameTests -only-testing:MirsaTests/HomeShortcutSchemeTests -only-testing:MirsaTests/WallpaperMakerTests -only-testing:MirsaTests/MirsaWallpaperOwnershipTests -only-testing:MirsaTests/MirsaDiagnosticPrivacyTests -only-testing:MirsaTests/MirsaDiagnosticAccessTests -only-testing:MirsaTests/PosterBoardAccessSafetyTests -only-testing:MirsaTests/MirsaNotificationTests -only-testing:MirsaTests/MirsaRequestReadyTests -only-testing:MirsaTests/ForgeChatNonblockingRecoveryTests -only-testing:MirsaTests/ForgeChatTendiesArtifactTests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee swift.log | tail -40
+      - name: Collect generated wallpaper archive evidence
+        if: always()
+        run: |
+          python3 - <<'PYEVIDENCE'
+          import pathlib, shutil
+          target = pathlib.Path("build/wallpaper-evidence")
+          target.mkdir(parents=True, exist_ok=True)
+          devices = pathlib.Path.home() / "Library/Developer/CoreSimulator/Devices"
+          for root in devices.glob("*/data/Containers/Data/Application/*/Documents/wallpaper-evidence"):
+              for item in root.iterdir():
+                  if item.is_file():
+                      shutil.copy2(item, target / item.name)
+          archives = list(target.glob("*.tendies"))
+          print("Generated wallpaper evidence:", [p.name for p in archives])
+          if not archives:
+              raise SystemExit("Missing generated archive evidence")
+          PYEVIDENCE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: forge-swift-log
-          path: swift.log
+          path: |
+            swift.log
+            build/wallpaper-evidence

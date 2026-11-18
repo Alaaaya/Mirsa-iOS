@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// UI-test only (DEBUG + `-MirsaUITestHarness -MirsaStylePage <id>`): hosts one real
 /// screen of the app with harmless fixture data so the style screenshot test can
@@ -38,6 +39,14 @@ struct MirsaStyleShotHost: View {
     private static let fixtureApps: [ManagedApp] = (1...8).map(fixtureApp)
     private static let fixturePersonal: [PersonalLibraryApp] = (1...6).map(fixturePersonalApp)
 
+    #if DEBUG
+    /// Generated locally, no network and no arbitrary URL.
+    private static let fixtureImage: UIImage = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { c in
+        UIColor.systemIndigo.setFill(); c.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+        UIColor.systemOrange.setFill(); c.cgContext.fillEllipse(in: CGRect(x: 200, y: 100, width: 200, height: 200))
+    }
+    #endif
+
     var body: some View {
         switch page {
         case "apps": tab(.apps)
@@ -46,6 +55,9 @@ struct MirsaStyleShotHost: View {
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "dock-clearance-29": SourcesDock29ValidationHost()
         case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
+        case "source-news-fixture": SourceNewsValidationHost()
+        case "source-news-live":
+            NavigationStack { SourceDetailView(source: RepoSource(url: MirsaSourceFeed.primary, name: "Mirsa", uid: RepoSource.canonicalID)) }
         #endif
         case "tools": tab(.pairing)
         case "more": tab(.personalHub)
@@ -65,7 +77,25 @@ struct MirsaStyleShotHost: View {
             }
             .preferredColorScheme(.dark)
         case "setup": SetupView()
-        case "mirsa-ai-embedded": tab(.pairing)
+        case "mirsa-ai-embedded": tab(.mirsaAI)
+        #if DEBUG
+        case "apps-design":
+            // Design review only: the real Apps tab with an in-memory signed-in account
+            // (9 of 10 App IDs left) and five fixture apps (one real, so 1 of 3 slots left).
+            ContentView().onAppear {
+                guard MirsaUITestHarness.active else { return }
+                let store = AppsStore.shared
+                store.account = AccountState(email: "review@mirsa.app",
+                                             certExpires: Date().addingTimeInterval(5 * 86_400),
+                                             appIDsAvailable: 9, appIDsMax: 10)
+                store.apps = Array(Self.fixtureApps.prefix(5))
+                vm.selectedTab = .apps
+            }
+        #endif
+        #if DEBUG
+        case "chat-image-fixture":
+            ZStack { MirsaChatTheme.bg.ignoresSafeArea(); MirsaTappableImage(image: Self.fixtureImage, maxWidth: 220, maxHeight: 200, cornerRadius: 14) }
+        #endif
         case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(.dark)
         default: sheetHost
         }
@@ -138,7 +168,7 @@ private struct SourcesDeleteValidationHost: View {
 #endif
 
 #if DEBUG
-/// Only the input catalogue is a fixture. Navigation, all five tabs, scroll
+/// Only the input catalogue is a fixture. Navigation, all six tabs, scroll
 /// containers and the floating dock are the actual ContentView implementation.
 private struct SourcesDock29ValidationHost: View {
     @EnvironmentObject private var vm: AppViewModel
@@ -165,5 +195,24 @@ private struct SourcesDock29ValidationHost: View {
     var body: some View {
         ContentView(sourcesStore: store).onAppear { vm.selectedTab = .sources }
     }
+}
+
+/// Isolated approved branding snapshot, used only by the explicit screenshot harness.
+private struct SourceNewsValidationHost: View {
+    @StateObject private var store: SourcesStore
+    private let source: RepoSource
+    init() {
+        let defaults = UserDefaults(suiteName: "mirsa.source-news.screenshot")!
+        defaults.removePersistentDomain(forName: "mirsa.source-news.screenshot")
+        let bytes = Data(#"{"iconURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-icon.png","headerURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-banner.jpg","tintColor":"7C83FF","subtitle":"تطبيقاتك وتويكاتك وخلفياتك بمكان واحد","description":"مرسى لتثبيت تطبيقات iPhone وإدارة السورسات والتويكات وخلفيات Tendies. من تطوير علاء. الأخبار والتواصل على X @rasmtk30.","website":"https://x.com/rasmtk30","name":"Mirsa","news":[{"title":"أهلاً فيكم بمرسى 💜","caption":"أنا علاء، عملت مرسى حتى تجمعوا تطبيقاتكم وتويكاتكم وخلفيات Tendies بمكان واحد. هون بنزّل الجديد، وإذا عندكم اقتراح أو مشكلة احكولي على X https://x.com/rasmtk30","imageURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-banner.jpg","tintColor":"7C83FF","date":"2026-11-18T00:11:35Z","identifier":"mirsa-welcome-2026","appID":"com.alaa.mirsa","url":"https://x.com/rasmtk30","notify":false}],"apps":[{"name":"Mirsa","bundleIdentifier":"com.alaa.mirsa","version":"2.5","downloadURL":"https://example.org/Mirsa.ipa","iconURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-icon.png"}]}"#.utf8)
+        let store = SourcesStore(defaults: defaults, load: { request in
+            (bytes, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let source = RepoSource(url: "https://example.org/source.json", name: "Mirsa")
+        store.sources = [source]
+        self.source = source
+        _store = StateObject(wrappedValue: store)
+    }
+    var body: some View { NavigationStack { SourceDetailView(source: source, store: store) } }
 }
 #endif

@@ -3,7 +3,7 @@ import Foundation
 /// Decodes server refusal bodies into one localized, user-readable message (message/reason + optional step-by-step nextSteps).
 enum ForgeServerMessage {
     static func lang() -> String {
-        switch L.lang { case .english: return "en"; case .arabic: return "ar"; case .sorani: return "ckb"; case .kurmanji: return "kmr" }
+        switch L.lang { case .english, .german: return "en"; case .arabic: return "ar"; case .sorani: return "ckb"; case .kurmanji: return "kmr" }
     }
 
     private static func pick(_ v: Any?, _ lang: String) -> String? {

@@ -24,6 +24,37 @@ final class SourceCatalogTests: XCTestCase {
         return SourcesStore(defaults: defaults, load: load)
     }
 
+    func testSourceNewsPresentationAndSafeRelativeLinks() throws {
+        let feed = Data(##"{"name":"Mirsa","headerURL":"banner.png","subtitle":"Welcome","description":"My source","website":"https://x.com/rasmtk30","news":[{"identifier":"welcome","title":"Hello","caption":"New source","imageURL":"news.png","tintColor":"#123456","date":"2026-11-18","appID":"test.sample","url":"https://example.org/story"},{"title":"Unsafe","imageURL":"file:///private/test","url":"javascript:alert(1)"},{"caption":"Missing title"},42],"apps":[]}"##.utf8)
+        let parsed = try SourcesStore.decodeSource(feed, base: URL(string: "https://example.org/source.json")!)
+        XCTAssertEqual(parsed.headerURL?.absoluteString, "https://example.org/banner.png")
+        XCTAssertEqual(parsed.subtitle, "Welcome")
+        XCTAssertEqual(parsed.description, "My source")
+        XCTAssertEqual(parsed.website?.host, "x.com")
+        XCTAssertEqual(parsed.news.count, 2)
+        XCTAssertEqual(parsed.news.first?.appID, "test.sample")
+        XCTAssertEqual(parsed.news.first?.imageURL?.absoluteString, "https://example.org/news.png")
+        XCTAssertNotNil(parsed.news.first?.date)
+        XCTAssertNil(parsed.news.last?.url)
+        XCTAssertNil(parsed.news.last?.imageURL)
+        XCTAssertTrue(parsed.apps.isEmpty)
+        XCTAssertNil(SourcesStore.contentURL("https://user:secret@example.org", base: URL(string: "https://example.org")!))
+    }
+
+    func testSourceNewsMissingAndRefreshClearsRemovedMetadata() async throws {
+        var branded = true
+        let store = makeStore { request in
+            let json = branded ? #"{"headerURL":"banner.png","news":[{"title":"News"}],"apps":[]}"# : #"{"apps":[]}"#
+            return (Data(json.utf8), self.response(request.url!))
+        }
+        await store.refresh(ryp0)
+        XCTAssertEqual(store.presentation[ryp0]?.news.count, 1)
+        branded = false
+        await store.refresh(ryp0)
+        XCTAssertTrue(store.presentation[ryp0]?.news.isEmpty == true)
+        XCTAssertNil(store.presentation[ryp0]?.headerURL)
+    }
+
     func testFullAppTestersJSONCountSearchAndInstallURLs() async throws {
         let data = try fixture("apptesters")
         XCTAssertEqual(data.count, 10_392_165)
@@ -205,4 +236,32 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertTrue(store.remove(id: store.sources[0].id))
         XCTAssertEqual(store.listing(for: ryp0).count, 1)
     }
+    func testGlobalSearchLoadsPartialCacheAndFindsFullTailByNameOnly() async throws {
+        let data = try fixture("apptesters")
+        var requests = [String]()
+        let store = makeStore { request in
+            requests.append(request.url!.absoluteString)
+            return (data, self.response(request.url!))
+        }
+        store.sources = [RepoSource(url: appTesters, name: "AppTesters"),
+                         RepoSource(url: ryp0, name: "Other source")]
+        store.apps[ryp0] = [] // global cache is nonempty, AppTesters still missing
+        let discovery = DiscoveryStore(sources: store)
+        discovery.input = " tIkToK "
+        await discovery.search()
+        XCTAssertEqual(requests, [appTesters])
+        XCTAssertFalse(discovery.results.isEmpty)
+        XCTAssertTrue(discovery.results.allSatisfy { $0.app.name.localizedCaseInsensitiveContains("tiktok") })
+        let expected = (store.apps[appTesters] ?? []).filter { $0.name.localizedCaseInsensitiveContains("tiktok") }
+        XCTAssertEqual(discovery.results.count, Set(expected.map { $0.id + "|" + $0.downloadURL.absoluteString }).count)
+        discovery.input = "HeyJapan"
+        await discovery.search()
+        XCTAssertFalse(discovery.results.isEmpty, "full catalogue tail, not first N entries")
+        XCTAssertEqual(requests.count, 1, "loaded sources are reused")
+        discovery.input = "no-match-name-473829"
+        await discovery.search()
+        XCTAssertTrue(discovery.results.isEmpty)
+        XCTAssertTrue(discovery.failures.isEmpty)
+    }
+
 }

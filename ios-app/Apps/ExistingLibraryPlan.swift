@@ -125,7 +125,7 @@ struct ExistingLibrariesCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Button { withAnimation(.easeOut(duration: 0.25)) { open.toggle() } } label: {
                 HStack {
-                    Label(tr("Already present", "موجودة مسبقاً", ckb: "پێشتر هەیە", kmr: "Jixwe heyî"), systemImage: "books.vertical").font(.subheadline.weight(.semibold))
+                    Label(tr5("Already present", "موجودة مسبقاً", de: "Bereits vorhanden", ckb: "پێشتر هەیە", kmr: "Jixwe heyî"), systemImage: "books.vertical").font(.subheadline.weight(.semibold))
                     Spacer()
                     Text("\(libraries.count)").foregroundStyle(.secondary)
                     Image(systemName: open ? "chevron.up" : "chevron.down")
@@ -171,7 +171,7 @@ struct ExistingLibrariesCard: View {
                                 }.tint(row.removed ? .green : .red)
                                 .accessibilityLabel(row.removed ? tr("Restore", "استرجاع", ckb: "گەڕاندنەوە", kmr: "Vegerîne") : tr("Remove", "إزالة", ckb: "لابردن", kmr: "Rakirin"))
                                 } else {
-                                    Text(tr("File only", "ملف فقط", ckb: "تەنها فایل", kmr: "Tenê pel"))
+                                    Text(tr5("File only", "ملف فقط", de: "Nur Datei", ckb: "تەنها فایل", kmr: "Tenê pel"))
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
@@ -180,7 +180,7 @@ struct ExistingLibrariesCard: View {
                         }
                     }
                 }
-                Text(tr("Some entries may be original app libraries, not tweaks. Files without a detected load command are read-only.", "بعض الملفات ممكن تكون مكتبات أصلية للتطبيق، مو تويكات. الملف اللي ما لقينا أمر تحميل إلو بيظهر للعرض بس.", ckb: "هەندێک فایل ڕەنگە کتێبخانەی ئەسڵیی ئەپ بن، نەک تویک. فایلە بێ فەرمانی بارکردن تەنها پیشان دەدرێن.", kmr: "Hin pel dikarin pirtûkxaneyên orîjînal ên sepanê bin, ne tweak. Pelên bê fermana barkirinê tenê tên nîşandan."))
+                Text(tr5("Some entries may be original app libraries, not tweaks. Files without a detected load command are read-only.", "بعض الملفات ممكن تكون مكتبات أصلية للتطبيق، مو تويكات. الملف اللي ما لقينا أمر تحميل إلو بيظهر للعرض بس.", de: "Einige Einträge können originale App-Bibliotheken sein, keine Tweaks. Dateien ohne erkannten Ladebefehl sind schreibgeschützt.", ckb: "هەندێک فایل ڕەنگە کتێبخانەی ئەسڵیی ئەپ بن، نەک تویک. فایلە بێ فەرمانی بارکردن تەنها پیشان دەدرێن.", kmr: "Hin pel dikarin pirtûkxaneyên orîjînal ên sepanê bin, ne tweak. Pelên bê fermana barkirinê tenê tên nîşandan."))
                     .font(.caption2).foregroundStyle(.secondary)
                 Text(tr("Disabling removes the load command but keeps the file. Deleting also removes an unshared standalone dylib when safe. This cannot disable code loaded dynamically by the app.", "التعطيل بيوقف أمر التحميل وبيخلّي الملف. الحذف بيشيل ملف dylib غير المشترك إذا كان آمن. التحميل الديناميكي من التطبيق ما بيتعطّل بهالطريقة.", ckb: "ناچالاککردن فەرمانی بارکردن لادەبات، فایلەکە دەمێنێتەوە. سڕینەوە فایلە سەلامەت و ناهاوبەشەکان لادەبات. بارکردنی داینامیکی ڕاناگیرێت.", kmr: "Neçalakirin fermana barkirinê radike, pel dimîne. Jêbirin pelên ewle û ne hevpar radike. Barkirina dînamîk nayê rawestandin."))
                     .font(.caption2).foregroundStyle(.secondary)

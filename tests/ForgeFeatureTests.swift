@@ -5,22 +5,25 @@ import ImageIO
 @testable import Mirsa
 
 @MainActor final class ForgeFeatureTests: XCTestCase {
-    func testGuideCopyInExistingFourLanguagesAndUniqueSeenKeys() {
+    func testGuideCopyAcrossAllLanguagesAndUniqueSeenKeys() {
         let previous = AppLanguageStore.shared.current
         defer { AppLanguageStore.shared.set(previous) }
-        XCTAssertEqual(Set(ForgeGuide.allCases.map(\.seenKey)).count, 4)
+        XCTAssertEqual(Set(ForgeGuide.allCases.map(\.seenKey)).count, ForgeGuide.allCases.count)
         var subtitles: [ForgeGuide: Set<String>] = [:]
         for language in AppLanguage.allCases {
             AppLanguageStore.shared.set(language)
             for feature in ForgeGuide.allCases {
                 XCTAssertFalse(feature.subtitle.isEmpty)
                 XCTAssertFalse(feature.subtitle.contains("\n"))
-                XCTAssertEqual(feature.steps.count, 3)
+                XCTAssertEqual(feature.steps.count, feature == .port ? 4 : 3)
                 XCTAssertTrue(feature.steps.allSatisfy { !$0.isEmpty })
                 subtitles[feature, default: []].insert(feature.subtitle)
             }
         }
-        XCTAssertTrue(subtitles.values.allSatisfy { $0.count == 4 })
+        for feature in ForgeGuide.allCases {
+            // Legacy tr copy intentionally shares the English fallback in German; tr5 tools have five distinct translations.
+            XCTAssertEqual(subtitles[feature]?.count, feature == .port || feature == .blackbox ? 5 : 4, feature.rawValue)
+        }
         AppLanguageStore.shared.set(.english)
         XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("cannot read system crash logs"))
         XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("not prove"))
@@ -351,6 +354,28 @@ import ImageIO
             "truncated": false, "limitations": "UIKit only", "logs": ["inspector: explicit foreground capture requested"]]
         if let guardValue { o["guardDisabled"] = guardValue }
         return try JSONSerialization.data(withJSONObject: o)
+    }
+    func testAttachContextAllCases() throws {
+        let cap = try ForgeCapture.read(capture(false), bundleID: "com.test.target")
+        guard case .attached(let list) = ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: true) else { return XCTFail() }
+        XCTAssertEqual(list, ["UIView"])
+        let out = ForgeCaptureContext.composed(prompt: "hi", classes: list)
+        XCTAssertEqual(out.components(separatedBy: "UIView").count - 1, 1); XCTAssertTrue(out.hasPrefix("hi"))
+        XCTAssertEqual(ForgeCaptureContext.composed(prompt: "hi", classes: []), "hi")
+        XCTAssertEqual(ForgeCaptureContext.attach(current: list, prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: true), .alreadyAttached(list))
+        XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.test.target", consent: false), .rejected(.consentOff))
+        XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: "hi", capture: cap, projectBundleID: "com.other", consent: true), .rejected(.wrongBundle))
+        XCTAssertEqual(ForgeCaptureContext.attach(current: [], prompt: String(repeating: "x", count: 2000), capture: cap, projectBundleID: "com.test.target", consent: true), .rejected(.tooLong))
+        XCTAssertTrue(ForgeCaptureContext.chipText(3).contains("📎")); XCTAssertFalse(ForgeCaptureContext.chipText(3).contains("User-reviewed")); XCTAssertFalse(ForgeCaptureContext.reasonText(.tooLong).isEmpty)
+    }
+    func testPreviewHidesRawDebugAndLocalizesKnownLimitation() throws {
+        var o = try XCTUnwrap(JSONSerialization.jsonObject(with: capture()) as? [String: Any])
+        o["limitations"] = "Foreground originating scene only."
+        let data = try JSONSerialization.data(withJSONObject: o)
+        let text = ForgeCaptureContext.previewText(data)
+        XCTAssertFalse(text.contains("inspector: explicit foreground")); XCTAssertFalse(text.contains("Foreground originating scene"))
+        XCTAssertNotNil(ForgeCaptureContext.limitationsText("Some unknown warning")); XCTAssertEqual(ForgeCaptureContext.limitationsText("Some unknown warning"), "Some unknown warning")
+        XCTAssertNoThrow(try ForgeCapture.read(data, bundleID: "com.test.target"))
     }
     func testCaptureGuardUnknownDisabledAndWrongTweakFailClosed() throws {
         let tweak = UUID(uuidString: "12345678-1234-1234-1234-123456789abc")!

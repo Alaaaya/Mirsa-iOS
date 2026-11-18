@@ -18,6 +18,11 @@ headers='import Foundation\nimport Combine\n'
 out=work/'Sources/MirsaStoreKit'
 (out/'SourcesCatalogHarness.swift').write_text(headers+body+'\n'+screen+'\n'+policy)
 (out/'MirsaSourceFeed.swift').write_text((root/'ios-app/Apps/MirsaSourceFeed.swift').read_text())
+# SourceCatalogTests also exercises the real global search model, not its SwiftUI screen.
+discovery=(root/'ios-app/Discovery/DiscoveryView.swift').read_text()
+discovery=discovery[discovery.index('@MainActor\nfinal class DiscoveryStore:'):discovery.index('\nstruct DiscoveryView: View {')]
+(out/'DiscoveryStoreHarness.swift').write_text(headers+discovery)
+
 (out/'SourceTestLocalization.swift').write_text('func tr(_ en: String, _ ar: String) -> String { en }\nenum MirsaTr { static func f(_ key: String, _ n: Int) -> String { "HTTP \\(n)" } }\n')
 tests=work/'Tests/MirsaStoreKitTests'
 for name in ['SourceCatalogTests.swift','SourceDeletionTests.swift']:

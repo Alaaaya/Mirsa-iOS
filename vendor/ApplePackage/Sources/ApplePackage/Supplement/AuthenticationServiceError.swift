@@ -3,6 +3,17 @@ import Foundation
 /// Only allowlisted response fields, never a request, headers, URL, or raw body.
 public struct AuthenticationServiceError: Error, Sendable {
     public enum Stage: String, Sendable { case bag, sapCertificate, sapSetup, sapValidation, signing, authentication }
+    public enum LoginPhase: String, Sendable { case password, verificationCode = "2FA" }
+    // Exact finite identifiers only. Never accept a server-provided string as metadata.
+    public enum ResponseMessage: String, Sendable {
+        case configurator = "MZFinance.BadLogin.Configurator_message"
+        case amdSP = "AMD-Action::SP", amdRP = "AMD-Action::RP"
+        case missing, empty, unrecognized
+    }
+    public enum FailureState: String, Sendable { case missing, empty, numeric, unrecognized }
+    public let loginPhase: LoginPhase?
+    public let responseMessage: ResponseMessage?
+    public let failureState: FailureState?
     public let stage: Stage
     public let transport: Bool
     public let httpStatus: Int?
@@ -11,7 +22,11 @@ public struct AuthenticationServiceError: Error, Sendable {
     public let networkCode: Int?
 
     public init(stage: Stage, httpStatus: Int? = nil, appleCode: Any? = nil, message: String? = nil,
-                networkCode: Int? = nil, transport: Bool = false, secrets: [String] = []) {
+                networkCode: Int? = nil, transport: Bool = false, secrets: [String] = [],
+                loginPhase: LoginPhase? = nil, responseMessage: ResponseMessage? = nil, failureState: FailureState? = nil) {
+        self.loginPhase = loginPhase
+        self.responseMessage = responseMessage
+        self.failureState = failureState
         self.stage = stage
         self.transport = transport
         self.httpStatus = httpStatus
@@ -23,6 +38,12 @@ public struct AuthenticationServiceError: Error, Sendable {
 
     public static func wrapping(_ error: Error, stage: Stage, transport: Bool = false) -> AuthenticationServiceError {
         if let diagnostic = error as? AuthenticationServiceError { return diagnostic }
+        if let amd = error as? StoreAMDError {
+            return .init(stage: stage, httpStatus: amd.httpStatus, message: amd.errorDescription)
+        }
+        if let auth = error as? AuthenticationError {
+            return .init(stage: stage, message: auth.errorDescription)
+        }
         let ns = error as NSError
         // No arbitrary errorDescription: networking errors may contain URLs or headers.
         return .init(stage: stage, networkCode: ns.domain == NSURLErrorDomain ? ns.code : nil, transport: transport)

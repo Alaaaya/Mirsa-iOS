@@ -14,6 +14,9 @@ struct WallpaperVideoPicker: UIViewControllerRepresentable {
         config.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
+        #if DEBUG
+        NSLog("MIRSA-PICKER video created")
+        #endif
         return picker
     }
     func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}

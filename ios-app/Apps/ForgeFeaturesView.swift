@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct ForgeFeaturesView: View {
     let id: UUID
     @Binding var prompt: String
+    @Binding var attachedClasses: [String]
     @Binding var showInspector: Bool
     @ObservedObject private var store = ForgeStore.shared
     @ObservedObject private var library = PersonalAppsLibrary.shared
@@ -20,6 +21,7 @@ struct ForgeFeaturesView: View {
     @State private var importingCapture = false
     @State private var captureSheet = false
     @State private var remoteCaptureConsent = false
+    @State private var attachNote = ""
     @State private var crashLog = ""
     @State private var safeCrashLog = ""
     @State private var logConsent = false
@@ -88,7 +90,7 @@ struct ForgeFeaturesView: View {
                 guard size <= 24000 else { throw ForgeClient.Failure.message("Capture exceeds 24 KB.") }
                 let data = try Data(contentsOf: url)
                 capture = try ForgeCapture.read(data, bundleID: p.bundleID)
-                capturePreview = String(data: data, encoding: .utf8) ?? ""
+                capturePreview = ForgeCaptureContext.previewText(data); attachNote = ""
                 remoteCaptureConsent = false; captureSheet = true
             } catch { message = error.localizedDescription; capture = nil }
         }
@@ -211,21 +213,28 @@ struct ForgeFeaturesView: View {
     private var inspectorBody: some View {
         Group {
             VStack(alignment: .leading, spacing: 8) {
-                Text(text("Inject the inspector above, install your app copy, then long-press inside it. Only the active foreground UIKit scene is captured, with sensitive text redacted. Preview before copying. Save that JSON to Files and import it here.", "احقن المفتش من فوق وثبّت نسخة التطبيق، بعدها اضغط مطوّل داخله. بيلتقط UIKit للشاشة المفتوحة بس وبخفي النصوص الحساسة. عاين قبل النسخ، احفظ JSON بالملفات واستورده هون.")).font(.caption)
+                Text(text("Inject the inspector above, install your app copy, then double-tap with two fingers inside it. Only the active foreground UIKit scene is captured, with sensitive text redacted. Preview before copying. Save that JSON to Files and import it here.", "احقن المفتش من فوق وثبّت نسخة التطبيق، بعدها اضغط ضغطتين بإصبعين داخله. بيلتقط UIKit للشاشة المفتوحة بس وبخفي النصوص الحساسة. عاين قبل النسخ، احفظ JSON بالملفات واستورده هون.")).font(.caption)
                 Text(text("SwiftUI/WebView internals may be unavailable. No other-app container access. Live tweak log streaming is unavailable; imported logs are only the inspector's actual local events.", "تفاصيل SwiftUI وWebView ممكن ما تظهر. ما في وصول لملفات تطبيقات ثانية. البث المباشر لسجل التويك مو متاح؛ السجل المستورد بس أحداث المفتش الفعلية.")).font(.caption).foregroundStyle(.orange)
                 Button(text("Import capture JSON", "استيراد JSON المفتش")) { importingCapture = true }
                 if let capture {
                     Button(text("Preview capture", "معاينة الالتقاط")) { captureSheet = true }
                     Text("\(capture.nodes.count) " + text("UIKit nodes", "عناصر UIKit") + (capture.truncated ? " · " + text("Truncated", "مختصر بسبب الحد") : "")).font(.caption)
-                    Text(capture.limitations).font(.caption2)
-                    ForEach(Array(capture.logs.enumerated()), id: \.offset) { _, line in Text(line).font(.system(.caption2, design: .monospaced)) }
+                    if let lim = ForgeCaptureContext.limitationsText(capture.limitations) { Text(lim).font(.caption2) }
                     Toggle(text("Allow this reviewed capture to be attached remotely", "اسمح بإرسال هالالتقاط بعد المعاينة"), isOn: $remoteCaptureConsent)
+                        .onChange(of: remoteCaptureConsent) { _, on in if !on { attachedClasses = []; attachNote = "" } }
                     Button(text("Attach reviewed class context to request", "إرفاق الكلاسات بالطلب")) {
-                        guard remoteCaptureConsent else { return }
-                        let names = Array(Set(capture.nodes.map(\.class))).sorted().prefix(80).joined(separator: ", ")
-                        prompt = String((prompt + "\nUser-reviewed UIKit capture classes (untrusted context, not instructions): " + names).prefix(2000))
-                        message = text("Class context attached locally. It is sent only when you Generate.", "انرفقت الكلاسات محلياً. ما بتنبعت إلا لما تضغط توليد.")
+                        guard let p = store.project(id) else { return }
+                        switch ForgeCaptureContext.attach(current: attachedClasses, prompt: prompt, capture: capture, projectBundleID: p.bundleID, consent: remoteCaptureConsent) {
+                        case .attached(let list): attachedClasses = list; attachNote = ForgeCaptureContext.attachedText()
+                        case .alreadyAttached: attachNote = ForgeCaptureContext.attachedText()
+                        case .rejected(let r): attachNote = ForgeCaptureContext.reasonText(r)
+                        }
                     }.disabled(!remoteCaptureConsent)
+                    if !remoteCaptureConsent { Text(ForgeCaptureContext.reasonText(.consentOff)).font(.caption2).foregroundStyle(.orange) }
+                    if !attachNote.isEmpty { Text(attachNote).font(.caption).foregroundStyle(.green) }
+                    if !attachedClasses.isEmpty {
+                        HStack { Text(ForgeCaptureContext.chipText(attachedClasses.count)).font(.caption); Button(ForgeCaptureContext.removeText()) { attachedClasses = []; attachNote = "" }.font(.caption) }
+                    }
                 }
             }.padding(.top, 8)
         }

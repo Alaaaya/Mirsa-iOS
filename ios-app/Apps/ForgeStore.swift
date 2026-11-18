@@ -33,6 +33,7 @@ struct ForgeProject: Codable, Identifiable {
     @Published var pendingGalleryCode: String? { didSet { if pendingGalleryCode == nil { pendingGallerySource = nil } } }
     @Published var pendingGallerySource: (id: String, version: Int?)?
     @Published var fixNotice: String?
+    @Published var queuedNotice: String?
     var fixSyncing = false
     nonisolated static var root: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaForge", isDirectory: true)
@@ -69,12 +70,14 @@ struct ForgeProject: Codable, Identifiable {
         let mach: ForgeMachO.Info
         do { mach = try ForgeMachO.inspect(app.appendingPathComponent(exe)) }
         catch { throw ForgeClient.Failure.message(IPAEditorService.archiveError("Invalid app executable")) }
-        if mach.encrypted {
+        let fw = ForgeFrameworkClasses.scan(ipa: ipa)
+        let allClasses = Array(Set(mach.classes).union(fw.classes)).sorted()
+        if allClasses.isEmpty && (mach.encrypted || fw.encrypted > 0) {
             throw ForgeClient.Failure.message(tr("This app is encrypted (App Store build). Import a decrypted IPA to build tweaks for it.", "هالتطبيق مشفّر (نسخة App Store). استورد نسخة IPA مفكوكة التشفير لتبني تويكس إله.", ckb: "ئەم ئەپە ڕەمزکراوە (وەشانی App Store). IPAیەکی ڕەمزنەکراو هاوردە بکە بۆ دروستکردنی تویک.", kmr: "Ev app şîfrekirî ye (guhertoya App Store). IPAyeke bê şîfre têxe da ku tweak çêbikî."))
         }
-        guard !mach.classes.isEmpty else { throw ForgeClient.Failure.message(tr("No Objective-C classes found in this app (Swift-only apps are not supported yet).", "ما لقيت كلاسات Objective-C بهالتطبيق (تطبيقات Swift فقط مو مدعومة بعد).", ckb: "هیچ کلاسێکی Objective-C نەدۆزرایەوە (ئەپی Swift تەنها هێشتا پشتگیری ناکرێت).", kmr: "Di vê appê de klasên Objective-C nehatin dîtin (appên Swift-only hê nayên piştgirîkirin).")) }
+        guard !allClasses.isEmpty else { throw ForgeClient.Failure.message(tr("No Objective-C classes found in this app (Swift-only apps are not supported yet).", "ما لقيت كلاسات Objective-C بهالتطبيق (تطبيقات Swift فقط مو مدعومة بعد).", ckb: "هیچ کلاسێکی Objective-C نەدۆزرایەوە (ئەپی Swift تەنها هێشتا پشتگیری ناکرێت).", kmr: "Di vê appê de klasên Objective-C nehatin dîtin (appên Swift-only hê nayên piştgirîkirin).")) }
         let name = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? id
-        return TargetInfo(name: name, bundleID: id, appName: name, version: (info["CFBundleShortVersionString"] as? String) ?? "?", executable: exe, classes: mach.classes)
+        return TargetInfo(name: name, bundleID: id, appName: name, version: (info["CFBundleShortVersionString"] as? String) ?? "?", executable: exe, classes: allClasses)
     }
 
     func create(ipa: URL, info: TargetInfo) throws -> UUID {
@@ -140,17 +143,21 @@ struct ForgeProject: Codable, Identifiable {
     }
 
     // MARK: versions
-    func generate(_ id: UUID, prompt: String) async throws {
-        guard let p = project(id) else { return }
+    @discardableResult
+    func generate(_ id: UUID, prompt: String) async throws -> Bool {
+        guard let p = project(id) else { return false }
         busy = tr("Writing the tweak…", "عم أكتب التويك…", ckb: "تویک دەنووسم…", kmr: "Tweak tê nivîsandin…"); defer { busy = nil }
-        let r = try await ForgeClient.json(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": ForgeFeaturePolicy.name(p.name),
+        queuedNotice = nil
+        let outcome = try await ForgeClient.createCall(["action": "generate", "prompt": prompt, "bundleID": p.bundleID, "name": ForgeFeaturePolicy.name(p.name),
                                             "classes": ForgeFeaturePolicy.classes(p.classes), "selectors": [String](), "previousCode": p.currentVersion?.code ?? ""])
+        guard case .generated(let r) = outcome else { queuedNotice = ForgeQueued.notice; return true }
         guard let code = r["code"] as? String else { throw ForgeClient.Failure.message("Bad response") }
         let settings = ((r["settings"] as? [[String: Any]]) ?? []).compactMap { s -> ForgeSetting? in
             guard let k = s["key"] as? String, let t = s["title"] as? String, let d = s["default"] as? Bool else { return nil }
             return ForgeSetting(key: k, title: t, default: d)
         }
         addVersion(id, ForgeVersion(prompt: prompt, code: code, settings: settings, explain: (r["explain"] as? String) ?? ""))
+        return false
     }
     func addVersion(_ id: UUID, _ v: ForgeVersion) {
         update(id) { $0.versions.append(v); $0.current = v.id
@@ -337,7 +344,7 @@ extension ForgeStore {
         guard let p = project(id), let local, let expectedVersion else { throw ForgeClient.Failure.message("No version") }
         _ = try await ForgeClient.json(try Self.updatePayload(project: p, local: local, entry: entry, changelog: changelog, expectedVersion: expectedVersion))
     }
-    /// Temporarily swaps in the tap inspector (long-press any view to copy its class chain), injects, then restores the user's version.
+    /// Temporarily swaps in the tap inspector (two-finger double-tap in the app to copy a capture), injects, then restores the user's version.
     func injectInspector(_ id: UUID) async throws -> URL {
         guard let p = project(id) else { throw ForgeClient.Failure.message("No project") }
         let prev = p.current; let pv = p.currentVersion

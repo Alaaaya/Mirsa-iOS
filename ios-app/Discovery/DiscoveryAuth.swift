@@ -45,6 +45,8 @@ final class KeychainSessionStore: DiscoverySessionStore {
         return try? JSONDecoder().decode(DiscoverySession.self, from: d)
     }
     func save(_ s: DiscoverySession?) {
+        // Invalidate every diagnostics grant on replacement/removal, including refresh failure.
+        defer { NotificationCenter.default.post(name: .mirsaDiagnosticIdentityChanged, object: nil) }
         SecItemDelete(base as CFDictionary)
         guard let s, let d = try? JSONEncoder().encode(s) else { return }
         var add = base

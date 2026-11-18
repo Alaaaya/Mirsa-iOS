@@ -108,4 +108,150 @@ final class ForgeChatNonblockingRecoveryTests: XCTestCase {
         XCTAssertTrue(store.sentEcho.isEmpty)
         XCTAssertEqual(store.error, "limit")
     }
+    func testSuccessfulRetryClearsSendBanner() async {
+        let pending = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true, text: "retry", imageBase64: nil)
+        var fail = true
+        let store = ForgeChatStore(testRequest: { body in
+            guard body["action"] as? String == "chat-send" else { return self.list }
+            if fail { throw URLError(.timedOut) }
+            return self.ok
+        })
+        store.outgoing = [pending]
+        await store.flush()
+        XCTAssertEqual(store.error, ForgeChatText.failed)
+        fail = false
+        await store.flush()
+        XCTAssertTrue(store.outgoing.isEmpty)
+        XCTAssertNil(store.error)
+    }
+
+    func testServerConfirmedMessageClearsTimedOutSendButNotOtherPendingFailure() async throws {
+        let tid = UUID()
+        let confirmed = ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: true, text: "arrived", imageBase64: nil)
+        let other = ForgeChatOutgoing(id: UUID(), threadID: tid, newThread: true, text: "still offline", imageBase64: nil)
+        let rows = [ForgeChatMessage(id: confirmed.id, threadID: tid, role: "user", text: confirmed.text),
+                    ForgeChatMessage(id: UUID(), threadID: tid, role: "kat", text: "reply")]
+        struct Read: Encodable { let messages: [ForgeChatMessage] }
+        let response = try JSONEncoder().encode(Read(messages: rows))
+        let store = ForgeChatStore(testRequest: { _ in response })
+        store.threads = [ForgeChatThread(id: tid, title: nil, status: "open", createdAt: nil, updatedAt: nil)]
+        store.outgoing = [confirmed, other]
+        store.error = ForgeChatText.failed
+        await store.read(tid)
+        XCTAssertEqual(store.outgoing, [other])
+        XCTAssertEqual(store.error, ForgeChatText.failed)
+        // An unrelated assistant reply must not pretend that the other UUID was sent.
+        await store.read(tid)
+        XCTAssertEqual(store.outgoing, [other])
+        store.outgoing = [confirmed]
+        await store.read(tid)
+        XCTAssertTrue(store.outgoing.isEmpty)
+        XCTAssertNil(store.error)
+        XCTAssertEqual(store.messages[tid]?.count, 2)
+    }
+    func testOnlyNonattachment409BecomesConversationConflict() {
+        for code in ["intake_changed", "confirmation_required", "id_conflict", "other_conflict", ""] {
+            XCTAssertNotNil(ForgeChatConversationConflict.response(status: 409, code: code), code)
+        }
+        for code in ["attachment_in_use", "attachment_storage_limit", "attachment_conflict", "bad_attachment_ids", "attachments_disabled"] {
+            XCTAssertNil(ForgeChatConversationConflict.response(status: 409, code: code), code)
+        }
+        // Do not change auth, quota, expiry, validation or transient retry behavior.
+        for status in [200, 401, 403, 404, 410, 422, 429, 503] {
+            XCTAssertNil(ForgeChatConversationConflict.response(status: status, code: "intake_changed"))
+        }
+    }
+
+    func testConversationConflictPersistsPayloadAndReloadNeverAutomaticallyResends() async throws {
+        for code in ["intake_changed", "confirmation_required", "id_conflict", "unknown_conflict"] {
+            let row = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true,
+                text: "hide side buttons too", imageBase64: nil, attachmentIDs: [UUID()])
+            var attempts = 0
+            let store = ForgeChatStore(testRequest: { body in
+                guard body["action"] as? String == "chat-send" else { return self.list }
+                attempts += 1
+                throw ForgeChatConversationConflict.response(status: 409, code: code)!
+            })
+            store.outgoing = [row]
+            await store.flush()
+            await store.flush()
+            XCTAssertEqual(attempts, 1)
+            XCTAssertEqual(store.outgoing.first?.id, row.id)
+            XCTAssertEqual(store.outgoing.first?.text, row.text)
+            XCTAssertEqual(store.outgoing.first?.attachmentIDs, row.attachmentIDs)
+            XCTAssertEqual(store.outgoing.first?.conversationConflict, code)
+            XCTAssertTrue(store.sentEcho.isEmpty)
+            XCTAssertTrue(store.returnedText.isEmpty) // never restore chips as unavailable
+            XCTAssertEqual(store.error, ForgeChatConversationConflict(code: code).message)
+
+            // Same Codable persistence path as the production outgoing v1 queue.
+            let disk = try JSONEncoder().encode(store.outgoing)
+            let reloaded = ForgeChatStore(testRequest: { body in
+                if body["action"] as? String == "chat-send" { attempts += 1 }
+                return self.list
+            })
+            reloaded.outgoing = try JSONDecoder().decode([ForgeChatOutgoing].self, from: disk)
+            await reloaded.flush()
+            XCTAssertEqual(attempts, 1)
+            XCTAssertEqual(reloaded.outgoing, store.outgoing)
+            XCTAssertTrue(reloaded.sentEcho.isEmpty)
+        }
+    }
+
+    func testExplicitSameTextSendResumesOriginalIDAndUploadedAttachments() async throws {
+        let row = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true,
+            text: "hide side buttons too", imageBase64: nil, attachmentIDs: [UUID()])
+        var paused = row
+        paused.conversationConflict = "intake_changed"
+        var calls: [[String: Any]] = []
+        let store = ForgeChatStore(testRequest: { body in
+            guard body["action"] as? String == "chat-send" else { return self.list }
+            calls.append(body)
+            return self.ok
+        })
+        store.outgoing = [paused]
+        // Empty composer chips must reuse the original uploaded IDs, not lose them.
+        let id = store.send(threadID: row.threadID, text: row.text, jpeg: nil)
+        XCTAssertEqual(id, row.id)
+        await store.flush()
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?["id"] as? String, row.id.uuidString.lowercased())
+        XCTAssertEqual(calls.first?["text"] as? String, row.text)
+        XCTAssertEqual(calls.first?["attachmentIDs"] as? [String], row.attachmentIDs?.map { $0.uuidString.lowercased() })
+        XCTAssertNil(calls.first?["image"])
+        XCTAssertTrue(store.outgoing.isEmpty)
+        XCTAssertEqual(store.sentEcho.map(\.id), [row.id])
+    }
+
+    func testNewConversationTextNeverUnpausesOrConfirmsConflictedMessage() async {
+        var paused = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true,
+            text: "make a tweak", imageBase64: nil, attachmentIDs: [UUID()])
+        paused.conversationConflict = "confirmation_required"
+        var calls: [[String: Any]] = []
+        let store = ForgeChatStore(testRequest: { body in
+            guard body["action"] as? String == "chat-send" else { return self.list }
+            calls.append(body)
+            return self.ok
+        })
+        store.outgoing = [paused]
+        let id = store.send(threadID: paused.threadID, text: "what do you mean?", jpeg: nil)
+        await store.flush()
+        XCTAssertNotEqual(id, paused.id)
+        XCTAssertEqual(store.outgoing, [paused])
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?["text"] as? String, "what do you mean?")
+        XCTAssertNil(calls.first?["attachmentIDs"])
+    }
+
+    func testSavedOutgoingV1WithoutConflictFieldStillDecodes() throws {
+        let row = ForgeChatOutgoing(id: UUID(), threadID: UUID(), newThread: true, text: "saved", imageBase64: nil)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(row)) as? [String: Any])
+        object.removeValue(forKey: "conversationConflict")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(ForgeChatOutgoing.self, from: legacy)
+        XCTAssertNil(decoded.conversationConflict)
+        XCTAssertEqual(decoded, row)
+    }
+
+
 }

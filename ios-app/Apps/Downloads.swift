@@ -211,7 +211,7 @@ enum HomeShortcut {
             "PayloadUUID": UUID().uuidString,
             "PayloadDisplayName": app.name,
             "Label": app.name,
-            "URL": "mirsa://launch?bundle=\(app.id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? app.id)",
+            "URL": launchURL(for: app.id).absoluteString,
             "IsRemovable": true,
             "FullScreen": true,
             "IgnoreManifestScope": true,
@@ -230,17 +230,83 @@ enum HomeShortcut {
         return try? PropertyListSerialization.data(fromPropertyList: root, format: .xml, options: 0)
     }
 
-    /// mirsa://launch?bundle=<id>
-    static func handle(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "mirsa", url.host == "launch",
-              let bid = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "app" || $0.name == "bundle" })?.value
-        else { return false }
+    /// Mirsa-only scheme. The Setup app never registers it, so a Home Screen
+    /// shortcut can't open Setup by mistake. Legacy "mirsa" links still parse.
+    static let launchScheme = "mirsa-container"
+
+    static func launchURL(for id: String) -> URL {
+        var c = URLComponents()
+        c.scheme = launchScheme; c.host = "launch"
+        c.queryItems = [URLQueryItem(name: "bundle", value: id)]
+        return c.url!
+    }
+
+    /// Returns the container id only for a well-formed launch link.
+    static func containerID(from url: URL) -> String? {
+        guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = c.scheme?.lowercased(), scheme == launchScheme || scheme == "mirsa",
+              c.host == "launch", c.user == nil, c.password == nil, c.port == nil,
+              c.path.isEmpty, c.fragment == nil,
+              let items = c.queryItems, items.count == 1,
+              let item = items.first, item.name == "bundle" || item.name == "app",
+              let bid = item.value, !bid.isEmpty, bid.count <= 255,
+              bid != ".", bid != "..",
+              !bid.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0) ||
+                  CharacterSet.whitespacesAndNewlines.contains($0) ||
+                  "/\\:?&#=".unicodeScalars.contains($0)
+              })
+        else { return nil }
+        return bid
+    }
+
+    private static let route = HomeShortcutLaunchRoute { bid in
         let store = AppsStore.shared
         guard let app = store.apps.first(where: { $0.id == bid }) else {
             store.error = tr("That app isn't in Mirsa anymore.", "هالتطبيق ما عاد موجود بـMirsa.")
-            return true
+            return
         }
         store.launch(app)
+    }
+
+    /// Loading the store is synchronous, but cold URL delivery can precede the root view.
+    static func applicationReady() {
+        _ = AppsStore.shared
+        route.markReady()
+    }
+
+    /// mirsa-container://launch?bundle=<id>
+    static func handle(_ url: URL) -> Bool {
+        guard let bid = containerID(from: url) else { return false }
+        route.receive(bid)
         return true
+    }
+}
+
+
+// The same one-shot queue is used by cold URL receipt and the already-running app.
+@MainActor
+final class HomeShortcutLaunchRoute {
+    private var ready = false
+    private var pending: [String] = []
+    private let launch: (String) -> Void
+
+    init(launch: @escaping (String) -> Void) { self.launch = launch }
+
+    func receive(_ containerID: String) {
+        pending.append(containerID)
+        drain()
+    }
+
+    func markReady() {
+        ready = true
+        drain()
+    }
+
+    private func drain() {
+        guard ready else { return }
+        let requests = pending
+        pending.removeAll()
+        for id in requests { launch(id) }
     }
 }

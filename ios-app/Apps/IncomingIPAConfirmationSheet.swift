@@ -20,6 +20,7 @@ struct IncomingIPAConfirmationSheet: View {
     @State private var error: String?
     @State private var loading = true
     @State private var submitted = false
+    @State private var submittedKind = ""
     @State private var certificates = false
     @State private var selected: PersonalIdentityVault.SavedIdentity?
     @State private var savedProfile: IncomingProfile?
@@ -117,7 +118,7 @@ struct IncomingIPAConfirmationSheet: View {
         .environment(\.layoutDirection, .leftToRight)
         .interactiveDismissDisabled(submitted)
         .sheet(isPresented: $login, onDismiss: {
-            if store.account != nil, let onAppleID { submit(onAppleID) }
+            if store.account != nil, let onAppleID { submit(onAppleID, kind: "appleID") }
         }) { LoginSheet(store: store) }
         .task {
             guard preview == nil else { return }
@@ -207,12 +208,12 @@ struct IncomingIPAConfirmationSheet: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 Button(tr("Cancel", "إلغاء")) { guard !submitted else { return }; onCancel() }.frame(maxWidth: .infinity).padding(.vertical, 11).appsGlass(cornerRadius: 13)
-                Button { submit(onImportProject) } label: {
+                Button { submit(onImportProject, kind: "project") } label: {
                     Text(tr("Import to project", "استيراد لمشروع")).frame(maxWidth: .infinity).padding(.vertical, 11)
                 }.appsGlass(cornerRadius: 13, tint: violet).disabled(preview == nil || submitted)
             }.font(.subheadline.weight(.semibold))
             if let onSaveLibrary {
-                Button { submit(onSaveLibrary) } label: {
+                Button { submit(onSaveLibrary, kind: "library") } label: {
                     Label(tr("Save to Certificate Library", "حفظ في مكتبة الشهادة", ckb: "هەڵگرتن لە کتێبخانەی بڕوانامە", kmr: "Di pirtûkxaneya sertîfîkayê de tomar bike"), systemImage: "square.stack.3d.up")
                         .frame(maxWidth: .infinity).padding(.vertical, 11)
                 }.font(.subheadline.weight(.semibold)).appsGlass(cornerRadius: 13, tint: violet)
@@ -222,9 +223,9 @@ struct IncomingIPAConfirmationSheet: View {
             if let onAppleID {
                 Button {
                     if store.account == nil && !store.hasSavedLogin { login = true }
-                    else { submit(onAppleID) }
+                    else { submit(onAppleID, kind: "appleID") }
                 } label: {
-                    Label(tr("Install with Apple ID", "تثبيت بـ Apple ID"), systemImage: "apple.logo")
+                    submitIndicator("appleID") { Label(tr("Install with Apple ID", "تثبيت بـ Apple ID"), systemImage: "apple.logo") }
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
                 }.appsGlass(cornerRadius: 15, tint: violet)
                     .accessibilityIdentifier("mirsa.incoming.appleID")
@@ -233,18 +234,18 @@ struct IncomingIPAConfirmationSheet: View {
             Button {
                 if let selected {
                     guard preview != nil, !submitted else { return }
-                    submitted = true
+                    submitted = true; submittedKind = "sign"
                     onSignInstall(url, selected)
                 } else { certificates = true }
             } label: {
-                Label(tr("Sign & install with certificate", "توقيع وتثبيت بالشهادة"), systemImage: "signature").font(.headline)
+                submitIndicator("sign") { Label(tr("Sign & install with certificate", "توقيع وتثبيت بالشهادة"), systemImage: "signature") }.font(.headline)
                     .frame(maxWidth: .infinity).padding(.vertical, 15)
                     .foregroundStyle(Color(red: 0.12, green: 0.09, blue: 0.18))
                     .background(LinearGradient(colors: [gold, Color(red: 0.98, green: 0.88, blue: 0.67)], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 15))
             }.accessibilityIdentifier("mirsa.incoming.certificate").disabled(preview == nil || submitted)
             if let onDirectInstall {
-                Button { submit(onDirectInstall) } label: {
-                    Label(tr("Direct install", "تثبيت مباشر"), systemImage: "square.and.arrow.down").font(.subheadline.weight(.semibold))
+                Button { submit(onDirectInstall, kind: "direct") } label: {
+                    submitIndicator("direct") { Label(tr("Direct install", "تثبيت مباشر"), systemImage: "square.and.arrow.down") }.font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }.appsGlass(cornerRadius: 13).disabled(preview == nil || submitted)
             }
@@ -252,9 +253,15 @@ struct IncomingIPAConfirmationSheet: View {
             .background(MirsaPalette.sheet.ignoresSafeArea(edges: .bottom))
             .overlay(alignment: .top) { Rectangle().fill(MirsaPalette.stroke).frame(height: 1) }
     }
-    private func submit(_ callback: (URL) -> Void) {
+    /// Same button keeps its place: it swaps its label for a non-cancellable phase indicator once submitted.
+    @ViewBuilder private func submitIndicator<L: View>(_ kind: String, @ViewBuilder label: () -> L) -> some View {
+        if submitted && submittedKind == kind {
+            SourceDownloadIndicator(fraction: nil, phase: kind == "direct" ? .installing : .preparing, cancellable: false)
+        } else { label() }
+    }
+    private func submit(_ callback: (URL) -> Void, kind: String) {
         guard preview != nil, !submitted else { return }
-        submitted = true
+        submitted = true; submittedKind = kind
         callback(url)
     }
     @MainActor private func reloadCertificate() async {

@@ -5,7 +5,7 @@ extension MirsaTr {
     static func lit(_ en: String) -> String {
         guard let t = legacy[en] else { return en }
         switch AppLanguageStore.shared.current {
-        case .english: return en
+        case .english, .german: return en
         case .arabic: return t.0
         case .sorani: return t.1
         case .kurmanji: return t.2

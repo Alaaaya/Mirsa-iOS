@@ -62,20 +62,26 @@ final class AppsStore: ObservableObject {
     nonisolated static let bgTaskID = "com.alaa.mirsa.apps.refresh"
 
     @Published var apps: [ManagedApp] = []
+    @Published private(set) var legacyInstallDiagnostics: [String] = []
     @Published var account: AccountState? = nil
     @Published var busy: String? = nil
     @Published var progress: Double = 0
     @Published var isDownloading = false
     @Published var downloadHasKnownSize = false
+    /// Exact requested URL, not an unverified bundle ID from a source feed.
+    @Published var sourceDownloadURL: URL?
+    /// Token of the InstallTracker request that owns the current download/import, if any.
+    var installToken: UUID?
     var downloadTask: Task<URL, Error>?
     var downloadID: UUID?
     var downloadOperationID: UUID?
     @Published var pending: PendingImport? = nil
     @Published var prompt: SideloadPrompt? = nil
+    @Published var errorOffersReimport = false
     @Published var errorOffersSettings = false
     @Published var error: String? = nil {
         didSet {
-            if error == nil { errorOffersSettings = false }
+            if error == nil { errorOffersSettings = false; errorOffersReimport = false }
             if let error {
                 let safe = InstallErrorText.sanitize(error, arabic: L.isArabic)
                 if safe != error { self.error = safe }
@@ -193,11 +199,17 @@ final class AppsStore: ObservableObject {
 
     private func load() {
         let ud = UserDefaults.standard
-        if let stage = ud.string(forKey: "mirsa.install.stage") {
-            let last = ud.string(forKey: "mirsa.install.lastLog") ?? ""
-            error = L.f("err.crashedAt", stage) + (last.isEmpty ? "" : "\n\n" + last)
-            ud.removeObject(forKey: "mirsa.install.stage")
-            ud.removeObject(forKey: "mirsa.install.lastLog")
+        let hadInterruptedInstall = ud.string(forKey: "mirsa.install.stage") != nil
+        let completedUpdate = InstallErrorText.completedSelfUpdate(
+            expected: ud.string(forKey: "mirsa.install.selfTargetBuild"),
+            previous: ud.string(forKey: "mirsa.install.selfPreviousBuild"),
+            current: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "")
+        ud.removeObject(forKey: "mirsa.install.selfTargetBuild")
+        ud.removeObject(forKey: "mirsa.install.selfPreviousBuild")
+        legacyInstallDiagnostics = MirsaDiagnosticPrivacy.migrateInstallBreadcrumbs(ud)
+        if hadInterruptedInstall && !completedUpdate {
+            // Status is useful to everyone; old technical install logs are owner-only.
+            error = InstallErrorText.interrupted(arabic: L.isArabic)
         }
         guard let d = try? Data(contentsOf: dbURL),
               let a = try? JSONDecoder().decode([ManagedApp].self, from: d) else { return }
@@ -265,8 +277,7 @@ final class AppsStore: ObservableObject {
 
     /// Apple ID install failures end with what to do next, in the app language.
     static func withNextStep(_ message: String) -> String {
-        let step = tr("Next step: check Wi-Fi and LocalDevVPN, then try again. If it repeats, send the report from Settings.",
-                      "الخطوة الجاية: تأكد من الواي فاي و LocalDevVPN وجرّب مرة تانية. إذا تكرر ابعت التقرير من الإعدادات.")
+        let step = InstallErrorText.nextStep(for: message, arabic: L.isArabic)
         return message.contains(step) ? message : message + "\n\n" + step
     }
 
@@ -299,12 +310,15 @@ final class AppsStore: ObservableObject {
     @discardableResult
     func ensureSession() async -> Bool {
         if SideloadService.isLoggedIn { return true }
-        guard let e = Keychain.get("appleid.email"), let p = Keychain.get("appleid.password") else { return false }
+        guard let e = Keychain.get("appleid.email"), let p = Keychain.get("appleid.password") else {
+            error = L.t("err.notSignedIn")
+            return false
+        }
         do {
             _ = try await Task.detached { try SideloadService.login(email: e, password: p) }.value
             return true
         } catch {
-            self.error = error.localizedDescription
+            self.error = Self.withNextStep(error.localizedDescription)
             return false
         }
     }
@@ -415,6 +429,8 @@ final class AppsStore: ObservableObject {
     // MARK: Import
 
     @Published var explicitIncomingInstall = false
+    /// Tweaks a Mirsa AI «Inject» choice wants pre-checked in the next IPA editor. Consumed once.
+    @Published var injectTweakIDs: Set<UUID>?
 
     /// Explicit Open-in Apple ID never consults the default installation mode.
     /// Suppress the generic pending-choice sheet while committing this choice.
@@ -466,7 +482,10 @@ final class AppsStore: ObservableObject {
                                     name: name, version: version, icon: Self.findIcon(in: app, info: info),
                                     wantsNotifications: modes.contains("remote-notification"),
                                     hasExtensions: hasExt, sizeBytes: size)
-            if !url.standardizedFileURL.path.hasPrefix(DownloadsLibrary.root.standardizedFileURL.path + "/") {
+            // An «Inject» from Mirsa AI works on a temporary copy of an installed app's
+            // saved IPA: it is never added to Downloads, and the work dir is removed
+            // after install or cancel like any pending import.
+            if injectTweakIDs == nil, !url.standardizedFileURL.path.hasPrefix(DownloadsLibrary.root.standardizedFileURL.path + "/") {
                 DownloadsLibrary.shared.add(ipa: ipa, bundleID: bid, name: name, version: version, size: size, icon: pending?.icon)
             }
             prepared = true
@@ -535,7 +554,9 @@ final class AppsStore: ObservableObject {
     }
 
     func cancelPending() {
-        guard busy == nil, let p = pending else { return }
+        guard busy == nil else { return }
+        injectTweakIDs = nil
+        guard let p = pending else { return }
         MirsaInstallActivity.shared.cancel()
         MirsaManagedTmp.end(p.workDir)
         pending = nil
@@ -553,6 +574,10 @@ final class AppsStore: ObservableObject {
         let publication = orig.deletingLastPathComponent().appendingPathComponent(".original-\(UUID().uuidString).ipa")
         defer { try? fm.removeItem(at: publication) }
         do {
+            guard fm.fileExists(atPath: p.originalIPA.path) else {
+                errorOffersReimport = true
+                throw SideloadError.message("MIRSA_SOURCE_IPA_MISSING")
+            }
             try fm.copyItem(at: p.originalIPA, to: publication)
             // Same-directory POSIX rename is atomic and preserves open readers.
             guard rename(publication.path, orig.path) == 0 else {
@@ -602,7 +627,7 @@ final class AppsStore: ObservableObject {
             MirsaCompletionFeedback.shared.finish(operationID: operation,
                 outcome: activitySucceeded ? .success : operationOutcome)
         }
-        guard await ensureSession() else { error = L.t("err.notSignedIn"); return false }
+        guard await ensureSession() else { return false }
         busy = L.t("busy.signing")
         defer { busy = nil }
         let fm = FileManager.default
@@ -744,7 +769,7 @@ final class AppsStore: ObservableObject {
             MirsaOperationProgress.shared.finish(operation)
             MirsaCompletionFeedback.shared.finish(operationID: operation, outcome: outcome)
         }
-        guard await ensureSession() else { error = L.t("err.notSignedIn"); return }
+        guard await ensureSession() else { return }
         busy = L.t("busy.signing"); defer { busy = nil }
         var a = app
         let path = Self.appDir(a.id).path
@@ -777,7 +802,7 @@ final class AppsStore: ObservableObject {
         let alreadyReal = app.location == .real && apps.contains(where: { $0.id == app.id && $0.location == .real })
         if !alreadyReal && slotsLeft <= 0 { error = L.t("choice.full"); return false }
         guard await realAppNetworkReady(vm) else { return false }
-        guard await ensureSession() else { error = L.t("err.notSignedIn"); return false }
+        guard await ensureSession() else { return false }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }
         let ipa = Self.originalIPA(app.id).path
@@ -916,6 +941,9 @@ final class AppsStore: ObservableObject {
     /// Container apps must be signed by the same team as the AirCard that loads
     /// them. This installs a copy of AirCard signed with the user's Apple ID.
     func installSelf(vm: AppViewModel?, from source: URL? = nil, feedback: Bool = true) async {
+        // Nested calls (updater) keep the outer request; direct taps own key "self" (prepare/sign/install, not cancellable).
+        let selfToken = InstallTracker.shared.begin(key: "self", phase: .installing)
+        defer { InstallTracker.shared.end(selfToken) }
         if MirsaInstallMode.ownCertificate {
             guard busy == nil else { error = Self.busyMessage(); return }
             busy = personalText("Signing for OTA…", "عم يوقّع لتثبيت OTA…")
@@ -938,7 +966,7 @@ final class AppsStore: ObservableObject {
             }
         }
         guard await realAppNetworkReady(vm, selfUpdate: true) else { return }
-        guard await ensureSession() else { error = L.t("err.notSignedIn"); return }
+        guard await ensureSession() else { return }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }
         let fm = FileManager.default
@@ -973,6 +1001,17 @@ final class AppsStore: ObservableObject {
                     try? fm.copyItem(at: URL(fileURLWithPath: pf), to: copy.appendingPathComponent(Self.handoffPairingName))
                 }
             }
+            // Exact build receipt is written only for replacing this app, never
+            // for installing other apps. Keep it across process death, not errors.
+            let defaults = UserDefaults.standard
+            let target = NSDictionary(contentsOf: plistURL)?["CFBundleVersion"] as? String
+            defaults.set(target, forKey: "mirsa.install.selfTargetBuild")
+            defaults.set(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+                         forKey: "mirsa.install.selfPreviousBuild")
+            defer {
+                defaults.removeObject(forKey: "mirsa.install.selfTargetBuild")
+                defaults.removeObject(forKey: "mirsa.install.selfPreviousBuild")
+            }
             let path = copy.path
             let o = try await Task.detached {
                 try SideloadService.install(appPath: path) { f, stage in
@@ -1003,7 +1042,7 @@ final class AppsStore: ObservableObject {
             return L.t("err.device") + "\n\n" + tr(failure.message(arabic: false), failure.message(arabic: true))
         }
         if raw.contains("Device connection failed") || raw.contains("RemoteXPC") || raw.contains("timed out") {
-            return L.t("err.device")
+            return L.t("err.device") + "\n\n" + InstallErrorText.sanitize(raw, arabic: L.isArabic)
         }
         return InstallErrorText.sanitize(raw, arabic: L.isArabic)
     }
