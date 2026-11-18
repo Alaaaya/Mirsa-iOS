@@ -2,7 +2,7 @@ name: Design review screenshots (floating dock)
 # Runs only on the design branch; captures the Apps home and Tools in Arabic and English.
 on:
   push:
-    branches: [mirsa/design-floating-dock-glass, mirsa/final-combined]
+    branches: [mirsa/design-floating-dock-glass, mirsa/final-combined, mirsa/bundle-2.8]
 permissions:
   contents: read
 jobs:

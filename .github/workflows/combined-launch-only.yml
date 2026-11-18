@@ -2,7 +2,7 @@ name: Combined final launch smoke
 on:
   workflow_dispatch:
   push:
-    branches: [mirsa/final-combined]
+    branches: [mirsa/final-combined, mirsa/bundle-2.8]
 permissions:
   contents: read
 jobs:
