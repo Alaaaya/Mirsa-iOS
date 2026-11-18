@@ -15,6 +15,7 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
 
     @State private var items: [MirsaCustomWallpapers.Item] = []
     @State private var busy = false
+    @State private var deletingID: String?
     @State private var thumbnailGeneration = UUID()
     @State private var pendingDelete: MirsaCustomWallpapers.Item?
     @State private var confirmCleanup = false
@@ -73,11 +74,17 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
                         thumb(rec)
                         Text(cardTitle(rec)).font(.subheadline.bold()).lineLimit(2)
                         Spacer()
-                        Button(role: .destructive) { pendingDelete = rec } label: {
-                            Text(t(.deleteItem)).font(.caption.bold())
+                        if deletingID == rec.id {
+                            ProgressView(t(.deleting))
+                                .font(.caption)
+                                .accessibilityIdentifier("wallpaper-delete-progress")
+                        } else {
+                            Button(role: .destructive) { pendingDelete = rec } label: {
+                                Text(t(.deleteItem)).font(.caption.bold())
+                            }
+                            .buttonStyle(.bordered).tint(.red)
+                            .disabled(disabled)
                         }
-                        .buttonStyle(.bordered).tint(.red)
-                        .disabled(disabled)
                     }
                     .background(thumbnailTask(rec))
                 }
@@ -270,11 +277,13 @@ struct MirsaWallpaperManagementSection<Main: View, Extra: View>: View {
 
     private func delete(_ rec: MirsaCustomWallpapers.Item) {
         guard !disabled else { return }
+        deletingID = rec.id
         log("DELETE CONFIRMED by user for UUID " + rec.id)
         run({ lines in
             lines.add("DELETE IDENTITY CHECK exact journal UUID " + rec.id)
             try MirsaCustomWallpapers.delete(rec, log: { lines.add($0) })
         }, done: { err in
+            deletingID = nil
             reload()
             if let err { log("DELETE RESULT error " + err.localizedDescription); report(err, "") }
             else { log("DELETE RESULT success; offering respring"); failed = false; message = t(.deleteDone); onDeleted() }

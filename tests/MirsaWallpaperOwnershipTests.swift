@@ -744,6 +744,29 @@ final class MirsaWallpaperOwnershipTests: XCTestCase {
         XCTAssertEqual(requested, 0)
     }
 
+    func testDeleteReadReuseTimingRetainsMetadataSnapshots() throws {
+        let root = try temporaryRoot()
+        let store = root.appendingPathComponent("owned")
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        let file = store.appendingPathComponent("asset")
+        try Data("fixture".utf8).write(to: file)
+        let before = try MirsaCustomWallpapers.snapshot(store)
+        let started = ProcessInfo.processInfo.systemUptime
+        var acquisitions = 0
+        for _ in 0..<75 {
+            // The exact-node branch used by the live lease, not recursive trust.
+            if !PosterBoardStore.readableNode(file) { acquisitions += 1 }
+        }
+        let elapsed = ProcessInfo.processInfo.systemUptime - started
+        XCTAssertGreaterThanOrEqual(elapsed, 0)
+        XCTAssertEqual(acquisitions, 0, "Readable fixture must not need 75 expensive grants")
+        XCTAssertEqual(try MirsaCustomWallpapers.snapshot(store), before)
+        try Data("changed".utf8).write(to: file)
+        XCTAssertNotEqual(try MirsaCustomWallpapers.snapshot(store), before,
+                          "Read reuse must not bypass fresh tree validation")
+        print("DELETE READ REUSE fixture75 elapsedSeconds=\(elapsed) acquisitions=\(acquisitions)")
+    }
+
     func testThumbnailDecodeIsBoundedAndFallsBack() throws {
         XCTAssertNil(MirsaCustomWallpapers.thumbnailData(from: Data("not an image".utf8)))
         XCTAssertNil(MirsaCustomWallpapers.thumbnailData(from: Data(count: MirsaCustomWallpapers.thumbMaxFileBytes + 1)))

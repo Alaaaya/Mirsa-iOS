@@ -696,11 +696,23 @@ enum MirsaCustomWallpapers {
     }
     /// UI must obtain separate per-item destructive confirmation before calling.
     static func delete(_ requested: Item, log: @escaping (String) -> Void) throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        func timing(_ stage: String, lease: PosterBoardLease? = nil) {
+            let elapsed = ProcessInfo.processInfo.systemUptime - started
+            log("DELETE TIMING " + stage + " elapsedSeconds=" + String(elapsed) +
+                " grants=" + String(lease?.grantRequests ?? 0) + " reusedReads=" + String(lease?.reusedReads ?? 0))
+        }
+        defer { timing("finished") }
         try MirsaWallpaperJournal.exclusive {
+            timing("lock-acquired")
             guard requested.canDelete else { throw PosterBoardStore.failure("Unclassified wallpaper is inspect-only. Nothing deleted.") }
             let container = try MirsaPosterDiscovery.discover(log: log)
             guard container == requested.container else { throw PosterBoardStore.failure("PosterBoard container changed; refresh the list.") }
-            let lease = try PosterBoardLease(path: container, log: log)
+            // Only skip token acquisition for exact nodes already proven readable.
+            // This grants no unlink authority: every journal, snapshot, inode,
+            // symlink and absence check below still runs unchanged.
+            let lease = try PosterBoardLease(path: container, reuseReadableAccess: true, log: log)
+            timing("access-ready", lease: lease)
             defer { try? lease.close() }
             do {
                 let records = try journals()
@@ -716,6 +728,7 @@ enum MirsaCustomWallpapers {
                       completedJournal(records, id: fresh.id, container: fresh.container, relative: fresh.relative,
                                        snapshot: Snapshot(expected: fresh.expected, paths: fresh.paths,
                                                           device: fresh.device, inode: fresh.inode)) != nil else { throw PosterBoardStore.failure("Wallpaper changed or is no longer proven custom. Nothing deleted.") }
+                timing("classified", lease: lease)
                 let target = try grant(fresh.relative, lease: lease)
                 guard let owned = completedJournal(records, id: fresh.id, container: fresh.container,
                     relative: fresh.relative, snapshot: Snapshot(expected: fresh.expected, paths: fresh.paths,
@@ -729,13 +742,16 @@ enum MirsaCustomWallpapers {
                                                     lease: lease, records: try journals(), baseline: baseline),
                       classified.id == fresh.id, classified.device == fresh.device, classified.inode == fresh.inode,
                       lease.permits(target) else { throw PosterBoardStore.failure("Wallpaper changed before deletion; preserved.") }
+                timing("revalidated", lease: lease)
                 let last = try identity(target, kind: S_IFDIR)
                 guard UInt64(last.st_dev) == fresh.device, UInt64(last.st_ino) == fresh.inode else {
                     throw PosterBoardStore.failure("Wallpaper root changed before deletion.")
                 }
                 try FileManager.default.removeItem(at: target)
                 guard try MirsaWallpaperJournal.absent(target) else { throw PosterBoardStore.failure("Custom deletion absence not proven.") }
+                timing("removed-and-absence-verified", lease: lease)
                 try lease.close()
+                timing("lease-closed", lease: lease)
                 // Existing owned-journal deletion remains untouched. Cleanup can
                 // later reconcile this now-absent entry through its normal path.
                 log("CUSTOM DELETE VERIFIED exact UUID " + fresh.id + "; lease closed; refresh pending.")
