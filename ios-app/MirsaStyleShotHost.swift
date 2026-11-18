@@ -53,6 +53,9 @@ struct MirsaStyleShotHost: View {
         case "sources": tab(.sources)
         #if DEBUG
         case "sources-delete-validation": SourcesDeleteValidationHost()
+        case "source-news-fixture": SourceNewsValidationHost()
+        case "source-news-live":
+            NavigationStack { SourceDetailView(source: RepoSource(url: MirsaSourceFeed.primary, name: "Mirsa", uid: RepoSource.canonicalID)) }
         #endif
         case "tools": tab(.pairing)
         case "more": tab(.personalHub)
@@ -159,5 +162,26 @@ private struct SourcesDeleteValidationHost: View {
         _store = StateObject(wrappedValue: store)
     }
     var body: some View { SourcesTab(store: store) }
+}
+#endif
+
+#if DEBUG
+/// Isolated approved branding snapshot, used only by the explicit screenshot harness.
+private struct SourceNewsValidationHost: View {
+    @StateObject private var store: SourcesStore
+    private let source: RepoSource
+    init() {
+        let defaults = UserDefaults(suiteName: "mirsa.source-news.screenshot")!
+        defaults.removePersistentDomain(forName: "mirsa.source-news.screenshot")
+        let bytes = Data(#"{"iconURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-icon.png","headerURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-banner.jpg","tintColor":"7C83FF","subtitle":"تطبيقاتك وتويكاتك وخلفياتك بمكان واحد","description":"مرسى لتثبيت تطبيقات iPhone وإدارة السورسات والتويكات وخلفيات Tendies. من تطوير علاء. الأخبار والتواصل على X @rasmtk30.","website":"https://x.com/rasmtk30","name":"Mirsa","news":[{"title":"أهلاً فيكم بمرسى 💜","caption":"أنا علاء، عملت مرسى حتى تجمعوا تطبيقاتكم وتويكاتكم وخلفيات Tendies بمكان واحد. هون بنزّل الجديد، وإذا عندكم اقتراح أو مشكلة احكولي على X https://x.com/rasmtk30","imageURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-banner.jpg","tintColor":"7C83FF","date":"2026-11-18T00:11:35Z","identifier":"mirsa-welcome-2026","appID":"com.alaa.mirsa","url":"https://x.com/rasmtk30","notify":false}],"apps":[{"name":"Mirsa","bundleIdentifier":"com.alaa.mirsa","version":"2.5","downloadURL":"https://example.org/Mirsa.ipa","iconURL":"https://raw.githubusercontent.com/Alaaaya/Mirsa/main/assets/branding/mirsa-icon.png"}]}"#.utf8)
+        let store = SourcesStore(defaults: defaults, load: { request in
+            (bytes, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let source = RepoSource(url: "https://example.org/source.json", name: "Mirsa")
+        store.sources = [source]
+        self.source = source
+        _store = StateObject(wrappedValue: store)
+    }
+    var body: some View { NavigationStack { SourceDetailView(source: source, store: store) } }
 }
 #endif
