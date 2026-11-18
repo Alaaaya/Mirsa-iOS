@@ -60,9 +60,6 @@ struct PersonalProjectDetailView: View {
                     tweaksCard
                     settingsCard
                     depsCard
-                    if !existingLibraries.isEmpty {
-                        ExistingLibrariesCard(libraries: existingLibraries, edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
-                    }
                     certificateCard
                     MirsaVersionArchiveSection(bundleID: app.bundleID)
                     Button { openBundleFiles() } label: {
@@ -226,7 +223,10 @@ struct PersonalProjectDetailView: View {
                 Label(MirsaTr.f("pending", added, removed), systemImage: "exclamationmark.circle.fill")
                     .font(.caption).foregroundStyle(.yellow)
             }
-            if ids.isEmpty {
+            if !existingLibraries.isEmpty {
+                ExistingLibrariesCard(libraries: existingLibraries, edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
+            }
+            if ids.isEmpty && existingLibraries.isEmpty {
                 Text(tr("No additions. Import ZIP, .dylib, .deb or a .framework folder.", "ما في إضافات. ضيف ZIP أو dylib أو deb أو مجلد framework.", ckb: "زیادکراو نییە. ZIP، dylib، deb یان بوخچەی framework هاوردە بکە.", kmr: "Pêvek tune ne. ZIP, dylib, deb an peldanka framework bîne."))
                     .font(.footnote).foregroundStyle(.secondary)
             }
