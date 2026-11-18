@@ -1,0 +1,27 @@
+{
+  "repository": "OpenSwiftUIProject/DarwinPrivateFrameworks",
+  "commit": "511cc728141f57dc325753f23898568ccd49c339",
+  "unchanged": true,
+  "files": [
+    {
+      "path": "LinkerStubs/iphoneos/CoreUI.tbd",
+      "upstream": "https://github.com/OpenSwiftUIProject/DarwinPrivateFrameworks/blob/511cc728141f57dc325753f23898568ccd49c339/CoreUI/2024/tbds/ios-arm64-arm64e/CoreUI.tbd",
+      "sha256": "bbdc7cbb8751fb4763dcaf6a72f233bf243acdadf89a6da4c867b7ee43c61cf9"
+    },
+    {
+      "path": "LinkerStubs/iphoneos/CoreSVG.tbd",
+      "upstream": "https://github.com/OpenSwiftUIProject/DarwinPrivateFrameworks/blob/511cc728141f57dc325753f23898568ccd49c339/CoreSVG/2024/tbds/ios-arm64-arm64e/CoreSVG.tbd",
+      "sha256": "0994179099e61bb574563299810d2e968560d88d73ed9988901d778e55c8f615"
+    },
+    {
+      "path": "LinkerStubs/iphonesimulator/CoreUI.tbd",
+      "upstream": "https://github.com/OpenSwiftUIProject/DarwinPrivateFrameworks/blob/511cc728141f57dc325753f23898568ccd49c339/CoreUI/2024/tbds/ios-arm64-x86_64-simulator/CoreUI.tbd",
+      "sha256": "9b00e879f6faa6fee11eb2b8691217e7c7f0dfd35dd69b454334379098bbbc34"
+    },
+    {
+      "path": "LinkerStubs/iphonesimulator/CoreSVG.tbd",
+      "upstream": "https://github.com/OpenSwiftUIProject/DarwinPrivateFrameworks/blob/511cc728141f57dc325753f23898568ccd49c339/CoreSVG/2024/tbds/ios-arm64-x86_64-simulator/CoreSVG.tbd",
+      "sha256": "10d261a86fa2823362dd5978b5cda39524431ffc383d25137767aaf2642153ff"
+    }
+  ]
+}
