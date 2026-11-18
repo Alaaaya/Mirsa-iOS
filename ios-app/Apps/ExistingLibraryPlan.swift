@@ -19,7 +19,7 @@ enum ExistingLibraryPlan {
     }
 
     static func stateLabel(_ lib: ExistingProjectLibrary) -> String {
-        lib.provenance == "bundledDependency"
+        lib.bundledPath != nil
             ? tr("Bundled in the app", "موجودة داخل التطبيق", ckb: "لەناو ئەپەکەدایە", kmr: "Di nav sepanê de ye")
             : tr("Location unresolved", "المكان غير محدد", ckb: "شوێنەکەی دیارینەکراوە", kmr: "Cih nehatiye diyarkirin")
     }
@@ -95,7 +95,7 @@ struct ExistingLibrariesCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Button { withAnimation(.easeOut(duration: 0.25)) { open.toggle() } } label: {
                 HStack {
-                    Label(tr("Existing libraries", "المكتبات الموجودة", ckb: "کتێبخانە هەبووەکان", kmr: "Pirtûkxaneyên heyî"), systemImage: "books.vertical").font(.subheadline.weight(.semibold))
+                    Label(tr5("Already present", "موجودة مسبقاً", de: "Bereits vorhanden", ckb: "پێشتر هەیە", kmr: "Jixwe heyî"), systemImage: "books.vertical").font(.subheadline.weight(.semibold))
                     Spacer()
                     Text("\(libraries.count)").foregroundStyle(.secondary)
                     Image(systemName: open ? "chevron.up" : "chevron.down")
@@ -113,13 +113,15 @@ struct ExistingLibrariesCard: View {
                             let keptCount = rows.filter { !$0.removed }.count
                             HStack(spacing: 8) {
                                 VStack(alignment: .leading, spacing: 2) {
+                                    Text(URL(fileURLWithPath: row.lib.loadPath).lastPathComponent).font(.subheadline.weight(.medium))
+                                        .strikethrough(row.removed)
                                     Text(row.lib.loadPath).font(.caption2.monospaced()).lineLimit(2)
                                         .strikethrough(row.removed)
                                     Text(ExistingLibraryPlan.provenanceLabel(row.lib) + " · " + ExistingLibraryPlan.stateLabel(row.lib))
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
-                                if !row.removed {
+                                if !row.removed && row.lib.kind != "file" {
                                     Button { edits = ExistingLibraryPlan.move(row.lib, by: -1, libs: libraries, in: edits) } label: { Image(systemName: "arrow.up") }
                                         .disabled(keptIdx == 0)
                                         .accessibilityLabel(tr("Move up", "تحريك لفوق", ckb: "بۆ سەرەوە", kmr: "Biçe jor"))
@@ -127,16 +129,23 @@ struct ExistingLibrariesCard: View {
                                         .disabled(keptIdx >= keptCount - 1)
                                         .accessibilityLabel(tr("Move down", "تحريك لتحت", ckb: "بۆ خوارەوە", kmr: "Biçe jêr"))
                                 }
+                                if row.lib.kind != "file" {
                                 Button { if row.removed { edits = ExistingLibraryPlan.toggleRemoved(row.lib, in: edits) } else { pendingRemove = row.lib } } label: {
                                     Image(systemName: row.removed ? "arrow.uturn.backward" : "trash")
                                 }.tint(row.removed ? .green : .red)
                                 .accessibilityLabel(row.removed ? tr("Restore", "استرجاع", ckb: "گەڕاندنەوە", kmr: "Vegerîne") : tr("Remove", "إزالة", ckb: "لابردن", kmr: "Rakirin"))
+                                } else {
+                                    Text(tr5("File only", "ملف فقط", de: "Nur Datei", ckb: "تەنها فایل", kmr: "Tenê pel"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
                             }
                             .buttonStyle(.borderless)
                             .opacity(row.removed ? 0.55 : 1)
                         }
                     }
                 }
+                Text(tr5("Some entries may be original app libraries, not tweaks. Files without a detected load command are read-only.", "بعض الملفات ممكن تكون مكتبات أصلية للتطبيق، مو تويكات. الملف اللي ما لقينا أمر تحميل إلو بيظهر للعرض بس.", de: "Einige Einträge können originale App-Bibliotheken sein, keine Tweaks. Dateien ohne erkannten Ladebefehl sind schreibgeschützt.", ckb: "هەندێک فایل ڕەنگە کتێبخانەی ئەسڵیی ئەپ بن، نەک تویک. فایلە بێ فەرمانی بارکردن تەنها پیشان دەدرێن.", kmr: "Hin pel dikarin pirtûkxaneyên orîjînal ên sepanê bin, ne tweak. Pelên bê fermana barkirinê tenê tên nîşandan."))
+                    .font(.caption2).foregroundStyle(.secondary)
                 if !edits.isEmpty {
                     Button { edits = ExistingLibraryPlan.reset() } label: {
                         Label(tr("Reset libraries", "إعادة المكتبات للأصل", ckb: "گەڕاندنەوەی کتێبخانەکان", kmr: "Pirtûkxaneyan vegerîne"), systemImage: "arrow.counterclockwise")

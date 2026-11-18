@@ -98,7 +98,24 @@ pub(super) fn graph(app:&Path)->Result<Vec<Library>> {
   }
  }Ok(out)
 }
-pub(super) fn inspect(app:&Path,out:&Path)->Result<()> {fs::write(out,serde_json::to_vec(&graph(app)?).map_err(err)?).map_err(err)}
+// Inspection-only inventory. Never add synthetic edges to graph(): editing, target
+// selection and ordinal remapping must operate on real load commands only.
+fn inventory(app:&Path)->Result<Vec<Library>> {
+ let mut entries=graph(app)?;let root=fs::canonicalize(app).map_err(err)?;
+ for p in binaries(&root)? {
+  let relative=p.strip_prefix(&root).map_err(err)?.to_str().ok_or("Non UTF8 library path")?.to_owned();
+  let parts:Vec<_>=relative.split('/').collect();
+  // Top-level Frameworks only; never mistake app extensions or resources for tweaks.
+  let dylib=parts.len()==2&&parts[0]=="Frameworks"&&relative.ends_with(".dylib");
+  let framework=parts.len()==3&&parts[0]=="Frameworks"&&parts[1].ends_with(".framework")&&parts[1].strip_suffix(".framework")==Some(parts[2]);
+  if !dylib&&!framework {continue}
+  if entries.iter().any(|l|l.bundled_path.as_deref()==Some(&relative)||l.load_path.strip_prefix("@rpath/")==relative.strip_prefix("Frameworks/")) {continue}
+  if entries.len()>=32768{return Err("Library inventory exceeds safe limits".into())}
+  entries.push(Library{id:format!("file|{relative}"),owner:"Frameworks".into(),load_path:relative.clone(),kind:"file".into(),bundled_path:Some(relative),provenance:"bundledFile".into(),slices:Vec::new()});
+ }
+ Ok(entries)
+}
+pub(super) fn inspect(app:&Path,out:&Path)->Result<()> {fs::write(out,serde_json::to_vec(&inventory(app)?).map_err(err)?).map_err(err)}
 fn mapped(old:u64,map:&[Option<u64>])->Result<u64>{
  if old==0{return Ok(0)}map.get(old as usize).copied().flatten().ok_or_else(||"This library still has linked symbols. Removing it would break the app; keep it or rebuild the app without this dependency.".into())
 }
@@ -269,6 +286,26 @@ mod tests {
   let mut bad=original.clone();put32(&mut bad,36,u32::MAX);assert!(commands(&bad).is_err());let mut bad=fat(&[original.clone()]);bad[16..20].copy_from_slice(&0u32.to_be_bytes());assert!(ranges(&bad).is_err());
   #[cfg(unix)]{std::os::unix::fs::symlink(root.join("Main"),root.join("Link")).unwrap();assert!(graph(&root).is_err());}
   fs::remove_dir_all(root).unwrap();
+ }
+ #[test] fn imported_ipa_preexisting_inventory_and_safe_removal(){
+  use std::io::Write;
+  let dir=dir();let ipa=dir.join("Fixture.ipa");let load="@executable_path/Frameworks/Injected.dylib";
+  let original=fixture(&[(0xc,load),(0x80000018,"@rpath/ElleKit.framework/ElleKit"),(0xc,"/usr/lib/libSystem.B.dylib")],&[]);
+  let mut archive=zip::ZipWriter::new(File::create(&ipa).unwrap());
+  for (path,data) in [("Payload/Test.app/Main",original.clone()),("Payload/Test.app/Frameworks/Injected.dylib",fixture(&[],&[])),("Payload/Test.app/Frameworks/Unused.dylib",fixture(&[],&[])),("Payload/Test.app/Frameworks/ElleKit.framework/ElleKit",fixture(&[],&[]))] {
+   archive.start_file(path,zip::write::SimpleFileOptions::default()).unwrap();archive.write_all(&data).unwrap();
+  }
+  archive.finish().unwrap();let ipa_bytes=fs::read(&ipa).unwrap();
+  let extract=dir.join("extracted");zip::ZipArchive::new(File::open(&ipa).unwrap()).unwrap().extract(&extract).unwrap();let app=extract.join("Payload/Test.app");
+  let entries=inventory(&app).unwrap();assert_eq!(entries.len(),3);
+  assert_eq!(entries.iter().filter(|l|l.kind=="file").count(),1);
+  assert!(entries.iter().any(|l|l.load_path==load&&l.kind=="load"));
+  assert!(entries.iter().any(|l|l.load_path=="@rpath/ElleKit.framework/ElleKit"&&l.kind=="weak"));
+  assert!(!entries.iter().any(|l|l.load_path.starts_with("/usr/lib/")));
+  // Inventory-only rows must never enter the editable graph or accept removal.
+  assert!(apply(&app,&[Edit{owner:"Frameworks".into(),removed:vec!["Frameworks/Unused.dylib".into()],order:vec![]}]).is_err());
+  apply(&app,&[edit(&[load],&[])]).unwrap();assert!(!names(&fs::read(app.join("Main")).unwrap()).contains(&load.to_owned()));
+  assert_eq!(fs::read(&ipa).unwrap(),ipa_bytes);fs::remove_dir_all(dir).unwrap();
  }
  #[test] fn threaded_bind_and_resize_fail_closed(){let mut d=linked();d[1024]=0xd0;assert!(rewrite(&d,&edit(&["@rpath/Unused.dylib"],&[])).unwrap_err().contains("Threaded"));assert!(replace_uleb(&mut [0;2],0,2,1).is_err());}
 }
