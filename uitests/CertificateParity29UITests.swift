@@ -29,12 +29,27 @@ final class CertificateParity29UITests: XCTestCase {
         let iconLabel = lang == "ar" ? "تغيير أيقونة التطبيق" : "Change app icon"
         let icon = app.buttons[iconLabel]
         XCTAssertTrue(icon.waitForExistence(timeout: 15))
-        icon.tap()
-        XCTAssertTrue(app.buttons[lang == "ar" ? "الصور" : "Photos"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons[lang == "ar" ? "الملفات" : "Files"].exists)
-        screenshot("certificate-29-\(lang)-real-icon-menu")
-        // Dismiss the menu without opening Photos or the filesystem.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+        // Open the real system picker, not just its menu item. Repeat after
+        // cancellation to catch a presentation binding stuck on true.
+        for attempt in 1...2 {
+            icon.tap()
+            let photos = app.buttons[lang == "ar" ? "الصور" : "Photos"]
+            XCTAssertTrue(photos.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons[lang == "ar" ? "الملفات" : "Files"].exists)
+            screenshot("certificate-29-\(lang)-real-icon-menu-\(attempt)")
+            photos.tap()
+            // PHPicker's remote view exposes its system Cancel control through
+            // the host app. The editor and its icon menu have no Cancel button.
+            let cancel = app.buttons.matching(NSPredicate(format: "label IN %@",
+                ["Cancel", "إلغاء", "إلغاء الأمر"])).firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 10), "Photos must present the real system picker")
+            XCTAssertTrue(cancel.isHittable)
+            screenshot("certificate-29-\(lang)-real-icon-photos-picker-\(attempt)")
+            cancel.tap()
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: cancel)
+            XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
+            XCTAssertTrue(app.buttons["mirsa.project.sign"].isHittable, "Picker cancellation must restore the editor")
+        }
 
         let rows: [(String, String, String)] = [
             ("Enable Files access", "تمكين الوصول إلى الملفات", "1"),
