@@ -1306,8 +1306,16 @@ final class AppViewModel: ObservableObject {
         var lastImportedName = ""
         for url in urls {
             do {
-                let item = try await TendiesEngine.shared.importTendie(from: url)
+                let imported = try await TendiesEngine.shared.importTendie(from: url)
                 await MainActor.run {
+                    var item = imported
+                    // A Documents scan may finish after an explicit import/edit.
+                    // Reconcile against CURRENT state instead of replacing its identity.
+                    if let existing = self.tendieItems.first(where: { $0.fileName == item.fileName }) {
+                        item.id = existing.id
+                        item.name = existing.name
+                        item.isSelected = existing.isSelected
+                    }
                     self.tendieItems.removeAll(where: { $0.fileName == item.fileName })
                     self.tendieItems.append(item)
                     importedIDs.append(item.id)
@@ -1335,16 +1343,18 @@ final class AppViewModel: ObservableObject {
             defer { try? fm.removeItem(at: staging) }
             let named = staging.appendingPathComponent(item.fileName)
             try fm.copyItem(at: archive, to: named)
-            var fresh = try await TendiesEngine.shared.importTendie(from: named)
-            fresh.id = item.id
-            fresh.name = item.name
-            fresh.isSelected = item.isSelected
+            var fresh = try await TendiesEngine.shared.inspectTendie(from: named)
             guard let index = tendieItems.firstIndex(where: { $0.id == item.id }) else {
-                // Row was deleted meanwhile: do not resurrect it.
-                try? fm.removeItem(at: fresh.fileURL)
+                // Row was deleted meanwhile: neither resurrect it nor touch its file.
                 return false
             }
-            // importTendie wrote the same fileName, so only this row changes.
+            let current = tendieItems[index]
+            fresh.id = current.id
+            fresh.name = current.name
+            fresh.isSelected = current.isSelected
+            fresh.relativePath = current.relativePath
+            // No suspension between the identity check, atomic file swap and row update.
+            try TendiesEngine.shared.storeTendie(from: named, fileName: current.relativePath)
             tendieItems[index] = fresh
             saveTendieItems()
             try? fm.removeItem(at: archive)
