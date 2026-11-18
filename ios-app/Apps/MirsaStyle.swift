@@ -165,6 +165,7 @@ struct LiquidTabBar: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.mirsaPress)
+                .accessibilityIdentifier("mirsa-tab-" + item.tab.rawValue)
             }
         }
         .padding(6)

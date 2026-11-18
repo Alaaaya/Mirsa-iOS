@@ -44,6 +44,8 @@ struct MirsaStyleShotHost: View {
         case "sources": tab(.sources)
         #if DEBUG
         case "sources-delete-validation": SourcesDeleteValidationHost()
+        case "dock-clearance-29": SourcesDock29ValidationHost()
+        case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
         #endif
         case "tools": tab(.pairing)
         case "more": tab(.personalHub)
@@ -132,5 +134,36 @@ private struct SourcesDeleteValidationHost: View {
         _store = StateObject(wrappedValue: store)
     }
     var body: some View { SourcesTab(store: store) }
+}
+#endif
+
+#if DEBUG
+/// Only the input catalogue is a fixture. Navigation, all five tabs, scroll
+/// containers and the floating dock are the actual ContentView implementation.
+private struct SourcesDock29ValidationHost: View {
+    @EnvironmentObject private var vm: AppViewModel
+    @StateObject private var store: SourcesStore
+    init() {
+        let domain = "mirsa.sources.dock29.validation"
+        let defaults = UserDefaults(suiteName: domain)!
+        defaults.removePersistentDomain(forName: domain)
+        let store = SourcesStore(defaults: defaults)
+        let sources = (1...18).map { i in
+            RepoSource(url: "https://dock29.example.invalid/source-\(i).json",
+                       name: i == 18 ? "Dock Source Last" : "Dock Source \(i)")
+        }
+        store.sources = sources
+        for source in sources { store.apps[source.url] = [] }
+        store.apps[sources[17].url] = (1...35).map { i in
+            RepoApp(name: i == 35 ? "Alaa Player" : "Dock App \(i)",
+                    bundleID: "invalid.example.dock29.app\(i)", developer: "Mirsa UI validation",
+                    subtitle: "Offline fixture", description: "", version: "1.0", iconURL: nil,
+                    downloadURL: URL(string: "https://dock29.example.invalid/app\(i).ipa")!, size: nil, date: nil)
+        }
+        _store = StateObject(wrappedValue: store)
+    }
+    var body: some View {
+        ContentView(sourcesStore: store).onAppear { vm.selectedTab = .sources }
+    }
 }
 #endif

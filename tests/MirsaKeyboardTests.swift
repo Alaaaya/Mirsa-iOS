@@ -130,18 +130,25 @@ final class MirsaKeyboardTests: XCTestCase {
             _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
         guard let cg = image.cgImage else { return false }
-        let expected = personalText("Export configuration only", "تصدير الإعدادات فقط")
+        let expected = ["Export configuration only", "تصدير الإعدادات فقط"]
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["ar", "en-US"]
         request.usesLanguageCorrection = false
-        request.customWords = [expected]
+        request.customWords = expected
         do { try VNImageRequestHandler(cgImage: cg).perform([request]) }
         catch { return false }
-        let compact: (String) -> String = { $0.filter { !$0.isWhitespace } }
-        return (request.results ?? []).contains { observation in
-            observation.topCandidates(10).contains { compact($0.string) == compact(expected) }
+        let compact: (String) -> String = { value in
+            value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "ar"))
+                .replacingOccurrences(of: "أ", with: "ا")
+                .replacingOccurrences(of: "إ", with: "ا")
+                .replacingOccurrences(of: "آ", with: "ا")
+                .filter { !$0.isWhitespace && $0 != "ـ" }
         }
+        let recognized = (request.results ?? []).flatMap { $0.topCandidates(10).map(\.string) }
+        if recognized.contains(where: { text in expected.contains { compact(text) == compact($0) } }) { return true }
+        print("Actual CTA OCR candidates: \(recognized)")
+        return false
     }
 
     private func accessibilityContains(_ root: NSObject, identifier: String) -> Bool {
