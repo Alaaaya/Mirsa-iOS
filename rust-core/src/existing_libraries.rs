@@ -1,6 +1,8 @@
 //! Read-only provenance graph and conservative all-slice editing on disposable copies.
 //! A bundled dependency is never claimed to be an injected tweak.
 use super::*;
+#[path="runtime_libraries.rs"]
+mod runtime_libraries;
 use serde::{Serialize, Deserialize};
 #[derive(Serialize, Clone)]
 #[serde(rename_all="camelCase")]
@@ -102,6 +104,7 @@ pub(super) fn graph(app:&Path)->Result<Vec<Library>> {
 // selection and ordinal remapping must operate on real load commands only.
 fn inventory(app:&Path)->Result<Vec<Library>> {
  let mut entries=graph(app)?;let root=fs::canonicalize(app).map_err(err)?;
+ entries.extend(runtime_libraries::entries(&root,&entries)?);
  for p in binaries(&root)? {
   let relative=p.strip_prefix(&root).map_err(err)?.to_str().ok_or("Non UTF8 library path")?.to_owned();
   let parts:Vec<_>=relative.split('/').collect();
@@ -212,8 +215,10 @@ fn rewrite(d:&[u8],edit:&Edit)->Result<Vec<u8>> {
 }
 pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
  if edits.len()>4096{return Err("Too many library edits".into())}let original=graph(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut owners=HashSet::new();let mut patches=BTreeMap::new();
+ let (runtime,runtime_patch)=runtime_libraries::plan(&app,&original,edits)?;
  for edit in edits {
   if !owners.insert(&edit.owner)||edit.removed.len()+edit.disabled.len()+edit.order.len()>8192{return Err("Invalid library edits".into())}
+  if edit.owner==runtime_libraries::OWNER {continue}
   let rel=relative(&edit.owner)?;if rel.to_str()!=Some(edit.owner.as_str()){return Err("Noncanonical owner path".into())}
   for name in edit.removed.iter().chain(&edit.disabled).chain(&edit.order){if !original.iter().any(|l|l.owner==edit.owner&&l.load_path==*name){return Err("Library edit references unknown or system dependency".into())}}
   if !original.iter().any(|l|l.owner==edit.owner){return Err("Unknown library owner".into())}
@@ -224,13 +229,14 @@ pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
  // Validate the prospective reference graph on bytes before any write. Retain a
  // candidate whenever ANY unresolved reference exists: inherited rpaths/dlopen
  // cannot be proven absent. Only delete standalone dylibs, never framework trees.
- let mut retained=HashSet::new();let mut unresolved=false;
+ let mut retained:HashSet<String>=runtime.iter().filter_map(|l|l.bundled_path.clone()).collect();let mut unresolved=false;
  for p in binaries(&app)? {let original_bytes=read_macho(&p)?;let d=patches.get(&p).unwrap_or(&original_bytes);for(a,b)in ranges(d)?{if d[a..a+4]!=[0xcf,0xfa,0xed,0xfe]{unresolved=true;continue}let cmds=commands(&d[a..b])?;for c in cmds.iter().filter(|c|load(c.kind)) {let n=c.name.as_ref().unwrap();if system(n){continue}match resolve(&app,&p,n,&cmds)?{Some(r)=>{retained.insert(r);},None=>unresolved=true}}}}
  let protected:HashSet<_>=original.iter().filter(|l|edits.iter().any(|e|e.owner==l.owner&&e.disabled.contains(&l.load_path))).filter_map(|l|l.bundled_path.clone()).collect();
  let deletions:Vec<_>=candidates.into_iter().filter(|p|!protected.contains(p)&&!unresolved&&!retained.contains(p)&&p.ends_with(".dylib")&&!p.split('/').any(|c|c.ends_with(".framework"))&&!patches.contains_key(&app.join(p))).collect();
  // All validation/remapping finishes before the first write. Caller discards the
  // entire disposable extraction on IO error. Framework resources and unresolved
  // or shared references are conservatively retained. Original IPA is untouched.
+ if let Some(data)=runtime_patch{patches.insert(app.join(runtime_libraries::OWNER),data);}
  for(p,d)in patches{fs::write(p,d).map_err(err)?}
  for p in deletions{fs::remove_file(app.join(p)).map_err(err)?}Ok(())
 }
@@ -238,7 +244,7 @@ pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
 mod tests {
  use super::*;
  fn command(kind:u32,name:&str)->Vec<u8>{let size=(24+name.len()+1+7)&!7;let mut d=vec![0;size];put32(&mut d,0,kind);put32(&mut d,4,size as u32);put32(&mut d,8,24);d[24..24+name.len()].copy_from_slice(name.as_bytes());d}
- fn fixture(loads:&[(u32,&str)],meta:&[Vec<u8>])->Vec<u8>{let mut d=vec![0;4096];put32(&mut d,0,0xfeedfacf);put32(&mut d,4,0x100000c);put32(&mut d,12,2);let mut at=32;for c in loads.iter().map(|(k,n)|command(*k,n)).chain(meta.iter().cloned()){d[at..at+c.len()].copy_from_slice(&c);at+=c.len();}put32(&mut d,16,(loads.len()+meta.len())as u32);put32(&mut d,20,(at-32)as u32);d}
+ pub(super) fn fixture(loads:&[(u32,&str)],meta:&[Vec<u8>])->Vec<u8>{let mut d=vec![0;4096];put32(&mut d,0,0xfeedfacf);put32(&mut d,4,0x100000c);put32(&mut d,12,2);let mut at=32;for c in loads.iter().map(|(k,n)|command(*k,n)).chain(meta.iter().cloned()){d[at..at+c.len()].copy_from_slice(&c);at+=c.len();}put32(&mut d,16,(loads.len()+meta.len())as u32);put32(&mut d,20,(at-32)as u32);d}
  fn cmd(kind:u32,size:usize)->Vec<u8>{let mut c=vec![0;size];put32(&mut c,0,kind);put32(&mut c,4,size as u32);c}
  fn names(d:&[u8])->Vec<String>{commands(d).unwrap().into_iter().filter(|c|load(c.kind)).map(|c|c.name.unwrap()).collect()}
  fn edit(remove:&[&str],order:&[&str])->Edit{Edit{owner:"Main".into(),disabled:vec![],removed:remove.iter().map(|s|s.to_string()).collect(),order:order.iter().map(|s|s.to_string()).collect()}}
