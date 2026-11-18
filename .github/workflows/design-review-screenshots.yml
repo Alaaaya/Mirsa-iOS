@@ -34,6 +34,13 @@ jobs:
         run: |
           set -o pipefail
           brew install xcodegen
+          # Real Keychain integration must run in an entitled, signed simulator host.
+          # Match forge-validation; never skip or mock the real Security.framework test.
+          python3 - <<'PYENT'
+          import plistlib
+          with open('/tmp/mirsa-ci-keychain.plist', 'wb') as f:
+              plistlib.dump({'application-identifier': 'MIRSACI.com.alaa.mirsa', 'keychain-access-groups': ['MIRSACI.com.alaa.mirsa']}, f)
+          PYENT
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
           xcrun simctl boot "$DEVICE" || true
@@ -42,10 +49,10 @@ jobs:
           mkdir -p build
           # Keep unit failure blocking, but still collect independent UI evidence.
           set +e
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUnit.xcresult test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/design-unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUnit.xcresult test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-unit.log
           UNIT_STATUS=$?
           set -e
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaDesignReviewUITests -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFloatingDockAllThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testClassicSixTabs -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testAppIconPickerAllIcons -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testChatImageFullscreen -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testRespringStandalone -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesSelectedApplyVisible -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerPickersStayIndependent -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testNonownerHasNoDiagnostics test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/design-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaDesignReviewUITests -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFloatingDockAllThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testClassicSixTabs -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testAppIconPickerAllIcons -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testChatImageFullscreen -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testRespringStandalone -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesSelectedApplyVisible -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerPickersStayIndependent -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testNonownerHasNoDiagnostics test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-ui.log
           exit "$UNIT_STATUS"
       - name: Export named screenshots
         if: always()
