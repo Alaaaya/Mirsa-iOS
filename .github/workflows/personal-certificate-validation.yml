@@ -15,6 +15,8 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Verify pinned platform private framework linker inputs
+        run: bash scripts/prepare-privatekits-sdk.sh iphoneos
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -41,7 +43,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Mirsa-personal-signing-validation
-          path: build/Mirsa-validation.ipa
+          path: |
+            build/Mirsa-validation.ipa
+            build/privatekits-sdk-iphoneos
           if-no-files-found: error
 
   simulator:
@@ -53,6 +57,8 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Verify pinned platform private framework linker inputs
+        run: bash scripts/prepare-privatekits-sdk.sh iphonesimulator
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim
@@ -67,7 +73,8 @@ jobs:
           cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
-      - name: Run actual SwiftUI integration and Arabic snapshots
+      - name: Run actual editor unit and asset-catalog tests
+        id: editor_unit
         run: |
           set -o pipefail
           brew install xcodegen
@@ -80,12 +87,19 @@ jobs:
           PYENT
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
           mkdir -p build
           xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/PersonalUI.xcresult test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/simulator-validation.log
+      - name: Run real certificate editor UI in English and Arabic
+        if: ${{ !cancelled() && (steps.editor_unit.outcome == 'success' || steps.editor_unit.outcome == 'failure') }}
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/CertificateRuntimeUI.xcresult -only-testing:MirsaUITests/CertificateParity29UITests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/certificate-runtime-ui.log
       - name: Export runtime screenshot attachments
         if: always()
         run: |
@@ -93,12 +107,20 @@ jobs:
             mkdir -p build/screenshots
             xcrun xcresulttool export attachments --path build/PersonalUI.xcresult --output-path build/screenshots
           fi
+          if [ -d build/CertificateRuntimeUI.xcresult ]; then
+            mkdir -p build/certificate-screenshots
+            xcrun xcresulttool export attachments --path build/CertificateRuntimeUI.xcresult --output-path build/certificate-screenshots
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Mirsa-real-SwiftUI-Arabic-validation
           path: |
+            build/privatekits-sdk-iphonesimulator
             build/screenshots
             build/PersonalUI.xcresult
             build/simulator-validation.log
+            build/CertificateRuntimeUI.xcresult
+            build/certificate-screenshots
+            build/certificate-runtime-ui.log
           if-no-files-found: warn
