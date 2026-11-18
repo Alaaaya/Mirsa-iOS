@@ -1213,6 +1213,7 @@ struct AppsSettingsSheet: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Section { SourceStoreLayoutPicker() }
                 Section(tr("Apps layout", "واجهة التطبيقات")) {
                     Toggle(tr("Home Screen", "الشاشة الرئيسية"), isOn: $homeLayout)
                     Text(tr("Off keeps your current apps view unchanged. Home Screen uses pages and a glass dock.", "لما تطفّي الخيار بتضل الواجهة الحالية نفسها. الشاشة الرئيسية فيها صفحات ودوك زجاجي."))

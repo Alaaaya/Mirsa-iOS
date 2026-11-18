@@ -49,6 +49,7 @@ struct RepoApp: Identifiable, Hashable, Sendable {
     let size: Int64?
     let date: String?
     var screenshots: [URL] = []
+    var category: String? = nil
 }
 
 struct RepoNews: Identifiable, Sendable {
@@ -349,6 +350,7 @@ final class SourcesStore: ObservableObject {
         let description: String?
         let website: URL?
         let news: [RepoNews]
+        var featuredIDs: [String] = []
     }
 
     /// Source content is untrusted. Never open executable/custom URL schemes or credential URLs.
@@ -384,6 +386,10 @@ final class SourcesStore: ObservableObject {
                     imageURL: contentURL(item["imageURL"], base: base), tint: item["tintColor"] as? String,
                     date: (item["date"] as? String).flatMap(Self.date),
                     url: contentURL(item["url"], base: base), appID: item["appID"] as? String)
+            }, featuredIDs: (root["featuredApps"] as? [Any] ?? []).compactMap { value in
+                if let id = value as? String { return id }
+                let item = value as? [String: Any]
+                return (item?["bundleIdentifier"] as? String) ?? (item?["appID"] as? String)
             })
     }
 
@@ -446,7 +452,8 @@ final class SourcesStore: ObservableObject {
                 downloadURL: dl,
                 size: int(latest?["size"]) ?? int(a["size"]) ?? int(a["fileSize"]),
                 date: (latest.flatMap { str($0, "date") }) ?? str(a, "versionDate", "date", "updated"),
-                screenshots: ScreenshotPolicy.sourceScreenshots(a, latest: latest, base: base)
+                screenshots: ScreenshotPolicy.sourceScreenshots(a, latest: latest, base: base),
+                category: str(a, "category", "primaryCategory")
             )
             return app
         }.filter { seen.insert($0.id).inserted }
@@ -472,8 +479,12 @@ struct SourcesTab: View {
     @State private var sharingURL: URL?
     @State private var input = ""
     @State private var finding = false
+    @State private var managing = false
+    @AppStorage(SourceStoreLayout.key) private var sourceLayout = SourceStoreLayout.store
+    private let forceClassic: Bool
 
-    init(onSelectIPA: ((URL) async throws -> Void)? = nil, store: SourcesStore = .shared) {
+    init(onSelectIPA: ((URL) async throws -> Void)? = nil, store: SourcesStore = .shared, forceClassic: Bool = false) {
+        self.forceClassic = forceClassic
         self.onSelectIPA = onSelectIPA
         _store = StateObject(wrappedValue: store)
     }
@@ -481,6 +492,12 @@ struct SourcesTab: View {
     var body: some View {
         NavigationStack {
             List {
+                if !forceClassic && sourceLayout != SourceStoreLayout.classic {
+                    SourceStoreFront(store: store, onSelectIPA: onSelectIPA)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 24, trailing: 0))
+                } else {
                 if store.sources.isEmpty {
                     Text(tr("Add a source link (AltStore, SideStore or Feather format) to browse its apps.",
                             "ضيف رابط سورس (بصيغة AltStore أو SideStore أو Feather) لتتصفّح تطبيقاته."))
@@ -552,6 +569,7 @@ struct SourcesTab: View {
                         }
                     }
                 }
+                }
             }
             .listStyle(.plain)
             .refreshable { await store.refreshAll() }
@@ -560,12 +578,22 @@ struct SourcesTab: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { input = UIPasteboard.general.string ?? ""; adding = true } label: { Image(systemName: "plus") }
                 }
-                ToolbarItem(placement: .topBarTrailing) { EditButton() }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if forceClassic || sourceLayout == SourceStoreLayout.classic { EditButton() }
+                    else {
+                        Button { managing = true } label: { Image(systemName: "slider.horizontal.3") }
+                            .accessibilityLabel(SourceStoreText.manage)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { finding = true } label: { Image(systemName: "sparkle.magnifyingglass") }
                 }
             }
             .sheet(isPresented: $finding) { DiscoveryView() }
+            .sheet(isPresented: $managing) {
+                SourcesTab(onSelectIPA: onSelectIPA, store: store, forceClassic: true)
+                    .safeAreaInset(edge: .bottom) { Button(tr("Done", "تم")) { managing = false }.buttonStyle(.mirsaSecondary).padding() }
+            }
             .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟", ckb: "ئەم سەرچاوەیە بسڕدرێتەوە؟", kmr: "Ev çavkanî were jêbirin?"), isPresented: Binding(get: { store.pendingDelete != nil }, set: { if !$0 { store.cancelDelete() } }), titleVisibility: .visible, presenting: store.pendingDelete) { src in
                 Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jêbirin"), role: .destructive) { store.confirmDelete() }
                 Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { store.cancelDelete() }

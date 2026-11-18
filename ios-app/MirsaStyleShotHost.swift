@@ -54,6 +54,8 @@ struct MirsaStyleShotHost: View {
         #if DEBUG
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "source-news-fixture": SourceNewsValidationHost()
+        case "sources-store-live": SourcesTab()
+        case "sources-classic-live": SourcesTab(forceClassic: true)
         case "source-news-live":
             NavigationStack { SourceDetailView(source: RepoSource(url: MirsaSourceFeed.primary, name: "Mirsa", uid: RepoSource.canonicalID)) }
         #endif
@@ -161,7 +163,7 @@ private struct SourcesDeleteValidationHost: View {
         store.apps[MirsaSourceFeed.primary] = []
         _store = StateObject(wrappedValue: store)
     }
-    var body: some View { SourcesTab(store: store) }
+    var body: some View { SourcesTab(store: store, forceClassic: true) }
 }
 #endif
 
