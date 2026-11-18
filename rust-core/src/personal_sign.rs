@@ -94,10 +94,8 @@ pub(crate) fn profile_with_verification(bytes: &[u8], index: usize) -> Result<(P
     if !trusted { status.warnings.push(serde_json::json!({"code":"profile_cms_unverified", "message":"تحذير: ما قدرنا نتحقق من توقيع البروفايل وثقة Apple. التوقيع رح يكمل، بس البروفايل غير موثّق.","profile_index":index})); }
     Ok((parsed,status))
 }
-fn default_preserve_app_groups() -> bool { true }
-#[derive(serde::Deserialize)]
+#[derive(Default, serde::Deserialize)]
 pub(crate) struct Options {
-    #[serde(default = "default_preserve_app_groups")] pub preserve_app_groups: bool,
     #[serde(default)] pub allow_encrypted_signing: bool,
     #[serde(default)] pub profiles: Vec<String>,
     /// Explicit user override only. Empty preserves the IPA identity.
@@ -114,11 +112,6 @@ pub(crate) struct Options {
     #[serde(default)] pub remove_app_clips: bool,
     /// Optional plist of extra entitlements for the MAIN app only; still constrained by its profile.
     #[serde(default)] pub custom_entitlements_path: String,
-}
-impl Default for Options {
-    fn default() -> Self {
-        serde_json::from_str("{}").expect("default signing options")
-    }
 }
 
 struct Profile { data: Vec<u8>, parsed: ProvisioningProfile }
@@ -298,7 +291,7 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         if node.path == app && !opts.custom_entitlements_path.is_empty() {
             for (k, v) in custom_entitlements(&opts.custom_entitlements_path)? { requested.insert(k, v); }
         }
-        nested::prepare_app_groups(&mut requested, p.entitlements(), opts.preserve_app_groups);
+        nested::prepare_app_groups(&mut requested, p.entitlements());
         pending.push((id.clone(), index, fallback, requested));
     }
     let group_pairs: Vec<_> = pending.iter().map(|(_, index, _, request)|
