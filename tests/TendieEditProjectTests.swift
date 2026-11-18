@@ -92,6 +92,69 @@ final class TendieEditProjectTests: XCTestCase {
         vm.deleteTendie(item: after)
     }
 
+    func testDocumentsReimportPreservesCurrentIdentityAndSelection() async throws {
+        let vm = AppViewModel()
+        let archive = try PhotoWallpaper.makeArchive(layers: layers(), screenAspect: 0.46)
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let ids = await vm.importTendieFiles(urls: [archive])
+        let id = try XCTUnwrap(ids.first)
+        let index = try XCTUnwrap(vm.tendieItems.firstIndex { $0.id == id })
+        vm.tendieItems[index].name = "My edited wallpaper"
+        vm.tendieItems[index].isSelected = false
+        let original = vm.tendieItems[index]
+        defer { vm.deleteTendie(item: original) }
+        // The scanner imports a stored URL after its detached discovery returns.
+        let rescanned = await vm.importTendieFiles(urls: [original.fileURL])
+        XCTAssertEqual(rescanned, [id])
+        let current = try XCTUnwrap(vm.tendieItems.first { $0.id == id })
+        XCTAssertEqual(current.name, original.name)
+        XCTAssertFalse(current.isSelected)
+        XCTAssertEqual(vm.tendieItems.filter { $0.fileName == original.fileName }.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: current.fileURL.path))
+    }
+
+    func testRejectedSameNameImportDoesNotOverwriteWorkingArchive() async throws {
+        let vm = AppViewModel()
+        let archive = try PhotoWallpaper.makeArchive(layers: layers(), screenAspect: 0.46)
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let ids = await vm.importTendieFiles(urls: [archive])
+        let item = try XCTUnwrap(vm.tendieItems.first { $0.id == ids.first })
+        defer { vm.deleteTendie(item: item) }
+        let before = try Data(contentsOf: item.fileURL)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rejected = root.appendingPathComponent(item.fileName)
+        let zip = try Archive(url: rejected, accessMode: .create)
+        let data = Data("No wallpaper descriptor".utf8)
+        try zip.addEntry(with: "readme.txt", type: .file, uncompressedSize: Int64(data.count)) { pos, size in
+            data.subdata(in: Int(pos)..<Int(pos) + size)
+        }
+        do {
+            _ = try await TendiesEngine.shared.importTendie(from: rejected)
+            XCTFail("A descriptor-free archive must be rejected")
+        } catch { }
+        XCTAssertEqual(try Data(contentsOf: item.fileURL), before)
+        let replaced = await vm.replaceTendie(item: item, with: rejected)
+        XCTAssertFalse(replaced)
+        XCTAssertEqual(try Data(contentsOf: item.fileURL), before)
+    }
+
+    func testReplacingDeletedRowDoesNotResurrectFile() async throws {
+        let vm = AppViewModel()
+        let archive = try PhotoWallpaper.makeArchive(layers: layers(), screenAspect: 0.46)
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let ids = await vm.importTendieFiles(urls: [archive])
+        let item = try XCTUnwrap(vm.tendieItems.first { $0.id == ids.first })
+        vm.deleteTendie(item: item)
+        let replacement = try PhotoWallpaper.makeArchive(layers: layers(), screenAspect: 0.46, depth: true)
+        defer { try? FileManager.default.removeItem(at: replacement) }
+        let replaced = await vm.replaceTendie(item: item, with: replacement)
+        XCTAssertFalse(replaced)
+        XCTAssertFalse(vm.tendieItems.contains { $0.id == item.id })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: item.fileURL.path))
+    }
+
     func testStringsExistInAllFiveLanguages() {
         for key in [WallpaperMakerStrings.Key.editing, .editHelp, .editCancel, .saveEdit, .editLegacy, .editSaved, .editButton, .notEditable] {
             let all = WallpaperMakerStrings.values[key]

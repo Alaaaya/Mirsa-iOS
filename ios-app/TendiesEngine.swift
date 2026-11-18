@@ -33,30 +33,16 @@ public final class TendiesEngine {
             }
         }
 
+        let item = try await inspectTendie(from: sourceURL)
+        try storeTendie(from: sourceURL, fileName: item.fileName)
+        return item
+    }
+
+    /// Inspect a candidate without publishing it over an existing wallpaper.
+    func inspectTendie(from sourceURL: URL) async throws -> TendieItem {
         try validateArchive(sourceURL)
         let fileName = sourceURL.lastPathComponent
         let baseName = (fileName as NSString).deletingPathExtension
-        let destinationURL = Self.tendiesStorageDirectory.appendingPathComponent(fileName)
-
-        if sourceURL.standardizedFileURL.path != destinationURL.standardizedFileURL.path {
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try? FileManager.default.removeItem(at: destinationURL)
-            }
-            do {
-                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-            } catch {
-                let fileData = try Data(contentsOf: sourceURL)
-                try fileData.write(to: destinationURL, options: .atomic)
-            }
-        }
-
-        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
-            throw NSError(
-                domain: "TendiesEngine",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to store wallpaper file at \(destinationURL.path)"]
-            )
-        }
 
         // Staging extraction to inspect contents
         let tempExtractDir = FileManager.default.temporaryDirectory
@@ -66,7 +52,7 @@ public final class TendiesEngine {
             try? FileManager.default.removeItem(at: tempExtractDir)
         }
 
-        try extractValidatedArchive(destinationURL, to: tempExtractDir)
+        try extractValidatedArchive(sourceURL, to: tempExtractDir)
 
         // Analyze file structure
         var isContainer = false
@@ -158,6 +144,29 @@ public final class TendiesEngine {
             dateImported: Date(),
             isSelected: true
         )
+    }
+
+    /// Copy privately, then atomically publish. Never unlink a working archive first.
+    func storeTendie(from sourceURL: URL, fileName: String) throws {
+        let fm = FileManager.default
+        guard !fileName.isEmpty, fileName != ".", fileName != "..",
+              (fileName as NSString).lastPathComponent == fileName else {
+            throw PosterBoardStore.failure("Invalid wallpaper filename.")
+        }
+        let destination = Self.tendiesStorageDirectory.appendingPathComponent(fileName)
+        guard fm.fileExists(atPath: sourceURL.path) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError)
+        }
+        guard sourceURL.standardizedFileURL != destination.standardizedFileURL else { return }
+        let staged = Self.tendiesStorageDirectory.appendingPathComponent(".import-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: staged) }
+        try fm.copyItem(at: sourceURL, to: staged)
+        let result = staged.withUnsafeFileSystemRepresentation { source in
+            destination.withUnsafeFileSystemRepresentation { target in
+                Darwin.rename(source!, target!)
+            }
+        }
+        guard result == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
     }
 
     /// Validate before either import or flash invokes the native ZIP extractor.
