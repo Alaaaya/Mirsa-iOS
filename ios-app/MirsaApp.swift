@@ -36,6 +36,9 @@ struct MirsaApp: App {
         StoreWishlistNotifications.schedule()
         AppsStore.importHandoffIfNeeded()
         MirsaChrome.apply()
+        Task { @MainActor in
+            MirsaInstallActivity.shared.reconcileActivities(foreground: false)
+        }
         // Cold/background launch may still be handing a URLSession file to its delegate.
         // Automatic sweeping starts only after the scene becomes active.
     }
@@ -55,10 +58,18 @@ struct MirsaApp: App {
             .id(language.current)
             .mirsaKeyboardDismissal()
             .mirsaLeftToRightChrome()
-            .task { if !MirsaUITestHarness.active { await ForgeStore.shared.syncFixInbox() } }
+            .task {
+                if scenePhase == .active {
+                    MirsaInstallActivity.shared.reconcileActivities(foreground: true)
+                }
+                if !MirsaUITestHarness.active { await ForgeStore.shared.syncFixInbox() }
+            }
             .task { if !MirsaUITestHarness.active { await AppStoreSectionModel.shared.refresh() } }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { OpenInProjectCoordinator.shared.presentNext() }
+                if phase == .active {
+                    MirsaInstallActivity.shared.reconcileActivities(foreground: true)
+                    OpenInProjectCoordinator.shared.presentNext()
+                }
                 if phase == .active, !MirsaUITestHarness.active { Task { await MirsaNotifications.foreground() } }
                 if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }
                 if phase == .active, !MirsaUITestHarness.active { Task { await ForgeStore.shared.syncFixInbox() } }

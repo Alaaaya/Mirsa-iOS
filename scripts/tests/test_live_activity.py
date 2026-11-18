@@ -12,6 +12,39 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class LiveActivityPackagingTests(unittest.TestCase):
+    def test_ready_phase_ends_instead_of_only_publishing(self):
+        manager = (ROOT / "ios-app/Apps/MirsaInstallActivity.swift").read_text()
+        phase = manager.split("func setPhase(", 1)[1].split("func reconcileActivities", 1)[0]
+        self.assertIn("case .ready, .completed, .failed:", phase)
+        self.assertIn("end(phase: phase, immediate: false)", phase)
+        self.assertIn("case .cancelled:", phase)
+        self.assertIn("end(phase: phase, immediate: true)", phase)
+        # A newly created activity must pass through the same terminal handling.
+        self.assertNotIn("begin(title: title, phase: phase); return", phase)
+
+    def test_final_summary_is_short_and_has_expiry(self):
+        manager = (ROOT / "ios-app/Apps/MirsaInstallActivity.swift").read_text()
+        end = manager.split("private func end(", 1)[1]
+        self.assertIn("addingTimeInterval(5)", end)
+        self.assertIn("staleDate: dismissAt", end)
+        self.assertIn(".after(dismissAt)", end)
+        self.assertIn("await previous?.value", end)
+        self.assertNotIn("staleDate: nil", end)
+
+    def test_launch_and_foreground_reconcile_os_retained_activities(self):
+        manager = (ROOT / "ios-app/Apps/MirsaInstallActivity.swift").read_text()
+        sweep = manager.split("func reconcileActivities", 1)[1].split("func updateBytes", 1)[0]
+        self.assertIn("Activity<MirsaDownloadAttributes>.activities", sweep)
+        self.assertIn("existing.activityState == .stale", sweep)
+        self.assertIn("existing.content.staleDate", sweep)
+        self.assertIn("case .ready, .completed, .failed, .cancelled:", sweep)
+        self.assertIn("(foreground && (!current", sweep)
+        self.assertIn("endedIDs.insert", sweep)
+        self.assertIn("dismissalPolicy: .immediate", sweep)
+        app = (ROOT / "ios-app/MirsaApp.swift").read_text()
+        self.assertIn("reconcileActivities(foreground: false)", app)
+        self.assertEqual(app.count("reconcileActivities(foreground: true)"), 2)
+
     def test_extension_embedded_and_shared_types_in_both_targets(self):
         project = yaml.safe_load((ROOT / "project.yml").read_text())
         app = project["targets"]["Mirsa"]
