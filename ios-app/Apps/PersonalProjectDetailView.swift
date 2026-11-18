@@ -26,6 +26,7 @@ struct PersonalProjectDetailView: View {
     @State private var sharing = false
     @State private var icon: UIImage?
     @State private var iconPhoto: PhotosPickerItem?
+    @State private var pickingIconPhoto = false
     @State private var pickingIcon = false
     @State private var extensionCount: Int?
     @State private var deps: [String]?
@@ -130,6 +131,8 @@ struct PersonalProjectDetailView: View {
                 try setProjectIcon(Data(contentsOf: url))
             } catch { message = error.localizedDescription }
         }
+        // Keep the presenter on the editor, not inside the transient Menu.
+        .photosPicker(isPresented: $pickingIconPhoto, selection: $iconPhoto, matching: .images)
         .onChange(of: iconPhoto) { _, selection in
             Task {
                 do {
@@ -193,7 +196,7 @@ struct PersonalProjectDetailView: View {
             }.frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .bottomTrailing) {
                     Menu {
-                        PhotosPicker(selection: $iconPhoto, matching: .images) {
+                        Button { pickingIconPhoto = true } label: {
                             Label(personalText("Photos", "الصور"), systemImage: "photo")
                         }
                         Button { pickingIcon = true } label: { Label(personalText("Files", "الملفات"), systemImage: "folder") }
