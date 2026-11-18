@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 env:
-  MIRSA_VERSION: "2.9"
+  MIRSA_VERSION: "2.9.1"
 jobs:
   build:
     runs-on: macos-15
