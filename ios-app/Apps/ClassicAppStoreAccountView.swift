@@ -636,6 +636,8 @@ struct ClassicAppStoreAccountView: View {
                     .font(MirsaFont.button).foregroundStyle(.white)
                     .padding(.horizontal, 16).frame(height: 34)
                     .background(Capsule().fill(MirsaPalette.accentGradient))
+                    }
+                }
             }
             .buttonStyle(.plain)
             .disabled((busy != nil && !inlineActive(app, get: false)) || !canDownload(app))
