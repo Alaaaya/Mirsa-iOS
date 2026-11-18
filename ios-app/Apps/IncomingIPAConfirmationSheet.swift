@@ -118,7 +118,7 @@ struct IncomingIPAConfirmationSheet: View {
         .environment(\.layoutDirection, .leftToRight)
         .interactiveDismissDisabled(submitted)
         .sheet(isPresented: $login, onDismiss: {
-            if store.account != nil, let onAppleID { submit(onAppleID) }
+            if store.account != nil, let onAppleID { submit(onAppleID, kind: "appleID") }
         }) { LoginSheet(store: store) }
         .task {
             guard preview == nil else { return }
@@ -208,12 +208,12 @@ struct IncomingIPAConfirmationSheet: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 Button(tr("Cancel", "إلغاء")) { guard !submitted else { return }; onCancel() }.frame(maxWidth: .infinity).padding(.vertical, 11).appsGlass(cornerRadius: 13)
-                Button { submit(onImportProject) } label: {
+                Button { submit(onImportProject, kind: "project") } label: {
                     Text(tr("Import to project", "استيراد لمشروع")).frame(maxWidth: .infinity).padding(.vertical, 11)
                 }.appsGlass(cornerRadius: 13, tint: violet).disabled(preview == nil || submitted)
             }.font(.subheadline.weight(.semibold))
             if let onSaveLibrary {
-                Button { submit(onSaveLibrary) } label: {
+                Button { submit(onSaveLibrary, kind: "library") } label: {
                     Label(tr("Save to Certificate Library", "حفظ في مكتبة الشهادة", ckb: "هەڵگرتن لە کتێبخانەی بڕوانامە", kmr: "Di pirtûkxaneya sertîfîkayê de tomar bike"), systemImage: "square.stack.3d.up")
                         .frame(maxWidth: .infinity).padding(.vertical, 11)
                 }.font(.subheadline.weight(.semibold)).appsGlass(cornerRadius: 13, tint: violet)
