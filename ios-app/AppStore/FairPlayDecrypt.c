@@ -2,23 +2,27 @@
  *
  * Mechanism (publicly documented): an App Store Mach-O marks its encrypted
  * __TEXT range with an LC_ENCRYPTION_INFO(_64) load command. Mapping the
- * file read-only and passing the page-aligned range to the kernel entry
- * point mremap_encrypted() runs the pages through FairPlay; fairplayd finds
- * the per-account licence at <dir>/SC_Info/<name>.sinf next to the binary
- * and returns the key, so decryption only works for apps the device's own
- * Apple ID bought. The decrypted bytes are then written back and cryptid
- * is zeroed. Nothing here contains, derives or transmits any key.
+ * file read-write and shared and passing the page-aligned range to the
+ * kernel entry point mremap_encrypted() runs the pages through FairPlay;
+ * fairplayd finds the per-account licence at <dir>/SC_Info/<name>.sinf
+ * next to the binary and returns the key, so decryption only works for
+ * apps the device's own Apple ID bought. The decrypted bytes are then
+ * written back and cryptid is zeroed. Nothing here contains, derives or
+ * transmits any key.
  *
- * Two mappings are used on purpose: the source is mapped PROT_READ /
- * MAP_PRIVATE so the kernel-side decryption never touches the input file,
- * and the file is only written (via pwrite) once every encrypted slice
- * decrypted successfully in memory. A failure therefore leaves the input
- * byte-identical.
+ * The mapping MUST be PROT_READ | PROT_WRITE / MAP_SHARED: the kernel
+ * decrypts the pages in place through the shared mapping. A private
+ * (MAP_PRIVATE) or read-only mapping makes the kernel refuse with
+ * ENOMEM (errno 12, "Cannot allocate memory") — exactly the error a
+ * private mapping produced on device. Decryption runs on a throwaway
+ * copy in the app's temp dir, never on the original encrypted IPA, so
+ * in-place decryption through the shared mapping is safe. The pwrite
+ * loop afterwards re-writes the same bytes and zeroes cryptid.
  *
  * The cryptid value passed to the kernel only selects the kernel code path;
  * the FairPlay key lookup is by SINF path, not by cryptid. Passing 2
  * (the Core ML model encryption path) skips the kernel's requirement that
- * the mapping be executable, so a plain PROT_READ mapping is enough and no
+ * the mapping be executable, so a plain read-write mapping is enough and no
  * special entitlement is needed. If that is refused, the binary's stored
  * cryptid is retried once.
  */
@@ -220,7 +224,7 @@ MirsaFPResult mirsa_fp_decrypt_macho(const char *path, char *errbuf, size_t errb
     }
     uint64_t file_size = (uint64_t)st.st_size;
 
-    uint8_t *map = mmap(NULL, (size_t)file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    uint8_t *map = mmap(NULL, (size_t)file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (map == MAP_FAILED) {
         close(fd);
         fp_note(errbuf, errbuf_len, "Cannot map file: %s.", strerror(errno));
@@ -293,8 +297,9 @@ MirsaFPResult mirsa_fp_decrypt_macho(const char *path, char *errbuf, size_t errb
         return MirsaFPUnavailable;
     }
 
-    /* Decrypt every range in the private mapping first. Nothing is written
-       to disk until all of them succeed. */
+    /* Decrypt every range in the shared mapping. The kernel writes the
+       decrypted pages through to the file as it goes; the pwrite loop
+       below re-writes the same bytes and zeroes cryptid. */
     long page = getpagesize();
     if (page <= 0) {
         page = 16384;
