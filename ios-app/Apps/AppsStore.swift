@@ -68,6 +68,10 @@ final class AppsStore: ObservableObject {
     @Published var progress: Double = 0
     @Published var isDownloading = false
     @Published var downloadHasKnownSize = false
+    /// Exact requested URL, not an unverified bundle ID from a source feed.
+    @Published var sourceDownloadURL: URL?
+    /// Token of the InstallTracker request that owns the current download/import, if any.
+    var installToken: UUID?
     var downloadTask: Task<URL, Error>?
     var downloadID: UUID?
     var downloadOperationID: UUID?
@@ -937,6 +941,9 @@ final class AppsStore: ObservableObject {
     /// Container apps must be signed by the same team as the AirCard that loads
     /// them. This installs a copy of AirCard signed with the user's Apple ID.
     func installSelf(vm: AppViewModel?, from source: URL? = nil, feedback: Bool = true) async {
+        // Nested calls (updater) keep the outer request; direct taps own key "self" (prepare/sign/install, not cancellable).
+        let selfToken = InstallTracker.shared.begin(key: "self", phase: .installing)
+        defer { InstallTracker.shared.end(selfToken) }
         if MirsaInstallMode.ownCertificate {
             guard busy == nil else { error = Self.busyMessage(); return }
             busy = personalText("Signing for OTA…", "عم يوقّع لتثبيت OTA…")

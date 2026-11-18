@@ -70,6 +70,8 @@ struct ClassicAppStoreAccountView: View {
     @State private var selected: MirsaStoreApp?
     @State private var busySince: Date?
     @State private var transfer: StoreDownloadProgress?
+    @State private var inlineAppID: Int64?
+    @State private var inlineIsGet = false
     @State private var progressAttempt: UUID?
     @FocusState private var focus: Bool
 
@@ -629,15 +631,15 @@ struct ClassicAppStoreAccountView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(t("Opens the app page", "بيفتح صفحة التطبيق", "پەڕەی ئەپەکە دەکاتەوە", "Rûpela sepanê vedike"))
-            Button { guardedStart(app, acquire: false) } label: {
-                Text(canDownload(app) ? t("Download", "تنزيل", "داگرتن", "Daxe") : t("Not in account store", "مو بمتجر حسابك", "لە ستۆرەکەت نییە", "Ne li stoya te ye"))
+            Button { if inlineActive(app, get: false) { cancelInline() } else { guardedStart(app, acquire: false) } } label: {
+                Group { if inlineActive(app, get: false) { inlineIndicator } else { Text(canDownload(app) ? t("Download", "تنزيل", "داگرتن", "Daxe") : t("Not in account store", "مو بمتجر حسابك", "لە ستۆرەکەت نییە", "Ne li stoya te ye"))
                     .font(MirsaFont.button).foregroundStyle(.white)
                     .padding(.horizontal, 16).frame(height: 34)
                     .background(Capsule().fill(MirsaPalette.accentGradient))
             }
             .buttonStyle(.plain)
-            .disabled(busy != nil || !canDownload(app))
-            .opacity(busy != nil || !canDownload(app) ? 0.5 : 1)
+            .disabled((busy != nil && !inlineActive(app, get: false)) || !canDownload(app))
+            .opacity((busy != nil && !inlineActive(app, get: false)) || !canDownload(app) ? 0.5 : 1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -670,10 +672,13 @@ struct ClassicAppStoreAccountView: View {
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
 
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            Button { guardedStart(app, acquire: false) } label: {
-                HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }.frame(maxWidth: .infinity)
+            Button { if inlineActive(app, get: false) { cancelInline() } else { guardedStart(app, acquire: false) } } label: {
+                Group {
+                    if inlineActive(app, get: false) { inlineIndicator }
+                    else { HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) } }
+                }.frame(maxWidth: .infinity)
             }
-            .buttonStyle(.mirsaPrimary).disabled(busy != nil || !canDownload(app))
+            .buttonStyle(.mirsaPrimary).disabled((busy != nil && !inlineActive(app, get: false)) || !canDownload(app))
             if otherStore && !accountAvailable.contains(app.id) {
                 Text(t("Not available in your account storefront. Download is disabled.", "مو متاح بمتجر حسابك، التنزيل موقف.", "لە ستۆری ئەکاونتەکەت بەردەست نییە.", "Li stoya hesabê te ne berdest e.")).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             }
@@ -688,8 +693,10 @@ struct ClassicAppStoreAccountView: View {
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Divider().overlay(MirsaPalette.stroke)
             if app.price == 0 && ownership[app.id] != .owned {
-                Button { guardedStart(app, acquire: true) } label: { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")).frame(maxWidth: .infinity) }
-                    .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || busy != nil || (otherStore && !accountAvailable.contains(app.id)))
+                Button { if inlineActive(app, get: true) { cancelInline() } else { guardedStart(app, acquire: true) } } label: {
+                    Group { if inlineActive(app, get: true) { inlineIndicator } else { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")) } }.frame(maxWidth: .infinity)
+                }
+                    .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || (busy != nil && !inlineActive(app, get: true)) || (otherStore && !accountAvailable.contains(app.id)))
                     .accessibilityIdentifier("store-detail-get")
             }
             if ownership[app.id] == .owned {
@@ -850,6 +857,18 @@ struct ClassicAppStoreAccountView: View {
 
     // MARK: actions
 
+    private var inlineIndicator: some View {
+        let downloading = transfer?.phase == .downloading
+        let known = downloading && (transfer?.expected ?? 0) > 0
+        let fraction: Double? = known ? Double(transfer?.received ?? 0) / Double(transfer?.expected ?? 1) : nil
+        return SourceDownloadIndicator(fraction: fraction, phase: downloading ? .downloading : .preparing, cancellable: downloading)
+    }
+    private func cancelInline() {
+        guard transfer?.phase == .downloading else { return }
+        StoreTransferControl.shared.discardCurrent(); work?.cancel()
+    }
+    private func inlineActive(_ app: MirsaStoreApp, get: Bool) -> Bool { inlineAppID == app.id && busy != nil && inlineIsGet == get }
+
     private func run(_ message: String, _ op: @escaping () async throws -> Void) {
         guard busy == nil else { return }
         focus = false
@@ -871,7 +890,7 @@ struct ClassicAppStoreAccountView: View {
             catch is CancellationError {}
             catch { if generation == operationGeneration { notice = describe(error) } }
             if generation == operationGeneration, progressAttempt == attempt {
-                progressAttempt = nil; transfer = nil; busy = nil; work = nil
+                progressAttempt = nil; transfer = nil; inlineAppID = nil; inlineIsGet = false; busy = nil; work = nil
             }
         }
     }
@@ -971,6 +990,7 @@ struct ClassicAppStoreAccountView: View {
         guard app.price == 0, (!otherStore || accountAvailable.contains(app.id)) else { return }
         let version = effectiveVersion(app)
         run(t("Getting free license and downloading…", "عم نجيب الترخيص المجاني وننزّل…", "مۆڵەتی بێبەرامبەر وەردەگیرێت و دادەگیرێت…", "Lîsansa belaş tê girtin û tê daxistin…")) {
+            inlineAppID = app.id; inlineIsGet = true
             transfer = StoreDownloadProgress()
             let generation = operationGeneration
             let selectedID = try await client.selectedAccountID()
@@ -1007,6 +1027,7 @@ struct ClassicAppStoreAccountView: View {
         guard canDownload(app) else { selected = app; return }
         let version = effectiveVersion(app)
         run(t("Preparing and downloading…", "عم جهّز ونزّل…", "لە Apple دادەگیرێت…", "Ji Apple tê daxistin…")) {
+            inlineAppID = app.id; inlineIsGet = false
             transfer = StoreDownloadProgress()
             let generation = operationGeneration
             let selectedID = try await client.selectedAccountID()
@@ -1045,6 +1066,7 @@ struct ClassicAppStoreAccountView: View {
         recovery = nil
         guard pending.revision == session.sessionRevision else { return }
         run(t("Refreshing free licence and retrying…", "عم نحدّث الترخيص المجاني ونعيد المحاولة…", "نوێکردنەوەی مۆڵەت…", "Lîsans nû dibe…")) {
+            inlineAppID = pending.app.id; inlineIsGet = true
             transfer = StoreDownloadProgress()
             let url = try await StoreFreeLicenseRecovery.retryOnce(consent: true, acquire: {
                 guard pending.revision == session.sessionRevision else { throw CancellationError() }
