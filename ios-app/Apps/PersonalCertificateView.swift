@@ -354,6 +354,8 @@ enum PersonalCertificateSigner {
             let embedded = app.appendingPathComponent("embedded.mobileprovision")
             if fm.fileExists(atPath: embedded.path) { try fm.removeItem(at: embedded) }
         }
+        if let png = options.iconPNG { try IPAEditorService.installIcon(png: png, in: app, info: &info) }
+        if options.fixDarkIcon { _ = try PersonalDarkIconFixer.repair(app: app, info: info) }
         if options.fixWhiteIcon { try PersonalIconFixer.flattenAlpha(app: app, info: info) }
         try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0)
             .write(to: app.appendingPathComponent("Info.plist"), options: .atomic)
@@ -442,6 +444,7 @@ enum PersonalCertificateSigner {
                                       "remove_watch": options.removeWatchApp,
                                       "remove_app_clips": options.removeAppClips,
                                       "strict_profile": options.strictProfile,
+                                     "omit_embedded_profile": options.removeEmbeddedProfile,
                                       "custom_entitlements_path": try customEntitlementsPath(options, stage: stage),
                                       "profiles": try options.additionalProfiles.enumerated().map { index, data in
                                           let url = stage.appendingPathComponent("profile-extra-\(index).mobileprovision")
