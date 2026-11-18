@@ -1,5 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
+import ImageIO
 
 struct PersonalProjectDetailView: View {
     let app: PersonalLibraryApp
@@ -23,6 +25,8 @@ struct PersonalProjectDetailView: View {
     @State private var output: URL?
     @State private var sharing = false
     @State private var icon: UIImage?
+    @State private var iconPhoto: PhotosPickerItem?
+    @State private var pickingIcon = false
     @State private var extensionCount: Int?
     @State private var deps: [String]?
     @State private var existingLibraries: [ExistingProjectLibrary] = []
@@ -60,9 +64,6 @@ struct PersonalProjectDetailView: View {
                     tweaksCard
                     settingsCard
                     depsCard
-                    if !existingLibraries.isEmpty {
-                        ExistingLibrariesCard(libraries: existingLibraries, edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
-                    }
                     certificateCard
                     MirsaVersionArchiveSection(bundleID: app.bundleID)
                     Button { openBundleFiles() } label: {
@@ -77,6 +78,7 @@ struct PersonalProjectDetailView: View {
                     if let message { Text(message).font(.footnote).textSelection(.enabled) }
                 }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 32)
             }.scrollIndicators(.hidden)
+                .accessibilityIdentifier("mirsa.project.editor-scroll")
                 .scrollDismissesKeyboard(.interactively)
                 .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
         }
@@ -115,6 +117,25 @@ struct PersonalProjectDetailView: View {
         }
         .sheet(item: $tweaks.pendingImport, onDismiss: { tweaks.finishImportSelection(nil) }) { choice in
             IPATweakImportSelectionView(choice: choice) { tweaks.finishImportSelection($0) }
+        }
+        .fileImporter(isPresented: $pickingIcon, allowedContentTypes: [.image]) { result in
+            do {
+                let url = try result.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                guard ((try url.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? Int.max) <= 16 * 1024 * 1024 else {
+                    throw SideloadError.message("Choose an image smaller than 16 MB.")
+                }
+                try setProjectIcon(Data(contentsOf: url))
+            } catch { message = error.localizedDescription }
+        }
+        .onChange(of: iconPhoto) { _, selection in
+            Task {
+                do {
+                    if let data = try await selection?.loadTransferable(type: Data.self) { try setProjectIcon(data) }
+                } catch { message = error.localizedDescription }
+                iconPhoto = nil
+            }
         }
         .sheet(isPresented: $pickingEntitlements) {
             DocumentPickerView(allowedContentTypes: [.propertyList, .xml, .data]) { url in
@@ -166,9 +187,24 @@ struct PersonalProjectDetailView: View {
     private var appCard: some View {
         HStack(alignment: .top, spacing: 14) {
             Group {
-                if let icon { Image(uiImage: icon).resizable().scaledToFill() }
+                if let preview = draft.iconPNG.flatMap({ UIImage(data: $0) }) ?? icon { Image(uiImage: preview).resizable().scaledToFill() }
                 else { Image(systemName: "app.dashed").font(.title).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white.opacity(0.08)) }
             }.frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    Menu {
+                        PhotosPicker(selection: $iconPhoto, matching: .images) {
+                            Label(personalText("Photos", "الصور"), systemImage: "photo")
+                        }
+                        Button { pickingIcon = true } label: { Label(personalText("Files", "الملفات"), systemImage: "folder") }
+                        if draft.iconPNG != nil {
+                            Button(personalText("Use original icon", "رجّع الأيقونة الأصلية")) { draft.iconPNG = nil }
+                        }
+                    } label: {
+                        Image(systemName: "pencil").font(.caption.bold()).padding(7)
+                            .background(.regularMaterial, in: Circle())
+                    }.accessibilityLabel(personalText("Change app icon", "تغيير أيقونة التطبيق"))
+                        .disabled(busy)
+                }
             VStack(alignment: .leading, spacing: 8) {
                 field(personalText("Name", "الاسم"), $draft.name)
                 field(personalText("Bundle ID", "معرّف التطبيق"), $draft.bundleID, mono: true)
@@ -182,6 +218,24 @@ struct PersonalProjectDetailView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }.padding(16).appsGlass(cornerRadius: 24)
+    }
+    private func setProjectIcon(_ data: Data) throws {
+        guard data.count <= 16 * 1024 * 1024,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.doubleValue > 0, height.doubleValue > 0,
+              width.doubleValue * height.doubleValue <= 16_777_216,
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 1024
+              ] as CFDictionary),
+              let png = UIImage(cgImage: thumbnail).pngData() else {
+            throw SideloadError.message("Choose a valid image up to 4096 × 4096 pixels and 16 MB.")
+        }
+        draft.iconPNG = png
     }
     private func chip(_ icon: String, _ text: String) -> some View {
         Label(text, systemImage: icon).font(.caption2.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 4)
@@ -226,7 +280,10 @@ struct PersonalProjectDetailView: View {
                 Label(MirsaTr.f("pending", added, removed), systemImage: "exclamationmark.circle.fill")
                     .font(.caption).foregroundStyle(.yellow)
             }
-            if ids.isEmpty {
+            if !existingLibraries.isEmpty {
+                ExistingLibrariesCard(libraries: existingLibraries, edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
+            }
+            if ids.isEmpty && existingLibraries.isEmpty {
                 Text(tr("No additions. Import ZIP, .dylib, .deb or a .framework folder.", "ما في إضافات. ضيف ZIP أو dylib أو deb أو مجلد framework.", ckb: "زیادکراو نییە. ZIP، dylib، deb یان بوخچەی framework هاوردە بکە.", kmr: "Pêvek tune ne. ZIP, dylib, deb an peldanka framework bîne."))
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -452,13 +509,13 @@ struct PersonalProjectDetailView: View {
             Label(personalText("Project settings", "إعدادات المشروع"), systemImage: "gearshape.fill").font(.subheadline.weight(.semibold))
             toggle(personalText("Enable Files access", "تمكين الوصول إلى الملفات"), personalText("Shows app documents in Files.", "بيظهر ملفات التطبيق بتطبيق الملفات."), $draft.fileSharing)
             toggle(personalText("Remove URL schemes", "إزالة مخططات URL"), personalText("Deletes the app's custom URL schemes.", "بيحذف مخططات URL تبع التطبيق."), $draft.removeURLSchemes)
-            toggle(personalText("Remove old embedded profile", "إزالة البروفايل المضمّن القديم"), personalText("Only the old one. Signing still embeds your new profile.", "القديم بس. التوقيع لسا بيضمّن البروفايل الجديد تبعك."), $draft.removeEmbeddedProfile)
+            toggle(personalText("Omit embedded profile", "عدم تضمين البروفايل"), personalText("The final signed app contains no embedded profile. Normal certificate installation may fail.", "النسخة الموقّعة ما رح تحتوي بروفايل مضمّن. التثبيت العادي بالشهادة ممكن يفشل."), $draft.removeEmbeddedProfile)
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
             toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }))
-            toggle(personalText("Fix dark icon (iOS 18)", "إصلاح الأيقونة الداكنة (iOS 18)"), personalText("Unavailable: needs Assets.car rewriting.", "غير متاح: بدو تعديل Assets.car."), .constant(false)).disabled(true).opacity(0.5)
+            toggle(personalText("Fix dark icon (iOS 18)", "إصلاح الأيقونة الداكنة (iOS 18)"), personalText("Removes primary dark icon renditions only when a matching default exists. Other assets stay intact.", "بيشيل نسخة الأيقونة الداكنة إذا إلها نسخة افتراضية مطابقة. باقي صور التطبيق بتضل."), Binding(get: { draft.fixDarkIcon ?? false }, set: { draft.fixDarkIcon = $0 }))
             toggle(personalText("Direct injection (main executable)", "حقن مباشر بالملف الرئيسي"), personalText("Off uses LoadControl (arm64 only).", "إذا طفيته بيستخدم LoadControl (arm64 بس)."), Binding(get: { !loaderOn }, set: { draft.directInjection = $0 }))
             toggle(personalText("New tweaks first", "الإضافات الجديدة أولاً"), personalText("Injected libraries load before the app's own.", "المكتبات المحقونة بتتحمّل قبل مكتبات التطبيق."), Binding(get: { draft.newTweaksFirst ?? false }, set: { draft.newTweaksFirst = $0 }))
             HStack {
@@ -636,10 +693,12 @@ struct PersonalProjectDetailView: View {
         options.removeAppClips = draft.removeAppClips ?? false
         options.strictProfile = draft.strictProfile ?? false
         options.gameMode = draft.gameMode ?? .keep
+        options.fixDarkIcon = draft.fixDarkIcon ?? false
         options.fixWhiteIcon = draft.fixWhiteIcon ?? false
         options.newTweaksFirst = draft.newTweaksFirst ?? false
         options.useLoader = (draft.injectionMethods ?? [:]).isEmpty && draft.directInjection == false
         options.existingLibraryEdits = draft.existingLibraryEdits ?? []
+        options.iconPNG = draft.iconPNG
         options.customEntitlements = draft.customEntitlements
         options.exportExtension = draft.exportExtension ?? "ipa"
         options.additionalProfiles = identities.filter { (draft.additionalProfileIDs ?? []).contains($0.id) }.map { $0.material.profile }
