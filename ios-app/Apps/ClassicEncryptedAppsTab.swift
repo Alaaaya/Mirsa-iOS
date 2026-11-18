@@ -401,7 +401,9 @@ private struct ClassicEncryptedEntryCard: View {
             if installing { installProgress }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { Task { await store.install(entry, vm: vm) } } label: {
-                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app")
+                    InstallKeyedLabel(key: "entry:" + entry.id.uuidString) {
+                            Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app")
+                        }
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.mirsaPrimary)
