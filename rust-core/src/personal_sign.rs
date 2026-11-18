@@ -107,6 +107,8 @@ pub(crate) struct Options {
     /// (old behavior). When false (compatibility), the app keeps its own CFBundleIdentifier and
     /// the selected profile's authorized identity/entitlements are used.
     #[serde(default)] pub strict_profile: bool,
+    /// Explicit no-profile output, not a bypass of profile authorization.
+    #[serde(default)] pub omit_embedded_profile: bool,
     #[serde(default)] pub remove_extensions: bool,
     #[serde(default)] pub remove_watch: bool,
     #[serde(default)] pub remove_app_clips: bool,
@@ -331,6 +333,7 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         let id = mapping.get(&node.id).unwrap_or(&node.id);
         let empty = plist::Dictionary::new();
         let mut settings = BundleSigningSettings::new(team, entitlements.get(id).unwrap_or(&empty).clone(), Some(&signer));
+        settings.omit_embedded_mobileprovision = opts.omit_embedded_profile;
         settings.entitlements_by_bundle_id = entitlements.clone();
         for (bundle, index) in &assignments {
             settings.embedded_mobileprovisions_by_bundle_id.insert(bundle.clone(), &profiles[*index].data);

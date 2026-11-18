@@ -18,6 +18,8 @@ pub struct BundleSigningSettings<'a> {
     pub main_entitlements: Dictionary,
     pub entitlements_by_bundle_id: BTreeMap<String, Dictionary>,
     pub cms_signer: Option<&'a dyn CmsSigner>,
+    /// Omit existing AND supplied profiles before resource collection, in every bundle.
+    pub omit_embedded_mobileprovision: bool,
     pub embedded_mobileprovision: Option<&'a [u8]>,
     pub embedded_mobileprovisions_by_bundle_id: BTreeMap<String, &'a [u8]>,
     pub cms_blob_reservation: usize,
@@ -34,6 +36,7 @@ impl<'a> BundleSigningSettings<'a> {
             main_entitlements,
             entitlements_by_bundle_id: BTreeMap::new(),
             cms_signer,
+            omit_embedded_mobileprovision: false,
             embedded_mobileprovision: None,
             embedded_mobileprovisions_by_bundle_id: BTreeMap::new(),
             cms_blob_reservation: DEFAULT_CMS_BLOB_RESERVATION,
@@ -123,8 +126,16 @@ impl Bundle {
                     None
                 }
             });
-        if let Some(mobileprovision) = mobileprovision {
-            let profile_path = self.path.join("embedded.mobileprovision");
+        let profile_path = self.path.join("embedded.mobileprovision");
+        if settings.omit_embedded_mobileprovision {
+            // Never mutate this after signing: both this envelope and its parent
+            // must seal the actual final resource set. remove_file unlinks symlinks.
+            match fs::remove_file(&profile_path) {
+                Ok(()) => {},
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {},
+                Err(source) => return Err(CodeSignError::io(&profile_path, source)),
+            }
+        } else if let Some(mobileprovision) = mobileprovision {
             fs::write(&profile_path, mobileprovision)
                 .map_err(|source| CodeSignError::io(&profile_path, source))?;
         }
@@ -578,6 +589,108 @@ fn join_relative(root: &str, child: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!("mirsa-profile-{}-{}", std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            fs::create_dir_all(&p).unwrap(); Self(p)
+        }
+        fn bundle(&self, relative: &str, id: &str) -> PathBuf {
+            let p = self.0.join(relative); fs::create_dir_all(&p).unwrap();
+            let mut info = Dictionary::new();
+            info.insert("CFBundleIdentifier".into(), id.into());
+            info.insert("CFBundleExecutable".into(), "Main".into());
+            fs::write(p.join("Info.plist"), encode_binary_plist(&info).unwrap()).unwrap();
+            // Minimal real arm64 Mach-O, signed by the production ad-hoc signer.
+            let mut d = vec![0u8;512];
+            fn u32w(d: &mut [u8], a: usize, v: u32) { d[a..a+4].copy_from_slice(&v.to_le_bytes()); }
+            fn u64w(d: &mut [u8], a: usize, v: u64) { d[a..a+8].copy_from_slice(&v.to_le_bytes()); }
+            for (a,v) in [(0,0xfeedfacf),(4,0x100000c),(12,2),(16,3),(20,160)] {u32w(&mut d,a,v);}
+            for (a,name,off,size) in [(32,"__TEXT",0,512),(104,"__LINKEDIT",512,0)] {
+                u32w(&mut d,a,0x19);u32w(&mut d,a+4,72);
+                d[a+8..a+8+name.len()].copy_from_slice(name.as_bytes());
+                u64w(&mut d,a+32,4096);u64w(&mut d,a+40,off);u64w(&mut d,a+48,size);
+            }
+            for (a,v) in [(176,0x1d),(180,16),(184,512)] {u32w(&mut d,a,v);}
+            fs::write(p.join("Main"),d).unwrap();p
+        }
+    }
+    impl Drop for Fixture {fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
+
+    fn assert_sealed_profile(bundle: &Path, expected: Option<&[u8]>) {
+        let resources = Value::from_file(bundle.join("_CodeSignature/CodeResources")).unwrap();
+        let files2 = resources.as_dictionary().unwrap()["files2"].as_dictionary().unwrap();
+        let path = bundle.join("embedded.mobileprovision");
+        if let Some(expected) = expected {
+            assert_eq!(fs::read(path).unwrap(),expected);
+            let entry=files2["embedded.mobileprovision"].as_dictionary().unwrap();
+            assert_eq!(entry["hash2"].as_data().unwrap(),sha2::Sha256::digest(expected).as_slice());
+        } else {
+            assert!(!path.exists());assert!(!files2.contains_key("embedded.mobileprovision"));
+        }
+    }
+
+    #[test]
+    fn embedded_profile_default_replaces_old_and_seals_final_bytes() {
+        let f=Fixture::new();let app=f.bundle("App.app","test.app");
+        fs::write(app.join("embedded.mobileprovision"),b"old").unwrap();
+        let mut settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
+        assert!(!settings.omit_embedded_mobileprovision);
+        settings.embedded_mobileprovision=Some(b"selected");
+        sign_bundle(&app,&settings).unwrap();assert_sealed_profile(&app,Some(b"selected"));
+    }
+
+    #[test]
+    fn embedded_profile_omission_dominates_root_and_nested_maps_before_seal() {
+        let f=Fixture::new();let app=f.bundle("App.app","test.app");
+        let child=f.bundle("App.app/PlugIns/Widget.appex","test.widget");
+        for p in [&app,&child] {fs::write(p.join("embedded.mobileprovision"),b"old").unwrap();}
+        let mut settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
+        settings.omit_embedded_mobileprovision=true;
+        settings.embedded_mobileprovision=Some(b"selected");
+        settings.embedded_mobileprovisions_by_bundle_id.insert("test.widget".into(),b"nested");
+        sign_bundle(&app,&settings).unwrap();
+        assert_sealed_profile(&app,None);assert_sealed_profile(&child,None);
+        let resources=Value::from_file(app.join("_CodeSignature/CodeResources")).unwrap();
+        let files2=resources.as_dictionary().unwrap()["files2"].as_dictionary().unwrap();
+        assert!(!files2.keys().any(|k|k.ends_with("embedded.mobileprovision")));
+        let sealed=files2["PlugIns/Widget.appex/_CodeSignature/CodeResources"].as_dictionary().unwrap();
+        let bytes=fs::read(child.join("_CodeSignature/CodeResources")).unwrap();
+        assert_eq!(sealed["hash2"].as_data().unwrap(),sha2::Sha256::digest(&bytes).as_slice());
+        // Re-sign is idempotent with absent profiles; no post-sign removal needed.
+        sign_bundle(&app,&settings).unwrap();assert_sealed_profile(&app,None);
+    }
+
+    #[test]
+    fn embedded_profile_absent_no_override_stays_absent() {
+        let f=Fixture::new();let app=f.bundle("App.app","test.app");
+        let settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
+        sign_bundle(&app,&settings).unwrap();assert_sealed_profile(&app,None);
+    }
+
+    #[test]
+    fn embedded_profile_omission_rejects_directory_without_deleting_it() {
+        let f=Fixture::new();let app=f.bundle("App.app","test.app");
+        let dir=app.join("embedded.mobileprovision");fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("keep"),b"keep").unwrap();
+        let mut settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
+        settings.omit_embedded_mobileprovision=true;
+        assert!(sign_bundle(&app,&settings).is_err());assert!(dir.join("keep").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn embedded_profile_omission_unlinks_symlink_not_external_target() {
+        let f=Fixture::new();let app=f.bundle("App.app","test.app");
+        let target=f.0.join("outside");fs::write(&target,b"untouched").unwrap();
+        std::os::unix::fs::symlink(&target,app.join("embedded.mobileprovision")).unwrap();
+        let mut settings=BundleSigningSettings::new("TEAM",Dictionary::new(),None);
+        settings.omit_embedded_mobileprovision=true;
+        sign_bundle(&app,&settings).unwrap();assert_sealed_profile(&app,None);
+        assert_eq!(fs::read(target).unwrap(),b"untouched");
+    }
 
     fn test_hash(relative_path: &str) -> FileHash {
         FileHash {
