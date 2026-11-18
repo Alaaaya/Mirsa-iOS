@@ -17,6 +17,8 @@ settings:
     DEVELOPMENT_TEAM: ""
 
 packages:
+  PrivateKits:
+    path: vendor/PrivateKits
   ApplePackage:
     path: vendor/ApplePackage
   swift-log:
@@ -39,6 +41,8 @@ targets:
         buildPhase: resources
       - path: LiveActivityShared
     dependencies:
+      - package: PrivateKits
+        product: AssetCatalogWrapper
       - package: ApplePackage
       - package: ZIPFoundation
       - package: swift-log
@@ -55,6 +59,10 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # idevice's static lib pulls in C++ symbols (aws-lc); link libc++.
         OTHER_LDFLAGS: "-lc++"
+        # PrivateKits upstream bundles macOS stubs. Resolve untouched platform
+        # exports for every production/device/simulator entrypoint, not CI only.
+        OTHER_LDFLAGS[sdk=iphoneos*]: '$(inherited) -lc++ "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphoneos/CoreUI.tbd" "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphoneos/CoreSVG.tbd"'
+        OTHER_LDFLAGS[sdk=iphonesimulator*]: '$(inherited) -lc++ "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphonesimulator/CoreUI.tbd" "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphonesimulator/CoreSVG.tbd"'
         GENERATE_INFOPLIST_FILE: NO
   MirsaLiveActivity:
     type: app-extension
@@ -90,11 +98,15 @@ targets:
       - path: rust-core/tests/fixtures/tweak-import/OwnerTikTokV4.zip
         buildPhase: resources
     dependencies:
+      - package: PrivateKits
+        product: AssetCatalogWrapper
       - target: Mirsa
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa.tests
+        OTHER_LDFLAGS[sdk=iphoneos*]: '$(inherited) "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphoneos/CoreUI.tbd" "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphoneos/CoreSVG.tbd"'
+        OTHER_LDFLAGS[sdk=iphonesimulator*]: '$(inherited) "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphonesimulator/CoreUI.tbd" "$(SRCROOT)/vendor/PrivateKits/LinkerStubs/iphonesimulator/CoreSVG.tbd"'
 
 schemes:
   Mirsa:

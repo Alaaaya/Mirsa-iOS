@@ -44,6 +44,7 @@ struct MirsaStyleShotHost: View {
         case "sources": tab(.sources)
         #if DEBUG
         case "sources-delete-validation": SourcesDeleteValidationHost()
+        case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
         #endif
         case "tools": tab(.pairing)
         case "more": tab(.personalHub)
