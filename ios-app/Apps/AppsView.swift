@@ -255,6 +255,14 @@ struct AppsTab: View {
             if store.errorOffersSettings {
                 Button(tr("Open Settings", "فتح الإعدادات")) { AppsStore.openWiFiSettings(); store.error = nil }
             }
+            Button(tr("Copy log", "نسخ السجل", ckb: "کۆپیکردنی تۆمار", kmr: "Tomarê kopî bike")) {
+                // Public error summary only. Owner-only technical history must
+                // still pass the separate live admin authorization boundary.
+                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+                MirsaDiagnosticPrivacy.copy(["Mirsa build " + build, store.error ?? ""]) {
+                    UIPasteboard.general.string = $0
+                }
+            }
             Button(MirsaTr.lit("OK")) { store.error = nil }
         } message: { Text(store.error ?? "") }
         .alert(L.f("launch.title", store.launchCandidate?.name ?? ""),
@@ -504,7 +512,9 @@ struct HeroCard: View {
                 RenewalRing(days: days, size: 52)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(store.account != nil ? L.t("hero.active") : L.t("hero.signedOut"))
+                    Text(store.account != nil ? L.t("hero.active") : (store.hasSavedLogin
+                         ? tr("Apple ID · Sign-in needs checking", "Apple ID · بدو تحقق من تسجيل الدخول")
+                         : L.t("hero.signedOut")))
                         .font(.headline)
                         .foregroundStyle(.white)
                         .lineLimit(1)
