@@ -9,7 +9,7 @@ pub(super) struct Library {
     pub(super) bundled_path: Option<String>, provenance: String, slices: Vec<String>,
 }
 #[derive(Deserialize, Clone, Default)]
-pub(super) struct Edit { pub owner: String, #[serde(default)] pub removed: Vec<String>, #[serde(default)] pub order: Vec<String> }
+pub(super) struct Edit { pub owner: String, #[serde(default)] pub removed: Vec<String>, #[serde(default)] pub disabled: Vec<String>, #[serde(default)] pub order: Vec<String> }
 #[derive(Clone)]
 struct Cmd { at:usize, size:usize, kind:u32, name:Option<String> }
 fn load(k:u32)->bool { matches!(k,0xc|0x18|0x80000018|0x1f|0x8000001f|0x20|0x23|0x80000023) }
@@ -98,7 +98,24 @@ pub(super) fn graph(app:&Path)->Result<Vec<Library>> {
   }
  }Ok(out)
 }
-pub(super) fn inspect(app:&Path,out:&Path)->Result<()> {fs::write(out,serde_json::to_vec(&graph(app)?).map_err(err)?).map_err(err)}
+// Inspection-only inventory. Never add synthetic edges to graph(): editing, target
+// selection and ordinal remapping must operate on real load commands only.
+fn inventory(app:&Path)->Result<Vec<Library>> {
+ let mut entries=graph(app)?;let root=fs::canonicalize(app).map_err(err)?;
+ for p in binaries(&root)? {
+  let relative=p.strip_prefix(&root).map_err(err)?.to_str().ok_or("Non UTF8 library path")?.to_owned();
+  let parts:Vec<_>=relative.split('/').collect();
+  // Top-level Frameworks only; never mistake app extensions or resources for tweaks.
+  let dylib=parts.len()==2&&parts[0]=="Frameworks"&&relative.ends_with(".dylib");
+  let framework=parts.len()==3&&parts[0]=="Frameworks"&&parts[1].ends_with(".framework")&&parts[1].strip_suffix(".framework")==Some(parts[2]);
+  if !dylib&&!framework {continue}
+  if entries.iter().any(|l|l.bundled_path.as_deref()==Some(&relative)||l.load_path.strip_prefix("@rpath/")==relative.strip_prefix("Frameworks/")) {continue}
+  if entries.len()>=32768{return Err("Library inventory exceeds safe limits".into())}
+  entries.push(Library{id:format!("file|{relative}"),owner:"Frameworks".into(),load_path:relative.clone(),kind:"file".into(),bundled_path:Some(relative),provenance:"bundledFile".into(),slices:Vec::new()});
+ }
+ Ok(entries)
+}
+pub(super) fn inspect(app:&Path,out:&Path)->Result<()> {fs::write(out,serde_json::to_vec(&inventory(app)?).map_err(err)?).map_err(err)}
 fn mapped(old:u64,map:&[Option<u64>])->Result<u64>{
  if old==0{return Ok(0)}map.get(old as usize).copied().flatten().ok_or_else(||"This library still has linked symbols. Removing it would break the app; keep it or rebuild the app without this dependency.".into())
 }
@@ -181,8 +198,9 @@ fn rewrite(d:&[u8],edit:&Edit)->Result<Vec<u8>> {
  let cmds=commands(d)?;let old:Vec<_>=cmds.iter().filter(|c|load(c.kind)).collect();
  let names:HashSet<_>=old.iter().map(|c|c.name.as_ref().unwrap().as_str()).collect();
  if old.len()!=names.len(){return Err("Duplicate dependency load commands cannot safely be edited".into())}
- let removed:HashSet<_>=edit.removed.iter().map(String::as_str).collect();let order:HashSet<_>=edit.order.iter().map(String::as_str).collect();
- if removed.len()!=edit.removed.len()||order.len()!=edit.order.len()||removed.intersection(&order).next().is_some(){return Err("Duplicate or conflicting library edit".into())}
+ let disabled:HashSet<_>=edit.disabled.iter().map(String::as_str).collect();
+ let removed:HashSet<_>=edit.removed.iter().chain(&edit.disabled).map(String::as_str).collect();let order:HashSet<_>=edit.order.iter().map(String::as_str).collect();
+ if disabled.len()!=edit.disabled.len()||removed.len()!=edit.removed.len()+edit.disabled.len()||order.len()!=edit.order.len()||removed.intersection(&order).next().is_some(){return Err("Duplicate or conflicting library edit".into())}
  let mut remaining:Vec<_>=old.iter().copied().filter(|c|!removed.contains(c.name.as_ref().unwrap().as_str())).collect();
  remaining.sort_by_key(|c|edit.order.iter().position(|n|Some(n)==c.name.as_ref()).unwrap_or(usize::MAX));
  let mut map=vec![Some(0)];for c in &old{map.push(remaining.iter().position(|r|r.at==c.at).map(|i|(i+1)as u64))}
@@ -195,9 +213,9 @@ fn rewrite(d:&[u8],edit:&Edit)->Result<Vec<u8>> {
 pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
  if edits.len()>4096{return Err("Too many library edits".into())}let original=graph(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut owners=HashSet::new();let mut patches=BTreeMap::new();
  for edit in edits {
-  if !owners.insert(&edit.owner)||edit.removed.len()+edit.order.len()>8192{return Err("Invalid library edits".into())}
+  if !owners.insert(&edit.owner)||edit.removed.len()+edit.disabled.len()+edit.order.len()>8192{return Err("Invalid library edits".into())}
   let rel=relative(&edit.owner)?;if rel.to_str()!=Some(edit.owner.as_str()){return Err("Noncanonical owner path".into())}
-  for name in edit.removed.iter().chain(&edit.order){if !original.iter().any(|l|l.owner==edit.owner&&l.load_path==*name){return Err("Library edit references unknown or system dependency".into())}}
+  for name in edit.removed.iter().chain(&edit.disabled).chain(&edit.order){if !original.iter().any(|l|l.owner==edit.owner&&l.load_path==*name){return Err("Library edit references unknown or system dependency".into())}}
   if !original.iter().any(|l|l.owner==edit.owner){return Err("Unknown library owner".into())}
   let path=app.join(rel);let mut d=read_macho(&path)?;for(a,b)in ranges(&d)?{if d[a..a+4]!=[0xcf,0xfa,0xed,0xfe]{continue}let updated=rewrite(&d[a..b],edit)?;d[a..b].copy_from_slice(&updated)}patches.insert(path,d);
  }
@@ -208,7 +226,8 @@ pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
  // cannot be proven absent. Only delete standalone dylibs, never framework trees.
  let mut retained=HashSet::new();let mut unresolved=false;
  for p in binaries(&app)? {let original_bytes=read_macho(&p)?;let d=patches.get(&p).unwrap_or(&original_bytes);for(a,b)in ranges(d)?{if d[a..a+4]!=[0xcf,0xfa,0xed,0xfe]{unresolved=true;continue}let cmds=commands(&d[a..b])?;for c in cmds.iter().filter(|c|load(c.kind)) {let n=c.name.as_ref().unwrap();if system(n){continue}match resolve(&app,&p,n,&cmds)?{Some(r)=>{retained.insert(r);},None=>unresolved=true}}}}
- let deletions:Vec<_>=candidates.into_iter().filter(|p|!unresolved&&!retained.contains(p)&&p.ends_with(".dylib")&&!p.split('/').any(|c|c.ends_with(".framework"))&&!patches.contains_key(&app.join(p))).collect();
+ let protected:HashSet<_>=original.iter().filter(|l|edits.iter().any(|e|e.owner==l.owner&&e.disabled.contains(&l.load_path))).filter_map(|l|l.bundled_path.clone()).collect();
+ let deletions:Vec<_>=candidates.into_iter().filter(|p|!protected.contains(p)&&!unresolved&&!retained.contains(p)&&p.ends_with(".dylib")&&!p.split('/').any(|c|c.ends_with(".framework"))&&!patches.contains_key(&app.join(p))).collect();
  // All validation/remapping finishes before the first write. Caller discards the
  // entire disposable extraction on IO error. Framework resources and unresolved
  // or shared references are conservatively retained. Original IPA is untouched.
@@ -222,7 +241,7 @@ mod tests {
  fn fixture(loads:&[(u32,&str)],meta:&[Vec<u8>])->Vec<u8>{let mut d=vec![0;4096];put32(&mut d,0,0xfeedfacf);put32(&mut d,4,0x100000c);put32(&mut d,12,2);let mut at=32;for c in loads.iter().map(|(k,n)|command(*k,n)).chain(meta.iter().cloned()){d[at..at+c.len()].copy_from_slice(&c);at+=c.len();}put32(&mut d,16,(loads.len()+meta.len())as u32);put32(&mut d,20,(at-32)as u32);d}
  fn cmd(kind:u32,size:usize)->Vec<u8>{let mut c=vec![0;size];put32(&mut c,0,kind);put32(&mut c,4,size as u32);c}
  fn names(d:&[u8])->Vec<String>{commands(d).unwrap().into_iter().filter(|c|load(c.kind)).map(|c|c.name.unwrap()).collect()}
- fn edit(remove:&[&str],order:&[&str])->Edit{Edit{owner:"Main".into(),removed:remove.iter().map(|s|s.to_string()).collect(),order:order.iter().map(|s|s.to_string()).collect()}}
+ fn edit(remove:&[&str],order:&[&str])->Edit{Edit{owner:"Main".into(),disabled:vec![],removed:remove.iter().map(|s|s.to_string()).collect(),order:order.iter().map(|s|s.to_string()).collect()}}
  fn linked()->Vec<u8>{
   let mut dyld=cmd(0x80000022,48);put32(&mut dyld,16,1024);put32(&mut dyld,20,6);
   let mut sym=cmd(2,24);put32(&mut sym,8,1100);put32(&mut sym,12,1);
@@ -269,6 +288,44 @@ mod tests {
   let mut bad=original.clone();put32(&mut bad,36,u32::MAX);assert!(commands(&bad).is_err());let mut bad=fat(&[original.clone()]);bad[16..20].copy_from_slice(&0u32.to_be_bytes());assert!(ranges(&bad).is_err());
   #[cfg(unix)]{std::os::unix::fs::symlink(root.join("Main"),root.join("Link")).unwrap();assert!(graph(&root).is_err());}
   fs::remove_dir_all(root).unwrap();
+ }
+ #[test] fn imported_ipa_preexisting_inventory_and_safe_removal(){
+  use std::io::Write;
+  let dir=dir();let ipa=dir.join("Fixture.ipa");let load="@executable_path/Frameworks/Injected.dylib";
+  let original=fixture(&[(0xc,load),(0x80000018,"@rpath/ElleKit.framework/ElleKit"),(0xc,"/usr/lib/libSystem.B.dylib")],&[]);
+  let mut archive=zip::ZipWriter::new(File::create(&ipa).unwrap());
+  for (path,data) in [("Payload/Test.app/Main",original.clone()),("Payload/Test.app/Frameworks/Injected.dylib",fixture(&[],&[])),("Payload/Test.app/Frameworks/Unused.dylib",fixture(&[],&[])),("Payload/Test.app/Frameworks/ElleKit.framework/ElleKit",fixture(&[],&[]))] {
+   archive.start_file(path,zip::write::SimpleFileOptions::default()).unwrap();archive.write_all(&data).unwrap();
+  }
+  archive.finish().unwrap();let ipa_bytes=fs::read(&ipa).unwrap();
+  let extract=dir.join("extracted");zip::ZipArchive::new(File::open(&ipa).unwrap()).unwrap().extract(&extract).unwrap();let app=extract.join("Payload/Test.app");
+  let entries=inventory(&app).unwrap();assert_eq!(entries.len(),3);
+  assert_eq!(entries.iter().filter(|l|l.kind=="file").count(),1);
+  assert!(entries.iter().any(|l|l.load_path==load&&l.kind=="load"));
+  assert!(entries.iter().any(|l|l.load_path=="@rpath/ElleKit.framework/ElleKit"&&l.kind=="weak"));
+  assert!(!entries.iter().any(|l|l.load_path.starts_with("/usr/lib/")));
+  // Inventory-only rows must never enter the editable graph or accept removal.
+  assert!(apply(&app,&[Edit{owner:"Frameworks".into(),removed:vec!["Frameworks/Unused.dylib".into()],order:vec![],disabled:vec![]}]).is_err());
+  apply(&app,&[edit(&[load],&[])]).unwrap();assert!(!names(&fs::read(app.join("Main")).unwrap()).contains(&load.to_owned()));
+  assert_eq!(fs::read(&ipa).unwrap(),ipa_bytes);fs::remove_dir_all(dir).unwrap();
+ }
+ #[test] fn disabled_unlinks_but_keeps_file_and_source() {
+  let root=dir();let path="@executable_path/Frameworks/Tweak.dylib";
+  let main=fixture(&[(0xc,path)],&[]);let dylib=fixture(&[],&[]);
+  fs::create_dir(root.join("Frameworks")).unwrap();fs::write(root.join("Main"),&main).unwrap();fs::write(root.join("Frameworks/Tweak.dylib"),&dylib).unwrap();
+  let e=Edit{owner:"Main".into(),disabled:vec![path.into()],..Edit::default()};
+  apply(&root,&[e]).unwrap();assert!(names(&fs::read(root.join("Main")).unwrap()).is_empty());assert_eq!(fs::read(root.join("Frameworks/Tweak.dylib")).unwrap(),dylib);
+  // A fresh disposable copy with delete must actually remove the unshared dylib.
+  fs::write(root.join("Main"),&main).unwrap();apply(&root,&[edit(&[path],&[])]).unwrap();assert!(!root.join("Frameworks/Tweak.dylib").exists());fs::remove_dir_all(root).unwrap();
+ }
+ #[test] fn disable_rejects_conflicts_unknown_and_bound_before_writes() {
+  let root=dir();let original=linked();fs::write(root.join("Main"),&original).unwrap();
+  for e in [Edit{disabled:vec!["unknown".into()],..edit(&[],&[])},Edit{disabled:vec!["@rpath/Unused.dylib".into()],..edit(&["@rpath/Unused.dylib"],&[])},Edit{disabled:vec!["@rpath/Used.dylib".into()],..edit(&[],&[])}] {
+   assert!(apply(&root,&[e]).is_err());assert_eq!(fs::read(root.join("Main")).unwrap(),original);
+  }fs::remove_dir_all(root).unwrap();
+ }
+ #[test] fn legacy_plan_defaults_disabled_empty() {
+  let e:Edit=serde_json::from_str(r#"{"owner":"Main","removed":[],"order":[]}"#).unwrap();assert!(e.disabled.is_empty());
  }
  #[test] fn threaded_bind_and_resize_fail_closed(){let mut d=linked();d[1024]=0xd0;assert!(rewrite(&d,&edit(&["@rpath/Unused.dylib"],&[])).unwrap_err().contains("Threaded"));assert!(replace_uleb(&mut [0;2],0,2,1).is_err());}
 }
