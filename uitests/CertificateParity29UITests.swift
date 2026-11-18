@@ -29,12 +29,27 @@ final class CertificateParity29UITests: XCTestCase {
         let iconLabel = lang == "ar" ? "تغيير أيقونة التطبيق" : "Change app icon"
         let icon = app.buttons[iconLabel]
         XCTAssertTrue(icon.waitForExistence(timeout: 15))
-        icon.tap()
-        XCTAssertTrue(app.buttons[lang == "ar" ? "الصور" : "Photos"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons[lang == "ar" ? "الملفات" : "Files"].exists)
-        screenshot("certificate-29-\(lang)-real-icon-menu")
-        // Dismiss the menu without opening Photos or the filesystem.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+        // Open the real system picker, not just its menu item. Repeat after
+        // cancellation to catch a presentation binding stuck on true.
+        for attempt in 1...2 {
+            icon.tap()
+            let photos = app.buttons[lang == "ar" ? "الصور" : "Photos"]
+            XCTAssertTrue(photos.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons[lang == "ar" ? "الملفات" : "Files"].exists)
+            screenshot("certificate-29-\(lang)-real-icon-menu-\(attempt)")
+            photos.tap()
+            // PHPicker's remote view exposes its system Cancel control through
+            // the host app. The editor and its icon menu have no Cancel button.
+            let cancel = app.buttons.matching(NSPredicate(format: "label IN %@",
+                ["Cancel", "إلغاء", "إلغاء الأمر"])).firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 10), "Photos must present the real system picker")
+            XCTAssertTrue(cancel.isHittable)
+            screenshot("certificate-29-\(lang)-real-icon-photos-picker-\(attempt)")
+            cancel.tap()
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: cancel)
+            XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
+            XCTAssertTrue(app.buttons["mirsa.project.sign"].isHittable, "Picker cancellation must restore the editor")
+        }
 
         let rows: [(String, String, String)] = [
             ("Enable Files access", "تمكين الوصول إلى الملفات", "1"),
@@ -46,12 +61,25 @@ final class CertificateParity29UITests: XCTestCase {
         for (en, ar, expected) in rows {
             let title = lang == "ar" ? ar : en
             let control = app.switches.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            let editor = app.scrollViews["mirsa.project.editor-scroll"]
+            let export = app.buttons["mirsa.project.sign"]
+            // AX can report a labelled switch hittable while its thumb is below
+            // the fixed export bar. Scroll the actual tap point into clear view.
+            func thumbIsClear() -> Bool {
+                guard control.exists, control.isHittable else { return false }
+                let point = control.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).screenPoint
+                return editor.frame.contains(point)
+                    && point.y > editor.frame.minY + 20
+                    && point.y < min(editor.frame.maxY, export.frame.minY) - 20
+            }
             for _ in 0..<20 {
-                if control.exists && control.isHittable { break }
-                app.swipeUp()
+                if thumbIsClear() { break }
+                editor.swipeUp()
             }
             XCTAssertTrue(control.exists, "Missing real editor toggle \(title)")
-            XCTAssertTrue(control.isHittable, "Unreachable editor toggle \(title)")
+            XCTAssertTrue(thumbIsClear(), "Editor toggle thumb obscured by export bar \(title)")
+            guard thumbIsClear() else { return }
+            screenshot("certificate-29-\(lang)-\(en)-before-tap")
             XCTAssertEqual(control.value as? String, expected, "Unexpected initial value \(title)")
             // The AX switch includes its multiline label. Target the actual
             // trailing switch thumb, not the Arabic label's bounding-box center.
