@@ -262,8 +262,10 @@ struct LiquidTabBar: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.mirsaPress)
+        .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
         .accessibilityLabel(item.title)
+        .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -277,6 +279,8 @@ struct LiquidTabBar: View {
             .padding(5)
             .frame(height: MirsaTabBarMetrics.height)
             .background { glass(Capsule()) }
+            // Give the pill its own container so its identifier cannot replace child IDs.
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("mirsa-main-tab-pill")
 
             if let ai = items.first(where: { $0.tab == .mirsaAI }) {
@@ -284,7 +288,6 @@ struct LiquidTabBar: View {
                     .padding(5)
                     .frame(width: MirsaTabBarMetrics.height, height: MirsaTabBarMetrics.height)
                     .background { glass(Circle()) }
-                    .accessibilityIdentifier("main-tab-" + ai.tab.rawValue)
             }
         }
         .accessibilityElement(children: .contain)

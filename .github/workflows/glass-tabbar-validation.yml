@@ -2,7 +2,7 @@ name: Glass tab bar validation
 # Branch-only validation; never publishes.
 on:
   push:
-    branches: [mirsa/glass-tabbar]
+    branches: [mirsa/glass-tabbar, mirsa/ai-cat]
 permissions:
   contents: read
 jobs:
@@ -33,6 +33,58 @@ jobs:
           cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Boot simulator with bounded recovery
+        timeout-minutes: 13
+        run: |
+          python3 - <<'PYBOOT'
+          import json, os, subprocess, sys
+
+          def simctl(*args, timeout=30, capture=False):
+              return subprocess.run(
+                  ["xcrun", "simctl", *args], check=True, timeout=timeout,
+                  text=True, stdout=subprocess.PIPE if capture else None,
+              )
+
+          inventory = json.loads(simctl("list", "-j", capture=True).stdout)
+          available = [
+              (runtime, device)
+              for runtime, devices in inventory["devices"].items()
+              for device in devices
+              if device.get("isAvailable", False) and device["name"].startswith("iPhone")
+          ]
+          preferred = [pair for pair in available if pair[1]["name"] in ("iPhone 16 Pro", "iPhone 17 Pro")]
+          if not available:
+              raise SystemExit("No available iPhone simulator")
+          runtime, original = (preferred or available)[0]
+          device_type = original.get("deviceTypeIdentifier") or next(
+              kind["identifier"] for kind in inventory["devicetypes"]
+              if kind["name"] == original["name"]
+          )
+          device = original["udid"]
+          for attempt in (1, 2):
+              try:
+                  if attempt == 2:
+                      device = simctl(
+                          "create", "Mirsa Glass Boot Recovery", device_type, runtime,
+                          capture=True,
+                      ).stdout.strip()
+                  print(f"Simulator boot attempt {attempt}/2: {device}", flush=True)
+                  if attempt == 2 or original["state"] != "Booted":
+                      simctl("boot", device)
+                  # bootstatus can hang forever during migration without this deadline.
+                  simctl("bootstatus", device, "-b", timeout=240)
+                  with open(os.environ["GITHUB_ENV"], "a") as env:
+                      env.write(f"DEVICE={device}\n")
+                  break
+              except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+                  print(f"::warning::Simulator boot attempt {attempt}/2 failed: {error}", file=sys.stderr, flush=True)
+                  try:
+                      simctl("shutdown", device, timeout=20)
+                  except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as cleanup_error:
+                      print(f"Simulator shutdown failed: {cleanup_error}", file=sys.stderr, flush=True)
+                  if attempt == 2:
+                      raise SystemExit("Simulator boot failed after two bounded attempts; UI tests did not run")
+          PYBOOT
       - name: Run design review UITests
         run: |
           set -o pipefail
@@ -45,9 +97,6 @@ jobs:
               plistlib.dump({'application-identifier': 'MIRSACI.com.alaa.mirsa', 'keychain-access-groups': ['MIRSACI.com.alaa.mirsa']}, f)
           PYENT
           xcodegen generate
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
-          xcrun simctl boot "$DEVICE" || true
-          xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
           # Keep unit failure blocking, but still collect independent UI evidence.
