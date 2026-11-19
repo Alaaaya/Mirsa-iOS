@@ -701,15 +701,11 @@ struct AppTile: View {
         if let e = progress.entry(for: app.id) {
             ZStack {
                 RoundedRectangle(cornerRadius: iconRadius, style: .continuous).fill(.black.opacity(0.92)).frame(width: iconSize, height: iconSize)
-                if let f = e.fraction {
-                    Circle().stroke(.white.opacity(0.25), lineWidth: 3).frame(width: 30, height: 30)
-                    Circle().trim(from: 0, to: f).stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .frame(width: 30, height: 30).rotationEffect(.degrees(-90))
-                } else { ProgressView().tint(.white) }
+                MirsaLiquidProgress(value: e.fraction, diameter: 48)
                 if e.canCancel {
                     Button { progress.cancel(e.id) } label: {
                         Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle()).offset(x: 19, y: 19)
                     }.buttonStyle(.mirsaPress).accessibilityLabel(tr("Cancel download", "إلغاء التنزيل")).accessibilityAddTraits(.isButton)
                 }
             }
@@ -780,16 +776,7 @@ struct BusyOverlay: View {
         ZStack {
             Color.black.opacity(0.35).ignoresSafeArea()
             VStack(spacing: 14) {
-                if isDownloading && hasKnownSize {
-                    Text("\(Int(min(1, max(0, progress)) * 100))%")
-                        .font(.title2.monospacedDigit().bold()).foregroundStyle(.white)
-                    ProgressView(value: progress).tint(.white).frame(width: 160)
-                        .environment(\.layoutDirection, .leftToRight)
-                } else if progress > 0.01 && progress < 1 {
-                    ProgressView(value: progress).tint(.white).frame(width: 160)
-                } else {
-                    ProgressView().tint(.white).controlSize(.large)
-                }
+                MirsaLiquidProgress(value: isDownloading && !hasKnownSize ? nil : (progress > 0 ? progress : nil), diameter: 112)
                 Text(text).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                 if isDownloading, let onCancel {
                     Button(action: onCancel) {

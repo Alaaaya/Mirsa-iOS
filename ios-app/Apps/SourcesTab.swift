@@ -994,14 +994,7 @@ struct SourceDownloadIndicator: View {
     var body: some View {
         HStack(spacing: 6) {
             ZStack {
-                if let value = shown {
-                    Circle().stroke(Color.accentColor.opacity(0.2), lineWidth: 2)
-                    Circle().trim(from: 0, to: CGFloat(min(1, max(0, value))))
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                } else {
-                    ProgressView().controlSize(.mini)
-                }
+                MirsaLiquidProgress(value: shown, diameter: 22)
                 if shown != nil && cancellable { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
             }
             .frame(width: 22, height: 22)
