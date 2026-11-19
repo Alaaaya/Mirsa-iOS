@@ -190,6 +190,54 @@ final class EncryptedAppsTests: XCTestCase {
         XCTAssertNotNil(outZip.entry("iTunesMetadata.plist"))
     }
 
+    /// A ZIP entry that ZipReader accepts but the path guard rejects
+    /// (empty component from "//") must fail with the entry name and the
+    /// guard reason in the message, not a bare "BundleFileError error 1".
+    func testDecryptorReportsBadEntryNameAndReason() throws {
+        let info = try plist(["CFBundleIdentifier": "com.example.notes", "CFBundleExecutable": "Notes",
+                              "CFBundleDisplayName": "Notes Pro", "CFBundleShortVersionString": "5.2.1"])
+        let meta = try plist(["itemName": "Notes Pro"])
+        let bytes = zip([("Payload/Notes.app/Info.plist", info), ("Payload/Notes.app/Notes", machO()),
+                         ("Payload/Notes.app//bad.txt", Data("x".utf8)), ("iTunesMetadata.plist", meta)])
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Notes.ipa")
+        try bytes.write(to: file)
+        XCTAssertThrowsError(try FairPlayDecryptor.decryptIPA(at: file)) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("Payload/Notes.app//bad.txt"), "message should name the entry: \(message)")
+            XCTAssertTrue(message.contains("invalidPath"), "message should name the reason: \(message)")
+        }
+    }
+
+    /// Names with spaces, %, # must extract fine: they are valid paths and
+    /// must not trip the path guard (no false outsideBundle).
+    func testDecryptorExtractsEntriesWithSpacesAndSpecialChars() throws {
+        let info = try plist(["CFBundleIdentifier": "com.example.notes", "CFBundleExecutable": "Notes",
+                              "CFBundleDisplayName": "Notes Pro", "CFBundleShortVersionString": "5.2.1"])
+        let meta = try plist(["itemName": "Notes Pro"])
+        let bytes = zip([("Payload/Notes.app/Info.plist", info), ("Payload/Notes.app/Notes", machO()),
+                         ("Payload/Notes.app/My File.txt", Data("a".utf8)),
+                         ("Payload/Notes.app/100%.txt", Data("b".utf8)),
+                         ("Payload/Notes.app/#hash.txt", Data("c".utf8)),
+                         ("iTunesMetadata.plist", meta)])
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Notes.ipa")
+        try bytes.write(to: file)
+        let report = try FairPlayDecryptor.decryptIPA(at: file)
+        addTeardownBlock { FairPlayDecryptor.endWorkDir(report) }
+        XCTAssertEqual(report.decrypted, [])
+        XCTAssertEqual(report.alreadyClear, ["Notes"])
+        let outData = try Data(contentsOf: report.outputURL, options: .mappedIfSafe)
+        let outZip = try ZipReader(data: outData)
+        XCTAssertNotNil(outZip.entry("Payload/Notes.app/My File.txt"))
+        XCTAssertNotNil(outZip.entry("Payload/Notes.app/100%.txt"))
+        XCTAssertNotNil(outZip.entry("Payload/Notes.app/#hash.txt"))
+    }
+
     func testDecryptorRejectsNonIPA() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
         try Data("not a zip".utf8).write(to: file)
