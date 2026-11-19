@@ -162,7 +162,10 @@ enum FairPlayDecryptor {
         typealias CopyEntitlementFn = @convention(c) (CFTypeRef, CFString, UnsafeMutablePointer<CFError?>?) -> CFTypeRef?
 
         func resolve(_ name: String) -> UnsafeMutableRawPointer? {
-            if let sym = dlsym(RTLD_DEFAULT, name) { return sym }
+            // RTLD_DEFAULT is the C macro ((void *) -2); Swift cannot import it,
+            // so its pointer value is spelled out here.
+            let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)!
+            if let sym = dlsym(rtldDefault, name) { return sym }
             guard let handle = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW | RTLD_LOCAL) else { return nil }
             return dlsym(handle, name)
         }
