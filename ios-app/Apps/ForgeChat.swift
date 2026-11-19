@@ -831,11 +831,8 @@ struct ForgeChatThreadView: View {
     // beneath the composer material.
     .scrollClipDisabled()
     .scrollDismissesKeyboard(.interactively)
-    // Fade only the scrolling pixels, not the controls or the canvas. Applying
-    // the mask before the insets puts its top at the conversation viewport.
-    // Messages cannot leak into the header/status safe area.
-    .mask(alignment: .top) { conversationTopFade }
-    // Reserve room for the floating controls at rest, with no background band.
+    // Reserve room for the floating controls at rest. scrollClipDisabled above
+    // lets conversation content draw beneath this transparent inset while scrolling.
     .safeAreaInset(edge: .top, spacing: 0) { header }
     // Inset the actual scrolling viewport, not its flexible outer container.
     // SwiftUI measures the complete lane (multiline input, previews and errors).
@@ -860,30 +857,6 @@ struct ForgeChatThreadView: View {
         pinToBottom(proxy, animated: false, after: 0.05)
         pinToBottom(proxy, animated: false, after: 0.3)
     }
-    }
-
-    /// Alpha-only scroll edge: reveals the actual canvas in every palette,
-    /// including Classic's aurora. No tinted rectangle or material at rest.
-    /// Extend downwards to preserve overflow beneath the translucent composer.
-    private var conversationTopFade: some View {
-        GeometryReader { viewport in
-            VStack(spacing: 0) {
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black.opacity(0.35), location: 0.35),
-                        .init(color: .black, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 28)
-                Rectangle().fill(.black)
-            }
-            .frame(height: viewport.size.height + 512, alignment: .top)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     private var conversationLayout: some View {
