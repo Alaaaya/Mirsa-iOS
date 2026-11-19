@@ -86,6 +86,21 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    func testLiquidProgress() {
+        for lang in ["ar", "en"] {
+            let app = launch("liquid-review", lang: lang)
+            XCTAssertTrue(app.scrollViews["liquid.review"].waitForExistence(timeout: 15))
+            XCTAssertEqual(app.staticTexts["liquid.title"].label, lang == "ar" ? "تقدّم التنزيل" : "Liquid progress")
+            let completion = app.descendants(matching: .any)["liquid.completion-orb"].firstMatch
+            XCTAssertTrue(completion.exists)
+            shot(app, "liquid_\(lang)_levels")
+            app.buttons["liquid.complete"].tap()
+            XCTAssertTrue(String(describing: completion.value ?? "").contains("100") || String(describing: completion.value ?? "").contains("١٠٠"))
+            shot(app, "liquid_\(lang)_completion")
+            app.terminate()
+        }
+    }
+
     private func run(lang: String) {
         for page in Self.pages {
             let app = launch(page, lang: lang)

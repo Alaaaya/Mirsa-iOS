@@ -175,7 +175,7 @@ struct PersonalURLImportSheet: View {
                         .padding(14).appsGlass(cornerRadius: 16).disabled(working)
                     if working {
                         VStack(alignment: .leading, spacing: 8) {
-                            if let f = downloader.fraction { ProgressView(value: f) } else { ProgressView() }
+                            MirsaLiquidProgress(value: downloader.fraction, diameter: 88)
                             Text(progressText).font(.caption).foregroundStyle(.secondary)
                         }
                     }

@@ -52,7 +52,7 @@ struct OriginalVideoWallpaperBlock: View {
             if preparingVideo {
                 ProgressView(value: videoProgress) {
                     Text(V.text(.preparing))
-                }
+                }.progressViewStyle(MirsaLiquidProgressStyle())
             }
             Text(V.text(.info))
                 .font(.caption).foregroundStyle(.secondary)

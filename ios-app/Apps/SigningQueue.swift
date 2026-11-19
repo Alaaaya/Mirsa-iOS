@@ -214,7 +214,7 @@ private struct SigningQueueRow: View {
                 case .cancelled: Text(sgText("Cancelled", "ملغى", "هەڵوەشێنرایەوە", "Hate betalkirin"))
                 }
             }.font(.caption)
-            if item.state == .signing, let f = item.fraction { ProgressView(value: f).tint(.green) }
+            if item.state == .signing, let f = item.fraction { MirsaLiquidProgress(value: f) }
             if let m = item.message { Text(m).font(.caption2).foregroundStyle(.orange) }
             HStack {
                 if item.state == .waiting || item.state == .signing {

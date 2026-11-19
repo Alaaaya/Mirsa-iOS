@@ -177,7 +177,7 @@ struct WallpaperMakerSection: View {
                 Button(t(.clear), role: .destructive) { clear() }
                     .disabled(busy || planBusy)
             }
-            if busy || planBusy { ProgressView(value: busy ? progress : nil) { Text(t(.preparing)) } }
+            if busy || planBusy { ProgressView(value: busy ? progress : nil) { Text(t(.preparing)) }.progressViewStyle(MirsaLiquidProgressStyle()) }
             if let message { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             if let generated {
                 Text(t(.ready)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

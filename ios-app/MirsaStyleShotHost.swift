@@ -52,6 +52,7 @@ struct MirsaStyleShotHost: View {
         case "apps": tab(.apps)
         case "sources": tab(.sources)
         #if DEBUG
+        case "liquid-review": MirsaLiquidReviewHost()
         case "glass-dock-review": GlassDockReviewHost()
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "dock-clearance-29": SourcesDock29ValidationHost()
