@@ -276,6 +276,10 @@ enum MirsaTr {
         "toast.refreshed": "%d sepan hatin nûkirin",
     ]
     static let ckb: [String: String] = [
+        "The file is larger than 4 GB.": "فایلەکە لە ٤ گیگابایت گەورەترە.",
+        "The file is empty or larger than 4 GB.": "فایلەکە بەتاڵە یان لە ٤ گیگابایت گەورەترە.",
+        "Not enough free storage to import this IPA.": "شوێنی بەتاڵی پێویست نییە بۆ هێنانی ئەم IPA.",
+        "Choose a valid IPA file.": "فایلێکی IPAی دروست هەڵبژێرە.",
         "Sources": "سەرچاوەکان",
         "More": "زیاتر",
         "About Mirsa": "دەربارەی Mirsa",
@@ -654,6 +658,10 @@ enum MirsaTr {
         "Drag an app outside to remove it": "ئەپێک ڕابکێشە دەرەوە بۆ لابردن",
     ]
     static let kmr: [String: String] = [
+        "The file is larger than 4 GB.": "Pel ji 4 GB mezintir e.",
+        "The file is empty or larger than 4 GB.": "Pel vala ye an ji 4 GB mezintir e.",
+        "Not enough free storage to import this IPA.": "Cihê vala têr nake ji bo anîna vê IPA.",
+        "Choose a valid IPA file.": "Pelek IPA ya derbasdar hilbijêre.",
         "Sources": "Çavkanî",
         "More": "Zêdetir",
         "About Mirsa": "Der barê Mirsa de",
@@ -1035,6 +1043,10 @@ enum MirsaTr {
 
     /// German for `tr(en, ar)` strings, keyed by the English text. Missing ones fall back to English.
     static let deByEnglish: [String: String] = [
+        "The file is larger than 4 GB.": "Die Datei ist größer als 4 GB.",
+        "The file is empty or larger than 4 GB.": "Die Datei ist leer oder größer als 4 GB.",
+        "Not enough free storage to import this IPA.": "Nicht genug freier Speicher, um diese IPA zu importieren.",
+        "Choose a valid IPA file.": "Wähle eine gültige IPA-Datei.",
         "About": "Über",
         "Add to Home Screen": "Zum Home-Bildschirm",
         "Admin access": "Admin-Zugang",

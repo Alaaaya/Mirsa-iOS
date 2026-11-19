@@ -506,15 +506,11 @@ struct MirsaHomeOperationBadge: View {
         if let e = progress.entry(for: appID) {
             ZStack {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(.black.opacity(0.92))
-                if let f = e.fraction {
-                    Circle().stroke(.white.opacity(0.25), lineWidth: 3).frame(width: 30, height: 30)
-                    Circle().trim(from: 0, to: f).stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .frame(width: 30, height: 30).rotationEffect(.degrees(-90))
-                } else { ProgressView().tint(.white) }
+                MirsaLiquidProgress(value: e.fraction, diameter: 48)
                 if e.canCancel {
                     Button { progress.cancel(e.id) } label: {
                         Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle()).offset(x: 19, y: 19)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(tr("Cancel download", "إلغاء التنزيل"))

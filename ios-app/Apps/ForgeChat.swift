@@ -171,6 +171,15 @@ enum ForgeChatImage {
                 messages[t] = [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: nil, result: result)]
             }
             #endif
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaTweakDeliveryFixture") {
+                let artifact = ForgeChatArtifact(id: UUID(), kind: "dylib", name: "Dock-Labels.dylib",
+                    size: 10240, sha256: nil, expiresAt: nil)
+                let result = ForgeChatResult(inboxID: nil, tweakID: nil, bundleID: nil, name: nil, version: nil, artifact: artifact)
+                let text = Array(repeating: "Your tweak is ready. Open Mirsa, choose your app, inject the tweak and install. Remove older versions of this tweak first.", count: 5).joined(separator: "\n\n")
+                messages[t] = (messages[t] ?? []) + [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: text, result: result)]
+            }
+            #endif
             ackedThreads.insert(t)
             return
         }
@@ -615,13 +624,31 @@ enum MirsaChatTheme {
     static let muted = Color(red: 0.545, green: 0.604, blue: 0.71)
 }
 
-struct MirsaTypingDots: View {
-    @State private var phase = 0
-    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+/// Original soft breathing/merging orbs, rendered only while the waiting row is visible.
+private struct MirsaBreathingOrbs: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { i in Circle().fill(MirsaChatTheme.blue).frame(width: 7, height: 7).opacity(phase == i ? 1 : 0.3).scaleEffect(phase == i ? 1.15 : 0.85) }
-        }.onReceive(timer) { _ in withAnimation(.easeInOut(duration: 0.3)) { phase = (phase + 1) % 3 } }
+        TimelineView(.animation(minimumInterval: 1.0 / 24, paused: !visible || reduceMotion || scenePhase != .active)) { timeline in
+            Canvas { context, size in
+                let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+                context.addFilter(.alphaThreshold(min: 0.32, color: MirsaPalette.accent))
+                context.addFilter(.blur(radius: 3))
+                context.drawLayer { layer in
+                    for index in 0..<3 {
+                        let phase = time * 1.8 + Double(index) * 1.9
+                        let radius = reduceMotion ? 5.5 : 5.5 + sin(phase) * 1.2
+                        let x = 10 + Double(index) * 12 + (reduceMotion ? 0 : sin(phase * 0.7) * 3)
+                        let y = Double(size.height) / 2 + (reduceMotion ? 0 : cos(phase) * 2)
+                        layer.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)), with: .color(MirsaPalette.accent))
+                    }
+                }
+            }
+        }
+        .frame(width: 46, height: 28)
+        .onAppear { visible = true }.onDisappear { visible = false }
+        .accessibilityHidden(true)
     }
 }
 
@@ -647,6 +674,23 @@ struct ForgeChatThreadView: View {
     let threadID: UUID
     @ObservedObject private var store = ForgeChatStore.shared
     @Environment(\.dismiss) private var dismiss
+    // The rest of Mirsa can force dark appearance. Read the scene's system
+    // traits, not that inherited SwiftUI override, until the user chooses.
+    @State private var systemDark = false
+    @AppStorage("mirsa.chat.appearance") private var chatAppearance = "system"
+    private var darkChat: Bool {
+        switch chatAppearance {
+        case "light": return false
+        case "dark", "classic": return true
+        default: return systemDark
+        }
+    }
+    private var classicChat: Bool { chatAppearance == "classic" }
+    private var chatInk: Color { darkChat ? Color(white: 0.95) : Color(white: 0.10) }
+    private var chatMuted: Color { darkChat ? Color(white: 0.65) : Color(white: 0.43) }
+    private var chatCanvas: Color { darkChat ? Color(white: 0.055) : Color(red: 0.973, green: 0.973, blue: 0.969) }
+    private var chatCard: Color { darkChat ? Color(red: 0.12, green: 0.125, blue: 0.135) : .white }
+    private var chatRim: Color { darkChat ? .white.opacity(0.12) : .black.opacity(0.06) }
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
     @FocusState private var composerFocused: Bool
@@ -688,7 +732,6 @@ struct ForgeChatThreadView: View {
         let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
-    @AppStorage(MirsaChatBackground.key) private var blackChatBackground = false
     private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
     private var draftCount: Int { ForgeChatText.messageCount(text) }
@@ -745,109 +788,108 @@ struct ForgeChatThreadView: View {
         .modifier(ForgeChatSwipeToReply(enabled: menuTarget == nil) { startReply(id: id, text: text, isUser: isUser) })
     }
 
-    var body: some View {
+    // Separate inference boundaries keep the native SwiftUI type checker bounded.
+    private var messageTimeline: some View {
+        LazyVStack(alignment: .leading, spacing: 22) {
+            assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
+            ForEach(rows) { row in
+                Group {
+                    switch row {
+                    case .message(let m): bubble(m)
+                    case .pending(let o, let sending):
+                        chrome(id: o.id, text: o.text, isUser: true, confirmed: false) {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                if let ids = o.attachmentIDs, !ids.isEmpty {
+                                    ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
+                                }
+                                userBubble(o.text)
+                                if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(chatMuted) }
+                            }
+                        }
+                    }
+                }
+                .id(row.id)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
+            }
+            if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
+                HStack(spacing: 10) { MirsaBreathingOrbs(); Text(ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
+            }
+            Color.clear.frame(height: 1).id("bottom")
+        }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 12)
+        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
+    }
+
+    private func conversationScroll(proxy: ScrollViewProxy) -> some View {
+    ScrollView {
+        messageTimeline
+    }
+    // Preserve the measured bottom inset, but let messages remain visible
+    // beneath the composer material.
+    .scrollClipDisabled()
+    .scrollDismissesKeyboard(.interactively)
+    // Reserve room for the floating controls at rest. scrollClipDisabled above
+    // lets conversation content draw beneath this transparent inset while scrolling.
+    .safeAreaInset(edge: .top, spacing: 0) { header }
+    // Inset the actual scrolling viewport, not its flexible outer container.
+    // SwiftUI measures the complete lane (multiline input, previews and errors).
+    .safeAreaInset(edge: .bottom, spacing: 0) { composerLane }
+    // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
+    .defaultScrollAnchor(.bottom, for: .initialOffset)
+    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+    .onChange(of: rows.map(\.id)) { _, _ in pinToBottom(proxy) }
+    .onChange(of: jumpTo) { _, target in
+        guard let target else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
+        flashID = target
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { if flashID == target { flashID = nil } }
+        jumpTo = nil
+    }
+    .onChange(of: msgs.last?.text) { _, _ in pinToBottom(proxy) }
+    .onChange(of: composerFocused) { _, focused in if focused { pinToBottom(proxy, after: 0.35) } }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in pinToBottom(proxy) }
+    .onAppear {
+        proxy.scrollTo("bottom", anchor: .bottom)
+        // Again once the lazy rows (and the full-screen cover) finished laying out.
+        pinToBottom(proxy, animated: false, after: 0.05)
+        pinToBottom(proxy, animated: false, after: 0.3)
+    }
+    }
+
+    private var conversationLayout: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
-                        assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
-                        ForEach(rows) { row in
-                            Group {
-                                switch row {
-                                case .message(let m): bubble(m)
-                                case .pending(let o, let sending):
-                                    chrome(id: o.id, text: o.text, isUser: true, confirmed: false) {
-                                        VStack(alignment: .trailing, spacing: 4) {
-                                            if let ids = o.attachmentIDs, !ids.isEmpty {
-                                                ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
-                                            }
-                                            userBubble(o.text)
-                                            if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(MirsaChatTheme.muted) }
-                                        }
-                                    }
-                                }
-                            }
-                            .id(row.id)
-                            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
-                        }
-                        if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
-                            HStack(spacing: 10) { MirsaTypingDots(); Text(ForgeChatText.waiting).font(.system(size: 15)).foregroundStyle(MirsaChatTheme.muted) }
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }.padding(.horizontal, 18).padding(.top, 8)
-                    .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
-                .safeAreaInset(edge: .top, spacing: 0) { header }
-                // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(.bottom, for: .sizeChanges)
-                .onChange(of: rows.map(\.id)) { _, _ in pinToBottom(proxy) }
-                .onChange(of: jumpTo) { _, target in
-                    guard let target else { return }
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
-                    flashID = target
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { if flashID == target { flashID = nil } }
-                    jumpTo = nil
-                }
-                .onChange(of: msgs.last?.text) { _, _ in pinToBottom(proxy) }
-                .onChange(of: composerFocused) { _, focused in if focused { pinToBottom(proxy, after: 0.35) } }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in pinToBottom(proxy) }
-                .onAppear {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                    // Again once the lazy rows (and the full-screen cover) finished laying out.
-                    pinToBottom(proxy, animated: false, after: 0.05)
-                    pinToBottom(proxy, animated: false, after: 0.3)
-                }
+                conversationScroll(proxy: proxy)
             }
         }
+    }
+
+    private var conversationAppearance: some View {
+        conversationLayout
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Reserve the composer before the scroll view is laid out. A flexible sibling
-        // can be placed below the visible nested NavigationStack/tab safe area.
-        // This also tracks the keyboard's safe area without fixed device heights.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                if !reactionsTipDismissed {
-                    ForgeChatReactionsTip { withAnimation(.easeOut(duration: 0.18)) { reactionsTipDismissed = true } }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                if let editingID {
-                    ForgeChatComposerContext(title: ForgeChatExtrasText.editing, line: ForgeChatLocal.snippet(messageText(editingID)), icon: "pencil") {
-                        withAnimation(.easeOut(duration: 0.18)) { self.editingID = nil; text = "" }
-                    }.transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if let replyTo {
-                    ForgeChatComposerContext(title: replyTo.fromUser ? ForgeChatExtrasText.replyToYou : ForgeChatExtrasText.replyToMirsa,
-                                             line: replyTo.snippet, icon: "arrowshape.turn.up.left") {
-                        withAnimation(.easeOut(duration: 0.18)) { self.replyTo = nil }
-                    }.transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                if attachmentsUI && editingID == nil { attachmentTray }
-                if let jpeg, let img = UIImage(data: jpeg) {
-                    HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
-                        Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(MirsaChatTheme.muted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
-                }
-                inputBar
-                if let e = actionError ?? store.error {
-                    Text(e).font(.caption).foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 18).padding(.bottom, 6)
-                        .accessibilityIdentifier("chat-composer-status")
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            // Same Aurora as the conversation behind it (screen-aligned slice), not a flat gray material.
-            .background { if blackChatBackground { Color.black.ignoresSafeArea(edges: .bottom) } else { MirsaAuroraSlice().ignoresSafeArea(edges: .bottom) } }
-        }
-        .background { if blackChatBackground { Color.black.ignoresSafeArea() } else { AuroraBackground().ignoresSafeArea() } }
+        .background { if classicChat { AuroraBackground().ignoresSafeArea() } else { chatCanvas.ignoresSafeArea() } }
+        .background(ForgeChatSystemAppearanceReader { dark in
+            if systemDark != dark { systemDark = dark }
+        }.frame(width: 0, height: 0))
+        // Local environment only. Never change the hosting window or other tabs.
+        .environment(\.colorScheme, darkChat ? .dark : .light)
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var conversationReporting: some View {
+        conversationAppearance
         .sheet(item: $reportTarget) { m in
             ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
                 .environment(\.layoutDirection, .leftToRight)
         }
         .alert(ForgeChatText.reportThanks, isPresented: $reportDone) {}
+    }
+
+    private var conversationMessageMenu: some View {
+        conversationReporting
         .overlay {
             if let t = menuTarget {
                 ForgeChatMessageMenu(target: t, current: reaction(t.id),
@@ -873,6 +915,10 @@ struct ForgeChatThreadView: View {
                 .zIndex(10)
             }
         }
+    }
+
+    private var conversationDeletion: some View {
+        conversationMessageMenu
         .confirmationDialog(ForgeChatExtrasText.deleteTitle, isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible) {
             Button(ForgeChatExtrasText.delete, role: .destructive) {
                 guard let t = deleteTarget else { return }
@@ -884,6 +930,10 @@ struct ForgeChatThreadView: View {
             }
             Button(ForgeChatText.cancel, role: .cancel) { deleteTarget = nil }
         }
+    }
+
+    private var conversationLifecycle: some View {
+        conversationDeletion
         .onAppear { markSeen() }
         .onDisappear { markSeen() }
         .onChange(of: store.threads) { _, _ in markSeen() }
@@ -902,6 +952,10 @@ struct ForgeChatThreadView: View {
         #if DEBUG
         .overlay(alignment: .center) { if ForgeChatStore.fixture && ProcessInfo.processInfo.arguments.contains("-MirsaAttachmentRulesSelfTest") { ChatAttachmentSelfTestBadge() } }
         #endif
+    }
+
+    private var conversationAttachments: some View {
+        conversationLifecycle
         .modifier(ChatAttachmentPickers(enabled: attachmentsUI, threadID: threadID, showPhotos: $showPhotos, showFiles: $showFiles,
                                         showLink: $showLink, attachPhoto: $attachPhoto, note: $attachNote))
         .onChange(of: store.returnedText[threadID]) { _, returned in
@@ -914,6 +968,10 @@ struct ForgeChatThreadView: View {
             guard let item else { return }
             Task { jpeg = (try? await item.loadTransferable(type: Data.self)).flatMap { ForgeChatImage.prepare($0) } }
         }
+    }
+
+    var body: some View {
+        conversationAttachments
         .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
@@ -928,12 +986,48 @@ struct ForgeChatThreadView: View {
             Button { showFiles = true } label: { Label(ChatAttachmentText.files, systemImage: "doc") }.accessibilityIdentifier("chat-attach-files")
             Button { showLink = true } label: { Label(ChatAttachmentText.fromLink, systemImage: "link") }.accessibilityIdentifier("chat-attach-link")
         } label: {
-            Image(systemName: "paperclip").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36)
+            Image(systemName: "paperclip").font(.system(size: 20)).foregroundStyle(chatMuted).frame(width: 36, height: 36)
         }
         .disabled(!drafts.canAdd(threadID))
         .accessibilityLabel(ChatAttachmentText.attach)
         .accessibilityIdentifier("chat-attach")
     }
+
+    private var composerLane: some View {
+        VStack(spacing: 0) {
+            if !reactionsTipDismissed {
+                ForgeChatReactionsTip { withAnimation(.easeOut(duration: 0.18)) { reactionsTipDismissed = true } }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let editingID {
+                ForgeChatComposerContext(title: ForgeChatExtrasText.editing, line: ForgeChatLocal.snippet(messageText(editingID)), icon: "pencil") {
+                    withAnimation(.easeOut(duration: 0.18)) { self.editingID = nil; text = "" }
+                }.transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let replyTo {
+                ForgeChatComposerContext(title: replyTo.fromUser ? ForgeChatExtrasText.replyToYou : ForgeChatExtrasText.replyToMirsa,
+                                         line: replyTo.snippet, icon: "arrowshape.turn.up.left") {
+                    withAnimation(.easeOut(duration: 0.18)) { self.replyTo = nil }
+                }.transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if attachmentsUI && editingID == nil { attachmentTray }
+            if let jpeg, let img = UIImage(data: jpeg) {
+                HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
+                    Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(chatMuted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
+            }
+            inputBar
+            if let e = actionError ?? store.error {
+                Text(e).font(.caption).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18).padding(.bottom, 6)
+                    .accessibilityIdentifier("chat-composer-status")
+            }
+        }
+        .padding(.top, 12)
+        .fixedSize(horizontal: false, vertical: true)
+        // Intentionally no lane-wide fill. Only inputBar owns its frosted material;
+        // the bottom safe-area inset keeps the final delivery reachable above it.
+    }
+
 
     /// Chips above the composer, removable, with a short explanation of the feature.
     @ViewBuilder private var attachmentTray: some View {
@@ -950,7 +1044,7 @@ struct ForgeChatThreadView: View {
                             }
                         }
                     }
-                    Text(ChatAttachmentText.help).font(.caption2).foregroundStyle(MirsaChatTheme.muted).fixedSize(horizontal: false, vertical: true)
+                    Text(ChatAttachmentText.help).font(.caption2).foregroundStyle(chatMuted).fixedSize(horizontal: false, vertical: true)
                 }
                 if let attachNote {
                     Text(attachNote).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("chat-attachment-note")
@@ -974,10 +1068,10 @@ struct ForgeChatThreadView: View {
                 Text(showCopied ? ForgeChatText.copied : ForgeChatText.shortIDLabel + " " + shortID)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced)).lineLimit(1)
             }
-            .foregroundStyle(showCopied ? Color.green : .white.opacity(0.9))
+            .foregroundStyle(showCopied ? Color.green : chatMuted)
             .padding(.horizontal, 12).frame(height: 32)
             .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
+            .overlay(Capsule().stroke(chatRim, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .environment(\.layoutDirection, .leftToRight)
@@ -1000,34 +1094,72 @@ struct ForgeChatThreadView: View {
         if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: go) } else { DispatchQueue.main.async(execute: go) }
     }
 
-    /// No bar and no title: only a floating circular back button over the conversation.
-    private var header: some View {
+    /// Familiar circular navigation actions and a quiet conversation identity.
+    @ViewBuilder private var header: some View {
+        if classicChat { classicHeader } else { isletHeader }
+    }
+
+    private var classicHeader: some View {
         HStack(spacing: 10) {
-            Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)) }
-                .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
             if !shortID.isEmpty { shortIDCapsule }
             blackBackgroundToggle
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
     }
 
-    /// Small circle next to the thread id: pure black chat background or the original gradient. Visual 28pt, hit target 44pt.
+    private var isletHeader: some View {
+        HStack(spacing: 10) {
+            Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(chatInk).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(chatRim, lineWidth: 0.5)) }
+                .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(ForgeChatText.title).font(.system(size: 18, weight: .semibold)).foregroundStyle(chatInk)
+                if !shortID.isEmpty { shortIDCapsule }
+            }
+            Spacer(minLength: 0)
+            blackBackgroundToggle
+
+        }
+        .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
+        .zIndex(1)
+    }
+
+    /// Three explicit palettes. Unset preferences continue to follow scene appearance.
     private var blackBackgroundToggle: some View {
-        Button { blackChatBackground.toggle() } label: {
-            Image(systemName: blackChatBackground ? "moon.fill" : "moon")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-                .frame(width: 28, height: 28).background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.5))
+        Menu {
+            ForEach(["light", "dark", "classic"], id: \.self) { choice in
+                Button { chatAppearance = choice } label: {
+                    if (chatAppearance == "system" ? (darkChat ? "dark" : "light") : chatAppearance) == choice {
+                        Label(ForgeChatAppearanceText.name(choice), systemImage: "checkmark")
+                    } else {
+                        Text(ForgeChatAppearanceText.name(choice))
+                    }
+                }
+                .accessibilityIdentifier("chat-theme-" + choice)
+            }
+        } label: {
+            Image(systemName: "paintpalette")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(chatInk)
+                .frame(width: 36, height: 36).background(.ultraThinMaterial, in: Circle())
                 .frame(width: 44, height: 44).contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(MirsaChatBackground.label(black: blackChatBackground))
+        .accessibilityLabel(ForgeChatAppearanceText.title)
+        .accessibilityValue(classicChat ? "classic" : (darkChat ? "dark" : "light"))
         .accessibilityIdentifier("chat-black-background")
     }
 
-    private var inputBar: some View {
+    @ViewBuilder private var inputBar: some View {
+        if classicChat { classicInputBar } else { isletInputBar }
+    }
+
+    private var classicInputBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             if draftCount >= 3600 {
                 Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
@@ -1079,11 +1211,75 @@ struct ForgeChatThreadView: View {
         // distinct identifiers and hiding those controls from accessibility queries.
     }
 
-    private func userBubble(_ t: String) -> some View {
-        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 11).background(MirsaPalette.accentGradient).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)).shadow(color: MirsaPalette.accent.opacity(0.25), radius: 8, y: 3).frame(maxWidth: 300, alignment: .trailing)
+    private var isletInputBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if draftCount >= 3600 {
+                Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
+                    .font(.caption).foregroundStyle(draftCount > ForgeChatText.messageMax ? Color.red : chatMuted)
+                    .accessibilityIdentifier("chat-character-limit")
+                    .accessibilityLabel(ForgeChatText.counter(draftCount))
+                    .accessibilityValue(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : "")
+            }
+            HStack(alignment: .center, spacing: 10) {
+                HStack(spacing: 8) {
+                    if attachmentsUI {
+                        attachMenu
+                    } else {
+                        PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(chatMuted).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
+                    }
+                    TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(chatMuted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(chatInk).tint(MirsaPalette.accent)
+                }.padding(.leading, 10).padding(.vertical, 8)
+                Button {
+                    started = true
+                    if let eid = editingID {
+                        let newText = text
+                        Task {
+                            let r = await store.editMessage(threadID: threadID, messageID: eid, text: newText)
+                            if r == .ok { editingID = nil; text = ""; actionError = nil } else { actionError = ForgeChatExtrasText.editFailed }
+                        }
+                        return
+                    }
+                    let quote = replyTo
+                    replyTo = nil
+                    if attachmentsUI {
+                        drafts.expireStale(threadID)
+                        guard let ids = drafts.readyIDs(threadID) else { attachNote = ChatAttachmentText.needsUpload; return }
+                        // Same draft thread UUID the uploads used; the first send still says newThread true.
+                        store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids, replyTo: quote)
+                        drafts.clearAfterSend(threadID); attachNote = nil
+                        text = ""; jpeg = nil; photo = nil
+                    } else {
+                        store.send(threadID: threadID, text: text, jpeg: jpeg, replyTo: quote)
+                        text = ""; jpeg = nil; photo = nil
+                    }
+                } label: { Image(systemName: "arrow.up").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white).frame(width: 44, height: 44).background((canSend ? MirsaPalette.accent : Color(white: 0.30)).opacity(canSend ? 1 : 0.45), in: Circle()) }
+                    .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
+                    .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
+                    .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
+            }
+            .padding(.trailing, 7).padding(.vertical, 4)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).stroke(chatRim, lineWidth: 1))
+            .shadow(color: .black.opacity(darkChat ? 0.16 : 0.05), radius: 18, y: 5)
+        }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 12)
+        // Do not assign an identifier to this transparent layout container.
+        // SwiftUI propagates it to the text editor and buttons, replacing their
+        // distinct identifiers and hiding those controls from accessibility queries.
+    }
+
+    @ViewBuilder private func userBubble(_ t: String) -> some View {
+        if classicChat { classicUserBubble(t) } else { isletUserBubble(t) }
     }
 
     @ViewBuilder private func assistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        if classicChat { classicAssistantBlock(content) } else { isletAssistantBlock(content) }
+    }
+
+    private func classicUserBubble(_ t: String) -> some View {
+        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 11).background(MirsaPalette.accentGradient).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)).shadow(color: MirsaPalette.accent.opacity(0.25), radius: 8, y: 3).frame(maxWidth: 300, alignment: .trailing)
+    }
+
+    @ViewBuilder private func classicAssistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) { MirsaSailMark().frame(width: 28, height: 28); Text(ForgeChatText.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(MirsaChatTheme.muted) }
             content().foregroundStyle(.white)
@@ -1091,6 +1287,25 @@ struct ForgeChatThreadView: View {
                 .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white.opacity(0.07)))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5))
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func isletUserBubble(_ t: String) -> some View {
+        Text(t).font(.system(size: 16)).foregroundStyle(.white)
+            .padding(.horizontal, 18).padding(.vertical, 13)
+            .background(Color(white: darkChat ? 0.18 : 0.10), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+            .frame(maxWidth: 300, alignment: .trailing)
+    }
+
+    @ViewBuilder private func isletAssistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content().foregroundStyle(chatInk)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(chatCard, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(chatRim, lineWidth: 0.7))
+        .shadow(color: .black.opacity(darkChat ? 0.08 : 0.025), radius: 14, y: 4)
+        .padding(.trailing, 14)
     }
 
     @ViewBuilder private func bubble(_ m: ForgeChatMessage) -> some View {
@@ -1116,7 +1331,7 @@ struct ForgeChatThreadView: View {
                 }
             } }
             Button { reportTarget = m } label: {
-                Label(ForgeChatText.reportButton, systemImage: "exclamationmark.bubble").font(.caption).foregroundStyle(MirsaChatTheme.muted)
+                Label(ForgeChatText.reportButton, systemImage: "exclamationmark.bubble").font(.caption).foregroundStyle(chatMuted)
                     .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(.ultraThinMaterial.opacity(0.6)))
             }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).padding(.top, -2)
             .accessibilityIdentifier("chat-report")
@@ -1259,6 +1474,54 @@ enum MirsaChatBackground {
         case .arabic: return on ? "استخدم الخلفية المتدرجة" : "استخدم الخلفية السوداء"
         case .kurmanji: return on ? "Paşxaneya gradient bikar bîne" : "Paşxaneya reş bikar bîne"
         case .sorani: return on ? "پاشبنەمای گرادیەنت بەکاربهێنە" : "پاشبنەمای ڕەش بەکاربهێنە"
+        }
+    }
+}
+
+
+/// Window-scene traits retain the iPhone's appearance even when an ancestor
+/// applies a SwiftUI color-scheme override. The callback is deferred out of layout.
+private struct ForgeChatSystemAppearanceReader: UIViewRepresentable {
+    let changed: (Bool) -> Void
+    func makeUIView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.changed = changed
+        return view
+    }
+    func updateUIView(_ view: ReaderView, context: Context) {
+        view.changed = changed
+        view.reportAppearance()
+    }
+    final class ReaderView: UIView {
+        var changed: ((Bool) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            reportAppearance()
+        }
+        override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+            super.traitCollectionDidChange(previousTraitCollection)
+            reportAppearance()
+        }
+        func reportAppearance() {
+            guard let scene = window?.windowScene else { return }
+            let dark = scene.traitCollection.userInterfaceStyle == .dark
+            DispatchQueue.main.async { [weak self] in self?.changed?(dark) }
+        }
+    }
+}
+
+
+/// Chat-only labels, independent from the application's theme preference.
+enum ForgeChatAppearanceText {
+    static var title: String {
+        tr5("Chat appearance", "مظهر المحادثة", de: "Chat-Darstellung",
+            ckb: "ڕووکارى گفتوگۆ", kmr: "Dîmena sohbetê")
+    }
+    static func name(_ choice: String) -> String {
+        switch choice {
+        case "light": return tr5("Light", "فاتح", de: "Hell", ckb: "ڕووناک", kmr: "Ronahî")
+        case "dark": return tr5("Dark", "داكن", de: "Dunkel", ckb: "تاریک", kmr: "Tarî")
+        default: return tr5("Mirsa Classic", "مرسى الكلاسيكي", de: "Mirsa Klassisch", ckb: "میرسای کلاسیکی", kmr: "Mirsa Klasîk")
         }
     }
 }
