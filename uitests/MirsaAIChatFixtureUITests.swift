@@ -114,11 +114,12 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
                                        "-mirsa.chat.catEnabled", "YES", "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
-                app.launchArguments += ["-mirsa.chat.appearance", light ? "light" : "dark"]
+                // No appearance launch argument: it would shadow the menu's persisted writes.
                 app.launch()
                 XCTAssertTrue(app.staticTexts["chat-waiting"].waitForExistence(timeout: 20))
                 XCTAssertTrue(app.staticTexts["Thanks, no rush."].exists)
                 let appearance = app.buttons["chat-black-background"]
+                selectTheme(app, light ? "light" : "dark")
                 XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
                 selectTheme(app, light ? "dark" : "light")
                 XCTAssertEqual(appearance.value as? String, light ? "dark" : "light")
