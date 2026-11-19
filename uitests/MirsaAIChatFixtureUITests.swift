@@ -29,82 +29,6 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
     }
 
 
-    func testPlayfulCatRoofTapAndPassThrough() {
-        for language in ["ar", "en"] {
-            let app = openEmptyChat(language: language)
-            app.buttons["chat-settings"].tap()
-            let initialToggle = app.switches["chat-cat-toggle"]
-            if initialToggle.value as? String == "0" { initialToggle.tap() }
-            app.buttons["chat-settings-close"].tap()
-            let cat = app.buttons["chat-playful-cat"]
-            XCTAssertTrue(cat.waitForExistence(timeout: 10))
-            XCTAssertTrue(app.buttons["chat-send"].exists)
-            let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
-            XCTAssertTrue(input.isHittable, "Cat overlay must not swallow composer taps")
-            let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            before.name = "playful_roof_\(language)"; before.lifetime = .keepAlways; add(before)
-            if cat.isHittable { cat.tap() }
-            let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            after.name = "playful_heart_\(language)"; after.lifetime = .keepAlways; add(after)
-            input.tap()
-            input.typeText("Hello")
-            XCTAssertTrue(app.buttons["chat-send"].isEnabled)
-            app.buttons["chat-settings"].tap()
-            let toggle = app.switches["chat-cat-toggle"]
-            if toggle.value as? String != "0" { toggle.tap() }
-            assertCatSetting(toggle, enabled: false)
-            app.buttons["chat-settings-close"].tap()
-            XCTAssertFalse(app.buttons["chat-playful-cat"].exists)
-            app.terminate()
-        }
-    }
-
-    func testCatCompanionStatesAndSettings() {
-        for language in ["ar", "en"] {
-            for (state, name) in [("", "idle"), ("-MirsaCatThinkingFixture", "thinking"),
-                                   ("-MirsaCatSleepingFixture", "sleeping"), ("-MirsaCatHappyFixture", "happy")] {
-                let app = openEmptyChat(state, language: language)
-                assertComposer(app, name: "cat_\(language)_\(name)")
-                // Scroll still belongs to the conversation, never to the decoration.
-                app.swipeUp()
-                assertComposer(app, name: "cat_\(language)_\(name)_scroll")
-                app.terminate()
-            }
-        }
-        for language in ["ar", "en", "de", "kmr", "ckb"] {
-            let app = openEmptyChat(language: language)
-            app.buttons["chat-settings"].tap()
-            let toggle = app.switches["chat-cat-toggle"]
-            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-            XCTAssertTrue(toggle.isHittable)
-            if toggle.value as? String == "0" { toggle.tap() }
-            assertCatSetting(toggle, enabled: true)
-            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            shot.name = "cat_settings_\(language)"; shot.lifetime = .keepAlways; add(shot)
-            toggle.tap()
-            assertCatSetting(toggle, enabled: false)
-            app.buttons["chat-settings-close"].tap()
-            assertComposer(app, name: "cat_\(language)_disabled")
-            // Setting persists while the chat and app are reopened.
-            app.terminate()
-            let reopened = openEmptyChat(language: language)
-            reopened.buttons["chat-settings"].tap()
-            let persisted = reopened.switches["chat-cat-toggle"]
-            XCTAssertTrue(persisted.waitForExistence(timeout: 5))
-            assertCatSetting(persisted, enabled: false)
-            persisted.tap()
-            reopened.terminate()
-        }
-    }
-
-    private func assertCatSetting(_ toggle: XCUIElement, enabled: Bool,
-                                  file: StaticString = #filePath, line: UInt = #line) {
-        let settled = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", enabled ? "1" : "0"), object: toggle)
-        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed,
-                       "Cat setting did not settle to the requested value", file: file, line: line)
-    }
-
     /// Real thread, real composer and existing result attachments, in both material environments.
     func testIsletChatMaterialsAndLanguages() {
         XCUIDevice.shared.orientation = .portrait
@@ -112,7 +36,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             for light in [false, true] {
                 let app = XCUIApplication()
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
-                                       "-mirsa.chat.catEnabled", "YES", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
                 // No appearance launch argument: it would shadow the menu's persisted writes.
                 app.launch()
@@ -127,9 +51,6 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 selectTheme(app, light ? "light" : "dark")
                 XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
                 assertComposer(app, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")")
-                app.buttons["chat-settings"].tap()
-                XCTAssertTrue(app.switches["chat-cat-toggle"].waitForExistence(timeout: 5))
-                app.buttons["chat-settings-close"].tap()
                 let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
                 input.tap()
                 input.typeText("Hello")
@@ -167,15 +88,13 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 let app = XCUIApplication()
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat",
                                        "-MirsaChatFixture", "-MirsaTweakDeliveryFixture",
-                                       "-mirsa.chat.catEnabled", "NO", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.chat.appearance", theme, "-mirsa.appLanguage", language,
                                        "-AppleLanguages", "(\(language))", "-AppleLocale", language]
                 app.launch()
                 let back = app.buttons["chat-back"]
-                let settings = app.buttons["chat-settings"]
                 XCTAssertTrue(back.waitForExistence(timeout: 20))
                 XCTAssertTrue(back.isHittable)
-                XCTAssertTrue(settings.isHittable)
                 let scroll = app.scrollViews.firstMatch
                 XCTAssertTrue(scroll.exists)
                 for state in ["bottom", "scrolling"] {
@@ -188,11 +107,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                     shot.lifetime = .keepAlways
                     add(shot)
                     XCTAssertTrue(back.isHittable)
-                    XCTAssertTrue(settings.isHittable)
-                }
-                settings.tap()
-                XCTAssertTrue(app.switches["chat-cat-toggle"].waitForExistence(timeout: 5))
-                app.buttons["chat-settings-close"].tap()
+                    }
                 XCTAssertTrue(back.isHittable)
                 app.terminate()
             }
@@ -212,7 +127,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             for light in [false, true] {
                 let app = XCUIApplication()
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
-                                       "-MirsaTweakDeliveryFixture", "-mirsa.chat.catEnabled", "YES", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-MirsaTweakDeliveryFixture", "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
                 app.launchArguments += ["-mirsa.chat.appearance", light ? "light" : "dark"]
                 app.launch()
@@ -226,7 +141,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                     delivery.isHittable && delivery.frame.maxY <= input.frame.minY - 80
                 }, object: delivery)
                 XCTAssertEqual(XCTWaiter.wait(for: [clearOfLane], timeout: 10), .completed,
-                               "Last delivery row overlaps the reserved cat/composer lane")
+                               "Last delivery row overlaps the composer lane")
                 let share = app.buttons["mirsa.chat.artifact.download"]
                 XCTAssertTrue(share.isHittable)
                 XCTAssertLessThanOrEqual(share.frame.maxY, input.frame.minY - 80)
