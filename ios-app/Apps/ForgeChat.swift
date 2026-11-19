@@ -693,11 +693,6 @@ struct ForgeChatThreadView: View {
     private var chatRim: Color { darkChat ? .white.opacity(0.12) : .black.opacity(0.06) }
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
-    @AppStorage("mirsa.chat.catEnabled") private var catEnabled = true
-    @State private var showChatSettings = false
-    @State private var catTouch = CGPoint(x: 0.78, y: 0)
-    @State private var catAwake = Date()
-    @State private var catCelebration = Date.distantPast
     @FocusState private var composerFocused: Bool
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
@@ -737,13 +732,6 @@ struct ForgeChatThreadView: View {
         let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
-    private var catThinking: Bool {
-        #if DEBUG
-        if ForgeChatStore.fixture && ProcessInfo.processInfo.arguments.contains("-MirsaCatThinkingFixture") { return true }
-        #endif
-        return unsent || !queued.isEmpty || msgs.last?.role == "user"
-    }
-    private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
     private var draftCount: Int { ForgeChatText.messageCount(text) }
     private var attachmentsUI: Bool { ChatAttachmentConfig.uiEnabled }
@@ -785,8 +773,6 @@ struct ForgeChatThreadView: View {
                 ForgeChatQuote(ref: ref, exists: messageText(ref.messageID) != nil || ref.messageID == id) { jumpTo = ref.messageID }
             }
             content()
-                .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { [id.uuidString: $0] }
-                .padding(.top, catEnabled ? 54 : 0)
                 .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
             if let e = reaction(id) {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
@@ -805,8 +791,6 @@ struct ForgeChatThreadView: View {
     private var messageTimeline: some View {
         LazyVStack(alignment: .leading, spacing: 22) {
             assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
-                .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["welcome": $0] }
-                .padding(.top, catEnabled ? 54 : 0)
             ForEach(rows) { row in
                 Group {
                     switch row {
@@ -830,8 +814,6 @@ struct ForgeChatThreadView: View {
                 HStack(spacing: 10) { MirsaBreathingOrbs(); Text(ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["thinking": $0] }
-                    .padding(.top, catEnabled ? 54 : 0)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
             }
             Color.clear.frame(height: 1).id("bottom")
@@ -844,36 +826,18 @@ struct ForgeChatThreadView: View {
     ScrollView {
         messageTimeline
     }
-    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { gesture in
-        guard catEnabled, !reduceMotion else { return }
-        catTouch = CGPoint(x: min(1, max(0, gesture.location.x / max(1, UIScreen.main.bounds.width))), y: min(1, abs(gesture.translation.height) / 180))
-        catAwake = Date()
-    }.onEnded { _ in catTouch.y = 0 })
-    .overlayPreferenceValue(MirsaCatPerches.self) { anchors in
-        GeometryReader { viewport in
-            if catEnabled {
-                MirsaCatPlayground(
-                    perches: anchors.mapValues { viewport[$0] },
-                    viewport: viewport.size,
-                    preferred: catThinking ? "thinking" : msgs.last?.id.uuidString,
-                    thinking: catThinking, touch: catTouch,
-                    awake: catAwake, celebration: catCelebration)
-            }
-        }
-        .clipped()
-    }
     // Preserve the measured bottom inset, but let messages remain visible
-    // beneath the transparent cat lane and the composer material.
+    // beneath the composer material.
     .scrollClipDisabled()
     .scrollDismissesKeyboard(.interactively)
     // Fade only the scrolling pixels, not the controls or the canvas. Applying
     // the mask before the insets puts its top at the conversation viewport.
-    // Messages (and the cat) cannot leak into the header/status safe area.
+    // Messages cannot leak into the header/status safe area.
     .mask(alignment: .top) { conversationTopFade }
     // Reserve room for the floating controls at rest, with no background band.
     .safeAreaInset(edge: .top, spacing: 0) { header }
     // Inset the actual scrolling viewport, not its flexible outer container.
-    // SwiftUI measures the complete lane (cat, multiline input, previews and errors).
+    // SwiftUI measures the complete lane (multiline input, previews and errors).
     .safeAreaInset(edge: .bottom, spacing: 0) { composerLane }
     // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
     .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -941,48 +905,8 @@ struct ForgeChatThreadView: View {
         .toolbar(.hidden, for: .navigationBar)
     }
 
-    private var conversationSettings: some View {
-        conversationAppearance
-        .sheet(isPresented: $showChatSettings) {
-            NavigationStack {
-                Form {
-                    Section {
-                        HStack {
-                            Text(MirsaCatText.title)
-                            Spacer()
-                            // Keep the native switch's hit target separate from the
-                            // full-width Form label (including in RTL layouts).
-                            Toggle(MirsaCatText.title, isOn: $catEnabled)
-                                .labelsHidden()
-                                .accessibilityIdentifier("chat-cat-toggle")
-                        }
-                    } footer: {
-                        Text(MirsaCatText.explanation)
-                    }
-                }
-                .navigationTitle(MirsaCatText.settings)
-                .toolbar { ToolbarItem(placement: .confirmationAction) {
-                    Button(ForgeChatText.close) { showChatSettings = false }.accessibilityIdentifier("chat-settings-close")
-                } }
-            }.presentationDetents([.medium, .large])
-        }
-    }
-
-    private var conversationCatEvents: some View {
-        conversationSettings
-        .onChange(of: text) { _, _ in catAwake = Date() }
-        .onChange(of: store.outgoing.count) { old, new in
-            if new > old { catAwake = Date(); catCelebration = Date() }
-        }
-        .onChange(of: msgs.last?.id) { _, _ in
-            catAwake = Date()
-            catTouch = CGPoint(x: msgs.last?.role == "user" ? 0.78 : 0.22, y: 0)
-            if let last = msgs.last, last.role != "user" { catCelebration = Date() }
-        }
-    }
-
     private var conversationReporting: some View {
-        conversationCatEvents
+        conversationAppearance
         .sheet(item: $reportTarget) { m in
             ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
                 .environment(\.layoutDirection, .leftToRight)
@@ -1046,8 +970,6 @@ struct ForgeChatThreadView: View {
             // Seed only the explicit no-network UI harness, never real drafts.
             if ForgeChatStore.fixture {
                 let args = ProcessInfo.processInfo.arguments
-                if args.contains("-MirsaCatSleepingFixture") { catAwake = Date().addingTimeInterval(-60) }
-                if args.contains("-MirsaCatHappyFixture") { catCelebration = Date() }
                 if args.contains("-MirsaChatDraft4000Fixture") { text = String(repeating: "ع", count: 4000) }
                 if args.contains("-MirsaChatDraft4001Fixture") { text = String(repeating: "ع", count: 4001) }
             }
@@ -1214,11 +1136,6 @@ struct ForgeChatThreadView: View {
             if !shortID.isEmpty { shortIDCapsule }
             blackBackgroundToggle
             Spacer(minLength: 0)
-            Button { showChatSettings = true } label: {
-                Image(systemName: "gearshape").foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
-            }
-            .accessibilityLabel(MirsaCatText.settings).accessibilityIdentifier("chat-settings")
         }
         .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
@@ -1234,11 +1151,6 @@ struct ForgeChatThreadView: View {
             }
             Spacer(minLength: 0)
             blackBackgroundToggle
-            Button { showChatSettings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 16))
-                    .foregroundStyle(chatInk).frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-            }.accessibilityLabel(MirsaCatText.settings).accessibilityIdentifier("chat-settings")
 
         }
         .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
@@ -1592,187 +1504,6 @@ enum MirsaChatBackground {
     }
 }
 
-
-// MARK: - Original hand-drawn roof-hopping chat companion
-private enum MirsaCatText {
-    static var settings: String { tr5("Chat settings", "إعدادات المحادثة", de: "Chat-Einstellungen", ckb: "ڕێکخستنەکانی گفتوگۆ", kmr: "Mîhengên sohbetê") }
-    static var title: String { tr5("Little cat companion", "رفيقك القط الصغير", de: "Kleiner Katzenbegleiter", ckb: "پشیلە بچووکە هاوڕێکە", kmr: "Hevalê pisîkê biçûk") }
-    static var explanation: String {
-        tr5("A playful cat hops along the empty tops of message cards, watches Mirsa think and naps after a quiet moment. Tap it for a heart. Turn it off here; Reduce Motion keeps it gently still.",
-            "قط صغير بينط فوق الرسائل وبيمشي عحوافها، بيراقب مرسى وهو عم يفكّر وبينام بعد الهدوء. اكبس عليه ليفرح ويطلع قلب. فيك تطفّيه هون، ومع تقليل الحركة بيضل هادي.",
-            de: "Eine verspielte Katze hüpft auf die freien Oberkanten der Nachrichten, beobachtet Mirsa und schläft bei Ruhe. Antippen zeigt ein Herz. Hier ausschaltbar; bei reduzierter Bewegung bleibt sie still.",
-            ckb: "پشیلەیەکی بچووک شوێن جووڵەی گفتوگۆکەت دەکەوێت، کاتێک میرسا بیر دەکاتەوە چاوەڕێ دەکات، بە وەڵام دڵخۆش دەبێت و لە پشوودا دەخەوێت. نامە و دوگمەکان داناپۆشێت. بە کەمکردنەوەی جووڵە جێگیر دەمێنێت.",
-            kmr: "Pisîkeke biçûk li pey tevgera sohbetê diçe, dema Mirsa difikire li bendê dimîne, bi bersivan şa dibe û di bêdengiyê de radizê. Peyam û bişkokan nagire. Bi Kêmkirina Tevgerê re bêliv dimîne.")
-    }
-}
-
-/// Bubble anchors are measured after layout, including scroll/keyboard/RTL changes.
-/// Each card reserves a 54pt empty roof. The cat's feet sit on its top edge.
-private struct MirsaCatPerches: PreferenceKey {
-    static var defaultValue: [String: Anchor<CGRect>] = [:]
-    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-private struct MirsaCatPlayground: View {
-    let perches: [String: CGRect]
-    let viewport: CGSize
-    let preferred: String?
-    let thinking: Bool
-    let touch: CGPoint
-    let awake: Date
-    let celebration: Date
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.layoutDirection) private var direction
-    @State private var tapped = Date.distantPast
-
-    private var roofs: [(key: String, value: CGRect)] {
-        perches.filter { _, r in
-            r.width >= 70 && r.minY >= 54 && r.minY < viewport.height - 16
-        }.sorted { $0.value.minY < $1.value.minY }
-    }
-
-    private func spot(_ roof: CGRect, walk: Double) -> CGPoint {
-        // Only the empty roof, never text, report buttons or attachment actions.
-        let left = max(36, roof.minX + 34)
-        let right = max(left, min(viewport.width - 36, roof.maxX - 34))
-        let progress = direction == .rightToLeft ? 1 - walk : walk
-        return CGPoint(x: left + (right - left) * progress, y: roof.minY - 24)
-    }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: scenePhase != .active || reduceMotion)) { clock in
-            let elapsed = max(0, clock.date.timeIntervalSince(max(awake, tapped)))
-            let t = reduceMotion ? 0 : (!thinking && elapsed > 45 ? 45 : elapsed)
-            let cycle = Int(t / 4)
-            let beat = t.truncatingRemainder(dividingBy: 4)
-            let sleeping = !thinking && elapsed > 45
-            let happyAge = clock.date.timeIntervalSince(max(tapped, celebration))
-            let happy = happyAge >= 0 && happyAge < 1.4
-            let available = roofs
-            let favored = available.firstIndex { $0.key == preferred }
-            let currentIndex = available.isEmpty ? 0 : (thinking || happy ? (favored ?? available.count - 1) : cycle % available.count)
-            let previousIndex = available.isEmpty ? 0 : (currentIndex + available.count - 1) % available.count
-            let walk = sleeping || reduceMotion ? 0.5 : 0.5 + sin(t * 1.3) * 0.28
-            let destination = available.isEmpty ? CGPoint(x: viewport.width * 0.75, y: 30) : spot(available[currentIndex].value, walk: walk)
-            let origin = available.isEmpty ? destination : spot(available[previousIndex].value, walk: 0.5)
-            let flight = !reduceMotion && !sleeping && !thinking && !happy && available.count > 1 && beat < 0.7
-            let progress = min(1, beat / 0.7)
-            let ease = progress * progress * (3 - 2 * progress)
-            let hop = flight ? sin(progress * .pi) * 42 : (happy && !reduceMotion ? abs(sin(happyAge * .pi * 2)) * 28 : 0)
-            let x = flight ? origin.x + (destination.x - origin.x) * ease : destination.x
-            let y = flight ? origin.y + (destination.y - origin.y) * ease - hop : destination.y - hop
-            let trick = !sleeping && !thinking && !happy && !flight && !reduceMotion
-            let stretch = trick && cycle % 4 == 1 ? sin(beat / 4 * .pi) * 0.18 : 0
-            let roll = trick && cycle % 4 == 2 && beat < 1.2 ? 360 * (beat / 1.2) : 0
-            let squash = flight ? sin(progress * .pi) * 0.13 : (happy && !reduceMotion ? -cos(happyAge * .pi * 4) * 0.10 : 0)
-
-            ZStack {
-                // Decoration is never a hit target. Only the cat's small roof button is.
-                if trick && cycle % 4 == 3 {
-                    Circle().fill(Color.orange.opacity(0.75)).frame(width: 5, height: 5)
-                        .position(x: x + sin(t * 3) * 28, y: destination.y + 16)
-                        .allowsHitTesting(false)
-                }
-                Button { tapped = Date() } label: {
-                    MirsaCatDrawing(phase: reduceMotion ? 0 : t, sleeping: sleeping,
-                                    thinking: thinking, happy: happy, look: thinking ? -1 : Double(touch.x - 0.5) * 2)
-                        .frame(width: 66, height: 48)
-                        .scaleEffect(x: 1 + stretch - squash, y: 1 - stretch + squash, anchor: .bottom)
-                        .scaleEffect(roll > 0 ? 0.72 : 1)
-                        .rotationEffect(.degrees(roll))
-                        .contentShape(Ellipse())
-                }
-                .buttonStyle(.plain)
-                .frame(width: 66, height: 48)
-                .position(x: x, y: max(24, y))
-                .allowsHitTesting(!flight && hop < 2)
-                .accessibilityLabel(MirsaCatText.title)
-                .accessibilityIdentifier("chat-playful-cat")
-                if happy {
-                    Image(systemName: "heart.fill").font(.system(size: 13))
-                        .foregroundStyle(.pink)
-                        .opacity(reduceMotion ? 1 : max(0, 1 - happyAge / 1.4))
-                        .position(x: x + 18, y: max(10, y - 30 - (reduceMotion ? 0 : happyAge * 14)))
-                        .allowsHitTesting(false)
-                }
-            }
-        }
-    }
-}
-
-/// Cream and apricot, tiny ink eyes and a curled tail. No assets or external runtime.
-private struct MirsaCatDrawing: View {
-    let phase: Double
-    let sleeping: Bool
-    let thinking: Bool
-    let happy: Bool
-    let look: Double
-    private let fur = Color(red: 1, green: 0.85, blue: 0.64)
-    private let ink = Color(red: 0.20, green: 0.16, blue: 0.17)
-
-    var body: some View {
-        Canvas { context, _ in
-            func ellipse(_ rect: CGRect, _ color: Color) {
-                context.fill(Path(ellipseIn: rect), with: .color(color))
-            }
-            func line(_ points: [CGPoint], _ color: Color, _ width: CGFloat = 1.4) {
-                guard let first = points.first else { return }
-                var path = Path(); path.move(to: first)
-                for point in points.dropFirst() { path.addLine(to: point) }
-                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
-            }
-            ellipse(CGRect(x: 9, y: 43, width: 48, height: 4), .black.opacity(0.16))
-            var tail = Path()
-            tail.move(to: CGPoint(x: 47, y: 37))
-            tail.addCurve(to: CGPoint(x: 58, y: 22 + sin(phase * 2) * 2),
-                          control1: CGPoint(x: 68, y: 40), control2: CGPoint(x: 60, y: 12))
-            context.stroke(tail, with: .color(fur.opacity(0.9)), style: StrokeStyle(lineWidth: 6, lineCap: .round))
-            ellipse(CGRect(x: 18, y: 23, width: 33, height: 22), fur)
-            ellipse(CGRect(x: 26, y: 29, width: 18, height: 15), .white.opacity(0.35))
-            var ears = Path()
-            ears.move(to: CGPoint(x: 14, y: 19)); ears.addLine(to: CGPoint(x: 13, y: 3))
-            ears.addQuadCurve(to: CGPoint(x: 28, y: 13), control: CGPoint(x: 18, y: 1)); ears.closeSubpath()
-            ears.move(to: CGPoint(x: 35, y: 12)); ears.addLine(to: CGPoint(x: 49, y: 3))
-            ears.addQuadCurve(to: CGPoint(x: 48, y: 23), control: CGPoint(x: 52, y: 4)); ears.closeSubpath()
-            context.fill(ears, with: .color(fur))
-            line([CGPoint(x: 17, y: 9), CGPoint(x: 18, y: 16), CGPoint(x: 23, y: 14)], .pink.opacity(0.5), 3)
-            line([CGPoint(x: 41, y: 14), CGPoint(x: 47, y: 9), CGPoint(x: 46, y: 17)], .pink.opacity(0.5), 3)
-            ellipse(CGRect(x: 12, y: 11, width: 39, height: 27), fur)
-            ellipse(CGRect(x: 17, y: 27, width: 7, height: 3), .pink.opacity(0.32))
-            ellipse(CGRect(x: 39, y: 27, width: 7, height: 3), .pink.opacity(0.32))
-            let blink = phase > 0 && phase.truncatingRemainder(dividingBy: 5.3) < 0.15
-            for x in [23.0, 39.0] {
-                if sleeping || happy || blink {
-                    line([CGPoint(x: x-3, y: 23), CGPoint(x: x, y: happy ? 21 : 25), CGPoint(x: x+3, y: 23)], ink)
-                } else {
-                    ellipse(CGRect(x: x-2 + look, y: thinking ? 20 : 21, width: 4, height: 6), ink)
-                    ellipse(CGRect(x: x-0.7 + look, y: thinking ? 20.5 : 21.5, width: 1.2, height: 1.5), .white)
-                }
-            }
-            ellipse(CGRect(x: 29.5, y: 26, width: 3.5, height: 2.5), Color(red: 0.77, green: 0.41, blue: 0.42))
-            line([CGPoint(x: 31, y: 29), CGPoint(x: 28, y: 31), CGPoint(x: 26, y: 30)], ink, 1)
-            line([CGPoint(x: 31, y: 29), CGPoint(x: 34, y: 31), CGPoint(x: 36, y: 30)], ink, 1)
-            let paw = sleeping ? 0 : sin(phase * (thinking ? 7 : 9)) * (thinking ? 3.5 : 1.4)
-            ellipse(CGRect(x: 20, y: 39 + paw, width: 10, height: 6), fur)
-            ellipse(CGRect(x: 37, y: 39 - paw, width: 10, height: 6), fur)
-            // A sleepy curl or three tiny thinking motes, never status text.
-            if sleeping {
-                var curl = Path()
-                curl.move(to: CGPoint(x: 53, y: 12)); curl.addLine(to: CGPoint(x: 59, y: 12))
-                curl.addLine(to: CGPoint(x: 53, y: 17)); curl.addLine(to: CGPoint(x: 59, y: 17))
-                context.stroke(curl, with: .color(fur.opacity(0.6)), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-            } else if thinking {
-                for i in 0..<3 {
-                    let alpha = 0.35 + (sin(phase * 4 - Double(i)) + 1) * 0.3
-                    ellipse(CGRect(x: 54 + Double(i) * 4, y: 9 - Double(i) * 3, width: 2.5, height: 2.5), fur.opacity(alpha))
-                }
-            }
-        }
-    }
-}
 
 /// Window-scene traits retain the iPhone's appearance even when an ancestor
 /// applies a SwiftUI color-scheme override. The callback is deferred out of layout.
