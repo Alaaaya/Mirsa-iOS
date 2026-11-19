@@ -28,6 +28,45 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         return app
     }
 
+
+    func testCatCompanionStatesAndSettings() {
+        for language in ["ar", "en"] {
+            for (state, name) in [("", "idle"), ("-MirsaCatThinkingFixture", "thinking"),
+                                   ("-MirsaCatSleepingFixture", "sleeping"), ("-MirsaCatHappyFixture", "happy")] {
+                let app = openEmptyChat(state, language: language)
+                assertComposer(app, name: "cat_\(language)_\(name)")
+                // Scroll still belongs to the conversation, never to the decoration.
+                app.swipeUp()
+                assertComposer(app, name: "cat_\(language)_\(name)_scroll")
+                app.terminate()
+            }
+        }
+        for language in ["ar", "en", "de", "kmr", "ckb"] {
+            let app = openEmptyChat(language: language)
+            app.buttons["chat-settings"].tap()
+            let toggle = app.switches["chat-cat-toggle"]
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            XCTAssertTrue(toggle.isHittable)
+            if toggle.value as? String == "0" { toggle.tap() }
+            XCTAssertEqual(toggle.value as? String, "1")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "cat_settings_\(language)"; shot.lifetime = .keepAlways; add(shot)
+            toggle.tap()
+            XCTAssertEqual(toggle.value as? String, "0")
+            app.buttons["chat-settings-close"].tap()
+            assertComposer(app, name: "cat_\(language)_disabled")
+            // Setting persists while the chat and app are reopened.
+            app.terminate()
+            let reopened = openEmptyChat(language: language)
+            reopened.buttons["chat-settings"].tap()
+            let persisted = reopened.switches["chat-cat-toggle"]
+            XCTAssertTrue(persisted.waitForExistence(timeout: 5))
+            XCTAssertEqual(persisted.value as? String, "0")
+            persisted.tap()
+            reopened.terminate()
+        }
+    }
+
     private func waitForLandscape(_ app: XCUIApplication) -> Bool {
         let predicate = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: app)], timeout: 10) == .completed

@@ -649,6 +649,11 @@ struct ForgeChatThreadView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
+    @AppStorage("mirsa.chat.catEnabled") private var catEnabled = true
+    @State private var showChatSettings = false
+    @State private var catTouch = CGPoint(x: 0.78, y: 0)
+    @State private var catAwake = Date()
+    @State private var catCelebration = Date.distantPast
     @FocusState private var composerFocused: Bool
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
@@ -689,6 +694,12 @@ struct ForgeChatThreadView: View {
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
     @AppStorage(MirsaChatBackground.key) private var blackChatBackground = false
+    private var catThinking: Bool {
+        #if DEBUG
+        if ForgeChatStore.fixture && ProcessInfo.processInfo.arguments.contains("-MirsaCatThinkingFixture") { return true }
+        #endif
+        return unsent || !queued.isEmpty || msgs.last?.role == "user"
+    }
     private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
     private var draftCount: Int { ForgeChatText.messageCount(text) }
@@ -779,6 +790,11 @@ struct ForgeChatThreadView: View {
                     .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
                 }
+                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { gesture in
+                    guard catEnabled, !reduceMotion else { return }
+                    catTouch = CGPoint(x: min(1, max(0, gesture.location.x / max(1, UIScreen.main.bounds.width))), y: min(1, abs(gesture.translation.height) / 180))
+                    catAwake = Date()
+                }.onEnded { _ in catTouch.y = 0 })
                 .scrollDismissesKeyboard(.interactively)
                 // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
                 .safeAreaInset(edge: .top, spacing: 0) { header }
@@ -829,6 +845,12 @@ struct ForgeChatThreadView: View {
                     HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
                         Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(MirsaChatTheme.muted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
                 }
+                if catEnabled {
+                    MirsaChatCat(thinking: catThinking, touch: catTouch, awake: catAwake, celebration: catCelebration)
+                        .frame(height: 52)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 inputBar
                 if let e = actionError ?? store.error {
                     Text(e).font(.caption).foregroundStyle(.red)
@@ -843,6 +865,27 @@ struct ForgeChatThreadView: View {
         }
         .background { if blackChatBackground { Color.black.ignoresSafeArea() } else { AuroraBackground().ignoresSafeArea() } }
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showChatSettings) {
+            NavigationStack {
+                Form {
+                    Section {
+                        Toggle(MirsaCatText.title, isOn: $catEnabled).accessibilityIdentifier("chat-cat-toggle")
+                    } footer: {
+                        Text(MirsaCatText.explanation)
+                    }
+                }
+                .navigationTitle(MirsaCatText.settings)
+                .toolbar { ToolbarItem(placement: .confirmationAction) {
+                    Button(ForgeChatText.close) { showChatSettings = false }.accessibilityIdentifier("chat-settings-close")
+                } }
+            }.presentationDetents([.medium, .large])
+        }
+        .onChange(of: text) { _, _ in catAwake = Date() }
+        .onChange(of: msgs.last?.id) { _, _ in
+            catAwake = Date()
+            catTouch = CGPoint(x: msgs.last?.role == "user" ? 0.78 : 0.22, y: 0)
+            if let last = msgs.last, last.role != "user" { catCelebration = Date() }
+        }
         .sheet(item: $reportTarget) { m in
             ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
                 .environment(\.layoutDirection, .leftToRight)
@@ -894,6 +937,8 @@ struct ForgeChatThreadView: View {
             // Seed only the explicit no-network UI harness, never real drafts.
             if ForgeChatStore.fixture {
                 let args = ProcessInfo.processInfo.arguments
+                if args.contains("-MirsaCatSleepingFixture") { catAwake = Date().addingTimeInterval(-60) }
+                if args.contains("-MirsaCatHappyFixture") { catCelebration = Date().addingTimeInterval(4) }
                 if args.contains("-MirsaChatDraft4000Fixture") { text = String(repeating: "ع", count: 4000) }
                 if args.contains("-MirsaChatDraft4001Fixture") { text = String(repeating: "ع", count: 4001) }
             }
@@ -1008,6 +1053,12 @@ struct ForgeChatThreadView: View {
             if !shortID.isEmpty { shortIDCapsule }
             blackBackgroundToggle
             Spacer()
+            Button { showChatSettings = true } label: {
+                Image(systemName: "gearshape").font(.system(size: 16))
+                    .foregroundStyle(.white.opacity(0.9)).frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+            }.accessibilityLabel(MirsaCatText.settings).accessibilityIdentifier("chat-settings")
+
         }
         .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
         .zIndex(1)
@@ -1259,6 +1310,129 @@ enum MirsaChatBackground {
         case .arabic: return on ? "استخدم الخلفية المتدرجة" : "استخدم الخلفية السوداء"
         case .kurmanji: return on ? "Paşxaneya gradient bikar bîne" : "Paşxaneya reş bikar bîne"
         case .sorani: return on ? "پاشبنەمای گرادیەنت بەکاربهێنە" : "پاشبنەمای ڕەش بەکاربهێنە"
+        }
+    }
+}
+
+
+// MARK: - A quiet, hand-drawn chat companion
+// All motion stays in a reserved 52pt lane, never over a message, attachment or input.
+// The parent observes touches simultaneously, leaving scroll/reply/tap gestures intact.
+private enum MirsaCatText {
+    static var settings: String { tr5("Chat settings", "إعدادات المحادثة", de: "Chat-Einstellungen", ckb: "ڕێکخستنەکانی گفتوگۆ", kmr: "Mîhengên sohbetê") }
+    static var title: String { tr5("Little cat companion", "رفيقك القط الصغير", de: "Kleiner Katzenbegleiter", ckb: "پشیلە بچووکە هاوڕێکە", kmr: "Hevalê pisîkê biçûk") }
+    static var explanation: String {
+        tr5("A little cat follows your scrolling, watches while Mirsa thinks, celebrates replies and naps when you pause. It never covers your messages or buttons. Reduce Motion keeps it still.",
+            "قط صغير بيلحق حركتك بالمحادثة، بينتظر معك لما مرسى يفكّر، بيفرح بالرد وبينام لما ترتاح. ما بيغطّي الرسائل أو الأزرار. مع تقليل الحركة بيضل ثابت.",
+            de: "Eine kleine Katze folgt deinem Scrollen, wartet mit dir auf Mirsa, freut sich über Antworten und schläft bei Pausen. Nachrichten und Tasten bleiben frei. Bei reduzierter Bewegung bleibt sie still.",
+            ckb: "پشیلەیەکی بچووک شوێن جووڵەی گفتوگۆکەت دەکەوێت، کاتێک میرسا بیر دەکاتەوە چاوەڕێ دەکات، بە وەڵام دڵخۆش دەبێت و لە پشوودا دەخەوێت. نامە و دوگمەکان داناپۆشێت. بە کەمکردنەوەی جووڵە جێگیر دەمێنێت.",
+            kmr: "Pisîkeke biçûk li pey tevgera sohbetê diçe, dema Mirsa difikire li bendê dimîne, bi bersivan şa dibe û di bêdengiyê de radizê. Peyam û bişkokan nagire. Bi Kêmkirina Tevgerê re bêliv dimîne.")
+    }
+}
+
+private struct MirsaChatCat: View {
+    let thinking: Bool
+    let touch: CGPoint
+    let awake: Date
+    let celebration: Date
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.layoutDirection) private var direction
+    @State private var position: CGFloat = 0.78
+
+    var body: some View {
+        GeometryReader { geometry in
+            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || scenePhase != .active)) { timeline in
+                let now = timeline.date.timeIntervalSinceReferenceDate
+                let sleeping = !thinking && timeline.date.timeIntervalSince(awake) > 25
+                let happyAge = timeline.date.timeIntervalSince(celebration)
+                let happy = happyAge >= 0 && happyAge < 1.1
+                let phase = reduceMotion ? 0 : now
+                let bounce = !reduceMotion && happy ? -abs(sin(happyAge * .pi * 3)) * 9 : 0
+                let breath = reduceMotion ? 0 : sin(phase * (sleeping ? 1.7 : 2.5)) * 0.7
+                MirsaCatDrawing(phase: phase, sleeping: sleeping, thinking: thinking, happy: happy,
+                                look: reduceMotion ? 0 : Double(touch.x - 0.5) * 2)
+                    .frame(width: 66, height: 48)
+                    .scaleEffect(x: 1, y: 1 + breath * 0.012, anchor: .bottom)
+                    .offset(y: bounce - (reduceMotion ? 0 : touch.y * 3))
+                    .position(x: 40 + max(0, geometry.size.width - 80) * (reduceMotion ? 0.78 : position), y: 28)
+            }
+            .onChange(of: touch) { _, next in
+                withAnimation(reduceMotion ? nil : .spring(response: 0.7, dampingFraction: 0.82)) {
+                    position = direction == .rightToLeft ? 1 - next.x : next.x
+                }
+            }
+        }
+    }
+}
+
+/// Cream and apricot, tiny ink eyes and a curled tail. No assets or external runtime.
+private struct MirsaCatDrawing: View {
+    let phase: Double
+    let sleeping: Bool
+    let thinking: Bool
+    let happy: Bool
+    let look: Double
+    private let fur = Color(red: 1, green: 0.85, blue: 0.64)
+    private let ink = Color(red: 0.20, green: 0.16, blue: 0.17)
+
+    var body: some View {
+        Canvas { context, _ in
+            func ellipse(_ rect: CGRect, _ color: Color) {
+                context.fill(Path(ellipseIn: rect), with: .color(color))
+            }
+            func line(_ points: [CGPoint], _ color: Color, _ width: CGFloat = 1.4) {
+                guard let first = points.first else { return }
+                var path = Path(); path.move(to: first)
+                for point in points.dropFirst() { path.addLine(to: point) }
+                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+            }
+            ellipse(CGRect(x: 9, y: 43, width: 48, height: 4), .black.opacity(0.16))
+            var tail = Path()
+            tail.move(to: CGPoint(x: 47, y: 37))
+            tail.addCurve(to: CGPoint(x: 58, y: 22 + sin(phase * 2) * 2),
+                          control1: CGPoint(x: 68, y: 40), control2: CGPoint(x: 60, y: 12))
+            context.stroke(tail, with: .color(fur.opacity(0.9)), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+            ellipse(CGRect(x: 18, y: 23, width: 33, height: 22), fur)
+            ellipse(CGRect(x: 26, y: 29, width: 18, height: 15), .white.opacity(0.35))
+            var ears = Path()
+            ears.move(to: CGPoint(x: 14, y: 19)); ears.addLine(to: CGPoint(x: 13, y: 3))
+            ears.addQuadCurve(to: CGPoint(x: 28, y: 13), control: CGPoint(x: 18, y: 1)); ears.closeSubpath()
+            ears.move(to: CGPoint(x: 35, y: 12)); ears.addLine(to: CGPoint(x: 49, y: 3))
+            ears.addQuadCurve(to: CGPoint(x: 48, y: 23), control: CGPoint(x: 52, y: 4)); ears.closeSubpath()
+            context.fill(ears, with: .color(fur))
+            line([CGPoint(x: 17, y: 9), CGPoint(x: 18, y: 16), CGPoint(x: 23, y: 14)], .pink.opacity(0.5), 3)
+            line([CGPoint(x: 41, y: 14), CGPoint(x: 47, y: 9), CGPoint(x: 46, y: 17)], .pink.opacity(0.5), 3)
+            ellipse(CGRect(x: 12, y: 11, width: 39, height: 27), fur)
+            ellipse(CGRect(x: 17, y: 27, width: 7, height: 3), .pink.opacity(0.32))
+            ellipse(CGRect(x: 39, y: 27, width: 7, height: 3), .pink.opacity(0.32))
+            let blink = phase > 0 && phase.truncatingRemainder(dividingBy: 5.3) < 0.15
+            for x in [23.0, 39.0] {
+                if sleeping || happy || blink {
+                    line([CGPoint(x: x-3, y: 23), CGPoint(x: x, y: happy ? 21 : 25), CGPoint(x: x+3, y: 23)], ink)
+                } else {
+                    ellipse(CGRect(x: x-2 + look, y: thinking ? 20 : 21, width: 4, height: 6), ink)
+                    ellipse(CGRect(x: x-0.7 + look, y: thinking ? 20.5 : 21.5, width: 1.2, height: 1.5), .white)
+                }
+            }
+            ellipse(CGRect(x: 29.5, y: 26, width: 3.5, height: 2.5), Color(red: 0.77, green: 0.41, blue: 0.42))
+            line([CGPoint(x: 31, y: 29), CGPoint(x: 28, y: 31), CGPoint(x: 26, y: 30)], ink, 1)
+            line([CGPoint(x: 31, y: 29), CGPoint(x: 34, y: 31), CGPoint(x: 36, y: 30)], ink, 1)
+            let paw = thinking ? sin(phase * 7) * 1.5 : 0
+            ellipse(CGRect(x: 20, y: 39 + paw, width: 10, height: 6), fur)
+            ellipse(CGRect(x: 37, y: 39 - paw, width: 10, height: 6), fur)
+            // A sleepy curl or three tiny thinking motes, never status text.
+            if sleeping {
+                var curl = Path()
+                curl.move(to: CGPoint(x: 53, y: 12)); curl.addLine(to: CGPoint(x: 59, y: 12))
+                curl.addLine(to: CGPoint(x: 53, y: 17)); curl.addLine(to: CGPoint(x: 59, y: 17))
+                context.stroke(curl, with: .color(fur.opacity(0.6)), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            } else if thinking {
+                for i in 0..<3 {
+                    let alpha = 0.35 + (sin(phase * 4 - Double(i)) + 1) * 0.3
+                    ellipse(CGRect(x: 54 + Double(i) * 4, y: 9 - Double(i) * 3, width: 2.5, height: 2.5), fur.opacity(alpha))
+                }
+            }
         }
     }
 }
