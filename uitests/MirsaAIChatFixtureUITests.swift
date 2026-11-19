@@ -134,13 +134,24 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             for light in [false, true] {
                 let app = XCUIApplication()
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
-                                       "-MirsaTendiesArtifactFixture", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-MirsaTweakDeliveryFixture", "-mirsa.chat.catEnabled", "YES", "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
                 app.launchArguments += ["-mirsa.chat.appearance", light ? "light" : "dark"]
                 app.launch()
-                let delivery = app.buttons["mirsa.chat.artifact.add-wallpaper"]
+                let delivery = app.buttons["mirsa.chat.artifact.inject"]
                 XCTAssertTrue(delivery.waitForExistence(timeout: 20))
-                XCTAssertTrue(delivery.isHittable)
+                let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+                XCTAssertTrue(input.waitForExistence(timeout: 10))
+                // Scroll only the conversation, leaving the composer untouched.
+                app.scrollViews.firstMatch.swipeUp()
+                let clearOfLane = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    delivery.isHittable && delivery.frame.maxY <= input.frame.minY - 80
+                }, object: delivery)
+                XCTAssertEqual(XCTWaiter.wait(for: [clearOfLane], timeout: 10), .completed,
+                               "Last delivery row overlaps the reserved cat/composer lane")
+                let share = app.buttons["mirsa.chat.artifact.download"]
+                XCTAssertTrue(share.isHittable)
+                XCTAssertLessThanOrEqual(share.frame.maxY, input.frame.minY - 80)
                 XCTAssertFalse(app.staticTexts["chat-waiting"].exists, "A completed delivery must not pretend to think")
                 assertComposer(app, liquid: false, name: "islet_delivery_\(language)_\(light ? "light" : "dark")")
                 app.terminate()

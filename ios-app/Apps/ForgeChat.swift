@@ -171,6 +171,15 @@ enum ForgeChatImage {
                 messages[t] = [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: nil, result: result)]
             }
             #endif
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaTweakDeliveryFixture") {
+                let artifact = ForgeChatArtifact(id: UUID(), kind: "dylib", name: "Dock-Labels.dylib",
+                    size: 10240, sha256: nil, expiresAt: nil)
+                let result = ForgeChatResult(inboxID: nil, tweakID: nil, bundleID: nil, name: nil, version: nil, artifact: artifact)
+                let text = Array(repeating: "Your tweak is ready. Open Mirsa, choose your app, inject the tweak and install. Remove older versions of this tweak first.", count: 5).joined(separator: "\n\n")
+                messages[t] = (messages[t] ?? []) + [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: text, result: result)]
+            }
+            #endif
             ackedThreads.insert(t)
             return
         }
@@ -679,8 +688,8 @@ struct ForgeChatThreadView: View {
     private var chatInk: Color { darkChat ? Color(white: 0.95) : Color(white: 0.10) }
     private var chatMuted: Color { darkChat ? Color(white: 0.65) : Color(white: 0.43) }
     private var chatCanvas: Color { darkChat ? Color(white: 0.055) : Color(red: 0.973, green: 0.973, blue: 0.969) }
-    private var chatCard: Color { darkChat ? Color(white: 0.105) : .white }
-    private var chatRim: Color { darkChat ? .white.opacity(0.09) : .black.opacity(0.06) }
+    private var chatCard: Color { darkChat ? Color(red: 0.12, green: 0.125, blue: 0.135) : .white }
+    private var chatRim: Color { darkChat ? .white.opacity(0.12) : .black.opacity(0.06) }
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
     @AppStorage("mirsa.chat.catEnabled") private var catEnabled = true
@@ -833,6 +842,9 @@ struct ForgeChatThreadView: View {
                 .scrollDismissesKeyboard(.interactively)
                 // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
                 .safeAreaInset(edge: .top, spacing: 0) { header }
+                // Inset the actual scrolling viewport, not its flexible outer container.
+                // SwiftUI measures the complete lane (cat, multiline input, previews and errors).
+                .safeAreaInset(edge: .bottom, spacing: 0) { composerLane }
                 // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
@@ -856,48 +868,6 @@ struct ForgeChatThreadView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Reserve the composer before the scroll view is laid out. A flexible sibling
-        // can be placed below the visible nested NavigationStack/tab safe area.
-        // This also tracks the keyboard's safe area without fixed device heights.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                if !reactionsTipDismissed {
-                    ForgeChatReactionsTip { withAnimation(.easeOut(duration: 0.18)) { reactionsTipDismissed = true } }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                if let editingID {
-                    ForgeChatComposerContext(title: ForgeChatExtrasText.editing, line: ForgeChatLocal.snippet(messageText(editingID)), icon: "pencil") {
-                        withAnimation(.easeOut(duration: 0.18)) { self.editingID = nil; text = "" }
-                    }.transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if let replyTo {
-                    ForgeChatComposerContext(title: replyTo.fromUser ? ForgeChatExtrasText.replyToYou : ForgeChatExtrasText.replyToMirsa,
-                                             line: replyTo.snippet, icon: "arrowshape.turn.up.left") {
-                        withAnimation(.easeOut(duration: 0.18)) { self.replyTo = nil }
-                    }.transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                if attachmentsUI && editingID == nil { attachmentTray }
-                if let jpeg, let img = UIImage(data: jpeg) {
-                    HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
-                        Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(chatMuted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
-                }
-                if catEnabled {
-                    MirsaChatCat(thinking: catThinking, touch: catTouch, awake: catAwake, celebration: catCelebration)
-                        .frame(height: 52)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-                inputBar
-                if let e = actionError ?? store.error {
-                    Text(e).font(.caption).foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 18).padding(.bottom, 6)
-                        .accessibilityIdentifier("chat-composer-status")
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            // Keep the floating composer separate from message cards without covering the last row.
-            .background(chatCanvas.opacity(0.96).ignoresSafeArea(edges: .bottom))
-        }
         .background(chatCanvas.ignoresSafeArea())
         .background(ForgeChatSystemAppearanceReader { dark in
             if systemDark != dark { systemDark = dark }
@@ -1027,6 +997,49 @@ struct ForgeChatThreadView: View {
         .accessibilityLabel(ChatAttachmentText.attach)
         .accessibilityIdentifier("chat-attach")
     }
+
+    private var composerLane: some View {
+        VStack(spacing: 0) {
+            if !reactionsTipDismissed {
+                ForgeChatReactionsTip { withAnimation(.easeOut(duration: 0.18)) { reactionsTipDismissed = true } }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let editingID {
+                ForgeChatComposerContext(title: ForgeChatExtrasText.editing, line: ForgeChatLocal.snippet(messageText(editingID)), icon: "pencil") {
+                    withAnimation(.easeOut(duration: 0.18)) { self.editingID = nil; text = "" }
+                }.transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let replyTo {
+                ForgeChatComposerContext(title: replyTo.fromUser ? ForgeChatExtrasText.replyToYou : ForgeChatExtrasText.replyToMirsa,
+                                         line: replyTo.snippet, icon: "arrowshape.turn.up.left") {
+                    withAnimation(.easeOut(duration: 0.18)) { self.replyTo = nil }
+                }.transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if attachmentsUI && editingID == nil { attachmentTray }
+            if let jpeg, let img = UIImage(data: jpeg) {
+                HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
+                    Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(chatMuted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
+            }
+            if catEnabled {
+                MirsaChatCat(thinking: catThinking, touch: catTouch, awake: catAwake, celebration: catCelebration)
+                    .frame(height: 68)
+                    .clipped()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            inputBar
+            if let e = actionError ?? store.error {
+                Text(e).font(.caption).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18).padding(.bottom, 6)
+                    .accessibilityIdentifier("chat-composer-status")
+            }
+        }
+        .padding(.top, 12)
+        .fixedSize(horizontal: false, vertical: true)
+        // Keep the floating composer separate from message cards without covering the last row.
+        .background(chatCanvas.opacity(0.96).ignoresSafeArea(edges: .bottom))
+    }
+
 
     /// Chips above the composer, removable, with a short explanation of the feature.
     @ViewBuilder private var attachmentTray: some View {
@@ -1417,7 +1430,7 @@ private struct MirsaChatCat: View {
                     .frame(width: 66, height: 48)
                     .scaleEffect(x: 1, y: 1 + breath * 0.012, anchor: .bottom)
                     .offset(y: bounce - (reduceMotion ? 0 : touch.y * 3))
-                    .position(x: 40 + max(0, geometry.size.width - 80) * (reduceMotion ? 0.78 : position), y: 28)
+                    .position(x: 40 + max(0, geometry.size.width - 80) * (reduceMotion ? 0.78 : position), y: 40)
             }
             .onChange(of: touch) { _, next in
                 withAnimation(reduceMotion ? nil : .spring(response: 0.7, dampingFraction: 0.82)) {
