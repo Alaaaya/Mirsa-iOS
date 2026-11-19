@@ -26,16 +26,19 @@ enum BundlePath {
             if (try? fm.destinationOfSymbolicLink(atPath: url.path)) != nil { throw BundleFileError.symlinkNotAllowed(path) }
         }
         if mustExist && (try? fm.attributesOfItem(atPath: url.path)) == nil { throw BundleFileError.notFound(path) }
-        let rootPath = root.standardizedFileURL.path
-        let candidatePath = url.standardizedFileURL.path
+        // /var is a symlink to /private/var on iOS: the root arrives as /var/...
+        // while a candidate built from it standardizes to /private/var/...,
+        // so a plain string prefix check fails on the same location. Resolve
+        // symlinks on both sides first so they compare like with like.
+        let rootPath = root
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
 
-        // Temporary diagnostics (friend's request): log the compared paths so the
-        // /var vs /private/var (or encoding) mismatch can be confirmed on-device.
-        print("""
-        [BundlePath] path=\(path)
-        [BundlePath] root=\(rootPath)
-        [BundlePath] candidate=\(candidatePath)
-        """)
+        let candidatePath = url
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
 
         guard candidatePath == rootPath ||
               candidatePath.hasPrefix(rootPath + "/") else {
