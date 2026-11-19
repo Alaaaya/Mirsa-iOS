@@ -169,10 +169,14 @@ struct MirsaLiquidProgressStyle: ProgressViewStyle {
 #if DEBUG
 /// Deterministic real-component coverage without downloads, accounts or installs.
 struct MirsaLiquidReviewHost: View {
+    @State private var completed = false
+    private var arabic: Bool { UserDefaults.standard.string(forKey: "mirsa.appLanguage") == "ar" }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                Text("Liquid progress").font(.title.bold())
+                Text(arabic ? "تقدّم التنزيل" : "Liquid progress").font(.title.bold())
+                    .foregroundStyle(.white).accessibilityIdentifier("liquid.title")
                 HStack(spacing: 16) {
                     MirsaLiquidProgress(value: 0, diameter: 92)
                     MirsaLiquidProgress(value: 0.47, diameter: 112)
@@ -181,15 +185,22 @@ struct MirsaLiquidReviewHost: View {
                 MirsaLiquidProgress(value: nil, diameter: 80)
                 MirsaLiquidProgress(value: 0.47, reviewReduceMotion: true)
                     .accessibilityIdentifier("liquid.reduce-motion")
-                Button("Completion") {
+                // The completion burst belongs to this measured, completed orb,
+                // never to an unrelated 47% gauge or the full review screen.
+                MirsaLiquidProgress(value: completed ? 1 : 0.47, diameter: 80)
+                    .overlay { MirsaCompletionSparkles() }
+                    .frame(height: 220)
+                    .accessibilityIdentifier("liquid.completion-orb")
+                Button(arabic ? "إكمال التنزيل" : "Completion") {
+                    completed = true
                     NotificationCenter.default.post(name: .mirsaLiquidCompletion, object: nil)
                 }.accessibilityIdentifier("liquid.complete")
-                MirsaLiquidProgress(value: 0.47, diameter: 80)
-                    .environment(\.layoutDirection, .rightToLeft)
             }.padding(24)
         }
         .background(Color(red: 0.05, green: 0.04, blue: 0.1))
-        .overlay { MirsaCompletionSparkles() }
+        .preferredColorScheme(.dark)
+        .environment(\.locale, Locale(identifier: arabic ? "ar" : "en"))
+        .environment(\.layoutDirection, arabic ? .rightToLeft : .leftToRight)
         .accessibilityIdentifier("liquid.review")
     }
 }
