@@ -176,7 +176,7 @@ final class EncryptedAppsTests: XCTestCase {
         let file = dir.appendingPathComponent("Notes.ipa")
         try bytes.write(to: file)
         let report = try FairPlayDecryptor.decryptIPA(at: file)
-        addTeardownBlock { MirsaManagedTmp.end(report.workDir) }
+        addTeardownBlock { FairPlayDecryptor.endWorkDir(report) }
         XCTAssertEqual(report.decrypted, [])
         XCTAssertEqual(report.alreadyClear, ["Notes"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: report.outputURL.path))
