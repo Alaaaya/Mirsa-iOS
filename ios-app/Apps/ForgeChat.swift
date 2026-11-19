@@ -801,96 +801,109 @@ struct ForgeChatThreadView: View {
         .modifier(ForgeChatSwipeToReply(enabled: menuTarget == nil) { startReply(id: id, text: text, isUser: isUser) })
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
-                        assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
-                            .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["welcome": $0] }
-                            .padding(.top, catEnabled ? 54 : 0)
-                        ForEach(rows) { row in
-                            Group {
-                                switch row {
-                                case .message(let m): bubble(m)
-                                case .pending(let o, let sending):
-                                    chrome(id: o.id, text: o.text, isUser: true, confirmed: false) {
-                                        VStack(alignment: .trailing, spacing: 4) {
-                                            if let ids = o.attachmentIDs, !ids.isEmpty {
-                                                ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
-                                            }
-                                            userBubble(o.text)
-                                            if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(chatMuted) }
-                                        }
-                                    }
+    // Separate inference boundaries keep the native SwiftUI type checker bounded.
+    private var messageTimeline: some View {
+        LazyVStack(alignment: .leading, spacing: 22) {
+            assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
+                .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["welcome": $0] }
+                .padding(.top, catEnabled ? 54 : 0)
+            ForEach(rows) { row in
+                Group {
+                    switch row {
+                    case .message(let m): bubble(m)
+                    case .pending(let o, let sending):
+                        chrome(id: o.id, text: o.text, isUser: true, confirmed: false) {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                if let ids = o.attachmentIDs, !ids.isEmpty {
+                                    ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
                                 }
+                                userBubble(o.text)
+                                if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(chatMuted) }
                             }
-                            .id(row.id)
-                            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
-                        }
-                        if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
-                            HStack(spacing: 10) { MirsaBreathingOrbs(); Text(ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["thinking": $0] }
-                                .padding(.top, catEnabled ? 54 : 0)
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 12)
-                    .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
-                }
-                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { gesture in
-                    guard catEnabled, !reduceMotion else { return }
-                    catTouch = CGPoint(x: min(1, max(0, gesture.location.x / max(1, UIScreen.main.bounds.width))), y: min(1, abs(gesture.translation.height) / 180))
-                    catAwake = Date()
-                }.onEnded { _ in catTouch.y = 0 })
-                .overlayPreferenceValue(MirsaCatPerches.self) { anchors in
-                    GeometryReader { viewport in
-                        if catEnabled {
-                            MirsaCatPlayground(
-                                perches: anchors.mapValues { viewport[$0] },
-                                viewport: viewport.size,
-                                preferred: catThinking ? "thinking" : msgs.last?.id.uuidString,
-                                thinking: catThinking, touch: catTouch,
-                                awake: catAwake, celebration: catCelebration)
                         }
                     }
-                    .clipped()
                 }
-                // Preserve the measured bottom inset, but let messages remain visible
-                // beneath the transparent cat lane and the composer material.
-                .scrollClipDisabled()
-                .scrollDismissesKeyboard(.interactively)
-                // Reserve room for the floating controls at rest. scrollClipDisabled above
-                // lets conversation content draw beneath this transparent inset while scrolling.
-                .safeAreaInset(edge: .top, spacing: 0) { header }
-                // Inset the actual scrolling viewport, not its flexible outer container.
-                // SwiftUI measures the complete lane (cat, multiline input, previews and errors).
-                .safeAreaInset(edge: .bottom, spacing: 0) { composerLane }
-                // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(.bottom, for: .sizeChanges)
-                .onChange(of: rows.map(\.id)) { _, _ in pinToBottom(proxy) }
-                .onChange(of: jumpTo) { _, target in
-                    guard let target else { return }
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
-                    flashID = target
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { if flashID == target { flashID = nil } }
-                    jumpTo = nil
-                }
-                .onChange(of: msgs.last?.text) { _, _ in pinToBottom(proxy) }
-                .onChange(of: composerFocused) { _, focused in if focused { pinToBottom(proxy, after: 0.35) } }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in pinToBottom(proxy) }
-                .onAppear {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                    // Again once the lazy rows (and the full-screen cover) finished laying out.
-                    pinToBottom(proxy, animated: false, after: 0.05)
-                    pinToBottom(proxy, animated: false, after: 0.3)
-                }
+                .id(row.id)
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
+            }
+            if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
+                HStack(spacing: 10) { MirsaBreathingOrbs(); Text(ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["thinking": $0] }
+                    .padding(.top, catEnabled ? 54 : 0)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
+            }
+            Color.clear.frame(height: 1).id("bottom")
+        }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 12)
+        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
+    }
+
+    private func conversationScroll(proxy: ScrollViewProxy) -> some View {
+    ScrollView {
+        messageTimeline
+    }
+    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { gesture in
+        guard catEnabled, !reduceMotion else { return }
+        catTouch = CGPoint(x: min(1, max(0, gesture.location.x / max(1, UIScreen.main.bounds.width))), y: min(1, abs(gesture.translation.height) / 180))
+        catAwake = Date()
+    }.onEnded { _ in catTouch.y = 0 })
+    .overlayPreferenceValue(MirsaCatPerches.self) { anchors in
+        GeometryReader { viewport in
+            if catEnabled {
+                MirsaCatPlayground(
+                    perches: anchors.mapValues { viewport[$0] },
+                    viewport: viewport.size,
+                    preferred: catThinking ? "thinking" : msgs.last?.id.uuidString,
+                    thinking: catThinking, touch: catTouch,
+                    awake: catAwake, celebration: catCelebration)
             }
         }
+        .clipped()
+    }
+    // Preserve the measured bottom inset, but let messages remain visible
+    // beneath the transparent cat lane and the composer material.
+    .scrollClipDisabled()
+    .scrollDismissesKeyboard(.interactively)
+    // Reserve room for the floating controls at rest. scrollClipDisabled above
+    // lets conversation content draw beneath this transparent inset while scrolling.
+    .safeAreaInset(edge: .top, spacing: 0) { header }
+    // Inset the actual scrolling viewport, not its flexible outer container.
+    // SwiftUI measures the complete lane (cat, multiline input, previews and errors).
+    .safeAreaInset(edge: .bottom, spacing: 0) { composerLane }
+    // Opens on the last message and stays pinned to the bottom (new reply, keyboard, composer focus).
+    .defaultScrollAnchor(.bottom, for: .initialOffset)
+    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+    .onChange(of: rows.map(\.id)) { _, _ in pinToBottom(proxy) }
+    .onChange(of: jumpTo) { _, target in
+        guard let target else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo(target, anchor: .center) }
+        flashID = target
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { if flashID == target { flashID = nil } }
+        jumpTo = nil
+    }
+    .onChange(of: msgs.last?.text) { _, _ in pinToBottom(proxy) }
+    .onChange(of: composerFocused) { _, focused in if focused { pinToBottom(proxy, after: 0.35) } }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in pinToBottom(proxy) }
+    .onAppear {
+        proxy.scrollTo("bottom", anchor: .bottom)
+        // Again once the lazy rows (and the full-screen cover) finished laying out.
+        pinToBottom(proxy, animated: false, after: 0.05)
+        pinToBottom(proxy, animated: false, after: 0.3)
+    }
+    }
+
+    private var conversationLayout: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                conversationScroll(proxy: proxy)
+            }
+        }
+    }
+
+    var body: some View {
+        conversationLayout
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { if classicChat { AuroraBackground().ignoresSafeArea() } else { chatCanvas.ignoresSafeArea() } }
         .background(ForgeChatSystemAppearanceReader { dark in
