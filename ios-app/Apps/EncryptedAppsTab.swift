@@ -23,6 +23,13 @@ struct EncryptedAppsTab: View {
     @State private var failedInstalls: Set<UUID> = []
     @State private var storageSizes: [UUID: Int64] = [:]
     @State private var storageFree: Int64?
+    /// Packages tab: which segment is shown, and its debounced search.
+    @State private var packagesSegment: PackageSegment = .original
+    @State private var packagesQuery = ""
+    @State private var appliedPackagesQuery = ""
+    /// Share / Save-to-Files targets for the Packages tab.
+    @State private var packageShareTarget: PackageShareTarget?
+    @State private var packageExportTarget: PackageExportTarget?
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
 
@@ -33,6 +40,7 @@ struct EncryptedAppsTab: View {
             StoreLuxeBackground()
             page(.search) { searchPage }
             page(.downloads) { downloadsPage }
+            page(.packages) { packagesPage }
             page(.purchases) { AppStorePurchasesPage(store: store, model: storeAccount, vm: vm, isActive: section == .purchases) }
             page(.account) {
                 AppStoreAccountPage(model: storeAccount, library: store, storeAvailable: storeLoginAvailable,
@@ -87,6 +95,12 @@ struct EncryptedAppsTab: View {
             DocumentPickerView(allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { url in
                 Task { await store.importIPA(from: url) }
             }
+        }
+        .sheet(item: $packageShareTarget) { target in
+            PackageActivitySheet(url: target.url) { StoreIPAProtection.endSharing(id: target.id) }
+        }
+        .sheet(item: $packageExportTarget) { target in
+            PackageExportPicker(url: target.url) { StoreIPAProtection.endSharing(id: target.id) }
         }
         .confirmationDialog(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"),
                             isPresented: $showingAdd, titleVisibility: .visible) {
@@ -328,6 +342,154 @@ struct EncryptedAppsTab: View {
             let installed = store.entries.first(where: { $0.id == old })?.installedAt != nil
             if store.error != nil && !installed { failedInstalls.insert(old) } else { failedInstalls.remove(old) }
         }
+    }
+
+    // MARK: - Packages tab
+
+    private var packageFilteredEntries: [EncryptedIPAEntry] {
+        let q = appliedPackagesQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return store.entries }
+        return store.entries.filter {
+            $0.name.localizedCaseInsensitiveContains(q) || $0.version.localizedCaseInsensitiveContains(q)
+                || $0.bundleID.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    private var packageOriginalEntries: [EncryptedIPAEntry] { packageFilteredEntries }
+
+    private var packageDecryptedEntries: [EncryptedIPAEntry] {
+        packageFilteredEntries.filter { store.decryptedIDs.contains($0.id) }
+    }
+
+    /// The Packages library: original source IPAs and their decrypted
+    /// outputs, in two segments. Swipe left on a card for Install /
+    /// Share / Delete; long-press for the full action menu.
+    private var packagesPage: some View {
+        List {
+            Group {
+                StorePageHeader(title: AppStoreSectionTab.packages.title, subtitle: EncryptedText.tabTitle) {
+                    HStack(spacing: MirsaSpacing.xs) {
+                        Button { showingAdd = true } label: { MirsaIconButtonLabel(systemName: "plus") }
+                            .storeGlassCapsule()
+                            .disabled(store.busy != nil)
+                            .accessibilityLabel(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"))
+                        Button { showingTools = true } label: { MirsaIconButtonLabel(systemName: "wrench.and.screwdriver") }
+                            .storeGlassCapsule()
+                            .accessibilityLabel(StoreFeatureText.tools)
+                        LanguageGlobeMenu(size: MirsaIconSize.button)
+                            .storeGlassCapsule()
+                    }
+                    .buttonStyle(.plain)
+                }
+                AppStoreSearchField(placeholder: storeText("Search by name, version or Bundle ID", "البحث بالاسم أو الإصدار أو Bundle ID",
+                                                           de: "Nach Name, Version oder Bundle-ID suchen",
+                                                           ckb: "گەڕان بە ناو، وەشان یان Bundle ID", kmr: "Bi nav, guherto an Bundle ID bigere"),
+                                    text: $packagesQuery)
+                Picker("", selection: $packagesSegment) {
+                    Text(storeText("Original IPA files (\(packageOriginalEntries.count))", "ملفات IPA الأصلية (\(packageOriginalEntries.count))",
+                                   de: "Originale IPA-Dateien (\(packageOriginalEntries.count))",
+                                   ckb: "فایلە IPA ئەسڵییەکان (\(packageOriginalEntries.count))", kmr: "Pelên IPA yên orjînal (\(packageOriginalEntries.count))"))
+                        .tag(PackageSegment.original)
+                    Text(storeText("Decrypted (\(packageDecryptedEntries.count))", "المفككة (\(packageDecryptedEntries.count))",
+                                   de: "Entschlüsselt (\(packageDecryptedEntries.count))",
+                                   ckb: "ڕەمزکراوە (\(packageDecryptedEntries.count))", kmr: "Şîfre hat vekirin (\(packageDecryptedEntries.count))"))
+                        .tag(PackageSegment.decrypted)
+                }
+                .pickerStyle(.segmented)
+                .modifier(StoreListRow())
+            }
+            .modifier(StoreListRow())
+
+            if packagesSegment == .original {
+                Section {
+                    if packageOriginalEntries.isEmpty {
+                        Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                            .modifier(StoreListRow())
+                    }
+                    ForEach(packageOriginalEntries) { entry in
+                        packageRow(entry, kind: .original)
+                    }
+                    Text(storeText("Original IPA files are the source files; they may be encrypted or not encrypted originally.",
+                                   "ملفات IPA الأصلية هي ملفات المصدر، وقد تكون مشفّرة أو غير مشفّرة أصلاً.",
+                                   de: "Originale IPA-Dateien sind die Quelldateien; sie können ursprünglich verschlüsselt sein oder auch nicht.",
+                                   ckb: "فایلە IPA ئەسڵییەکان فایلە سەرچاوەییەکانن؛ لەوانەیە لە بنەڕەتدا شفرەکرابن یان نا.",
+                                   kmr: "Pelên IPA yên orjînal pelên çavkaniyê ne; dibe ku di eslê xwe de şîfrekirî bin an na."))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                        .modifier(StoreListRow())
+                }
+            } else {
+                Section {
+                    if packageDecryptedEntries.isEmpty {
+                        Text(t("Nothing decrypted yet.", "لسّا ما انفك تشفير شي.", "هێشتا هیچ شتێک ڕەمز نەکراوەتەوە.", "Hêj tiştek nehatiye vekirin."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                            .modifier(StoreListRow())
+                    }
+                    ForEach(packageDecryptedEntries) { entry in
+                        packageRow(entry, kind: .decrypted)
+                    }
+                } header: {
+                    StoreSectionTitle(title: storeText("Passed verification", "اجتاز التحقق", de: "Verifizierung bestanden", ckb: "پشکنینی تێپەڕاند", kmr: "Verastkirin derbas bû"),
+                                      trailing: "\(packageDecryptedEntries.count)")
+                        .textCase(nil)
+                        .padding(.vertical, 6)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 1)
+        .scrollDismissesKeyboard(.interactively)
+        .task(id: packagesQuery) {
+            if packagesQuery.isEmpty { appliedPackagesQuery = ""; return }
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            if !Task.isCancelled { appliedPackagesQuery = packagesQuery }
+        }
+        .refreshable { await refreshDownloads() }
+    }
+
+    /// One Packages card with its swipe actions, shared by both segments.
+    @ViewBuilder
+    private func packageRow(_ entry: EncryptedIPAEntry, kind: PackageSegment) -> some View {
+        PackageEntryRow(entry: entry, kind: kind, store: store, vm: vm,
+                        onInstall: { install(entry) },
+                        onInstallDecrypted: { installDecrypted(entry) },
+                        onDelete: { pendingDelete = entry },
+                        onShareURL: { url in packageShareTarget = PackageShareTarget(id: entry.id, url: url) },
+                        onSaveURL: { url in packageExportTarget = PackageExportTarget(id: entry.id, url: url) },
+                        onShowDecrypted: { withAnimation(MirsaMotion.select) { packagesSegment = .decrypted } })
+            .modifier(StoreListRow())
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    if kind == .decrypted { installDecrypted(entry) } else { install(entry) }
+                } label: {
+                    Label(t("Install", "تثبيت", "دامەزراندن", "Saz bike"), systemImage: "arrow.down.app.fill")
+                }
+                .tint(StoreLuxe.accent)
+                .disabled(store.busy != nil)
+                Button {
+                    do {
+                        let url = kind == .decrypted ? try StoreIPAProtection.shareDecryptedURL(id: entry.id) : try StoreIPAProtection.shareURL(id: entry.id)
+                        packageShareTarget = PackageShareTarget(id: entry.id, url: url)
+                    } catch { store.error = error.localizedDescription }
+                } label: {
+                    Label(t("Share", "مشاركة", "هاوبەشکردن", "Parve bike"), systemImage: "square.and.arrow.up.fill")
+                }
+                .tint(.blue)
+                Button { StoreHaptics.delete(); pendingDelete = entry } label: {
+                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash.fill")
+                }
+                .tint(MirsaPalette.danger)
+                .disabled(store.installingID == entry.id)
+            }
+    }
+
+    /// Install the persisted decrypted IPA (Packages › Decrypted).
+    private func installDecrypted(_ entry: EncryptedIPAEntry) {
+        guard store.busy == nil else { return }
+        failedInstalls.remove(entry.id)
+        StoreHaptics.install()
+        Task { await store.installDecrypted(entry, vm: vm) }
     }
 
     private var openSearchAction: (() -> Void)? {
@@ -760,5 +922,208 @@ private struct EncryptedEntryCard: View {
                          "Apple ID ya kirrîyar di vê IPA de tune. Tenê li ser iPhone ku bi hesabê ku ew kirî ketiye vedibe."))
         }
         return out
+    }
+}
+
+// MARK: - Packages tab
+
+/// The two segments of the Packages library.
+private enum PackageSegment: String, CaseIterable {
+    case original, decrypted
+}
+
+/// A share-sheet target: the entry id (for StoreIPAProtection.endSharing)
+/// plus the file URL to share.
+private struct PackageShareTarget: Identifiable {
+    let id: UUID
+    let url: URL
+}
+
+/// A Save-to-Files target: the entry id plus the file URL to export.
+private struct PackageExportTarget: Identifiable {
+    let id: UUID
+    let url: URL
+}
+
+/// Share sheet for a Packages IPA file.
+private struct PackageActivitySheet: UIViewControllerRepresentable {
+    let url: URL
+    let onDismiss: () -> Void
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let c = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        c.completionWithItemsHandler = { _, _, _, _ in onDismiss() }
+        return c
+    }
+    func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
+}
+
+/// Save-to-Files export picker for a Packages IPA file.
+private struct PackageExportPicker: UIViewControllerRepresentable {
+    let url: URL
+    let onDismiss: () -> Void
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let p = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        p.delegate = context.coordinator
+        return p
+    }
+    func updateUIViewController(_ c: UIDocumentPickerViewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onDismiss: () -> Void
+        init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onDismiss() }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { onDismiss() }
+    }
+}
+
+/// One row in the Packages tab: the app icon, name, version, size and a
+/// green decrypt status. Swipe left (from the tab) reveals Install /
+/// Share / Delete; long-press opens the full action menu.
+private struct PackageEntryRow: View {
+    let entry: EncryptedIPAEntry
+    let kind: PackageSegment
+    @ObservedObject var store: EncryptedAppsStore
+    let vm: AppViewModel
+    let onInstall: () -> Void
+    let onInstallDecrypted: () -> Void
+    let onDelete: () -> Void
+    let onShareURL: (URL) -> Void
+    let onSaveURL: (URL) -> Void
+    let onShowDecrypted: () -> Void
+
+    private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
+
+    private var isDecrypted: Bool { store.decryptedIDs.contains(entry.id) }
+
+    private var sizeBytes: Int64 {
+        if kind == .decrypted { return store.decryptedSize(entry) ?? entry.sizeBytes }
+        return entry.sizeBytes
+    }
+
+    /// Decryption completion time (the decrypted file's modification time).
+    private var timeText: String? {
+        guard kind == .decrypted, let date = store.decryptedDate(entry) else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        if kind == .decrypted {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                Text(t("Decryption complete", "اكتمل فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê temam bû"))
+            }
+            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
+        } else if isDecrypted {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                Text(t("Encrypted · decrypted output available", "مشفر · يتوفر ناتج مفكوك التشفير", "شفرەکراوە · ئەنجامی ڕەمزکراوە بەردەستە", "Şîfrekirî · encama vekirî berdest e"))
+            }
+            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
+        } else if entry.encryptedBinary == true {
+            Text(t("Encrypted", "مشفر", "شفرەکراوە", "Şîfrekirî"))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+        } else {
+            Text(t("Not encrypted", "غير مشفّر", "شفرە نەکراوە", "Ne şîfrekirî"))
+                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+        }
+    }
+
+    private func shareOriginal() {
+        do { onShareURL(try StoreIPAProtection.shareURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func shareDecrypted() {
+        do { onShareURL(try StoreIPAProtection.shareDecryptedURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func saveOriginal() {
+        do { onSaveURL(try StoreIPAProtection.shareURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func saveDecrypted() {
+        do { onSaveURL(try StoreIPAProtection.shareDecryptedURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    var body: some View {
+        HStack(spacing: MirsaSpacing.s) {
+            Group {
+                if let img = store.icon(entry) { Image(uiImage: img).resizable().scaledToFill() }
+                else {
+                    ZStack {
+                        LinearGradient(colors: [StoreLuxe.seedColor(entry.bundleID), StoreLuxe.seedColor(entry.bundleID + "~")], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Text(String(entry.name.prefix(1)).uppercased()).font(.system(size: 26, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    }
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
+                Text("\(entry.version) · \(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))")
+                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                statusLine
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 4) {
+                if let time = timeText {
+                    Text(time).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary).monospacedDigit()
+                }
+                Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(MirsaPalette.textTertiary)
+            }
+        }
+        .padding(MirsaSpacing.m)
+        .storeGlass(radius: MirsaRadius.l)
+        .contextMenu {
+            if kind == .original {
+                if isDecrypted {
+                    Button { onShowDecrypted() } label: {
+                        Label(t("View decrypt result", "عرض نتيجة فك التشفير", "بینینی ئەنجامی ڕەمزکردنەوە", "Encama vekirinê bibîne"), systemImage: "checkmark.circle")
+                    }
+                }
+                Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                    Label(t("Decrypt again", "فك التشفير مجددًا", "دووبارە ڕەمزکردنەوە", "Dîsa şîfreyê veke"), systemImage: "arrow.counterclockwise")
+                }
+                .disabled(store.busy != nil)
+                Button { saveOriginal() } label: {
+                    Label(t("Save original IPA", "حفظ IPA الأصلي", "پاشەکەوتکردنی IPA ئەسڵییەکە", "IPA ya orjînal tomar bike"), systemImage: "folder")
+                }
+                Button { shareOriginal() } label: {
+                    Label(t("Share original IPA", "مشاركة IPA الأصلي", "هاوبەشکردنی IPA ئەسڵییەکە", "IPA ya orjînal parve bike"), systemImage: "square.and.arrow.up")
+                }
+                Button { Task { await store.reinspect(entry) } } label: {
+                    Label(t("Re-inspect", "الفحص مجددًا", "دووبارە پشکنین", "Dîsa kontrol bike"), systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(store.busy != nil)
+                Button(role: .destructive) { StoreHaptics.delete(); onDelete() } label: {
+                    Label(t("Delete original IPA", "حذف IPA الأصلي", "سڕینەوەی IPA ئەسڵییەکە", "IPA ya orjînal jê bibe"), systemImage: "trash")
+                }
+            } else {
+                Button { saveDecrypted() } label: {
+                    Label(t("Save to Files", "حفظ في الملفات", "پاشەکەوتکردن لە Files", "Di Files de tomar bike"), systemImage: "folder")
+                }
+                Button { shareDecrypted() } label: {
+                    Label(t("Share IPA", "مشاركة IPA", "هاوبەشکردنی IPA", "IPA parve bike"), systemImage: "square.and.arrow.up")
+                }
+                Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                    Label(t("Decrypt again", "فك التشفير مجددًا", "دووبارە ڕەمزکردنەوە", "Dîsa şîfreyê veke"), systemImage: "arrow.counterclockwise")
+                }
+                .disabled(store.busy != nil)
+                Button(role: .destructive) { StoreHaptics.delete(); store.deleteDecrypted(entry) } label: {
+                    Label(t("Delete output file", "حذف ملف الناتج", "سڕینەوەی فایلی ئەنجام", "Pelê encamê jê bibe"), systemImage: "trash")
+                }
+                Button(role: .destructive) { StoreHaptics.delete(); onDelete() } label: {
+                    Label(t("Remove processing record", "إزالة سجل المعالجة", "لابردنی تۆماری پرۆسەکردن", "Tomara pêvajoyê jê bibe"), systemImage: "clock.badge.xmark")
+                }
+            }
+        }
     }
 }
