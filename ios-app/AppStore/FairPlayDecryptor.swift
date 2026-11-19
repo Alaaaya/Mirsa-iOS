@@ -429,13 +429,13 @@ enum FairPlayDecryptor {
 
     private static func rezip(tree: URL, to dest: URL) throws {
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(at: tree, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]) else {
+        guard let enumerator = fm.enumerator(at: tree, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .isRegularFileKey]) else {
             throw Error.ioError("cannot list extracted files")
         }
         var files: [(rel: String, url: URL, isDir: Bool)] = []
         var total: UInt64 = 0
         for case let item as URL in enumerator {
-            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .isRegularFileKey])
             guard values.isSymbolicLink == false else { throw Error.ioError("symlink in IPA: " + item.lastPathComponent) }
             let rel = String(item.standardizedFileURL.path.dropFirst(tree.standardizedFileURL.path.count + 1))
             guard !rel.isEmpty else { continue }
