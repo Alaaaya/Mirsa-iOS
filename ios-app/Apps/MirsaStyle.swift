@@ -254,9 +254,15 @@ struct LiquidTabBar: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 if selected {
-                    Capsule()
-                        .fill(.white.opacity(0.14))
-                        .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    if item.tab == .mirsaAI {
+                        Circle()
+                            .fill(.white.opacity(0.14))
+                            .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    } else {
+                        Capsule()
+                            .fill(.white.opacity(0.14))
+                            .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    }
                 }
             }
             .contentShape(Capsule())
@@ -287,7 +293,9 @@ struct LiquidTabBar: View {
                 tabButton(ai)
                     .padding(5)
                     .frame(width: MirsaTabBarMetrics.height, height: MirsaTabBarMetrics.height)
+                    .clipShape(Circle())
                     .background { glass(Circle()) }
+                    .contentShape(Circle())
             }
         }
         .accessibilityElement(children: .contain)
