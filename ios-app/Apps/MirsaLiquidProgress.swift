@@ -91,28 +91,39 @@ struct MirsaCompletionSparkles: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var started: Date?
+    private static func starPath(center: CGPoint, p: Double) -> Path {
+        var star = Path()
+        for corner in 0..<8 {
+            let a: Double = Double(corner) * Double.pi / 4
+            let big: Double = corner % 2 == 0 ? 5.0 : 1.6
+            let radius: Double = big * (1.0 - p)
+            let pt = CGPoint(x: center.x + CGFloat(cos(a) * radius), y: center.y + CGFloat(sin(a) * radius))
+            if corner == 0 { star.move(to: pt) } else { star.addLine(to: pt) }
+        }
+        star.closeSubpath()
+        return star
+    }
+
+    private static func drawSparkles(context: inout GraphicsContext, size: CGSize, p: Double) {
+        for i in 0..<12 {
+            let angle: Double = Double(i) * Double.pi / 6
+            let distance: Double = 16.0 + p * 78.0
+            let px: Double = Double(size.width) / 2.0 + cos(angle) * distance
+            let py: Double = Double(size.height) / 2.0 + sin(angle) * distance + p * p * 24.0
+            let star = starPath(center: CGPoint(x: px, y: py), p: p)
+            let base: Color = i % 3 == 0 ? Color.white : Color.purple
+            context.fill(star, with: .color(base.opacity(1.0 - p)))
+        }
+    }
+
     var body: some View {
         Group {
             if let started, !reduceMotion, scenePhase == .active {
                 TimelineView(.animation(minimumInterval: 1.0 / 60, paused: MirsaUITestHarness.active)) { tick in
                     Canvas { context, size in
-                        let age = tick.date.timeIntervalSince(started)
-                        let p = MirsaUITestHarness.active ? 0.4 : min(1, max(0, age / 0.85))
-                        for i in 0..<12 {
-                            let angle = Double(i) * .pi / 6
-                            let distance = (16 + p * 78)
-                            let point = CGPoint(x: size.width / 2 + cos(angle) * distance,
-                                                y: size.height / 2 + sin(angle) * distance + p * p * 24)
-                            var star = Path()
-                            for corner in 0..<8 {
-                                let a = Double(corner) * .pi / 4
-                                let radius = (corner.isMultiple(of: 2) ? 5.0 : 1.6) * (1 - p)
-                                let pt = CGPoint(x: point.x + cos(a) * radius, y: point.y + sin(a) * radius)
-                                if corner == 0 { star.move(to: pt) } else { star.addLine(to: pt) }
-                            }
-                            star.closeSubpath()
-                            context.fill(star, with: .color((i.isMultiple(of: 3) ? Color.white : Color.purple).opacity(1 - p)))
-                        }
+                        let age: Double = tick.date.timeIntervalSince(started)
+                        let p: Double = MirsaUITestHarness.active ? 0.4 : min(1.0, max(0.0, age / 0.85))
+                        Self.drawSparkles(context: &context, size: size, p: p)
                     }
                 }
                 .frame(width: 220, height: 220)
