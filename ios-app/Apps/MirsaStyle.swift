@@ -6,8 +6,24 @@ import UIKit
 struct MirsaForm<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        Form { Group { content() }.listRowBackground(MirsaPalette.row) }
+        Form { Group { content() }.listRowBackground(MirsaRowBackground()) }
             .mirsaScreen()
+    }
+}
+
+/// Form/List row fill: the App Store glass tint with the Liquid Glass theme,
+/// the original solid row with Classic or Reduce Transparency.
+struct MirsaRowBackground: View {
+    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        if theme == MirsaTheme.liquid.rawValue && !reduceTransparency {
+            LinearGradient(colors: [StoreLuxe.glassTop, StoreLuxe.glassBottom], startPoint: .top, endPoint: .bottom)
+                .overlay(LinearGradient(colors: [StoreLuxe.accent.opacity(0.10), Color.white.opacity(0.02)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing))
+        } else {
+            MirsaPalette.row
+        }
     }
 }
 
@@ -201,7 +217,11 @@ struct LiquidTabBar: View {
     @ObservedObject private var chatStore = ForgeChatStore.shared
     @ObservedObject private var chatLocal = ForgeChatLocal.shared
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     private var chatUnread: Int { chatLocal.unreadCount(chatStore.threads) }
+    /// Liquid Glass theme: the dock and the Mirsa AI circle use the App Store bar's glass.
+    /// Classic (and Reduce Transparency) keep the original dock look.
+    private var storeLook: Bool { theme == MirsaTheme.liquid.rawValue && !reduceTransparency }
 
     private func glow(for tab: AppTab) -> Color {
         switch tab {
@@ -215,7 +235,27 @@ struct LiquidTabBar: View {
         }
     }
 
-    private func glass<S: InsettableShape>(_ shape: S) -> some View {
+    @ViewBuilder private func glass<S: InsettableShape>(_ shape: S) -> some View {
+        if storeLook {
+            ZStack {
+                shape.fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.26), radius: 10, y: 5)
+                shape.fill(LinearGradient(colors: [StoreLuxe.accent.opacity(0.16), Color.white.opacity(0.02)],
+                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+                shape.fill(LinearGradient(stops: [
+                    .init(color: Color.white.opacity(0.14), location: 0),
+                    .init(color: Color.white.opacity(0), location: 0.45),
+                ], startPoint: .top, endPoint: .bottom))
+                shape.strokeBorder(LinearGradient(colors: [Color.white.opacity(0.30), StoreLuxe.accent.opacity(0.28), Color.white.opacity(0.04)],
+                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.9)
+            }
+            .allowsHitTesting(false)
+        } else {
+            classicGlass(shape)
+        }
+    }
+
+    private func classicGlass<S: InsettableShape>(_ shape: S) -> some View {
         shape.fill(.ultraThinMaterial)
             .overlay(shape.fill(Color.black.opacity(reduceTransparency ? 0.86 : 0.36)))
             .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.75))
@@ -253,7 +293,22 @@ struct LiquidTabBar: View {
             .foregroundStyle(selected ? Color.white : Color.white.opacity(0.57))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
-                if selected {
+                if selected && storeLook {
+                    // Selected pill as in the store bar: the Mirsa gradient with a soft top light.
+                    if item.tab == .mirsaAI {
+                        ZStack {
+                            Circle().fill(StoreLuxe.identity).opacity(0.85)
+                            Circle().fill(LinearGradient(colors: [Color.white.opacity(0.30), .clear], startPoint: .top, endPoint: .center))
+                            Circle().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.8)
+                        }
+                    } else {
+                        ZStack {
+                            Capsule().fill(StoreLuxe.identity).opacity(0.85)
+                            Capsule().fill(LinearGradient(colors: [Color.white.opacity(0.30), .clear], startPoint: .top, endPoint: .center))
+                            Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.8)
+                        }
+                    }
+                } else if selected {
                     if item.tab == .mirsaAI {
                         Circle()
                             .fill(.white.opacity(0.14))
