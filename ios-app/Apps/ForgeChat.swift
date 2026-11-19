@@ -839,6 +839,9 @@ struct ForgeChatThreadView: View {
                     catTouch = CGPoint(x: min(1, max(0, gesture.location.x / max(1, UIScreen.main.bounds.width))), y: min(1, abs(gesture.translation.height) / 180))
                     catAwake = Date()
                 }.onEnded { _ in catTouch.y = 0 })
+                // Preserve the measured bottom inset, but let messages remain visible
+                // beneath the transparent cat lane and the composer material.
+                .scrollClipDisabled()
                 .scrollDismissesKeyboard(.interactively)
                 // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
                 .safeAreaInset(edge: .top, spacing: 0) { header }
@@ -1036,8 +1039,8 @@ struct ForgeChatThreadView: View {
         }
         .padding(.top, 12)
         .fixedSize(horizontal: false, vertical: true)
-        // Keep the floating composer separate from message cards without covering the last row.
-        .background(chatCanvas.opacity(0.96).ignoresSafeArea(edges: .bottom))
+        // Intentionally no lane-wide fill. Only inputBar owns its frosted material;
+        // the bottom safe-area inset keeps the final delivery reachable above it.
     }
 
 
