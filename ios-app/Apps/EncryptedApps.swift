@@ -307,7 +307,7 @@ final class EncryptedAppsStore: ObservableObject {
             let report = try await Task.detached(priority: .userInitiated) {
                 try FairPlayDecryptor.decryptIPA(at: source)
             }.value
-            defer { MirsaManagedTmp.end(report.workDir) }
+            defer { FairPlayDecryptor.endWorkDir(report) }
             await AppsStore.shared.importIPA(from: report.outputURL)
             if let message = AppsStore.shared.error {
                 AppsStore.shared.error = nil
