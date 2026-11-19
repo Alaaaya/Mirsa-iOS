@@ -232,6 +232,33 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Actual dock materials in both system appearances and all supported languages.
+    func testGlassDockMaterials() {
+        continueAfterFailure = false
+        for lang in ["ar", "en", "de", "kmr", "ckb"] {
+            for appearance in ["dark", "light"] {
+                let app = launch("glass-dock-review", lang: lang,
+                                 extra: appearance == "light" ? ["-GlassDockLight"] : [])
+                let pill = app.descendants(matching: .any).matching(identifier: "mirsa-main-tab-pill").firstMatch
+                XCTAssertTrue(pill.waitForExistence(timeout: 10))
+                let ai = app.buttons["main-tab-Mirsa AI"]
+                XCTAssertTrue(ai.isHittable)
+                XCTAssertEqual(ai.frame.width, ai.frame.height, accuracy: 2)
+                XCTAssertGreaterThan(ai.frame.minX, pill.frame.maxX)
+                for id in ["Apps", "Sources", "Pairing", "Encrypted", "Personal Apps Hub", "Mirsa AI"] {
+                    let b = app.buttons["main-tab-" + id]
+                    XCTAssertTrue(b.isHittable, "\(lang) \(id)")
+                    b.tap()
+                    XCTAssertTrue(b.isSelected, id)
+                    if lang == "ar" || lang == "en" {
+                        shot(app, "glass_\(lang)_\(appearance)_\(id.replacingOccurrences(of: " ", with: "_"))")
+                    }
+                }
+                app.terminate()
+            }
+        }
+    }
+
     /// Floating dock for every theme: six tabs, selected trait, tab transitions.
     func testFloatingDockAllThemes() {
         continueAfterFailure = false
