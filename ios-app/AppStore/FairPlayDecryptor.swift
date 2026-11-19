@@ -39,7 +39,7 @@ enum FairPlayDecryptor {
         case notIPA
         case noApp
         case noExecutable
-        case noLicence(binary: String)
+        case noLicence(binary: String, detail: String)
         case decryptFailed(binary: String, message: String)
         case verificationFailed(binary: String)
         case ioError(String)
@@ -55,11 +55,11 @@ enum FairPlayDecryptor {
             case .noExecutable:
                 return tr("The app's executable could not be found.", "ما لقينا الملف التنفيذي تبع التطبيق.",
                           ckb: "فایلی جێبەجێکراوی ئەپ نەدۆزرایەوە.", kmr: "Pelê cîbicîkirî ya sepanê nehat dîtin.")
-            case .noLicence(let binary):
-                return tr("No purchase licence (sinf) for \(binary). Decryption needs the Apple ID that bought the app.",
-                          "ما في رخصة شراء (sinf) لـ\(binary). فك التشفير بدو حساب Apple يلي اشترى التطبيق.",
-                          ckb: "هیچ مۆڵەتی کڕین (sinf) بۆ \(binary) نییە. ڕەمزکردنەوە پێویستی بە Apple IDی کڕیار هەیە.",
-                          kmr: "Ji bo \(binary) lîsansa kirînê (sinf) tune. Vekirina şîfreyê Apple ID ya kirrîyar dixwaze.")
+            case .noLicence(let binary, let detail):
+                return tr("No purchase licence (sinf) for \(binary). Decryption needs the Apple ID that bought the app.\n\(detail)",
+                          "ما في رخصة شراء (sinf) لـ\(binary). فك التشفير بدو حساب Apple يلي اشترى التطبيق.\n\(detail)",
+                          ckb: "هیچ مۆڵەتی کڕین (sinf) بۆ \(binary) نییە. ڕەمزکردنەوە پێویستی بە Apple IDی کڕیار هەیە.\n\(detail)",
+                          kmr: "Ji bo \(binary) lîsansa kirînê (sinf) tune. Vekirina şîfreyê Apple ID ya kirrîyar dixwaze.\n\(detail)")
             case .decryptFailed(let binary, let message):
                 return tr("Could not decrypt \(binary): \(message)", "ما قدرنا نفك تشفير \(binary): \(message)",
                           ckb: "نەتوانرا \(binary) ڕەمز بکرێتەوە: \(message)", kmr: "Nehat \(binary) şîfre kirin: \(message)")
@@ -360,11 +360,15 @@ enum FairPlayDecryptor {
             let source: URL
             if let rel = manifestPaths.first(where: { ($0 as NSString).lastPathComponent == binary.name + ".sinf" }) {
                 let candidate = appDir.appendingPathComponent(rel)
-                guard fm.fileExists(atPath: candidate.path) else { throw Error.noLicence(binary: binary.name) }
+                guard fm.fileExists(atPath: candidate.path) else {
+                    throw Error.noLicence(binary: binary.name, detail: licenceDiagnostic(appDir: appDir, binary: binary, manifestPaths: manifestPaths, searched: [target.path, candidate.path]))
+                }
                 source = candidate
             } else {
                 let own = scInfo.appendingPathComponent(binary.name + ".sinf")
-                guard fm.fileExists(atPath: own.path) else { throw Error.noLicence(binary: binary.name) }
+                guard fm.fileExists(atPath: own.path) else {
+                    throw Error.noLicence(binary: binary.name, detail: licenceDiagnostic(appDir: appDir, binary: binary, manifestPaths: manifestPaths, searched: [target.path, own.path]))
+                }
                 source = own
             }
             var createdDir: URL? = nil
@@ -377,6 +381,30 @@ enum FairPlayDecryptor {
             staged.append(StagedLicence(sinfURL: target, createdDir: createdDir))
         }
         return staged
+    }
+
+    /// Diagnostic for a missing licence: what .sinf files exist, what the
+    /// Manifest lists, and which paths were searched. Shown in the error so
+    /// the user can see whether the IPA lacks the licence or the lookup is
+    /// wrong. Diagnostic only; it never creates, copies or alters a licence.
+    private static func licenceDiagnostic(appDir: URL, binary: Binary, manifestPaths: [String], searched: [String]) -> String {
+        let fm = FileManager.default
+        let scInfo = appDir.appendingPathComponent("SC_Info", isDirectory: true)
+        let scExists = fm.fileExists(atPath: scInfo.path)
+        let sinfFiles: [String] = {
+            guard scExists, let names = try? fm.contentsOfDirectory(atPath: scInfo.path) else { return [] }
+            return names.filter { $0.hasSuffix(".sinf") }.sorted()
+        }()
+        let manifestList = manifestPaths.isEmpty ? "(empty/missing)" : manifestPaths.joined(separator: ", ")
+        let sinfList = sinfFiles.isEmpty ? "(none)" : sinfFiles.joined(separator: ", ")
+        return """
+        [diag] binary: \(binary.name)
+        [diag] binary path: \(binary.url.path)
+        [diag] SC_Info exists: \(scExists ? "yes" : "no")
+        [diag] .sinf in app SC_Info: \(sinfList)
+        [diag] Manifest SinfPaths: \(manifestList)
+        [diag] searched: \(searched.joined(separator: " | "))
+        """
     }
 
     private static func removeStaged(_ staged: [StagedLicence]) {
