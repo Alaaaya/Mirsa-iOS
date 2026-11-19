@@ -863,7 +863,8 @@ struct ForgeChatThreadView: View {
                 // beneath the transparent cat lane and the composer material.
                 .scrollClipDisabled()
                 .scrollDismissesKeyboard(.interactively)
-                // No header bar: the conversation runs to the top edge and scrolls under a floating back button.
+                // Reserve room for the floating controls at rest. scrollClipDisabled above
+                // lets conversation content draw beneath this transparent inset while scrolling.
                 .safeAreaInset(edge: .top, spacing: 0) { header }
                 // Inset the actual scrolling viewport, not its flexible outer container.
                 // SwiftUI measures the complete lane (cat, multiline input, previews and errors).
@@ -1169,7 +1170,6 @@ struct ForgeChatThreadView: View {
 
         }
         .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
-        .background { if !classicChat { chatCanvas.opacity(0.94) } }
         .zIndex(1)
     }
 

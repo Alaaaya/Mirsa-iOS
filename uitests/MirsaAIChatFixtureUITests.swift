@@ -158,6 +158,46 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         }
     }
 
+    /// Capture the actual scrolling content beneath floating controls, not a header mockup.
+    func testTransparentHeaderAllChatThemes() {
+        XCUIDevice.shared.orientation = .portrait
+        for language in ["ar", "en"] {
+            for theme in ["light", "dark", "classic"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat",
+                                       "-MirsaChatFixture", "-MirsaTweakDeliveryFixture",
+                                       "-mirsa.chat.catEnabled", "NO", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.chat.appearance", theme, "-mirsa.appLanguage", language,
+                                       "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+                app.launch()
+                let back = app.buttons["chat-back"]
+                let settings = app.buttons["chat-settings"]
+                XCTAssertTrue(back.waitForExistence(timeout: 20))
+                XCTAssertTrue(back.isHittable)
+                XCTAssertTrue(settings.isHittable)
+                let scroll = app.scrollViews.firstMatch
+                XCTAssertTrue(scroll.exists)
+                for state in ["bottom", "scrolling"] {
+                    if state == "scrolling" {
+                        // Keep the gesture outside the floating buttons and composer.
+                        scroll.swipeDown()
+                    }
+                    let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                    shot.name = "transparent_header_\(language)_\(theme)_\(state)"
+                    shot.lifetime = .keepAlways
+                    add(shot)
+                    XCTAssertTrue(back.isHittable)
+                    XCTAssertTrue(settings.isHittable)
+                }
+                settings.tap()
+                XCTAssertTrue(app.switches["chat-cat-toggle"].waitForExistence(timeout: 5))
+                app.buttons["chat-settings-close"].tap()
+                XCTAssertTrue(back.isHittable)
+                app.terminate()
+            }
+        }
+    }
+
     private func selectTheme(_ app: XCUIApplication, _ theme: String,
                              file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["chat-black-background"].tap()
