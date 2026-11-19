@@ -3,9 +3,10 @@ import Foundation
 extension MirsaTr {
     /// Legacy (pairing, wallet, passcode, wallpaper) screen literals: English key -> (ar, ckb, kmr).
     static func lit(_ en: String) -> String {
-        guard let t = legacy[en] else { return en }
+        guard let t = legacy[en] else { return german(en) }
         switch AppLanguageStore.shared.current {
-        case .english, .german: return en
+        case .english: return en
+        case .german: return deByEnglish[en] ?? en
         case .arabic: return t.0
         case .sorani: return t.1
         case .kurmanji: return t.2

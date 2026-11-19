@@ -63,7 +63,8 @@ struct PersonalProfileVerification: Codable, Equatable {
         guard warning.code == "entitlements_dropped" else { return warning.message }
         let title: String
         switch AppLanguageStore.shared.current {
-        case .english, .german: title = "Compatibility mode removed unsupported entitlements; related features may not work."
+        case .english: title = "Compatibility mode removed unsupported entitlements; related features may not work."
+        case .german: title = "Der Kompatibilitätsmodus hat nicht unterstützte Entitlements entfernt; zugehörige Funktionen funktionieren eventuell nicht."
         case .arabic: title = "وضع التوافق حذف صلاحيات مو مدعومة؛ الميزات المرتبطة فيها ممكن ما تشتغل."
         case .sorani: title = "دۆخی گونجان دەسەڵاتە پشتگیرینەکراوەکانی سڕییەوە؛ تایبەتمەندییە پەیوەندیدارەکان لەوانەیە کار نەکەن."
         case .kurmanji: title = "Moda lihevhatinê destûrên bê piştgirî rakirin; dibe ku taybetmendiyên girêdayî wan nexebitin."

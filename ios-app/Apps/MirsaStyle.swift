@@ -293,7 +293,8 @@ struct LiquidTabBar: View {
                 tabButton(ai)
                     .padding(5)
                     .frame(width: MirsaTabBarMetrics.height, height: MirsaTabBarMetrics.height)
-                    .clipShape(Circle())
+                    // No clipShape here: the glass and the selection fill are already
+                    // circles, and clipping cut off the unread badge at the top edge.
                     .background { glass(Circle()) }
                     .contentShape(Circle())
             }
