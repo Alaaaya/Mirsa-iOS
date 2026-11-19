@@ -11,6 +11,18 @@ final class OpenInIPATests: XCTestCase {
         return file
     }
 
+    func testSparseIPAOver512MiBIsAcceptedAndCopiedByStreaming() throws {
+        let source = try input("Big.ipa", bytes: Data([0x50, 0x4b, 3, 4]))
+        let handle = try FileHandle(forWritingTo: source)
+        try handle.truncate(atOffset: 513 * 1024 * 1024)
+        try handle.close()
+        XCTAssertGreaterThan(OpenInIPA.maximumBytes, 513 * 1024 * 1024)
+        let copy = try OpenInIPA.snapshot(source)
+        defer { OpenInIPA.remove(copy) }
+        let size = try FileManager.default.attributesOfItem(atPath: copy.path)[.size] as? NSNumber
+        XCTAssertEqual(size?.int64Value, 513 * 1024 * 1024)
+    }
+
     func testCopyIsIndependentAndCleanupPreservesSource() throws {
         let source = try input("Example.IPA", bytes: Data([0x50, 0x4b, 3, 4]))
         let copy = try OpenInIPA.snapshot(source)

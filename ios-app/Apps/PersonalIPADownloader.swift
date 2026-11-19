@@ -3,7 +3,16 @@ import SwiftUI
 /// HTTPS-only IPA download into a temp file. The result is only ever handed to
 /// PersonalAppsLibrary.add, which validates the archive. No DRM or protection bypass.
 enum PersonalIPAURL {
-    static let maximumBytes: Int64 = 512 * 1024 * 1024
+    static let maximumBytes: Int64 = 4 * 1024 * 1024 * 1024
+
+    /// Free-space guard: a copy plus an extracted tree needs roughly 2x the IPA.
+    static func ensureRoom(for bytes: Int64, at dir: URL = FileManager.default.temporaryDirectory) throws {
+        let free = (try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage ?? Int64.max
+        if free < bytes * 2 + 256 * 1024 * 1024 {
+            throw SideloadError.message(personalText("Not enough free storage to import this IPA.", "ما في مساحة كافية لاستيراد هالـ IPA."))
+        }
+    }
 
     static func validate(_ raw: String) throws -> URL {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -56,7 +65,7 @@ private final class PersonalIPADownload: NSObject, URLSessionDownloadDelegate, @
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         if totalBytesExpectedToWrite > PersonalIPAURL.maximumBytes || totalBytesWritten > PersonalIPAURL.maximumBytes {
-            fail(personalText("The file is larger than 512 MB.", "الملف أكبر من 512 ميغا."), downloadTask); return
+            fail(personalText("The file is larger than 4 GB.", "الملف أكبر من 4 غيغا."), downloadTask); return
         }
         onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
     }
@@ -69,8 +78,9 @@ private final class PersonalIPADownload: NSObject, URLSessionDownloadDelegate, @
         do {
             let size = (try fm.attributesOfItem(atPath: location.path)[.size] as? NSNumber)?.int64Value ?? 0
             guard size > 0, size <= PersonalIPAURL.maximumBytes else {
-                throw SideloadError.message(personalText("The file is empty or larger than 512 MB.", "الملف فاضي أو أكبر من 512 ميغا."))
+                throw SideloadError.message(personalText("The file is empty or larger than 4 GB.", "الملف فاضي أو أكبر من 4 غيغا."))
             }
+            try PersonalIPAURL.ensureRoom(for: size)
             let dir = try MirsaManagedTmp.begin("personal-url")
             var handedOff = false
             defer { if !handedOff { MirsaManagedTmp.end(dir) } }
