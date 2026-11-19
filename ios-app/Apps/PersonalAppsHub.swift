@@ -364,11 +364,7 @@ private struct PersonalAppIcon: View {
             if let e = progressState.entry(for: app.id.uuidString) {
                 ZStack {
                     Color.black.opacity(0.45)
-                    if let f = e.fraction {
-                        Circle().stroke(.white.opacity(0.25), lineWidth: 3).frame(width: 28, height: 28)
-                        Circle().trim(from: 0, to: f).stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                            .frame(width: 28, height: 28).rotationEffect(.degrees(-90))
-                    } else { ProgressView().tint(.white) }
+                    MirsaLiquidProgress(value: e.fraction, diameter: 48)
                 }.accessibilityElement(children: .ignore)
                  .accessibilityLabel(app.name + ", " + personalText("Signing", "جاري التوقيع") + (e.fraction.map { " \(Int($0 * 100))%" } ?? ""))
             }

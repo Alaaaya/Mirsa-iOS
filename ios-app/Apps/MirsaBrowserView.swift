@@ -171,7 +171,7 @@ private struct BrowserBody: View {
                         Text(it.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                         switch it.state {
                         case .downloading(let p):
-                            ProgressView(value: p).tint(.white)
+                            MirsaLiquidProgress(value: p)
                         case .validating: Text(tr("Checking IPA…", "عم يفحص IPA…")).font(.caption).opacity(0.7)
                         case .added: Text(tr("Added to Downloads", "انضاف للتنزيلات")).font(.caption).opacity(0.7)
                         case .failed(let m): Text(m).font(.caption).foregroundColor(.orange)

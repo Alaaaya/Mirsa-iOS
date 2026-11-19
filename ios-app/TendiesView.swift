@@ -92,7 +92,7 @@ struct TendiesView: View {
                                 ProgressView()
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(MirsaTr.lit("Flashing Wallpapers…")).font(.subheadline.bold())
-                                    ProgressView(value: vm.tendiesFlashProgress)
+                                    MirsaLiquidProgress(value: vm.tendiesFlashProgress)
                                 }
                             }
                             .frame(maxWidth: .infinity)

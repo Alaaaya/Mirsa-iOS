@@ -211,7 +211,7 @@ struct PersonalSigningProgressView: View {
                 Spacer()
                 Text("\(Int(state.overallFraction * 100))%").monospacedDigit().fontWeight(.bold)
             }
-            ProgressView(value: state.overallFraction).tint(.green)
+            MirsaLiquidProgress(value: state.overallFraction, diameter: 88)
                 .accessibilityValue("\(Int(state.overallFraction * 100))%")
             Text(PersonalSigningLabels.weighted).font(.caption2).foregroundStyle(.secondary)
             if state.stage == .signing, state.totalUnits > 0 {
