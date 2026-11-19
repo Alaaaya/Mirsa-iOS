@@ -27,6 +27,9 @@ final class MirsaCompletionFeedback {
 
     func finish(operationID: UUID, outcome: Outcome) {
         guard consumeCompletion(operationID) else { return }
+        if case .success = outcome, UIApplication.shared.applicationState == .active {
+            NotificationCenter.default.post(name: .mirsaLiquidCompletion, object: nil)
+        }
         guard enabled, UIApplication.shared.applicationState == .active else { return }
         switch outcome {
         case .cancelled: return

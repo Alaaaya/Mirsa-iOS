@@ -823,7 +823,7 @@ struct ClassicAppStoreAccountView: View {
             StorePauseStatus()
             if let transfer {
                 if let fraction = transfer.fraction {
-                    ProgressView(value: fraction, total: 1).tint(.white)
+                    MirsaLiquidProgress(value: fraction, diameter: 80)
                     Text("\(Int(fraction * 100))%").font(MirsaFont.caption.monospacedDigit())
                 } else {
                     MirsaIndeterminateBar()

@@ -28,6 +28,130 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         return app
     }
 
+
+    /// Real thread, real composer and existing result attachments, in both material environments.
+    func testIsletChatMaterialsAndLanguages() {
+        XCUIDevice.shared.orientation = .portrait
+        for language in ["ar", "en", "de", "kmr", "ckb"] {
+            for light in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                                       "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+                // No appearance launch argument: it would shadow the menu's persisted writes.
+                app.launch()
+                XCTAssertTrue(app.staticTexts["chat-waiting"].waitForExistence(timeout: 20))
+                XCTAssertTrue(app.staticTexts["Thanks, no rush."].exists)
+                let appearance = app.buttons["chat-black-background"]
+                selectTheme(app, light ? "light" : "dark")
+                XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
+                selectTheme(app, light ? "dark" : "light")
+                XCTAssertEqual(appearance.value as? String, light ? "dark" : "light")
+                assertComposer(app, liquid: false, name: "islet_toggled_\(language)_\(light ? "dark" : "light")")
+                selectTheme(app, light ? "light" : "dark")
+                XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
+                assertComposer(app, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")")
+                let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+                input.tap()
+                input.typeText("Hello")
+                XCTAssertTrue(app.buttons["chat-send"].isEnabled)
+                assertComposer(app, keyboard: true, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")_keyboard")
+                app.terminate()
+            }
+        }
+        // No appearance override: menu selection must persist across real relaunches.
+        for language in ["ar", "en"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                                   "-mirsa.appLanguage", language]
+            app.launch()
+            let appearance = app.buttons["chat-black-background"]
+            XCTAssertTrue(appearance.waitForExistence(timeout: 20))
+            for theme in ["classic", "light", "dark"] {
+                selectTheme(app, theme)
+                XCTAssertEqual(appearance.value as? String, theme)
+                app.terminate()
+                app.launch()
+                XCTAssertTrue(appearance.waitForExistence(timeout: 20))
+                XCTAssertEqual(appearance.value as? String, theme)
+                assertComposer(app, liquid: false, name: "three_themes_\(language)_\(theme)")
+            }
+            app.terminate()
+        }
+    }
+
+    /// Capture the actual scrolling content beneath floating controls, not a header mockup.
+    func testTransparentHeaderAllChatThemes() {
+        XCUIDevice.shared.orientation = .portrait
+        for language in ["ar", "en"] {
+            for theme in ["light", "dark", "classic"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat",
+                                       "-MirsaChatFixture", "-MirsaTweakDeliveryFixture",
+                                       "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.chat.appearance", theme, "-mirsa.appLanguage", language,
+                                       "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+                app.launch()
+                let back = app.buttons["chat-back"]
+                XCTAssertTrue(back.waitForExistence(timeout: 20))
+                XCTAssertTrue(back.isHittable)
+                let scroll = app.scrollViews.firstMatch
+                XCTAssertTrue(scroll.exists)
+                for state in ["bottom", "scrolling"] {
+                    if state == "scrolling" {
+                        // Keep the gesture outside the floating buttons and composer.
+                        scroll.swipeDown()
+                    }
+                    let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                    shot.name = "transparent_header_\(language)_\(theme)_\(state)"
+                    shot.lifetime = .keepAlways
+                    add(shot)
+                    XCTAssertTrue(back.isHittable)
+                    }
+                XCTAssertTrue(back.isHittable)
+                app.terminate()
+            }
+        }
+    }
+
+    private func selectTheme(_ app: XCUIApplication, _ theme: String,
+                             file: StaticString = #filePath, line: UInt = #line) {
+        app.buttons["chat-black-background"].tap()
+        let choice = app.buttons["chat-theme-" + theme]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), file: file, line: line)
+        choice.tap()
+    }
+
+    func testIsletDeliveredAttachmentRemainsReachable() {
+        for language in ["ar", "en"] {
+            for light in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                                       "-MirsaTweakDeliveryFixture", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+                app.launchArguments += ["-mirsa.chat.appearance", light ? "light" : "dark"]
+                app.launch()
+                let delivery = app.buttons["mirsa.chat.artifact.inject"]
+                XCTAssertTrue(delivery.waitForExistence(timeout: 20))
+                let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+                XCTAssertTrue(input.waitForExistence(timeout: 10))
+                // Scroll only the conversation, leaving the composer untouched.
+                app.scrollViews.firstMatch.swipeUp()
+                let clearOfLane = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    delivery.isHittable && delivery.frame.maxY <= input.frame.minY - 80
+                }, object: delivery)
+                XCTAssertEqual(XCTWaiter.wait(for: [clearOfLane], timeout: 10), .completed,
+                               "Last delivery row overlaps the composer lane")
+                let share = app.buttons["mirsa.chat.artifact.download"]
+                XCTAssertTrue(share.isHittable)
+                XCTAssertLessThanOrEqual(share.frame.maxY, input.frame.minY - 80)
+                XCTAssertFalse(app.staticTexts["chat-waiting"].exists, "A completed delivery must not pretend to think")
+                assertComposer(app, liquid: false, name: "islet_delivery_\(language)_\(light ? "light" : "dark")")
+                app.terminate()
+            }
+        }
+    }
+
     private func waitForLandscape(_ app: XCUIApplication) -> Bool {
         let predicate = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: app)], timeout: 10) == .completed

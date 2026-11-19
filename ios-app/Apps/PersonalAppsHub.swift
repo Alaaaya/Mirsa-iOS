@@ -298,9 +298,13 @@ final class PersonalAppsLibrary: ObservableObject {
             defer { if access { input.stopAccessingSecurityScopedResource() } }
             let fm = FileManager.default
             let size = try input.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-            guard size.isRegularFile == true, let bytes = size.fileSize, bytes > 0, bytes <= 512 * 1024 * 1024 else {
-                throw SideloadError.message("Choose an IPA smaller than 512 MB.")
+            guard size.isRegularFile == true, let bytes = size.fileSize, bytes > 0 else {
+                throw SideloadError.message(personalText("Choose a valid IPA file.", "اختار ملف IPA صحيح."))
             }
+            guard Int64(bytes) <= PersonalIPAURL.maximumBytes else {
+                throw SideloadError.message(personalText("The file is larger than 4 GB.", "الملف أكبر من 4 غيغا."))
+            }
+            try PersonalIPAURL.ensureRoom(for: Int64(bytes))
             let stage = fm.temporaryDirectory.appendingPathComponent("personal-library-\(UUID().uuidString)")
             try fm.createDirectory(at: stage, withIntermediateDirectories: true,
                 attributes: [.protectionKey: FileProtectionType.complete])
@@ -360,11 +364,7 @@ private struct PersonalAppIcon: View {
             if let e = progressState.entry(for: app.id.uuidString) {
                 ZStack {
                     Color.black.opacity(0.45)
-                    if let f = e.fraction {
-                        Circle().stroke(.white.opacity(0.25), lineWidth: 3).frame(width: 28, height: 28)
-                        Circle().trim(from: 0, to: f).stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                            .frame(width: 28, height: 28).rotationEffect(.degrees(-90))
-                    } else { ProgressView().tint(.white) }
+                    MirsaLiquidProgress(value: e.fraction, diameter: 48)
                 }.accessibilityElement(children: .ignore)
                  .accessibilityLabel(app.name + ", " + personalText("Signing", "جاري التوقيع") + (e.fraction.map { " \(Int($0 * 100))%" } ?? ""))
             }
@@ -605,6 +605,12 @@ struct PersonalAppsHub: View {
             }
         } message: { app in
             Text(app.name)
+        }
+        .alert(personalText("Couldn't import", "ما قدرت استورد"),
+               isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+            Button(personalText("OK", "تمام"), role: .cancel) { message = nil }
+        } message: {
+            Text(message ?? "")
         }
     }
 }

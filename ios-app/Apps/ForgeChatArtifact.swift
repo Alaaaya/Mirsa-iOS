@@ -92,7 +92,7 @@ struct ForgeChatArtifactCard: View {
             if let s = artifact.size { Text(ByteCountFormatter.string(fromByteCount: s, countStyle: .file) + " · " + artifact.kind.uppercased()).font(.caption2).foregroundStyle(.secondary) }
             if isIPA { Text(ForgeChatText.ipaNote).font(.caption2).foregroundStyle(.secondary) }
             if let p = progress {
-                ProgressView(value: min(max(p, 0), 1))
+                MirsaLiquidProgress(value: p)
                 Button(ForgeChatText.cancel) { task?.cancel(); progress = nil }.font(.caption)
             } else {
                 HStack(spacing: 8) {

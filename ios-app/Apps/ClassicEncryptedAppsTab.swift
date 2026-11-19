@@ -426,7 +426,7 @@ private struct ClassicEncryptedEntryCard: View {
     /// that fraction, the file size and the elapsed time.
     private var installProgress: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: min(max(store.progress, 0), 1)).tint(MirsaPalette.accentSoft)
+            MirsaLiquidProgress(value: store.progress, diameter: 80)
             TimelineView(.periodic(from: installStart ?? Date(), by: 1)) { ctx in
                 let fraction = min(max(store.progress, 0), 1)
                 let elapsed = installStart.map { ctx.date.timeIntervalSince($0) } ?? 0
