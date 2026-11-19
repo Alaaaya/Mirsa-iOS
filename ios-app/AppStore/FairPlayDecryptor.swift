@@ -512,15 +512,38 @@ enum FairPlayDecryptor {
                 try archive.addEntry(with: entry.rel + "/", type: .directory, uncompressedSize: Int64(0),
                                      compressionMethod: .none) { _, _ in Data() }
             } else {
-                let size = (try fm.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber)?.int64Value ?? 0
+                let fileSize =
+                    (try fm.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber)?
+                    .int64Value ?? 0
+
                 let handle = try FileHandle(forReadingFrom: entry.url)
                 defer { try? handle.close() }
-                try archive.addEntry(with: entry.rel, type: .file, uncompressedSize: size,
-                                     compressionMethod: .deflate) { position, size in
+
+                try archive.addEntry(
+                    with: entry.rel,
+                    type: .file,
+                    uncompressedSize: fileSize,
+                    compressionMethod: .deflate
+                ) { position, requestedSize in
+                    // ZIPFoundation may call the provider at end-of-file or
+                    // with a zero-sized request; an empty read there is
+                    // expected, not a failure. Only a genuinely short read
+                    // (fewer bytes than remain) is an error.
+                    if Int64(position) >= fileSize {
+                        return Data()
+                    }
+
                     try handle.seek(toOffset: UInt64(position))
-                    guard let bytes = try handle.read(upToCount: size), !bytes.isEmpty else {
+
+                    let remaining = fileSize - Int64(position)
+                    let amount = min(Int64(requestedSize), remaining)
+
+                    guard amount > 0,
+                          let bytes = try handle.read(upToCount: Int(amount)),
+                          !bytes.isEmpty else {
                         throw Error.ioError("short read: " + entry.rel)
                     }
+
                     return bytes
                 }
             }
