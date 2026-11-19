@@ -1,16 +1,25 @@
 import Foundation
+import Security
 import ZIPFoundation
 
 /// FairPlay decryption for App Store IPAs the user's own Apple ID bought.
 ///
 /// Flow: extract the IPA, decrypt every encrypted Mach-O (main executable,
 /// frameworks, app extensions) with the on-device kernel entry point, then
-/// re-zip. The original encrypted IPA is never modified. Decryption only
-/// works when fairplayd can find the account's licence
-/// (<dir>/SC_Info/<name>.sinf next to each binary); the main licence is
-/// staged next to extension/framework binaries that ship without their own,
-/// exactly as installd replicates it on install, and the staged copies are
-/// removed afterwards.
+/// re-zip. The original encrypted IPA is never modified.
+///
+/// Two staging rules, both learned the hard way (errno 12 on every app
+/// until they were fixed):
+/// 1. The workdir must live in the app's own App Group container. A copy
+///    under tmp is refused by the kernel (errno 12) even when the SINF is
+///    present and correct, because fairplayd only reads licences from
+///    system-recognised containers. Falls back to tmp only when the app
+///    was signed without an App Group (then decryption is expected to fail).
+/// 2. Every binary gets its OWN licence (SC_Info/<name>.sinf next to it),
+///    resolved from the Manifest's SinfPaths when it is not already there.
+///    The main executable's licence is never copied to another binary: it
+///    belongs to that binary alone and the kernel refuses it (errno 12).
+/// Staged copies are removed afterwards.
 ///
 /// No network calls. No signing, no re-signing, no key material anywhere:
 /// the kernel + fairplayd do the decryption, Mirsa only hands them the
@@ -21,7 +30,8 @@ enum FairPlayDecryptor {
         var decrypted: [String]     // Binary names that were encrypted and are now clear.
         var alreadyClear: [String]  // Binaries that were already unencrypted.
         var outputURL: URL          // Decrypted IPA. Caller must consume it, then end workDir.
-        var workDir: URL            // MirsaManagedTmp lease; caller must end it after consuming outputURL.
+        var workDir: URL            // Workdir lease; caller must end it (see endWorkDir) after consuming outputURL.
+        var workDirIsAppGroup: Bool // True when workDir lives in the App Group container (not tmp).
     }
 
     enum Error: LocalizedError {
@@ -69,9 +79,9 @@ enum FairPlayDecryptor {
     /// Decrypts the encrypted IPA at `url` into a new IPA. The input file is
     /// never modified. Must run off the main actor (blocking file I/O + syscalls).
     static func decryptIPA(at url: URL) throws -> Report {
-        let work = try MirsaManagedTmp.begin("fairplay-decrypt")
+        let (work, isAppGroup) = try workDir()
         var handedOff = false
-        defer { if !handedOff { MirsaManagedTmp.end(work) } }
+        defer { if !handedOff { endWorkDir(work, isAppGroup: isAppGroup) } }
         let extracted = work.appendingPathComponent("extracted", isDirectory: true)
         let output = work.appendingPathComponent("decrypted.ipa")
         do {
@@ -86,7 +96,7 @@ enum FairPlayDecryptor {
             for binary in binaries {
                 if try isEncrypted(binary.url) { encrypted.append(binary) } else { alreadyClear.append(binary.name) }
             }
-            let staged = try stageLicences(appDir: appDir, executable: executable, binaries: encrypted)
+            let staged = try stageLicences(appDir: appDir, binaries: encrypted)
             defer { removeStaged(staged) }
             var decrypted: [String] = []
             for binary in encrypted {
@@ -101,12 +111,64 @@ enum FairPlayDecryptor {
             }
             try rezip(tree: extracted, to: output)
             handedOff = true
-            return Report(decrypted: decrypted, alreadyClear: alreadyClear, outputURL: output, workDir: work)
+            return Report(decrypted: decrypted, alreadyClear: alreadyClear, outputURL: output, workDir: work, workDirIsAppGroup: isAppGroup)
         } catch let e as Error {
             throw e
         } catch {
             throw Error.ioError(error.localizedDescription)
         }
+    }
+
+    /// Removes a workdir created by decryptIPA. The caller ends the lease
+    /// after consuming the decrypted IPA (see Report.workDir).
+    static func endWorkDir(_ report: Report) {
+        endWorkDir(report.workDir, isAppGroup: report.workDirIsAppGroup)
+    }
+
+    private static func endWorkDir(_ dir: URL, isAppGroup: Bool) {
+        if isAppGroup {
+            try? FileManager.default.removeItem(at: dir)
+        } else {
+            MirsaManagedTmp.end(dir)
+        }
+    }
+
+    /// The App Group container is the only place fairplayd will read a
+    /// licence from: a temp-dir copy is refused with errno 12 even when the
+    /// SINF is present and correct. Resolves the app's own groups from its
+    /// entitlements and returns the first usable container, or nil when the
+    /// app was signed without an App Group.
+    private static func appGroupContainer() -> URL? {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let groups = SecTaskCopyValueForEntitlement(task, "com.apple.security.application-groups" as CFString) as? [String] else {
+            return nil
+        }
+        let fm = FileManager.default
+        for id in groups {
+            guard let url = fm.containerURL(forSecurityApplicationGroupIdentifier: id) else { continue }
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// Workdir for one decrypt operation. Prefers the App Group container;
+    /// falls back to the tmp lease only when no App Group is available.
+    /// Stale fairplay-decrypt dirs in the group container are leftovers of
+    /// crashed runs (only one decrypt runs at a time) and are swept first.
+    private static func workDir() throws -> (URL, Bool) {
+        if let group = appGroupContainer() {
+            let fm = FileManager.default
+            for name in (try? fm.contentsOfDirectory(atPath: group.path)) ?? [] where name.hasPrefix("mirsa-fairplay-decrypt-") {
+                try? fm.removeItem(at: group.appendingPathComponent(name, isDirectory: true))
+            }
+            let dir = group.appendingPathComponent("mirsa-fairplay-decrypt-" + UUID().uuidString, isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: false)
+            return (dir, true)
+        }
+        return (try MirsaManagedTmp.begin("fairplay-decrypt"), false)
     }
 
     // MARK: - Extraction (ZipReader with the standard IPA limits, not the
@@ -229,24 +291,40 @@ enum FairPlayDecryptor {
     }
 
     /// Ensures every binary has SC_Info/<name>.sinf next to it, because
-    /// fairplayd looks the licence up by the binary's own path. Prefers the
-    /// binary's own licence from the app's SC_Info, falls back to the main
-    /// executable's licence (the replication installd performs on install).
-    private static func stageLicences(appDir: URL, executable: String, binaries: [Binary]) throws -> [StagedLicence] {
+    /// fairplayd looks the licence up by the binary's own path. The licence
+    /// is resolved from SC_Info/Manifest.plist's SinfPaths (the server's
+    /// per-component list) when it is not already next to the binary. A
+    /// binary with no licence of its own fails with noLicence: the main
+    /// executable's licence is NEVER copied to another binary — it belongs
+    /// to that binary alone and the kernel refuses it (errno 12).
+    private static func stageLicences(appDir: URL, binaries: [Binary]) throws -> [StagedLicence] {
         let fm = FileManager.default
         let scInfo = appDir.appendingPathComponent("SC_Info", isDirectory: true)
-        let mainSinf = scInfo.appendingPathComponent(executable + ".sinf")
+        let manifestPaths: [String] = {
+            let manifest = scInfo.appendingPathComponent("Manifest.plist")
+            guard let data = try? Data(contentsOf: manifest),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let paths = plist["SinfPaths"] as? [String] else { return [] }
+            return paths
+        }()
         var staged: [StagedLicence] = []
         for binary in binaries {
             let dir = binary.url.deletingLastPathComponent()
             let target = dir.appendingPathComponent("SC_Info", isDirectory: true)
                 .appendingPathComponent(binary.name + ".sinf")
             if fm.fileExists(atPath: target.path) { continue }
-            let own = scInfo.appendingPathComponent(binary.name + ".sinf")
+            // The binary's own licence: the Manifest entry named after it,
+            // then the app's SC_Info copy under the same name.
             let source: URL
-            if fm.fileExists(atPath: own.path) { source = own }
-            else if fm.fileExists(atPath: mainSinf.path) { source = mainSinf }
-            else { throw Error.noLicence(binary: binary.name) }
+            if let rel = manifestPaths.first(where: { ($0 as NSString).lastPathComponent == binary.name + ".sinf" }) {
+                let candidate = appDir.appendingPathComponent(rel)
+                guard fm.fileExists(atPath: candidate.path) else { throw Error.noLicence(binary: binary.name) }
+                source = candidate
+            } else {
+                let own = scInfo.appendingPathComponent(binary.name + ".sinf")
+                guard fm.fileExists(atPath: own.path) else { throw Error.noLicence(binary: binary.name) }
+                source = own
+            }
             var createdDir: URL? = nil
             let dirURL = target.deletingLastPathComponent()
             if !fm.fileExists(atPath: dirURL.path) {
