@@ -194,11 +194,11 @@ final class EncryptedAppsStore: ObservableObject {
     @Published var decryptingID: UUID?
     @Published var error: String?
     @Published var toast: String?
-    @Published var decryptSuccess: String?
-    /// A decrypted IPA waiting for the user to confirm the install after
-    /// the "decryption complete" alert. The FairPlay workdir stays alive
-    /// until the user confirms or cancels, then it is ended.
-    private var pendingDecrypted: (name: String, report: FairPlayDecryptor.Report)?
+    /// IDs of entries with a decrypted IPA persisted on disk. The card
+    /// shows "تم فك التشفير" + an Install button for these, and the
+    /// Decrypted section lists them. Rebuilt from the decrypted files
+    /// on launch, so the state survives app restarts.
+    @Published var decryptedIDs: Set<UUID> = []
 
     nonisolated static let root: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -211,6 +211,10 @@ final class EncryptedAppsStore: ObservableObject {
     }()
     nonisolated static func ipaURL(_ id: UUID) -> URL { root.appendingPathComponent("\(id.uuidString).ipa") }
     nonisolated static func iconURL(_ id: UUID) -> URL { root.appendingPathComponent("\(id.uuidString).png") }
+    /// The persisted decrypted IPA for an entry (written on a successful
+    /// decrypt, next to the encrypted file). The card's Install button
+    /// hands this file to the installer.
+    nonisolated static func decryptedURL(_ id: UUID) -> URL { root.appendingPathComponent("\(id.uuidString)-decrypted.ipa") }
     private var indexURL: URL { Self.root.appendingPathComponent("index.json") }
 
     init() {
@@ -220,6 +224,7 @@ final class EncryptedAppsStore: ObservableObject {
         if let d = try? Data(contentsOf: indexURL), let list = try? JSONDecoder().decode([EncryptedIPAEntry].self, from: d) {
             entries = list.filter { FileManager.default.fileExists(atPath: Self.ipaURL($0.id).path) }
         }
+        decryptedIDs = Set(entries.map(\.id).filter { FileManager.default.fileExists(atPath: Self.decryptedURL($0).path) })
     }
 
     private func save() {
@@ -274,6 +279,8 @@ final class EncryptedAppsStore: ObservableObject {
     func delete(_ entry: EncryptedIPAEntry) {
         try? FileManager.default.removeItem(at: Self.ipaURL(entry.id))
         try? FileManager.default.removeItem(at: Self.iconURL(entry.id))
+        try? FileManager.default.removeItem(at: Self.decryptedURL(entry.id))
+        decryptedIDs.remove(entry.id)
         entries.removeAll { $0.id == entry.id }
         save()
     }
@@ -317,49 +324,48 @@ final class EncryptedAppsStore: ObservableObject {
             guard FileManager.default.fileExists(atPath: report.outputURL.path) else {
                 throw FairPlayDecryptor.Error.ioError("Decrypted IPA missing at \(report.outputURL.path)")
             }
-            // Decryption succeeded. Show a clear "decryption complete"
-            // confirmation first; the decrypted IPA is handed to the
-            // installer only after the user confirms, so they see the
-            // success instead of jumping straight to the install sheet.
-            // The workdir stays alive until confirm/cancel ends it.
-            pendingDecrypted = (name: entry.name, report: report)
-            decryptSuccess = EncryptedText.t("Decryption complete — \(entry.name) is ready to install.",
-                                            "تم فك التشفير — \(entry.name) جاهز للتثبيت.",
-                                            "ڕەمزکردنەوە تەواو بوو — \(entry.name) ئامادەیە بۆ دامەزراندن.",
-                                            "Vekirina şîfreyê qediya — \(entry.name) ji bo sazkirinê amade ye.")
+            // Decryption succeeded. Persist the decrypted IPA next to the
+            // encrypted one so the card can offer Install later, then end
+            // the FairPlay workdir. The card flips to "تم فك التشفير" +
+            // Install, and the entry moves to the Decrypted section.
+            let dest = Self.decryptedURL(entry.id)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: report.outputURL, to: dest)
+            FairPlayDecryptor.endWorkDir(report)
+            guard FileManager.default.fileExists(atPath: dest.path) else {
+                throw FairPlayDecryptor.Error.ioError("Decrypted IPA missing at \(dest.path)")
+            }
+            decryptedIDs.insert(entry.id)
+            toast = EncryptedText.t("Decryption complete — \(entry.name)",
+                                    "تم فك التشفير — \(entry.name)",
+                                    "ڕەمزکردنەوە تەواو بوو — \(entry.name)",
+                                    "Vekirina şîfreyê qediya — \(entry.name)")
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    /// The user confirmed the "decryption complete" alert: hand the
-    /// decrypted IPA to the normal Apps-tab importer (install sheet),
-    /// then end the FairPlay workdir.
-    func confirmDecryptedInstall(vm: AppViewModel?) async {
-        guard let pending = pendingDecrypted else { return }
-        pendingDecrypted = nil
-        decryptSuccess = nil
-        await AppsStore.shared.importIPA(from: pending.report.outputURL)
-        FairPlayDecryptor.endWorkDir(pending.report)
+    /// Install the persisted decrypted IPA: hand it to the normal
+    /// Apps-tab importer (install sheet). The card's Install button
+    /// (shown on a decrypted entry, in place of Share) calls this
+    /// directly — no alert, no race: the file is already on disk.
+    func installDecrypted(_ entry: EncryptedIPAEntry, vm: AppViewModel?) async {
+        let url = Self.decryptedURL(entry.id)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            decryptedIDs.remove(entry.id)
+            error = EncryptedText.t("Decrypted file not found. Decrypt the app again.",
+                                    "ملف المفكوك مو موجود. فك تشفير التطبيق مرة تانية.",
+                                    "فایلی ڕەمزکراوەکە نەدۆزرایەوە. دووبارە ڕەمزکردنەوە بکە.",
+                                    "Pelê şîfrevekirî nehat dîtin. Sepanê dîsa şîfre veke.")
+            return
+        }
+        await AppsStore.shared.importIPA(from: url)
         if let message = AppsStore.shared.error {
             AppsStore.shared.error = nil
             self.error = message
             return
         }
         vm?.selectedTab = .apps
-        toast = EncryptedText.t("Decrypted \(pending.name) — ready in the Apps tab",
-                                "انفك تشفير \(pending.name) — جاهز بتبويب التطبيقات",
-                                "\(pending.name) ڕەمزکرایەوە — لە بەشی ئەپەکان ئامادەیە",
-                                "\(pending.name) şîfre hate vekirin — di tabloya Sepanan de amade ye")
-    }
-
-    /// The user dismissed the "decryption complete" alert without
-    /// installing: discard the decrypted copy and end the workdir.
-    func cancelDecrypted() {
-        guard let pending = pendingDecrypted else { decryptSuccess = nil; return }
-        pendingDecrypted = nil
-        decryptSuccess = nil
-        FairPlayDecryptor.endWorkDir(pending.report)
     }
 
     /// Keeps the existing Wi-Fi tunnel path; cellular serves the same IPA locally, without signing or upload.
