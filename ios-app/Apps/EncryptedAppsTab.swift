@@ -101,15 +101,6 @@ struct EncryptedAppsTab: View {
         .alert(MirsaTr.lit("Notice"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button(MirsaTr.lit("OK")) { store.error = nil }
         } message: { Text(store.error ?? "") }
-        .alert(t("Decryption complete", "تم فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê qediya"),
-               isPresented: Binding(get: { store.decryptSuccess != nil }, set: { if !$0 { store.cancelDecrypted() } })) {
-            Button(t("Install", "تثبيت", "دامەزراندن", "Saz bike")) {
-                Task { await store.confirmDecryptedInstall(vm: vm) }
-            }
-            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {
-                store.cancelDecrypted()
-            }
-        } message: { Text(store.decryptSuccess ?? "") }
         .confirmationDialog(t("Delete this IPA?", "تحذف هالـIPA؟", "ئەم IPAیە بسڕیتەوە؟", "Vê IPA jê bibî?"),
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible) {
@@ -211,6 +202,29 @@ struct EncryptedAppsTab: View {
         }
     }
 
+    /// One entry card with its swipe actions, shared by the Decrypted
+    /// and Waiting sections.
+    @ViewBuilder
+    private func entryRow(_ entry: EncryptedIPAEntry) -> some View {
+        EncryptedEntryCard(entry: entry, store: store, vm: vm, failed: failedInstalls.contains(entry.id),
+                           onInstall: { install(entry) }) { pendingDelete = entry }
+            .modifier(StoreListRow())
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button { install(entry) } label: {
+                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
+                }
+                .tint(StoreLuxe.accent)
+                .disabled(store.busy != nil)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button { StoreHaptics.delete(); pendingDelete = entry } label: {
+                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash.fill")
+                }
+                .tint(MirsaPalette.danger)
+                .disabled(store.installingID == entry.id)
+            }
+    }
+
     private var downloadsPage: some View {
         List {
             Group {
@@ -257,34 +271,31 @@ struct EncryptedAppsTab: View {
                 }
                 .modifier(StoreListRow())
             } else {
+                // Decrypted apps replace the old "Queue": every app whose
+                // decryption finished lives here, with an Install button
+                // on its card. The rest stay below, waiting to be decrypted.
+                let decrypted = filteredEntries.filter { store.decryptedIDs.contains($0.id) }
+                let waiting = filteredEntries.filter { !store.decryptedIDs.contains($0.id) }
+                if !decrypted.isEmpty {
+                    Section {
+                        ForEach(decrypted) { entry in entryRow(entry) }
+                    } header: {
+                        StoreSectionTitle(title: storeText("Decrypted", "تم فك تشفيرها", de: "Entschlüsselt", ckb: "ڕەمزکراوە", kmr: "Şîfre hat vekirin"),
+                                          trailing: "\(decrypted.count)")
+                            .textCase(nil)
+                            .padding(.vertical, 6)
+                    }
+                }
                 Section {
                     if filteredEntries.isEmpty {
                         Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
                             .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
                             .modifier(StoreListRow())
                     }
-                    ForEach(filteredEntries) { entry in
-                        EncryptedEntryCard(entry: entry, store: store, vm: vm, failed: failedInstalls.contains(entry.id),
-                                           onInstall: { install(entry) }) { pendingDelete = entry }
-                            .modifier(StoreListRow())
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button { install(entry) } label: {
-                                    Label(t("Install as-is", "ثبّت متل ما هو", "وەک خۆی دابمەزرێنە", "Wekî xwe saz bike"), systemImage: "arrow.down.app.fill")
-                                }
-                                .tint(StoreLuxe.accent)
-                                .disabled(store.busy != nil)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button { StoreHaptics.delete(); pendingDelete = entry } label: {
-                                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash.fill")
-                                }
-                                .tint(MirsaPalette.danger)
-                                .disabled(store.installingID == entry.id)
-                            }
-                    }
+                    ForEach(waiting) { entry in entryRow(entry) }
                 } header: {
-                    StoreSectionTitle(title: storeText("Queue", "قائمة الانتظار", de: "Warteschlange", ckb: "ڕیز", kmr: "Rêz"),
-                                      trailing: "\(filteredEntries.count)")
+                    StoreSectionTitle(title: storeText("Waiting for decryption", "بانتظار فك التشفير", de: "Warten auf Entschlüsselung", ckb: "چاوەڕوانی ڕەمزکردنەوە", kmr: "Li benda vekirina şîfreyê"),
+                                      trailing: "\(waiting.count)")
                         .textCase(nil)
                         .padding(.vertical, 6)
                 }
@@ -592,25 +603,51 @@ private struct EncryptedEntryCard: View {
                 .buttonStyle(.mirsaPress)
                 .disabled(store.busy != nil)
                 .opacity(store.busy != nil ? 0.55 : 1)
-                if entry.encryptedBinary == true, entry.hasSinf {
-                    Button { Task { await store.decrypt(entry, vm: vm) } } label: {
-                        // Icon above the text: "التشفير" is one long word and
-                        // truncates next to the icon in the half-width button.
-                        VStack(spacing: 2) {
-                            Image(systemName: "lock.open")
-                            Text(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"))
-                        }
-                            .font(MirsaFont.button)
-                            .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                // After a successful decrypt the card flips: the Decrypt
+                // button becomes a "تم فك التشفير" badge and the Share
+                // button becomes an Install button for the decrypted IPA.
+                if store.decryptedIDs.contains(entry.id) {
+                    VStack(spacing: 2) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text(t("Decryption complete", "تم فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê qediya"))
                     }
-                    .buttonStyle(.mirsaSecondary)
+                        .font(MirsaFont.button)
+                        .foregroundStyle(MirsaPalette.success)
+                        .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .accessibilityIdentifier("encrypted-decrypted")
+                    Button { Task { await store.installDecrypted(entry, vm: vm) } } label: {
+                        Image(systemName: "arrow.down.app.fill")
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(StoreLuxe.identity, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 64)
                     .disabled(store.busy != nil)
-                    .accessibilityIdentifier("encrypted-decrypt")
+                    .accessibilityLabel(t("Install", "تثبيت", "دامەزراندن", "Saz bike"))
+                    .accessibilityIdentifier("encrypted-install-decrypted")
+                } else {
+                    if entry.encryptedBinary == true, entry.hasSinf {
+                        Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                            // Icon above the text: "التشفير" is one long word and
+                            // truncates next to the icon in the half-width button.
+                            VStack(spacing: 2) {
+                                Image(systemName: "lock.open")
+                                Text(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"))
+                            }
+                                .font(MirsaFont.button)
+                                .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.mirsaSecondary)
+                        .disabled(store.busy != nil)
+                        .accessibilityIdentifier("encrypted-decrypt")
+                    }
+                    // Share and Delete are icon-only so long labels never wrap mid-word; VoiceOver keeps the full label.
+                    StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
+                        .labelStyle(.iconOnly).frame(width: 64)
                 }
-                // Share and Delete are icon-only so long labels never wrap mid-word; VoiceOver keeps the full label.
-                StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
-                    .labelStyle(.iconOnly).frame(width: 64)
                 Button { StoreHaptics.delete(); onDelete() } label: {
                     Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
                         .foregroundStyle(MirsaPalette.danger)
