@@ -5,6 +5,11 @@ import SwiftUI
 struct MirsaLiquidProgress: View {
     var value: Double? = nil
     var diameter: CGFloat = 68
+#if DEBUG
+    // EnvironmentValues.accessibilityReduceMotion is read-only. Keep the
+    // deterministic review override local to this component and DEBUG builds.
+    var reviewReduceMotion: Bool? = nil
+#endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -13,9 +18,17 @@ struct MirsaLiquidProgress: View {
         guard let value, value.isFinite else { return nil }
         return min(1, max(0, value))
     }
+    private var effectiveReduceMotion: Bool {
+#if DEBUG
+        reviewReduceMotion ?? reduceMotion
+#else
+        reduceMotion
+#endif
+    }
+
     var body: some View {
         Group {
-            if reduceMotion {
+            if effectiveReduceMotion {
                 ProgressView(value: fraction).progressViewStyle(.linear)
                     .frame(maxWidth: 180).tint(.purple)
             } else {
@@ -166,8 +179,7 @@ struct MirsaLiquidReviewHost: View {
                     MirsaLiquidProgress(value: 1, diameter: 92)
                 }
                 MirsaLiquidProgress(value: nil, diameter: 80)
-                MirsaLiquidProgress(value: 0.47)
-                    .environment(\.accessibilityReduceMotion, true)
+                MirsaLiquidProgress(value: 0.47, reviewReduceMotion: true)
                     .accessibilityIdentifier("liquid.reduce-motion")
                 Button("Completion") {
                     NotificationCenter.default.post(name: .mirsaLiquidCompletion, object: nil)
