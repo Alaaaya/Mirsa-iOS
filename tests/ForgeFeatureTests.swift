@@ -21,8 +21,8 @@ import ImageIO
             }
         }
         for feature in ForgeGuide.allCases {
-            // Legacy tr copy intentionally shares the English fallback in German; tr5 tools have five distinct translations.
-            XCTAssertEqual(subtitles[feature]?.count, feature == .port || feature == .blackbox ? 5 : 4, feature.rawValue)
+            // Every supported language now has its own translated guide copy.
+            XCTAssertEqual(subtitles[feature]?.count, 5, feature.rawValue)
         }
         AppLanguageStore.shared.set(.english)
         XCTAssertTrue(ForgeGuide.crash.steps.joined().contains("cannot read system crash logs"))
@@ -158,7 +158,7 @@ import ImageIO
             XCTAssertNotEqual(ForgeCommunityCard.explanation(.version), ForgeCommunityCard.explanation(.version, uploaded: true))
             versions.insert(ForgeCommunityCard.explanation(.version))
         }
-        XCTAssertEqual(versions.count, 4)
+        XCTAssertEqual(versions.count, 5)
         AppLanguageStore.shared.set(.arabic)
         XCTAssertEqual(ForgeCommunityCard.explanation(.version), "قارن النسخ، اكتب شو الجديد، وانشر تحديثك.")
         XCTAssertTrue(ForgeCommunityCard.explanation(.edit).contains("اسم"))
@@ -259,7 +259,7 @@ import ImageIO
                       "Case-colliding archive path component", "App executable is missing", "Invalid Zip header"]
         for error in errors {
             let messages = AppLanguage.allCases.map { IPAEditorService.archiveError(error, language: $0) }
-            XCTAssertEqual(Set(messages).count, 4)
+            XCTAssertEqual(Set(messages).count, 5)
             for message in messages {
                 XCTAssertFalse(message.isEmpty)
                 XCTAssertFalse(message.contains("/private/secret"))
