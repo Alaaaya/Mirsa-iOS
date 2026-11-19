@@ -681,10 +681,11 @@ struct ForgeChatThreadView: View {
     private var darkChat: Bool {
         switch chatAppearance {
         case "light": return false
-        case "dark": return true
+        case "dark", "classic": return true
         default: return systemDark
         }
     }
+    private var classicChat: Bool { chatAppearance == "classic" }
     private var chatInk: Color { darkChat ? Color(white: 0.95) : Color(white: 0.10) }
     private var chatMuted: Color { darkChat ? Color(white: 0.65) : Color(white: 0.43) }
     private var chatCanvas: Color { darkChat ? Color(white: 0.055) : Color(red: 0.973, green: 0.973, blue: 0.969) }
@@ -890,7 +891,7 @@ struct ForgeChatThreadView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(chatCanvas.ignoresSafeArea())
+        .background { if classicChat { AuroraBackground().ignoresSafeArea() } else { chatCanvas.ignoresSafeArea() } }
         .background(ForgeChatSystemAppearanceReader { dark in
             if systemDark != dark { systemDark = dark }
         }.frame(width: 0, height: 0))
@@ -1125,7 +1126,32 @@ struct ForgeChatThreadView: View {
     }
 
     /// Familiar circular navigation actions and a quiet conversation identity.
-    private var header: some View {
+    @ViewBuilder private var header: some View {
+        if classicChat { classicHeader } else { isletHeader }
+    }
+
+    private var classicHeader: some View {
+        HStack(spacing: 10) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9)).frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
+            if !shortID.isEmpty { shortIDCapsule }
+            blackBackgroundToggle
+            Spacer(minLength: 0)
+            Button { showChatSettings = true } label: {
+                Image(systemName: "gearshape").foregroundStyle(.white.opacity(0.9))
+                    .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+            }
+            .accessibilityLabel(MirsaCatText.settings).accessibilityIdentifier("chat-settings")
+        }
+        .padding(.horizontal, 18).padding(.top, 2).padding(.bottom, 6)
+        .zIndex(1)
+    }
+
+    private var isletHeader: some View {
         HStack(spacing: 10) {
             Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundStyle(chatInk).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(chatRim, lineWidth: 0.5)) }
                 .accessibilityLabel(ForgeChatText.close).accessibilityIdentifier("chat-back")
@@ -1143,26 +1169,91 @@ struct ForgeChatThreadView: View {
 
         }
         .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
-        .background(chatCanvas.opacity(0.94))
+        .background { if !classicChat { chatCanvas.opacity(0.94) } }
         .zIndex(1)
     }
 
-    /// Switch the whole thread palette and materials, persisting an explicit choice.
+    /// Three explicit palettes. Unset preferences continue to follow scene appearance.
     private var blackBackgroundToggle: some View {
-        Button { chatAppearance = darkChat ? "light" : "dark" } label: {
-            Image(systemName: darkChat ? "moon.fill" : "moon")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(chatInk)
-                .frame(width: 28, height: 28).background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(chatRim, lineWidth: 0.5))
+        Menu {
+            ForEach(["light", "dark", "classic"], id: \.self) { choice in
+                Button { chatAppearance = choice } label: {
+                    if (chatAppearance == "system" ? (darkChat ? "dark" : "light") : chatAppearance) == choice {
+                        Label(ForgeChatAppearanceText.name(choice), systemImage: "checkmark")
+                    } else {
+                        Text(ForgeChatAppearanceText.name(choice))
+                    }
+                }
+                .accessibilityIdentifier("chat-theme-" + choice)
+            }
+        } label: {
+            Image(systemName: "paintpalette")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(chatInk)
+                .frame(width: 36, height: 36).background(.ultraThinMaterial, in: Circle())
                 .frame(width: 44, height: 44).contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(MirsaChatBackground.label(black: darkChat))
-        .accessibilityValue(darkChat ? "dark" : "light")
+        .accessibilityLabel(ForgeChatAppearanceText.title)
+        .accessibilityValue(classicChat ? "classic" : (darkChat ? "dark" : "light"))
         .accessibilityIdentifier("chat-black-background")
     }
 
-    private var inputBar: some View {
+    @ViewBuilder private var inputBar: some View {
+        if classicChat { classicInputBar } else { isletInputBar }
+    }
+
+    private var classicInputBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if draftCount >= 3600 {
+                Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
+                    .font(.caption).foregroundStyle(draftCount > ForgeChatText.messageMax ? Color.red : MirsaChatTheme.muted)
+                    .accessibilityIdentifier("chat-character-limit")
+                    .accessibilityLabel(ForgeChatText.counter(draftCount))
+                    .accessibilityValue(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : "")
+            }
+            HStack(alignment: .center, spacing: 10) {
+                HStack(spacing: 8) {
+                    if attachmentsUI {
+                        attachMenu
+                    } else {
+                        PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
+                    }
+                    TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(.white).tint(MirsaChatTheme.blue)
+                }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                Button {
+                    started = true
+                    if let eid = editingID {
+                        let newText = text
+                        Task {
+                            let r = await store.editMessage(threadID: threadID, messageID: eid, text: newText)
+                            if r == .ok { editingID = nil; text = ""; actionError = nil } else { actionError = ForgeChatExtrasText.editFailed }
+                        }
+                        return
+                    }
+                    let quote = replyTo
+                    replyTo = nil
+                    if attachmentsUI {
+                        drafts.expireStale(threadID)
+                        guard let ids = drafts.readyIDs(threadID) else { attachNote = ChatAttachmentText.needsUpload; return }
+                        // Same draft thread UUID the uploads used; the first send still says newThread true.
+                        store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids, replyTo: quote)
+                        drafts.clearAfterSend(threadID); attachNote = nil
+                        text = ""; jpeg = nil; photo = nil
+                    } else {
+                        store.send(threadID: threadID, text: text, jpeg: jpeg, replyTo: quote)
+                        text = ""; jpeg = nil; photo = nil
+                    }
+                } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
+                    .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
+                    .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
+                    .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
+            }
+        }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
+        // Do not assign an identifier to this transparent layout container.
+        // SwiftUI propagates it to the text editor and buttons, replacing their
+        // distinct identifiers and hiding those controls from accessibility queries.
+    }
+
+    private var isletInputBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             if draftCount >= 3600 {
                 Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
@@ -1218,14 +1309,36 @@ struct ForgeChatThreadView: View {
         // distinct identifiers and hiding those controls from accessibility queries.
     }
 
-    private func userBubble(_ t: String) -> some View {
+    @ViewBuilder private func userBubble(_ t: String) -> some View {
+        if classicChat { classicUserBubble(t) } else { isletUserBubble(t) }
+    }
+
+    @ViewBuilder private func assistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        if classicChat { classicAssistantBlock(content) } else { isletAssistantBlock(content) }
+    }
+
+    private func classicUserBubble(_ t: String) -> some View {
+        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 11).background(MirsaPalette.accentGradient).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)).shadow(color: MirsaPalette.accent.opacity(0.25), radius: 8, y: 3).frame(maxWidth: 300, alignment: .trailing)
+    }
+
+    @ViewBuilder private func classicAssistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) { MirsaSailMark().frame(width: 28, height: 28); Text(ForgeChatText.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(MirsaChatTheme.muted) }
+            content().foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white.opacity(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.08), lineWidth: 0.5))
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func isletUserBubble(_ t: String) -> some View {
         Text(t).font(.system(size: 16)).foregroundStyle(.white)
             .padding(.horizontal, 18).padding(.vertical, 13)
             .background(Color(white: darkChat ? 0.18 : 0.10), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
             .frame(maxWidth: 300, alignment: .trailing)
     }
 
-    @ViewBuilder private func assistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+    @ViewBuilder private func isletAssistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             content().foregroundStyle(chatInk)
         }
@@ -1616,6 +1729,22 @@ private struct ForgeChatSystemAppearanceReader: UIViewRepresentable {
             guard let scene = window?.windowScene else { return }
             let dark = scene.traitCollection.userInterfaceStyle == .dark
             DispatchQueue.main.async { [weak self] in self?.changed?(dark) }
+        }
+    }
+}
+
+
+/// Chat-only labels, independent from the application's theme preference.
+enum ForgeChatAppearanceText {
+    static var title: String {
+        tr5("Chat appearance", "مظهر المحادثة", de: "Chat-Darstellung",
+            ckb: "ڕووکارى گفتوگۆ", kmr: "Dîmena sohbetê")
+    }
+    static func name(_ choice: String) -> String {
+        switch choice {
+        case "light": return tr5("Light", "فاتح", de: "Hell", ckb: "ڕووناک", kmr: "Ronahî")
+        case "dark": return tr5("Dark", "داكن", de: "Dunkel", ckb: "تاریک", kmr: "Tarî")
+        default: return tr5("Mirsa Classic", "مرسى الكلاسيكي", de: "Mirsa Klassisch", ckb: "میرسای کلاسیکی", kmr: "Mirsa Klasîk")
         }
     }
 }

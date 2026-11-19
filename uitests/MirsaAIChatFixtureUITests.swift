@@ -120,10 +120,10 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 XCTAssertTrue(app.staticTexts["Thanks, no rush."].exists)
                 let appearance = app.buttons["chat-black-background"]
                 XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
-                appearance.tap()
+                selectTheme(app, light ? "dark" : "light")
                 XCTAssertEqual(appearance.value as? String, light ? "dark" : "light")
                 assertComposer(app, liquid: false, name: "islet_toggled_\(language)_\(light ? "dark" : "light")")
-                appearance.tap()
+                selectTheme(app, light ? "light" : "dark")
                 XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
                 assertComposer(app, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")")
                 app.buttons["chat-settings"].tap()
@@ -137,7 +137,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 app.terminate()
             }
         }
-        // No appearance launch override here: exercise the actual persisted choice.
+        // No appearance override: menu selection must persist across real relaunches.
         for language in ["ar", "en"] {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
@@ -145,18 +145,25 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             app.launch()
             let appearance = app.buttons["chat-black-background"]
             XCTAssertTrue(appearance.waitForExistence(timeout: 20))
-            if appearance.value as? String != "light" { appearance.tap() }
-            app.terminate()
-            app.launch()
-            XCTAssertTrue(appearance.waitForExistence(timeout: 20))
-            XCTAssertEqual(appearance.value as? String, "light")
-            appearance.tap()
-            app.terminate()
-            app.launch()
-            XCTAssertTrue(appearance.waitForExistence(timeout: 20))
-            XCTAssertEqual(appearance.value as? String, "dark")
+            for theme in ["classic", "light", "dark"] {
+                selectTheme(app, theme)
+                XCTAssertEqual(appearance.value as? String, theme)
+                app.terminate()
+                app.launch()
+                XCTAssertTrue(appearance.waitForExistence(timeout: 20))
+                XCTAssertEqual(appearance.value as? String, theme)
+                assertComposer(app, liquid: false, name: "three_themes_\(language)_\(theme)")
+            }
             app.terminate()
         }
+    }
+
+    private func selectTheme(_ app: XCUIApplication, _ theme: String,
+                             file: StaticString = #filePath, line: UInt = #line) {
+        app.buttons["chat-black-background"].tap()
+        let choice = app.buttons["chat-theme-" + theme]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), file: file, line: line)
+        choice.tap()
     }
 
     func testIsletDeliveredAttachmentRemainsReachable() {
