@@ -289,6 +289,59 @@ final class EncryptedAppsStore: ObservableObject {
         UIImage(contentsOfFile: Self.iconURL(entry.id).path)
     }
 
+    /// On-disk size of the persisted decrypted IPA, if one exists.
+    func decryptedSize(_ entry: EncryptedIPAEntry) -> Int64? {
+        let url = Self.decryptedURL(entry.id)
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .totalFileAllocatedSizeKey]) else { return nil }
+        return Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
+    }
+
+    /// When the persisted decrypted IPA was written (decryption completion time).
+    func decryptedDate(_ entry: EncryptedIPAEntry) -> Date? {
+        let url = Self.decryptedURL(entry.id)
+        return (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    /// Delete only the decrypted output file, keeping the original entry.
+    /// The entry leaves the Decrypted section and returns to Waiting.
+    func deleteDecrypted(_ entry: EncryptedIPAEntry) {
+        try? FileManager.default.removeItem(at: Self.decryptedURL(entry.id))
+        decryptedIDs.remove(entry.id)
+    }
+
+    /// Re-read the original IPA's metadata (name, version, size, licence)
+    /// and update the entry in place, keeping its id so the decrypted
+    /// file stays linked.
+    func reinspect(_ entry: EncryptedIPAEntry) async {
+        guard busy == nil, AppsStore.shared.busy == nil else {
+            error = tr("Finish the current import first.", "خلّص الاستيراد الحالي أولاً.")
+            return
+        }
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try EncryptedIPAInspector.inspect(Self.ipaURL(entry.id))
+            }.value
+            guard let idx = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+            var updated = entries[idx]
+            let fresh = result.entry
+            updated.name = fresh.name
+            updated.bundleID = fresh.bundleID
+            updated.version = fresh.version
+            updated.sizeBytes = fresh.sizeBytes
+            updated.hasSinf = fresh.hasSinf
+            updated.hasMetadata = fresh.hasMetadata
+            updated.encryptedBinary = fresh.encryptedBinary
+            updated.metadata = fresh.metadata
+            entries[idx] = updated
+            if let icon = result.icon { try? icon.write(to: Self.iconURL(entry.id), options: .atomic) }
+            save()
+            toast = EncryptedText.t("Re-inspected \(entry.name)", "أعدنا فحص \(entry.name)",
+                                    "\(entry.name) دووبارە پشکنرا", "\(entry.name) dîsa hate kontrolkirin")
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     /// Decrypts the stored encrypted IPA on this iPhone (own-account only)
     /// and hands the decrypted copy to the normal Apps-tab importer, which
     /// shows the usual install sheet (edit & tweaks, container, real app,
