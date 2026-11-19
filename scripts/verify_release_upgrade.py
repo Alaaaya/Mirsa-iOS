@@ -16,16 +16,16 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     names = [n for n in archive.namelist() if n.startswith("Payload/") and n.count("/") == 2 and n.endswith(".app/Info.plist")]
     assert len(names) == 1
     current = plistlib.loads(archive.read(names[0]))
-    assert current["CFBundleShortVersionString"] == "2.9.1"
+    assert current["CFBundleShortVersionString"] == "2.9.2"
     for name in archive.namelist():
         if name.endswith(".appex/Info.plist"):
             ext = plistlib.loads(archive.read(name))
             assert ext["CFBundleShortVersionString"] == current["CFBundleShortVersionString"]
             assert ext["CFBundleVersion"] == current["CFBundleVersion"]
 old = baseline["ipa"]["info"]["CFBundleVersion"]
-previous = "6.89.1"  # Verified production 2.9 IPA
+previous = "6.90.1"  # Verified production 2.9.1 IPA
 new = current["CFBundleVersion"]
-assert int(current["MirsaBuild"]) > 486, "actual MirsaBuild must advance past production 2.8"
+assert int(current["MirsaBuild"]) > 490, "actual MirsaBuild must advance past production 2.8"
 # JSON-encoded numeric versions are also valid Swift string literals.
 with tempfile.TemporaryDirectory() as tmp:
     script = pathlib.Path(tmp) / "Upgrade243.swift"
