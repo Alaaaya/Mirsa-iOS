@@ -18,8 +18,12 @@ import ZIPFoundation
 ///    was signed without an App Group (then decryption is expected to fail).
 /// 2. Every binary gets its OWN licence (SC_Info/<name>.sinf next to it),
 ///    resolved from the Manifest's SinfPaths when it is not already there.
-///    The main executable's licence is never copied to another binary: it
-///    belongs to that binary alone and the kernel refuses it (errno 12).
+///    Frameworks in App Store packages usually have no licence of their own
+///    - the Manifest lists only the main licence - so a binary with no
+///    licence of its own falls back to the main executable's licence, which
+///    covers the whole purchase (the app's own licence, for the user's own
+///    bought app). The licence is staged next to the binary because
+///    fairplayd looks it up by the binary's own path.
 /// Staged copies are removed afterwards.
 ///
 /// No network calls. No signing, no re-signing, no key material anywhere:
@@ -335,10 +339,10 @@ enum FairPlayDecryptor {
     /// Ensures every binary has SC_Info/<name>.sinf next to it, because
     /// fairplayd looks the licence up by the binary's own path. The licence
     /// is resolved from SC_Info/Manifest.plist's SinfPaths (the server's
-    /// per-component list) when it is not already next to the binary. A
-    /// binary with no licence of its own fails with noLicence: the main
-    /// executable's licence is NEVER copied to another binary — it belongs
-    /// to that binary alone and the kernel refuses it (errno 12).
+    /// per-component list) when it is not already there. A binary with no
+    /// licence of its own falls back to the main executable's licence (the
+    /// app's own licence, covering the whole purchase); only when that is
+    /// missing too does it fail with noLicence.
     private static func stageLicences(appDir: URL, binaries: [Binary]) throws -> [StagedLicence] {
         let fm = FileManager.default
         let scInfo = appDir.appendingPathComponent("SC_Info", isDirectory: true)
@@ -349,6 +353,23 @@ enum FairPlayDecryptor {
                   let paths = plist["SinfPaths"] as? [String] else { return [] }
             return paths
         }()
+        // The main executable's licence, used as a fallback for binaries
+        // that have no licence of their own (frameworks in App Store
+        // packages: the Manifest lists only the main licence). It is the
+        // app's own licence for the user's own bought app, staged next to
+        // the binary because fairplayd looks it up by the binary's path.
+        // The binary's own signature is registered before decrypt
+        // (F_ADDFILESIGS), so the kernel validates the staged licence.
+        let mainLicence: URL? = {
+            guard let main = binaries.first else { return nil }
+            let own = scInfo.appendingPathComponent(main.name + ".sinf")
+            if fm.fileExists(atPath: own.path) { return own }
+            if let rel = manifestPaths.first(where: { ($0 as NSString).lastPathComponent == main.name + ".sinf" }) {
+                let candidate = appDir.appendingPathComponent(rel)
+                if fm.fileExists(atPath: candidate.path) { return candidate }
+            }
+            return nil
+        }()
         var staged: [StagedLicence] = []
         for binary in binaries {
             let dir = binary.url.deletingLastPathComponent()
@@ -356,20 +377,27 @@ enum FairPlayDecryptor {
                 .appendingPathComponent(binary.name + ".sinf")
             if fm.fileExists(atPath: target.path) { continue }
             // The binary's own licence: the Manifest entry named after it,
-            // then the app's SC_Info copy under the same name.
+            // then the app's SC_Info copy under the same name. If neither
+            // exists, fall back to the main executable's licence.
             let source: URL
             if let rel = manifestPaths.first(where: { ($0 as NSString).lastPathComponent == binary.name + ".sinf" }) {
                 let candidate = appDir.appendingPathComponent(rel)
-                guard fm.fileExists(atPath: candidate.path) else {
+                if fm.fileExists(atPath: candidate.path) {
+                    source = candidate
+                } else if let main = mainLicence {
+                    source = main
+                } else {
                     throw Error.noLicence(binary: binary.name, detail: licenceDiagnostic(appDir: appDir, binary: binary, manifestPaths: manifestPaths, searched: [target.path, candidate.path]))
                 }
-                source = candidate
             } else {
                 let own = scInfo.appendingPathComponent(binary.name + ".sinf")
-                guard fm.fileExists(atPath: own.path) else {
+                if fm.fileExists(atPath: own.path) {
+                    source = own
+                } else if let main = mainLicence {
+                    source = main
+                } else {
                     throw Error.noLicence(binary: binary.name, detail: licenceDiagnostic(appDir: appDir, binary: binary, manifestPaths: manifestPaths, searched: [target.path, own.path]))
                 }
-                source = own
             }
             var createdDir: URL? = nil
             let dirURL = target.deletingLastPathComponent()
