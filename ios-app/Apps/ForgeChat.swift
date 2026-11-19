@@ -902,7 +902,7 @@ struct ForgeChatThreadView: View {
         }
     }
 
-    var body: some View {
+    private var conversationAppearance: some View {
         conversationLayout
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { if classicChat { AuroraBackground().ignoresSafeArea() } else { chatCanvas.ignoresSafeArea() } }
@@ -912,6 +912,10 @@ struct ForgeChatThreadView: View {
         // Local environment only. Never change the hosting window or other tabs.
         .environment(\.colorScheme, darkChat ? .dark : .light)
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var conversationSettings: some View {
+        conversationAppearance
         .sheet(isPresented: $showChatSettings) {
             NavigationStack {
                 Form {
@@ -935,6 +939,10 @@ struct ForgeChatThreadView: View {
                 } }
             }.presentationDetents([.medium, .large])
         }
+    }
+
+    private var conversationCatEvents: some View {
+        conversationSettings
         .onChange(of: text) { _, _ in catAwake = Date() }
         .onChange(of: store.outgoing.count) { old, new in
             if new > old { catAwake = Date(); catCelebration = Date() }
@@ -944,11 +952,19 @@ struct ForgeChatThreadView: View {
             catTouch = CGPoint(x: msgs.last?.role == "user" ? 0.78 : 0.22, y: 0)
             if let last = msgs.last, last.role != "user" { catCelebration = Date() }
         }
+    }
+
+    private var conversationReporting: some View {
+        conversationCatEvents
         .sheet(item: $reportTarget) { m in
             ForgeChatReportSheet { note in await store.report(threadID: m.threadID, messageID: m.id, note: note) } onSent: { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reportDone = true } }
                 .environment(\.layoutDirection, .leftToRight)
         }
         .alert(ForgeChatText.reportThanks, isPresented: $reportDone) {}
+    }
+
+    private var conversationMessageMenu: some View {
+        conversationReporting
         .overlay {
             if let t = menuTarget {
                 ForgeChatMessageMenu(target: t, current: reaction(t.id),
@@ -974,6 +990,10 @@ struct ForgeChatThreadView: View {
                 .zIndex(10)
             }
         }
+    }
+
+    private var conversationDeletion: some View {
+        conversationMessageMenu
         .confirmationDialog(ForgeChatExtrasText.deleteTitle, isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible) {
             Button(ForgeChatExtrasText.delete, role: .destructive) {
                 guard let t = deleteTarget else { return }
@@ -985,6 +1005,10 @@ struct ForgeChatThreadView: View {
             }
             Button(ForgeChatText.cancel, role: .cancel) { deleteTarget = nil }
         }
+    }
+
+    private var conversationLifecycle: some View {
+        conversationDeletion
         .onAppear { markSeen() }
         .onDisappear { markSeen() }
         .onChange(of: store.threads) { _, _ in markSeen() }
@@ -1005,6 +1029,10 @@ struct ForgeChatThreadView: View {
         #if DEBUG
         .overlay(alignment: .center) { if ForgeChatStore.fixture && ProcessInfo.processInfo.arguments.contains("-MirsaAttachmentRulesSelfTest") { ChatAttachmentSelfTestBadge() } }
         #endif
+    }
+
+    private var conversationAttachments: some View {
+        conversationLifecycle
         .modifier(ChatAttachmentPickers(enabled: attachmentsUI, threadID: threadID, showPhotos: $showPhotos, showFiles: $showFiles,
                                         showLink: $showLink, attachPhoto: $attachPhoto, note: $attachNote))
         .onChange(of: store.returnedText[threadID]) { _, returned in
@@ -1017,6 +1045,10 @@ struct ForgeChatThreadView: View {
             guard let item else { return }
             Task { jpeg = (try? await item.loadTransferable(type: Data.self)).flatMap { ForgeChatImage.prepare($0) } }
         }
+    }
+
+    var body: some View {
+        conversationAttachments
         .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
