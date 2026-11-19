@@ -108,6 +108,19 @@ enum StoreIPAProtection {
         beginSharing(id: id)
         return url
     }
+    /// The persisted decrypted IPA for sharing/saving. Same validation as
+    /// shareURL: a regular readable file inside the library root.
+    static func shareDecryptedURL(id: UUID) throws -> URL {
+        let url = EncryptedAppsStore.decryptedURL(id)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              FileManager.default.isReadableFile(atPath: url.path),
+              url.resolvingSymlinksInPath().deletingLastPathComponent() == EncryptedAppsStore.root.resolvingSymlinksInPath() else {
+            throw MirsaStoreError.invalidPackage
+        }
+        beginSharing(id: id)
+        return url
+    }
     static func mayClean(_ entry: EncryptedIPAEntry, confirmed: Bool) -> Bool {
         StoreIPACleanupPolicy.mayDelete(
             enabled: UserDefaults.standard.bool(forKey: "mirsa.store.autoCleanIPA"), confirmed: confirmed,
