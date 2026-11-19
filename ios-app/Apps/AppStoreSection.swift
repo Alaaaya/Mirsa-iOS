@@ -11,13 +11,14 @@ import CryptoKit
 // search and downloads stay in AppStoreAccountView, unchanged.
 
 enum AppStoreSectionTab: String, CaseIterable, Identifiable {
-    case search, downloads, purchases, account
+    case search, downloads, packages, purchases, account
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .search: return storeText("Search", "بحث", de: "Suche", ckb: "گەڕان", kmr: "Lêgerîn")
         case .downloads: return storeText("Downloads", "التنزيلات", de: "Downloads", ckb: "داگرتنەکان", kmr: "Daxistin")
+        case .packages: return storeText("Packages", "الحزم", de: "Pakete", ckb: "پاکێجەکان", kmr: "Pakêt")
         case .purchases: return storeText("Purchases", "المشتريات", de: "Käufe", ckb: "کڕینەکان", kmr: "Kirîn")
         case .account: return storeText("Account", "الحساب", de: "Konto", ckb: "ئەکاونت", kmr: "Hesab")
         }
@@ -27,6 +28,7 @@ enum AppStoreSectionTab: String, CaseIterable, Identifiable {
         switch self {
         case .search: return "magnifyingglass"
         case .downloads: return "arrow.down.circle.fill"
+        case .packages: return "shippingbox.fill"
         case .purchases: return "bag.fill"
         case .account: return "person.crop.circle.fill"
         }
