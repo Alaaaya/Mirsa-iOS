@@ -219,28 +219,39 @@ enum FairPlayDecryptor {
             let isDir = e.name.hasSuffix("/")
             let clean = isDir ? String(e.name.dropLast()) : e.name
             if clean.isEmpty { continue }
-            let parts = try BundlePath.components(clean)
-            if parts.first == "__MACOSX" || parts.last == ".DS_Store" { continue }
-            let key = clean.lowercased()
-            guard seen.insert(key).inserted else { throw Error.ioError("duplicate entry " + clean) }
-            for i in 1..<max(parts.count, 1) { dirs.insert(parts[0..<i].joined(separator: "/").lowercased()) }
-            if isDir { dirs.insert(key) }
-            let target = try BundlePath.resolve(clean, in: dest, mustExist: false)
-            if isDir { try fm.createDirectory(at: target, withIntermediateDirectories: true); continue }
-            guard !dirs.contains(key) else { throw Error.ioError("file/folder clash " + clean) }
-            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            _ = try BundlePath.resolve(BundlePath.parent(clean), in: dest, mustExist: false)
-            guard fm.createFile(atPath: target.path, contents: nil) else { throw Error.ioError(clean) }
-            let h = try FileHandle(forWritingTo: target)
-            defer { try? h.close() }
-            var off: UInt64 = 0
-            while off < e.uncompressedSize {
-                let bytes = try zip.read(e, offset: off, length: min(chunk, e.uncompressedSize - off), limits: limits)
-                if bytes.isEmpty { break }
-                try h.write(contentsOf: bytes)
-                off += UInt64(bytes.count)
+            // Diagnostics: a path-guard failure must name the entry that
+            // caused it. Without this the UI only shows a bare
+            // "BundleFileError error 1" and the offending entry is hidden.
+            do {
+                let parts = try BundlePath.components(clean)
+                if parts.first == "__MACOSX" || parts.last == ".DS_Store" { continue }
+                let key = clean.lowercased()
+                guard seen.insert(key).inserted else { throw Error.ioError("duplicate entry " + clean) }
+                for i in 1..<max(parts.count, 1) { dirs.insert(parts[0..<i].joined(separator: "/").lowercased()) }
+                if isDir { dirs.insert(key) }
+                let target = try BundlePath.resolve(clean, in: dest, mustExist: false)
+                if isDir { try fm.createDirectory(at: target, withIntermediateDirectories: true); continue }
+                guard !dirs.contains(key) else { throw Error.ioError("file/folder clash " + clean) }
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                _ = try BundlePath.resolve(BundlePath.parent(clean), in: dest, mustExist: false)
+                guard fm.createFile(atPath: target.path, contents: nil) else { throw Error.ioError(clean) }
+                let h = try FileHandle(forWritingTo: target)
+                defer { try? h.close() }
+                var off: UInt64 = 0
+                while off < e.uncompressedSize {
+                    let bytes = try zip.read(e, offset: off, length: min(chunk, e.uncompressedSize - off), limits: limits)
+                    if bytes.isEmpty { break }
+                    try h.write(contentsOf: bytes)
+                    off += UInt64(bytes.count)
+                }
+                guard off == e.uncompressedSize else { throw Error.ioError("corrupt entry " + clean) }
+            } catch let error as BundleFileError {
+                throw Error.ioError("extracting \(clean): \(String(describing: error))")
+            } catch let error as Error {
+                throw error
+            } catch {
+                throw Error.ioError("extracting \(clean): \(error.localizedDescription)")
             }
-            guard off == e.uncompressedSize else { throw Error.ioError("corrupt entry " + clean) }
         }
     }
 
