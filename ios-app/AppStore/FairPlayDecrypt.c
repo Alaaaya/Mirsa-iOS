@@ -10,14 +10,22 @@
  * written back and cryptid is zeroed. Nothing here contains, derives or
  * transmits any key.
  *
- * The mapping MUST be PROT_READ | PROT_WRITE / MAP_SHARED: the kernel
- * decrypts the pages in place through the shared mapping. A private
- * (MAP_PRIVATE) or read-only mapping makes the kernel refuse with
- * ENOMEM (errno 12, "Cannot allocate memory") — exactly the error a
- * private mapping produced on device. Decryption runs on a throwaway
- * copy in the app's temp dir, never on the original encrypted IPA, so
- * in-place decryption through the shared mapping is safe. The pwrite
- * loop afterwards re-writes the same bytes and zeroes cryptid.
+ * The mapping is PROT_READ | PROT_WRITE / MAP_SHARED so the kernel
+ * decrypts the pages in place and the changes propagate to the file.
+ * Decryption runs on a throwaway copy in the app's temp dir, never on
+ * the original encrypted IPA, so in-place decryption through the shared
+ * mapping is safe. The pwrite loop afterwards re-writes the same bytes
+ * and zeroes cryptid.
+ *
+ * When the kernel refuses with ENOMEM (errno 12, "Cannot allocate
+ * memory"), its FairPlay decrypter could not validate the file: either
+ * the licence is missing/wrong, or the kernel does not know this copy's
+ * code signature. A fresh copy extracted from an IPA has never been
+ * loaded, so the kernel has never seen its signature; registering it
+ * first with fcntl(F_ADDFILESIGS_RETURN) using the LC_CODE_SIGNATURE
+ * blob lets the decrypter validate the binary, and the same decrypt
+ * call then succeeds. That registration is retried automatically when
+ * the first attempt is refused.
  *
  * The cryptid value passed to the kernel only selects the kernel code path;
  * the FairPlay key lookup is by SINF path, not by cryptid. Passing 2
@@ -25,6 +33,10 @@
  * the mapping be executable, so a plain read-write mapping is enough and no
  * special entitlement is needed. If that is refused, the binary's stored
  * cryptid is retried once.
+ *
+ * The approach (signature registration before retrying the kernel call)
+ * was learned by studying the open-source iPadn implementation; the code
+ * here is Mirsa's own, written independently.
  */
 
 #include "FairPlayDecrypt.h"
@@ -37,6 +49,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -48,6 +61,7 @@
 #define FP_MH_MAGIC 0xFEEDFACEu
 #define FP_LC_ENCRYPTION_INFO 0x21u
 #define FP_LC_ENCRYPTION_INFO_64 0x2Cu
+#define FP_LC_CODE_SIGNATURE 0x1Du
 #define FP_CPU_TYPE_ARM64 0x0100000Cu
 
 /* Bounds matching the app's own IPA limits. */
@@ -102,7 +116,8 @@ static uint64_t fp_align_up(uint64_t v, uint64_t align) {
 }
 
 /* One encrypted byte range inside one Mach-O slice. Offsets are absolute
-   file offsets. */
+   file offsets, except cs_off which is relative to the slice start
+   (the form the kernel's file-signature registration wants). */
 typedef struct fp_range {
     uint64_t crypt_off;   /* Absolute file offset of the encrypted bytes. */
     uint32_t crypt_size;
@@ -110,6 +125,9 @@ typedef struct fp_range {
     uint64_t cryptid_off; /* Absolute file offset of the cryptid field. */
     uint32_t cputype;
     uint32_t cpusubtype;
+    uint64_t slice_off;   /* File offset where this slice starts (0 = thin). */
+    uint32_t cs_off;      /* Code-signature blob offset, relative to slice. */
+    uint32_t cs_size;     /* Code-signature blob size (0 = none found). */
 } fp_range;
 
 const char *mirsa_fp_result_message(MirsaFPResult result) {
@@ -163,6 +181,11 @@ static MirsaFPResult fp_parse_slice(const uint8_t *base, uint64_t slice_off, uin
         return MirsaFPBadMachO;
     }
     (void)is64;
+    /* The code signature is only used for the file-signature retry below,
+       so a missing or malformed one is ignored, not a failure. */
+    out->slice_off = slice_off;
+    out->cs_off = 0;
+    out->cs_size = 0;
     uint32_t off = header_size;
     int seen = 0;
     for (uint32_t i = 0; i < ncmds; i++) {
@@ -175,7 +198,12 @@ static MirsaFPResult fp_parse_slice(const uint8_t *base, uint64_t slice_off, uin
         if (cmdsize < 8 || off + cmdsize > header_size + sizeofcmds) {
             return MirsaFPBadMachO;
         }
-        if (type == FP_LC_ENCRYPTION_INFO || type == FP_LC_ENCRYPTION_INFO_64) {
+        if (type == FP_LC_CODE_SIGNATURE) {
+            if (cmdsize >= 16) {
+                out->cs_off = fp_read32le(cmd + 8);
+                out->cs_size = fp_read32le(cmd + 12);
+            }
+        } else if (type == FP_LC_ENCRYPTION_INFO || type == FP_LC_ENCRYPTION_INFO_64) {
             if (cmdsize < 20) {
                 return MirsaFPBadMachO;
             }
@@ -204,6 +232,30 @@ static MirsaFPResult fp_parse_slice(const uint8_t *base, uint64_t slice_off, uin
         off += cmdsize;
     }
     return MirsaFPSuccess;
+}
+
+/* Registers one slice's code signature with the kernel so the FairPlay
+   decrypter can validate the binary. The kernel only knows the signature
+   of files it has loaded before; a fresh copy extracted from an IPA has
+   never been loaded, so without this the decrypter refuses the file
+   (errno 12) even though the licence next to it is valid. Returns 0 on
+   success, -1 when there is no signature to register or the kernel
+   would not take it. */
+static int fp_register_signature(int fd, const fp_range *r) {
+#if defined(F_ADDFILESIGS_RETURN)
+    if (r->cs_size == 0) {
+        return -1;
+    }
+    fsignatures_t fs;
+    fs.fs_file_start = (off_t)r->slice_off;
+    fs.fs_blob_start = (void *)(uintptr_t)r->cs_off;
+    fs.fs_blob_size = (size_t)r->cs_size;
+    return fcntl(fd, F_ADDFILESIGS_RETURN, &fs);
+#else
+    (void)fd;
+    (void)r;
+    return -1;
+#endif
 }
 
 MirsaFPResult mirsa_fp_decrypt_macho(const char *path, char *errbuf, size_t errbuf_len) {
@@ -316,8 +368,16 @@ MirsaFPResult mirsa_fp_decrypt_macho(const char *path, char *errbuf, size_t errb
             return MirsaFPBadMachO;
         }
         int rc = remap(map + start, (size_t)(end - start), FP_CRYPTID_NOEXEC, r->cputype, r->cpusubtype);
+        if (rc != 0) {
+            /* The kernel may not know this copy's code signature yet.
+               Register it, then retry with the same cryptid. */
+            if (fp_register_signature(fd, r) == 0) {
+                rc = remap(map + start, (size_t)(end - start), FP_CRYPTID_NOEXEC, r->cputype, r->cpusubtype);
+            }
+        }
         if (rc != 0 && r->cryptid != FP_CRYPTID_NOEXEC) {
-            /* Retry once with the binary's own stored cryptid. */
+            /* Retry once with the binary's own stored cryptid
+               (the signature is already registered by now, if any). */
             rc = remap(map + start, (size_t)(end - start), r->cryptid, r->cputype, r->cpusubtype);
         }
         if (rc != 0) {
