@@ -14,7 +14,7 @@ final class TendiesSectionNameTests: XCTestCase {
         for rel in ["ios-app/Apps/AppsStrings.swift", "ios-app/Apps/MirsaTr.swift"] {
             let src = try String(contentsOf: root.appendingPathComponent(rel), encoding: .utf8)
             let lines = src.components(separatedBy: "\n").filter { $0.contains("\"tools.wallpapers\":") }
-            XCTAssertEqual(lines.count, 2, rel)
+            XCTAssertEqual(lines.count, rel.hasSuffix("AppsStrings.swift") ? 3 : 2, rel)
             for line in lines { XCTAssertTrue(line.contains("\"Tendies\""), line) }
         }
     }
