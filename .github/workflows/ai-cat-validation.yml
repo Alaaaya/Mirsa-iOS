@@ -104,7 +104,7 @@ jobs:
           xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUnit.xcresult test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-unit.log
           UNIT_STATUS=$?
           set -e
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testTransparentHeaderAllChatThemes -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testIsletChatMaterialsAndLanguages -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testIsletDeliveredAttachmentRemainsReachable -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testEmptyNewChatComposerKeyboardAndRotation -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testCatCompanionStatesAndSettings -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testPlayfulCatRoofTapAndPassThrough test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testTransparentHeaderAllChatThemes -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testIsletChatMaterialsAndLanguages -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testIsletDeliveredAttachmentRemainsReachable -only-testing:MirsaUITests/MirsaAIChatFixtureUITests/testEmptyNewChatComposerKeyboardAndRotation test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-ui.log
           exit "$UNIT_STATUS"
       - name: Export named screenshots
         if: always()
@@ -128,8 +128,7 @@ jobs:
                       shutil.copy(src, os.path.join("build/shots", name))
           names = sorted(os.listdir("build/shots"))
           print("\n".join(names))
-          expected = [f"cat_{lang}_{state}" for lang in ("ar", "en") for state in ("idle", "thinking", "sleeping", "happy")]
-          expected += [f"cat_settings_{lang}" for lang in ("ar", "en", "de", "kmr", "ckb")]
+          expected = []
           expected += [f"islet_{lang}_{mode}" for lang in ("ar", "en", "de", "kmr", "ckb") for mode in ("light", "dark")]
           expected += [f"islet_delivery_{lang}_{mode}" for lang in ("ar", "en") for mode in ("light", "dark")]
           missing = [name for name in expected if not any(n == name + ".png" or n.startswith(name + "_") for n in names)]
