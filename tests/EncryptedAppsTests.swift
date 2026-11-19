@@ -100,4 +100,101 @@ final class EncryptedAppsTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: file) }
         XCTAssertThrowsError(try EncryptedIPAInspector.inspect(file))
     }
+
+    // MARK: - FairPlayDecryptor (clean-room core + wrapper)
+
+    /// Minimal thin arm64 Mach-O: header + one LC_ENCRYPTION_INFO_64.
+    private func machO(cryptid: UInt32 = 0) -> Data {
+        func u32(_ v: UInt32) -> [UInt8] {
+            [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)]
+        }
+        var d = Data()
+        d.append(contentsOf: u32(0xFEEDFACF)) // MH_MAGIC_64
+        d.append(contentsOf: u32(0x0100000C)) // CPU_TYPE_ARM64
+        d.append(contentsOf: u32(0))          // cpusubtype
+        d.append(contentsOf: u32(2))          // MH_EXECUTE
+        d.append(contentsOf: u32(1))          // ncmds
+        d.append(contentsOf: u32(24))         // sizeofcmds
+        d.append(contentsOf: u32(0))          // reserved
+        d.append(contentsOf: u32(0x2C))       // LC_ENCRYPTION_INFO_64
+        d.append(contentsOf: u32(24))         // cmdsize
+        d.append(contentsOf: u32(0))          // cryptoff
+        d.append(contentsOf: u32(0))          // cryptsize
+        d.append(contentsOf: u32(cryptid))    // cryptid
+        d.append(contentsOf: u32(0))          // pad
+        return d
+    }
+
+    private func decryptCore(_ url: URL) -> Int32 {
+        var errbuf = [CChar](repeating: 0, count: 256)
+        let result = url.path.withCString { cpath in
+            errbuf.withUnsafeMutableBufferPointer { buf in
+                mirsa_fp_decrypt_macho(cpath, buf.baseAddress, buf.count)
+            }
+        }
+        return result.rawValue
+    }
+
+    /// Runs on the simulator: no kernel decryption is attempted, only the
+    /// no-op and rejection paths of the C core.
+    func testDecryptCoreLeavesClearMachOUntouched() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bytes = machO(cryptid: 0)
+        try bytes.write(to: file)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(decryptCore(file), 1) // MirsaFPAlreadyClear
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    func testDecryptCoreRejectsNonMachO() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("hello world, not a mach-o".utf8).write(to: file)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(decryptCore(file), -1) // MirsaFPNotMachO
+    }
+
+    func testDecryptCoreRejectsMalformedMachO() throws {
+        var bytes = machO()
+        // ncmds = 5000 at header offset 16.
+        bytes[16] = 0x88; bytes[17] = 0x13; bytes[18] = 0; bytes[19] = 0
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try bytes.write(to: file)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(decryptCore(file), -2) // MirsaFPBadMachO
+    }
+
+    func testDecryptorPassesThroughClearIPA() throws {
+        let info = try plist(["CFBundleIdentifier": "com.example.notes", "CFBundleExecutable": "Notes",
+                              "CFBundleDisplayName": "Notes Pro", "CFBundleShortVersionString": "5.2.1"])
+        let meta = try plist(["itemName": "Notes Pro"])
+        let bytes = zip([("Payload/Notes.app/Info.plist", info), ("Payload/Notes.app/Notes", machO()),
+                         ("iTunesMetadata.plist", meta)])
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Notes.ipa")
+        try bytes.write(to: file)
+        let report = try FairPlayDecryptor.decryptIPA(at: file)
+        addTeardownBlock { MirsaManagedTmp.end(report.workDir) }
+        XCTAssertEqual(report.decrypted, [])
+        XCTAssertEqual(report.alreadyClear, ["Notes"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: report.outputURL.path))
+        // The original encrypted (here: clear) IPA is untouched.
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        // The output is a valid zip with the same entries.
+        let outData = try Data(contentsOf: report.outputURL, options: .mappedIfSafe)
+        let outZip = try ZipReader(data: outData)
+        XCTAssertNotNil(outZip.entry("Payload/Notes.app/Notes"))
+        XCTAssertNotNil(outZip.entry("Payload/Notes.app/Info.plist"))
+        XCTAssertNotNil(outZip.entry("iTunesMetadata.plist"))
+    }
+
+    func testDecryptorRejectsNonIPA() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+        try Data("not a zip".utf8).write(to: file)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        XCTAssertThrowsError(try FairPlayDecryptor.decryptIPA(at: file)) { error in
+            XCTAssertTrue(error is FairPlayDecryptor.Error)
+        }
+    }
 }

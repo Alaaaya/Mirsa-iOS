@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Own-account App Store downloads (no sharing, no decryption, no signing).
-/// Self-contained: the host passes `onDownloaded` which must import the file into the
+/// Own-account App Store downloads (no sharing, no signing).
+/// Decryption is a separate opt-in action on the App Store tab: the downloaded
+/// encrypted IPA can be decrypted on this iPhone (own account only) and handed
+/// to the normal importer. Self-contained: the host passes `onDownloaded` which must import the file into the
 /// encrypted-IPA flow WITHOUT modifying it. After it returns normally this view removes
 /// the file's private temp directory. Hook: AppStoreAccountView(onDownloaded: { url in ... }).
 struct AppStoreAccountView: View {
@@ -78,10 +80,10 @@ struct AppStoreAccountView: View {
 
     private var infoCard: some View {
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            Label(t("Download apps your own Apple Account owns. Mirsa does not decrypt, sign or share them.",
-                    "نزّل تطبيقات حساب Apple تبعك بيملكها. مرسى ما بيفك تشفيرها ولا بيوقّعها ولا بيشاركها.",
-                    "ئەو ئەپانە دابگرە کە ئەکاونتی Apple ی خۆت خاوەنیەتی. Mirsa ڕەمزیان ناکاتەوە، واژۆیان ناکات و بڵاویان ناکاتەوە.",
-                    "Sepanên ku hesabê te yê Apple xwedî ye dakêşe. Mirsa şîfreya wan venake, îmze nake û parve nake."),
+            Label(t("Download apps your own Apple Account owns. Mirsa does not sign or share them. You can decrypt an app you bought, on this iPhone, from the App Store tab.",
+                    "نزّل تطبيقات حساب Apple تبعك بيملكها. مرسى ما بيوقّعها ولا بيشاركها. فيك تفك تشفير تطبيق اشتريته، على هالآيفون، من تبويب App Store.",
+                    "ئەو ئەپانە دابگرە کە ئەکاونتی Apple ی خۆت خاوەنیەتی. Mirsa واژۆیان ناکات و بڵاویان ناکاتەوە. دەتوانیت ئەپێک کە کڕیوتە لەسەر ئەم ئایفۆنە لە بەشی App Store ڕەمز بکەیتەوە.",
+                    "Sepanên ku hesabê te yê Apple xwedî ye dakêşe. Mirsa wan îmze nake û parve nake. Tu dikarî sepanek ku te kirî li ser vê iPhone ji tabloya App Store şîfre vekî."),
                   systemImage: "lock.shield.fill")
                 .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
             Text(t("Your email and password go over HTTPS to the Mirsa server for Apple sign-in. The password is not saved. Apple may require a verification code.",

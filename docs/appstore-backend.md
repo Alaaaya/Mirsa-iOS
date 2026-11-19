@@ -15,7 +15,7 @@ Use the single actor `MirsaStoreClient.shared`. Do not create separate productio
 - `downloadOwnedApp(app, externalVersionID:)` downloads the account-owned encrypted IPA and assembles its original SINF and metadata. It never acquires a license automatically. The returned local URL may be passed to the existing local importer, then its UUID temporary directory must be removed after a successful copy.
 - `signOut()` deletes account and challenge secrets, clears challenge memory, actively cancels a CDN transfer and prevents an in-flight response from restoring the account. Account secrets are loaded from Keychain only for each operation, not cached on the client. ApplePackage does not expose its underlying auth HTTP handle; an already-sent Apple authentication request may finish within its bounded timeout, but its response is discarded after sign-out. A failed Keychain deletion is reported and must not be presented as a successful sign-out.
 
-Do not claim encrypted apps can be re-signed, decrypted, installed or run merely because a download succeeded. There is no decryption or certificate bypass in this backend.
+Do not claim encrypted apps can be re-signed, decrypted, installed or run merely because a download succeeded. Decryption is a separate, explicit, on-device action (FairPlayDecryptor in ios-app/AppStore/): it decrypts only apps the signed-in account owns, using the account's own SINF through the kernel, and hands the decrypted IPA to the local importer for signing and install. There is no decryption or certificate bypass in this backend itself.
 
 ## Security boundary
 
