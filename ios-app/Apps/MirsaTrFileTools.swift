@@ -2,10 +2,11 @@ import Foundation
 
 extension MirsaTr {
     static func ft(_ en: String, _ args: CVarArg...) -> String {
-        var s = en
+        var s = german(en)
         if let t = fileTools[en] {
             switch AppLanguageStore.shared.current {
-            case .english, .german: s = en
+            case .english: s = en
+            case .german: s = deByEnglish[en] ?? en
             case .arabic: s = t.0
             case .sorani: s = t.1
             case .kurmanji: s = t.2

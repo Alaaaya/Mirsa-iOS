@@ -44,8 +44,10 @@ struct MirsaLiquidProgress: View {
                                 .font(.system(size: diameter * 0.22, weight: .bold, design: .rounded))
                                 .monospacedDigit().foregroundStyle(.white)
                                 .shadow(color: .black.opacity(0.6), radius: 3)
-                        } else {
+                        } else if fraction == nil {
+                            // Indeterminate only. Small orbs with a measured value show the liquid level alone.
                             Image(systemName: "ellipsis").foregroundStyle(.white)
+                                .font(.system(size: max(8, diameter * 0.26), weight: .bold))
                         }
                     }
                     .frame(width: diameter, height: diameter)

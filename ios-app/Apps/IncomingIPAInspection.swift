@@ -35,8 +35,9 @@ enum IncomingIPAInspection {
         let fm = FileManager.default
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
-              let size = values.fileSize, size > 0, Int64(size) <= IPAEditorService.maximumFileSize else {
-            throw SideloadError.message("IPA exceeds preview limits.")
+              let size = values.fileSize, size > 0, Int64(size) <= PersonalIPAURL.maximumBytes else {
+            // Open-in accepts IPAs up to 4 GB; the preview must not reject 512 MB–4 GB files.
+            throw SideloadError.message(personalText("The file is empty or larger than 4 GB.", "الملف فاضي أو أكبر من 4 غيغا."))
         }
         let root = fm.temporaryDirectory.appendingPathComponent("incoming-preview-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: root) }
