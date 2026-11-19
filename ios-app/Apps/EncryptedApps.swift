@@ -194,6 +194,11 @@ final class EncryptedAppsStore: ObservableObject {
     @Published var decryptingID: UUID?
     @Published var error: String?
     @Published var toast: String?
+    @Published var decryptSuccess: String?
+    /// A decrypted IPA waiting for the user to confirm the install after
+    /// the "decryption complete" alert. The FairPlay workdir stays alive
+    /// until the user confirms or cancels, then it is ended.
+    private var pendingDecrypted: (name: String, report: FairPlayDecryptor.Report)?
 
     nonisolated static let root: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -307,21 +312,49 @@ final class EncryptedAppsStore: ObservableObject {
             let report = try await Task.detached(priority: .userInitiated) {
                 try FairPlayDecryptor.decryptIPA(at: source)
             }.value
-            defer { FairPlayDecryptor.endWorkDir(report) }
-            await AppsStore.shared.importIPA(from: report.outputURL)
-            if let message = AppsStore.shared.error {
-                AppsStore.shared.error = nil
-                self.error = message
-                return
-            }
-            vm?.selectedTab = .apps
-            toast = EncryptedText.t("Decrypted \(entry.name) — ready in the Apps tab",
-                                    "انفك تشفير \(entry.name) — جاهز بتبويب التطبيقات",
-                                    "\(entry.name) ڕەمزکرایەوە — لە بەشی ئەپەکان ئامادەیە",
-                                    "\(entry.name) şîfre hate vekirin — di tabloya Sepanan de amade ye")
+            // Decryption succeeded. Show a clear "decryption complete"
+            // confirmation first; the decrypted IPA is handed to the
+            // installer only after the user confirms, so they see the
+            // success instead of jumping straight to the install sheet.
+            // The workdir stays alive until confirm/cancel ends it.
+            pendingDecrypted = (name: entry.name, report: report)
+            decryptSuccess = EncryptedText.t("Decryption complete — \(entry.name) is ready to install.",
+                                            "تم فك التشفير — \(entry.name) جاهز للتثبيت.",
+                                            "ڕەمزکردنەوە تەواو بوو — \(entry.name) ئامادەیە بۆ دامەزراندن.",
+                                            "Vekirina şîfreyê qediya — \(entry.name) ji bo sazkirinê amade ye.")
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// The user confirmed the "decryption complete" alert: hand the
+    /// decrypted IPA to the normal Apps-tab importer (install sheet),
+    /// then end the FairPlay workdir.
+    func confirmDecryptedInstall(vm: AppViewModel?) async {
+        guard let pending = pendingDecrypted else { return }
+        pendingDecrypted = nil
+        decryptSuccess = nil
+        await AppsStore.shared.importIPA(from: pending.report.outputURL)
+        FairPlayDecryptor.endWorkDir(pending.report)
+        if let message = AppsStore.shared.error {
+            AppsStore.shared.error = nil
+            self.error = message
+            return
+        }
+        vm?.selectedTab = .apps
+        toast = EncryptedText.t("Decrypted \(pending.name) — ready in the Apps tab",
+                                "انفك تشفير \(pending.name) — جاهز بتبويب التطبيقات",
+                                "\(pending.name) ڕەمزکرایەوە — لە بەشی ئەپەکان ئامادەیە",
+                                "\(pending.name) şîfre hate vekirin — di tabloya Sepanan de amade ye")
+    }
+
+    /// The user dismissed the "decryption complete" alert without
+    /// installing: discard the decrypted copy and end the workdir.
+    func cancelDecrypted() {
+        guard let pending = pendingDecrypted else { decryptSuccess = nil; return }
+        pendingDecrypted = nil
+        decryptSuccess = nil
+        FairPlayDecryptor.endWorkDir(pending.report)
     }
 
     /// Keeps the existing Wi-Fi tunnel path; cellular serves the same IPA locally, without signing or upload.
