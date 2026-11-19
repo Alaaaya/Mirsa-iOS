@@ -48,11 +48,11 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             XCTAssertTrue(toggle.waitForExistence(timeout: 5))
             XCTAssertTrue(toggle.isHittable)
             if toggle.value as? String == "0" { toggle.tap() }
-            XCTAssertEqual(toggle.value as? String, "1")
+            assertCatSetting(toggle, enabled: true)
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             shot.name = "cat_settings_\(language)"; shot.lifetime = .keepAlways; add(shot)
             toggle.tap()
-            XCTAssertEqual(toggle.value as? String, "0")
+            assertCatSetting(toggle, enabled: false)
             app.buttons["chat-settings-close"].tap()
             assertComposer(app, name: "cat_\(language)_disabled")
             // Setting persists while the chat and app are reopened.
@@ -61,10 +61,18 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
             reopened.buttons["chat-settings"].tap()
             let persisted = reopened.switches["chat-cat-toggle"]
             XCTAssertTrue(persisted.waitForExistence(timeout: 5))
-            XCTAssertEqual(persisted.value as? String, "0")
+            assertCatSetting(persisted, enabled: false)
             persisted.tap()
             reopened.terminate()
         }
+    }
+
+    private func assertCatSetting(_ toggle: XCUIElement, enabled: Bool,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", enabled ? "1" : "0"), object: toggle)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed,
+                       "Cat setting did not settle to the requested value", file: file, line: line)
     }
 
     /// Real thread, real composer and existing result attachments, in both material environments.

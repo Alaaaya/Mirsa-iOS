@@ -901,7 +901,15 @@ struct ForgeChatThreadView: View {
             NavigationStack {
                 Form {
                     Section {
-                        Toggle(MirsaCatText.title, isOn: $catEnabled).accessibilityIdentifier("chat-cat-toggle")
+                        HStack {
+                            Text(MirsaCatText.title)
+                            Spacer()
+                            // Keep the native switch's hit target separate from the
+                            // full-width Form label (including in RTL layouts).
+                            Toggle(MirsaCatText.title, isOn: $catEnabled)
+                                .labelsHidden()
+                                .accessibilityIdentifier("chat-cat-toggle")
+                        }
                     } footer: {
                         Text(MirsaCatText.explanation)
                     }
