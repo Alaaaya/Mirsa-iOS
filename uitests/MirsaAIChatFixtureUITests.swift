@@ -67,6 +67,52 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
         }
     }
 
+    /// Real thread, real composer and existing result attachments, in both material environments.
+    func testIsletChatMaterialsAndLanguages() {
+        XCUIDevice.shared.orientation = .portrait
+        for language in ["ar", "en", "de", "kmr", "ckb"] {
+            for light in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                                       "-mirsa.chat.catEnabled", "YES", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+                if light { app.launchArguments.append("-MirsaChatLightFixture") }
+                app.launch()
+                XCTAssertTrue(app.staticTexts["chat-waiting"].waitForExistence(timeout: 20))
+                XCTAssertTrue(app.staticTexts["Thanks, no rush."].exists)
+                assertComposer(app, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")")
+                app.buttons["chat-settings"].tap()
+                XCTAssertTrue(app.switches["chat-cat-toggle"].waitForExistence(timeout: 5))
+                app.buttons["chat-settings-close"].tap()
+                let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+                input.tap()
+                input.typeText("Hello")
+                XCTAssertTrue(app.buttons["chat-send"].isEnabled)
+                assertComposer(app, keyboard: true, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")_keyboard")
+                app.terminate()
+            }
+        }
+    }
+
+    func testIsletDeliveredAttachmentRemainsReachable() {
+        for language in ["ar", "en"] {
+            for light in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                                       "-MirsaTendiesArtifactFixture", "-mirsa.chat.reactionsTipDismissed", "YES",
+                                       "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+                if light { app.launchArguments.append("-MirsaChatLightFixture") }
+                app.launch()
+                let delivery = app.buttons["mirsa.chat.artifact.add-wallpaper"]
+                XCTAssertTrue(delivery.waitForExistence(timeout: 20))
+                XCTAssertTrue(delivery.isHittable)
+                XCTAssertFalse(app.staticTexts["chat-waiting"].exists, "A completed delivery must not pretend to think")
+                assertComposer(app, liquid: false, name: "islet_delivery_\(language)_\(light ? "light" : "dark")")
+                app.terminate()
+            }
+        }
+    }
+
     private func waitForLandscape(_ app: XCUIApplication) -> Bool {
         let predicate = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: app)], timeout: 10) == .completed

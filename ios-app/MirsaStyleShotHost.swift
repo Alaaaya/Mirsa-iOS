@@ -97,7 +97,7 @@ struct MirsaStyleShotHost: View {
         case "chat-image-fixture":
             ZStack { MirsaChatTheme.bg.ignoresSafeArea(); MirsaTappableImage(image: Self.fixtureImage, maxWidth: 220, maxHeight: 200, cornerRadius: 14) }
         #endif
-        case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(.dark)
+        case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-MirsaChatLightFixture") ? .light : .dark)
         default: sheetHost
         }
     }
