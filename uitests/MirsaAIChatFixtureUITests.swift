@@ -29,6 +29,36 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
     }
 
 
+    func testPlayfulCatRoofTapAndPassThrough() {
+        for language in ["ar", "en"] {
+            let app = openEmptyChat(language: language)
+            app.buttons["chat-settings"].tap()
+            let initialToggle = app.switches["chat-cat-toggle"]
+            if initialToggle.value as? String == "0" { initialToggle.tap() }
+            app.buttons["chat-settings-close"].tap()
+            let cat = app.buttons["chat-playful-cat"]
+            XCTAssertTrue(cat.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["chat-send"].exists)
+            let input = app.descendants(matching: .any).matching(identifier: "chat-input").firstMatch
+            XCTAssertTrue(input.isHittable, "Cat overlay must not swallow composer taps")
+            let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            before.name = "playful_roof_\(language)"; before.lifetime = .keepAlways; add(before)
+            if cat.isHittable { cat.tap() }
+            let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            after.name = "playful_heart_\(language)"; after.lifetime = .keepAlways; add(after)
+            input.tap()
+            input.typeText("Hello")
+            XCTAssertTrue(app.buttons["chat-send"].isEnabled)
+            app.buttons["chat-settings"].tap()
+            let toggle = app.switches["chat-cat-toggle"]
+            if toggle.value as? String != "0" { toggle.tap() }
+            assertCatSetting(toggle, enabled: false)
+            app.buttons["chat-settings-close"].tap()
+            XCTAssertFalse(app.buttons["chat-playful-cat"].exists)
+            app.terminate()
+        }
+    }
+
     func testCatCompanionStatesAndSettings() {
         for language in ["ar", "en"] {
             for (state, name) in [("", "idle"), ("-MirsaCatThinkingFixture", "thinking"),

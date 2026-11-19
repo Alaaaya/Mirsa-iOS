@@ -784,6 +784,8 @@ struct ForgeChatThreadView: View {
                 ForgeChatQuote(ref: ref, exists: messageText(ref.messageID) != nil || ref.messageID == id) { jumpTo = ref.messageID }
             }
             content()
+                .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { [id.uuidString: $0] }
+                .padding(.top, catEnabled ? 54 : 0)
                 .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
             if let e = reaction(id) {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
@@ -804,6 +806,8 @@ struct ForgeChatThreadView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
                         assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
+                            .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["welcome": $0] }
+                            .padding(.top, catEnabled ? 54 : 0)
                         ForEach(rows) { row in
                             Group {
                                 switch row {
@@ -827,6 +831,8 @@ struct ForgeChatThreadView: View {
                             HStack(spacing: 10) { MirsaBreathingOrbs(); Text(ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                .anchorPreference(key: MirsaCatPerches.self, value: .bounds) { ["thinking": $0] }
+                                .padding(.top, catEnabled ? 54 : 0)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -839,6 +845,19 @@ struct ForgeChatThreadView: View {
                     catTouch = CGPoint(x: min(1, max(0, gesture.location.x / max(1, UIScreen.main.bounds.width))), y: min(1, abs(gesture.translation.height) / 180))
                     catAwake = Date()
                 }.onEnded { _ in catTouch.y = 0 })
+                .overlayPreferenceValue(MirsaCatPerches.self) { anchors in
+                    GeometryReader { viewport in
+                        if catEnabled {
+                            MirsaCatPlayground(
+                                perches: anchors.mapValues { viewport[$0] },
+                                viewport: viewport.size,
+                                preferred: catThinking ? "thinking" : msgs.last?.id.uuidString,
+                                thinking: catThinking, touch: catTouch,
+                                awake: catAwake, celebration: catCelebration)
+                        }
+                    }
+                    .clipped()
+                }
                 // Preserve the measured bottom inset, but let messages remain visible
                 // beneath the transparent cat lane and the composer material.
                 .scrollClipDisabled()
@@ -902,6 +921,9 @@ struct ForgeChatThreadView: View {
             }.presentationDetents([.medium, .large])
         }
         .onChange(of: text) { _, _ in catAwake = Date() }
+        .onChange(of: store.outgoing.count) { old, new in
+            if new > old { catAwake = Date(); catCelebration = Date() }
+        }
         .onChange(of: msgs.last?.id) { _, _ in
             catAwake = Date()
             catTouch = CGPoint(x: msgs.last?.role == "user" ? 0.78 : 0.22, y: 0)
@@ -959,7 +981,7 @@ struct ForgeChatThreadView: View {
             if ForgeChatStore.fixture {
                 let args = ProcessInfo.processInfo.arguments
                 if args.contains("-MirsaCatSleepingFixture") { catAwake = Date().addingTimeInterval(-60) }
-                if args.contains("-MirsaCatHappyFixture") { catCelebration = Date().addingTimeInterval(4) }
+                if args.contains("-MirsaCatHappyFixture") { catCelebration = Date() }
                 if args.contains("-MirsaChatDraft4000Fixture") { text = String(repeating: "ع", count: 4000) }
                 if args.contains("-MirsaChatDraft4001Fixture") { text = String(repeating: "ع", count: 4001) }
             }
@@ -1021,13 +1043,6 @@ struct ForgeChatThreadView: View {
             if let jpeg, let img = UIImage(data: jpeg) {
                 HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
                     Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(chatMuted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
-            }
-            if catEnabled {
-                MirsaChatCat(thinking: catThinking, touch: catTouch, awake: catAwake, celebration: catCelebration)
-                    .frame(height: 68)
-                    .clipped()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
             }
             inputBar
             if let e = actionError ?? store.error {
@@ -1393,22 +1408,32 @@ enum MirsaChatBackground {
 }
 
 
-// MARK: - A quiet, hand-drawn chat companion
-// All motion stays in a reserved 52pt lane, never over a message, attachment or input.
-// The parent observes touches simultaneously, leaving scroll/reply/tap gestures intact.
+// MARK: - Original hand-drawn roof-hopping chat companion
 private enum MirsaCatText {
     static var settings: String { tr5("Chat settings", "إعدادات المحادثة", de: "Chat-Einstellungen", ckb: "ڕێکخستنەکانی گفتوگۆ", kmr: "Mîhengên sohbetê") }
     static var title: String { tr5("Little cat companion", "رفيقك القط الصغير", de: "Kleiner Katzenbegleiter", ckb: "پشیلە بچووکە هاوڕێکە", kmr: "Hevalê pisîkê biçûk") }
     static var explanation: String {
-        tr5("A little cat follows your scrolling, watches while Mirsa thinks, celebrates replies and naps when you pause. It never covers your messages or buttons. Reduce Motion keeps it still.",
-            "قط صغير بيلحق حركتك بالمحادثة، بينتظر معك لما مرسى يفكّر، بيفرح بالرد وبينام لما ترتاح. ما بيغطّي الرسائل أو الأزرار. مع تقليل الحركة بيضل ثابت.",
-            de: "Eine kleine Katze folgt deinem Scrollen, wartet mit dir auf Mirsa, freut sich über Antworten und schläft bei Pausen. Nachrichten und Tasten bleiben frei. Bei reduzierter Bewegung bleibt sie still.",
+        tr5("A playful cat hops along the empty tops of message cards, watches Mirsa think and naps after a quiet moment. Tap it for a heart. Turn it off here; Reduce Motion keeps it gently still.",
+            "قط صغير بينط فوق الرسائل وبيمشي عحوافها، بيراقب مرسى وهو عم يفكّر وبينام بعد الهدوء. اكبس عليه ليفرح ويطلع قلب. فيك تطفّيه هون، ومع تقليل الحركة بيضل هادي.",
+            de: "Eine verspielte Katze hüpft auf die freien Oberkanten der Nachrichten, beobachtet Mirsa und schläft bei Ruhe. Antippen zeigt ein Herz. Hier ausschaltbar; bei reduzierter Bewegung bleibt sie still.",
             ckb: "پشیلەیەکی بچووک شوێن جووڵەی گفتوگۆکەت دەکەوێت، کاتێک میرسا بیر دەکاتەوە چاوەڕێ دەکات، بە وەڵام دڵخۆش دەبێت و لە پشوودا دەخەوێت. نامە و دوگمەکان داناپۆشێت. بە کەمکردنەوەی جووڵە جێگیر دەمێنێت.",
             kmr: "Pisîkeke biçûk li pey tevgera sohbetê diçe, dema Mirsa difikire li bendê dimîne, bi bersivan şa dibe û di bêdengiyê de radizê. Peyam û bişkokan nagire. Bi Kêmkirina Tevgerê re bêliv dimîne.")
     }
 }
 
-private struct MirsaChatCat: View {
+/// Bubble anchors are measured after layout, including scroll/keyboard/RTL changes.
+/// Each card reserves a 54pt empty roof. The cat's feet sit on its top edge.
+private struct MirsaCatPerches: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private struct MirsaCatPlayground: View {
+    let perches: [String: CGRect]
+    let viewport: CGSize
+    let preferred: String?
     let thinking: Bool
     let touch: CGPoint
     let awake: Date
@@ -1416,28 +1441,77 @@ private struct MirsaChatCat: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.layoutDirection) private var direction
-    @State private var position: CGFloat = 0.78
+    @State private var tapped = Date.distantPast
+
+    private var roofs: [(key: String, value: CGRect)] {
+        perches.filter { _, r in
+            r.width >= 70 && r.minY >= 54 && r.minY < viewport.height - 16
+        }.sorted { $0.value.minY < $1.value.minY }
+    }
+
+    private func spot(_ roof: CGRect, walk: Double) -> CGPoint {
+        // Only the empty roof, never text, report buttons or attachment actions.
+        let left = max(36, roof.minX + 34)
+        let right = max(left, min(viewport.width - 36, roof.maxX - 34))
+        let progress = direction == .rightToLeft ? 1 - walk : walk
+        return CGPoint(x: left + (right - left) * progress, y: roof.minY - 24)
+    }
 
     var body: some View {
-        GeometryReader { geometry in
-            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || scenePhase != .active)) { timeline in
-                let now = timeline.date.timeIntervalSinceReferenceDate
-                let sleeping = !thinking && timeline.date.timeIntervalSince(awake) > 25
-                let happyAge = timeline.date.timeIntervalSince(celebration)
-                let happy = happyAge >= 0 && happyAge < 1.1
-                let phase = reduceMotion ? 0 : now
-                let bounce = !reduceMotion && happy ? -abs(sin(happyAge * .pi * 3)) * 9 : 0
-                let breath = reduceMotion ? 0 : sin(phase * (sleeping ? 1.7 : 2.5)) * 0.7
-                MirsaCatDrawing(phase: phase, sleeping: sleeping, thinking: thinking, happy: happy,
-                                look: reduceMotion ? 0 : Double(touch.x - 0.5) * 2)
-                    .frame(width: 66, height: 48)
-                    .scaleEffect(x: 1, y: 1 + breath * 0.012, anchor: .bottom)
-                    .offset(y: bounce - (reduceMotion ? 0 : touch.y * 3))
-                    .position(x: 40 + max(0, geometry.size.width - 80) * (reduceMotion ? 0.78 : position), y: 40)
-            }
-            .onChange(of: touch) { _, next in
-                withAnimation(reduceMotion ? nil : .spring(response: 0.7, dampingFraction: 0.82)) {
-                    position = direction == .rightToLeft ? 1 - next.x : next.x
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: scenePhase != .active || reduceMotion)) { clock in
+            let elapsed = max(0, clock.date.timeIntervalSince(max(awake, tapped)))
+            let t = reduceMotion ? 0 : (!thinking && elapsed > 45 ? 45 : elapsed)
+            let cycle = Int(t / 4)
+            let beat = t.truncatingRemainder(dividingBy: 4)
+            let sleeping = !thinking && elapsed > 45
+            let happyAge = clock.date.timeIntervalSince(max(tapped, celebration))
+            let happy = happyAge >= 0 && happyAge < 1.4
+            let available = roofs
+            let favored = available.firstIndex { $0.key == preferred }
+            let currentIndex = available.isEmpty ? 0 : (thinking || happy ? (favored ?? available.count - 1) : cycle % available.count)
+            let previousIndex = available.isEmpty ? 0 : (currentIndex + available.count - 1) % available.count
+            let walk = sleeping || reduceMotion ? 0.5 : 0.5 + sin(t * 1.3) * 0.28
+            let destination = available.isEmpty ? CGPoint(x: viewport.width * 0.75, y: 30) : spot(available[currentIndex].value, walk: walk)
+            let origin = available.isEmpty ? destination : spot(available[previousIndex].value, walk: 0.5)
+            let flight = !reduceMotion && !sleeping && !thinking && !happy && available.count > 1 && beat < 0.7
+            let progress = min(1, beat / 0.7)
+            let ease = progress * progress * (3 - 2 * progress)
+            let hop = flight ? sin(progress * .pi) * 42 : (happy && !reduceMotion ? abs(sin(happyAge * .pi * 2)) * 28 : 0)
+            let x = flight ? origin.x + (destination.x - origin.x) * ease : destination.x
+            let y = flight ? origin.y + (destination.y - origin.y) * ease - hop : destination.y - hop
+            let trick = !sleeping && !thinking && !happy && !flight && !reduceMotion
+            let stretch = trick && cycle % 4 == 1 ? sin(beat / 4 * .pi) * 0.18 : 0
+            let roll = trick && cycle % 4 == 2 && beat < 1.2 ? 360 * (beat / 1.2) : 0
+            let squash = flight ? sin(progress * .pi) * 0.13 : (happy && !reduceMotion ? -cos(happyAge * .pi * 4) * 0.10 : 0)
+
+            ZStack {
+                // Decoration is never a hit target. Only the cat's small roof button is.
+                if trick && cycle % 4 == 3 {
+                    Circle().fill(Color.orange.opacity(0.75)).frame(width: 5, height: 5)
+                        .position(x: x + sin(t * 3) * 28, y: destination.y + 16)
+                        .allowsHitTesting(false)
+                }
+                Button { tapped = Date() } label: {
+                    MirsaCatDrawing(phase: reduceMotion ? 0 : t, sleeping: sleeping,
+                                    thinking: thinking, happy: happy, look: thinking ? -1 : Double(touch.x - 0.5) * 2)
+                        .frame(width: 66, height: 48)
+                        .scaleEffect(x: 1 + stretch - squash, y: 1 - stretch + squash, anchor: .bottom)
+                        .scaleEffect(roll > 0 ? 0.72 : 1)
+                        .rotationEffect(.degrees(roll))
+                        .contentShape(Ellipse())
+                }
+                .buttonStyle(.plain)
+                .frame(width: 66, height: 48)
+                .position(x: x, y: max(24, y))
+                .allowsHitTesting(!flight && hop < 2)
+                .accessibilityLabel(MirsaCatText.title)
+                .accessibilityIdentifier("chat-playful-cat")
+                if happy {
+                    Image(systemName: "heart.fill").font(.system(size: 13))
+                        .foregroundStyle(.pink)
+                        .opacity(reduceMotion ? 1 : max(0, 1 - happyAge / 1.4))
+                        .position(x: x + 18, y: max(10, y - 30 - (reduceMotion ? 0 : happyAge * 14)))
+                        .allowsHitTesting(false)
                 }
             }
         }
@@ -1496,7 +1570,7 @@ private struct MirsaCatDrawing: View {
             ellipse(CGRect(x: 29.5, y: 26, width: 3.5, height: 2.5), Color(red: 0.77, green: 0.41, blue: 0.42))
             line([CGPoint(x: 31, y: 29), CGPoint(x: 28, y: 31), CGPoint(x: 26, y: 30)], ink, 1)
             line([CGPoint(x: 31, y: 29), CGPoint(x: 34, y: 31), CGPoint(x: 36, y: 30)], ink, 1)
-            let paw = thinking ? sin(phase * 7) * 1.5 : 0
+            let paw = sleeping ? 0 : sin(phase * (thinking ? 7 : 9)) * (thinking ? 3.5 : 1.4)
             ellipse(CGRect(x: 20, y: 39 + paw, width: 10, height: 6), fur)
             ellipse(CGRect(x: 37, y: 39 - paw, width: 10, height: 6), fur)
             // A sleepy curl or three tiny thinking motes, never status text.
