@@ -27,8 +27,19 @@ enum BundlePath {
         }
         if mustExist && (try? fm.attributesOfItem(atPath: url.path)) == nil { throw BundleFileError.notFound(path) }
         let rootPath = root.standardizedFileURL.path
-        guard url.standardizedFileURL.path == rootPath || url.standardizedFileURL.path.hasPrefix(rootPath + "/") else {
-            throw BundleFileError.outsideBundle(path)
+        let candidatePath = url.standardizedFileURL.path
+
+        // Temporary diagnostics (friend's request): log the compared paths so the
+        // /var vs /private/var (or encoding) mismatch can be confirmed on-device.
+        print("""
+        [BundlePath] path=\(path)
+        [BundlePath] root=\(rootPath)
+        [BundlePath] candidate=\(candidatePath)
+        """)
+
+        guard candidatePath == rootPath ||
+              candidatePath.hasPrefix(rootPath + "/") else {
+            throw BundleFileError.outsideBundle("\(path)\nroot=\(rootPath)\ncandidate=\(candidatePath)")
         }
         return url
     }
