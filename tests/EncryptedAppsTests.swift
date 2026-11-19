@@ -246,4 +246,16 @@ final class EncryptedAppsTests: XCTestCase {
             XCTAssertTrue(error is FairPlayDecryptor.Error)
         }
     }
+
+    /// /var is a symlink to /private/var: a root spelled /var/... and a
+    /// candidate spelled /private/var/... are the same location, and resolve
+    /// must not reject the candidate as outside the bundle.
+    func testResolveTreatsVarAndPrivateVarAsSamePath() throws {
+        let root = URL(fileURLWithPath: "/var/tmp/test-root", isDirectory: true)
+        let resolved = try BundlePath.resolve("META-INF", in: root, mustExist: false)
+        XCTAssertTrue(
+            resolved.resolvingSymlinksInPath().path
+                .hasSuffix("/test-root/META-INF")
+        )
+    }
 }
