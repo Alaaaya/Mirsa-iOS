@@ -665,16 +665,20 @@ struct ForgeChatThreadView: View {
     let threadID: UUID
     @ObservedObject private var store = ForgeChatStore.shared
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
+    // The rest of Mirsa can force dark appearance. Read the scene's system
+    // traits, not that inherited SwiftUI override, until the user chooses.
+    @State private var systemDark = false
+    @AppStorage("mirsa.chat.appearance") private var chatAppearance = "system"
     private var darkChat: Bool {
-        #if DEBUG
-        if ForgeChatStore.fixture && ProcessInfo.processInfo.arguments.contains("-MirsaChatLightFixture") { return false }
-        #endif
-        return blackChatBackground || colorScheme == .dark
+        switch chatAppearance {
+        case "light": return false
+        case "dark": return true
+        default: return systemDark
+        }
     }
     private var chatInk: Color { darkChat ? Color(white: 0.95) : Color(white: 0.10) }
     private var chatMuted: Color { darkChat ? Color(white: 0.65) : Color(white: 0.43) }
-    private var chatCanvas: Color { darkChat ? Color(white: blackChatBackground ? 0 : 0.055) : Color(red: 0.973, green: 0.973, blue: 0.969) }
+    private var chatCanvas: Color { darkChat ? Color(white: 0.055) : Color(red: 0.973, green: 0.973, blue: 0.969) }
     private var chatCard: Color { darkChat ? Color(white: 0.105) : .white }
     private var chatRim: Color { darkChat ? .white.opacity(0.09) : .black.opacity(0.06) }
     @Environment(\.scenePhase) private var scenePhase
@@ -723,7 +727,6 @@ struct ForgeChatThreadView: View {
         let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
-    @AppStorage(MirsaChatBackground.key) private var blackChatBackground = false
     private var catThinking: Bool {
         #if DEBUG
         if ForgeChatStore.fixture && ProcessInfo.processInfo.arguments.contains("-MirsaCatThinkingFixture") { return true }
@@ -896,6 +899,11 @@ struct ForgeChatThreadView: View {
             .background(chatCanvas.opacity(0.96).ignoresSafeArea(edges: .bottom))
         }
         .background(chatCanvas.ignoresSafeArea())
+        .background(ForgeChatSystemAppearanceReader { dark in
+            if systemDark != dark { systemDark = dark }
+        }.frame(width: 0, height: 0))
+        // Local environment only. Never change the hosting window or other tabs.
+        .environment(\.colorScheme, darkChat ? .dark : .light)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showChatSettings) {
             NavigationStack {
@@ -1108,17 +1116,18 @@ struct ForgeChatThreadView: View {
         .zIndex(1)
     }
 
-    /// Small circle next to the thread id: pure black chat background or the original gradient. Visual 28pt, hit target 44pt.
+    /// Switch the whole thread palette and materials, persisting an explicit choice.
     private var blackBackgroundToggle: some View {
-        Button { blackChatBackground.toggle() } label: {
-            Image(systemName: blackChatBackground ? "moon.fill" : "moon")
+        Button { chatAppearance = darkChat ? "light" : "dark" } label: {
+            Image(systemName: darkChat ? "moon.fill" : "moon")
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(chatInk)
                 .frame(width: 28, height: 28).background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().stroke(chatRim, lineWidth: 0.5))
                 .frame(width: 44, height: 44).contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(MirsaChatBackground.label(black: blackChatBackground))
+        .accessibilityLabel(MirsaChatBackground.label(black: darkChat))
+        .accessibilityValue(darkChat ? "dark" : "light")
         .accessibilityIdentifier("chat-black-background")
     }
 
@@ -1486,6 +1495,37 @@ private struct MirsaCatDrawing: View {
                     ellipse(CGRect(x: 54 + Double(i) * 4, y: 9 - Double(i) * 3, width: 2.5, height: 2.5), fur.opacity(alpha))
                 }
             }
+        }
+    }
+}
+
+/// Window-scene traits retain the iPhone's appearance even when an ancestor
+/// applies a SwiftUI color-scheme override. The callback is deferred out of layout.
+private struct ForgeChatSystemAppearanceReader: UIViewRepresentable {
+    let changed: (Bool) -> Void
+    func makeUIView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.changed = changed
+        return view
+    }
+    func updateUIView(_ view: ReaderView, context: Context) {
+        view.changed = changed
+        view.reportAppearance()
+    }
+    final class ReaderView: UIView {
+        var changed: ((Bool) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            reportAppearance()
+        }
+        override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+            super.traitCollectionDidChange(previousTraitCollection)
+            reportAppearance()
+        }
+        func reportAppearance() {
+            guard let scene = window?.windowScene else { return }
+            let dark = scene.traitCollection.userInterfaceStyle == .dark
+            DispatchQueue.main.async { [weak self] in self?.changed?(dark) }
         }
     }
 }

@@ -84,10 +84,17 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
                                        "-mirsa.chat.catEnabled", "YES", "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
-                if light { app.launchArguments.append("-MirsaChatLightFixture") }
+                app.launchArguments += ["-mirsa.chat.appearance", light ? "light" : "dark"]
                 app.launch()
                 XCTAssertTrue(app.staticTexts["chat-waiting"].waitForExistence(timeout: 20))
                 XCTAssertTrue(app.staticTexts["Thanks, no rush."].exists)
+                let appearance = app.buttons["chat-black-background"]
+                XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
+                appearance.tap()
+                XCTAssertEqual(appearance.value as? String, light ? "dark" : "light")
+                assertComposer(app, liquid: false, name: "islet_toggled_\(language)_\(light ? "dark" : "light")")
+                appearance.tap()
+                XCTAssertEqual(appearance.value as? String, light ? "light" : "dark")
                 assertComposer(app, liquid: false, name: "islet_\(language)_\(light ? "light" : "dark")")
                 app.buttons["chat-settings"].tap()
                 XCTAssertTrue(app.switches["chat-cat-toggle"].waitForExistence(timeout: 5))
@@ -100,6 +107,26 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 app.terminate()
             }
         }
+        // No appearance launch override here: exercise the actual persisted choice.
+        for language in ["ar", "en"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
+                                   "-mirsa.appLanguage", language]
+            app.launch()
+            let appearance = app.buttons["chat-black-background"]
+            XCTAssertTrue(appearance.waitForExistence(timeout: 20))
+            if appearance.value as? String != "light" { appearance.tap() }
+            app.terminate()
+            app.launch()
+            XCTAssertTrue(appearance.waitForExistence(timeout: 20))
+            XCTAssertEqual(appearance.value as? String, "light")
+            appearance.tap()
+            app.terminate()
+            app.launch()
+            XCTAssertTrue(appearance.waitForExistence(timeout: 20))
+            XCTAssertEqual(appearance.value as? String, "dark")
+            app.terminate()
+        }
     }
 
     func testIsletDeliveredAttachmentRemainsReachable() {
@@ -109,7 +136,7 @@ final class MirsaAIChatFixtureUITests: XCTestCase {
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat", "-MirsaChatFixture",
                                        "-MirsaTendiesArtifactFixture", "-mirsa.chat.reactionsTipDismissed", "YES",
                                        "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
-                if light { app.launchArguments.append("-MirsaChatLightFixture") }
+                app.launchArguments += ["-mirsa.chat.appearance", light ? "light" : "dark"]
                 app.launch()
                 let delivery = app.buttons["mirsa.chat.artifact.add-wallpaper"]
                 XCTAssertTrue(delivery.waitForExistence(timeout: 20))
