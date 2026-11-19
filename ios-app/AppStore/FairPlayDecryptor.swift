@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Security
 import ZIPFoundation
 
@@ -139,10 +140,7 @@ enum FairPlayDecryptor {
     /// entitlements and returns the first usable container, or nil when the
     /// app was signed without an App Group.
     private static func appGroupContainer() -> URL? {
-        guard let task = SecTaskCreateFromSelf(nil),
-              let groups = SecTaskCopyValueForEntitlement(task, "com.apple.security.application-groups" as CFString) as? [String] else {
-            return nil
-        }
+        guard let groups = appGroupIdentifiers(), !groups.isEmpty else { return nil }
         let fm = FileManager.default
         for id in groups {
             guard let url = fm.containerURL(forSecurityApplicationGroupIdentifier: id) else { continue }
@@ -151,6 +149,36 @@ enum FairPlayDecryptor {
                 return url
             }
         }
+        return nil
+    }
+
+    /// The app's declared App Group identifiers from its runtime
+    /// entitlements, or nil when they cannot be read. SecTask is not
+    /// exposed to Swift (even with `import Security`), so the two SecTask
+    /// entry points are resolved at runtime with dlsym — the same pattern
+    /// PosterBoardAccess.m uses — instead of being called directly.
+    private static func appGroupIdentifiers() -> [String]? {
+        typealias CreateTaskFn = @convention(c) (CFDictionary?) -> CFTypeRef?
+        typealias CopyEntitlementFn = @convention(c) (CFTypeRef, CFString, UnsafeMutablePointer<CFError?>?) -> CFTypeRef?
+
+        func resolve(_ name: String) -> UnsafeMutableRawPointer? {
+            if let sym = dlsym(RTLD_DEFAULT, name) { return sym }
+            guard let handle = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW | RTLD_LOCAL) else { return nil }
+            return dlsym(handle, name)
+        }
+        guard let createPtr = resolve("SecTaskCreateFromSelf"),
+              let copyPtr = resolve("SecTaskCopyValueForEntitlement") else {
+            return nil
+        }
+        let create = unsafeBitCast(createPtr, to: CreateTaskFn.self)
+        let copy = unsafeBitCast(copyPtr, to: CopyEntitlementFn.self)
+        guard let task = create(nil) else { return nil }
+        var error: CFError?
+        guard let value = copy(task, "com.apple.security.application-groups" as CFString, &error) else {
+            return nil
+        }
+        if let groups = value as? [String] { return groups }
+        if let group = value as? String { return [group] }
         return nil
     }
 
