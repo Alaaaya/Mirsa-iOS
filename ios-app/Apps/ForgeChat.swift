@@ -732,6 +732,7 @@ struct ForgeChatThreadView: View {
         let byID = Dictionary(uniqueKeysWithValues: (confirmed + pending).map { ($0.id, $0) })
         return ForgeChatTimeline.orderedIDs(confirmed: msgs, pending: queued).compactMap { byID[$0] }
     }
+    private var unsent: Bool { store.hasInFlight(threadID) }
     private var isNew: Bool { !started && msgs.isEmpty && queued.isEmpty && !store.threads.contains { $0.id == threadID } }
     private var draftCount: Int { ForgeChatText.messageCount(text) }
     private var attachmentsUI: Bool { ChatAttachmentConfig.uiEnabled }
