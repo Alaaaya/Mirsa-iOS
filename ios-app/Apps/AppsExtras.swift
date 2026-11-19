@@ -496,7 +496,7 @@ struct GitHubSourcesView: View {
                 .disabled(gh.checking || gh.sources.isEmpty)
                 if let r = gh.lastResult { Text(r).font(.footnote).foregroundStyle(.secondary) }
             }
-        }.listRowBackground(MirsaPalette.row) }
+        }.listRowBackground(MirsaRowBackground()) }
         .mirsaScreen()
         .navigationTitle(tr("GitHub Updates", "تحديثات GitHub"))
     }
@@ -526,7 +526,7 @@ struct WebUploadView: View {
                 Text(tr("Keep Mirsa open. Drop an .ipa on the page and choose Container or Real App here.",
                         "خلّي Mirsa مفتوح. اسحب ملف ‎.ipa عالصفحة، وبعدين اختار Container أو تطبيق حقيقي من هون."))
             }
-        }.listRowBackground(MirsaPalette.row) }
+        }.listRowBackground(MirsaRowBackground()) }
         .mirsaScreen()
         .navigationTitle(tr("Upload from Computer", "رفع من الكمبيوتر"))
     }

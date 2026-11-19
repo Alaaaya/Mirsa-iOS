@@ -114,7 +114,9 @@ struct MirsaSolidCard<S: InsettableShape>: ViewModifier {
 
     func body(content: Content) -> some View {
         if theme == MirsaTheme.liquid.rawValue && !reduceTransparency {
-            glass(content)
+            // App Store look: the same layered violet glass as the store's cards,
+            // with the Mirsa rim and a top sheen on raised cards.
+            content.modifier(StoreGlass(shape: shape, tint: tint, sheen: elevation >= 1, elevation: elevation))
         } else {
             solid(content)
         }
@@ -363,12 +365,13 @@ struct MirsaPageHeader<Trailing: View>: View {
     var subtitle: String? = nil
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
-        HStack(alignment: .bottom, spacing: MirsaSpacing.xs) {
+        HStack(alignment: .center, spacing: MirsaSpacing.xs) {
             VStack(alignment: .leading, spacing: 2) {
                 if let subtitle {
-                    Text(subtitle)
-                        .font(MirsaFont.secondary.weight(.medium))
-                        .foregroundStyle(MirsaPalette.textSecondary)
+                    // App Store style eyebrow: small bold caps in the Mirsa gradient.
+                    Text(subtitle.uppercased())
+                        .font(.system(size: 11, weight: .bold, design: .rounded)).tracking(1.2)
+                        .foregroundStyle(StoreLuxe.identity)
                         .lineLimit(1)
                 }
                 Text(title)

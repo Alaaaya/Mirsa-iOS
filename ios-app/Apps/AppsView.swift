@@ -1291,7 +1291,7 @@ struct AppsSettingsSheet: View {
                 Section {
                     NavigationLink(L.t("settings.licenses")) { LicensesView() }
                 }
-            }.listRowBackground(MirsaPalette.row) }
+            }.listRowBackground(MirsaRowBackground()) }
             .mirsaScreen()
             .onChange(of: store.pending?.id) { _, new in if new != nil { dismiss() } }
             .navigationTitle(L.t("settings.title"))
@@ -1322,7 +1322,7 @@ struct AppInfoSheet: View {
                 if let s = app.signedSerial {
                     LabeledContent(L.t("info.signedWith"), value: s)
                 }
-            }.listRowBackground(MirsaPalette.row) }
+            }.listRowBackground(MirsaRowBackground()) }
             .mirsaScreen()
             .navigationTitle(app.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -1391,12 +1391,12 @@ struct LicensesView: View {
                 }
                 .accessibilityLabel(licensesTitle)
             }
-        }.listRowBackground(MirsaPalette.row) }
+        }.listRowBackground(MirsaRowBackground()) }
         .mirsaScreen()
         .navigationTitle(tr("About", "حول التطبيق"))
         .sheet(isPresented: $showLicenses) {
             NavigationStack {
-                List { Group { ForEach(items) { i in licenseRow(i) } }.listRowBackground(MirsaPalette.row) }
+                List { Group { ForEach(items) { i in licenseRow(i) } }.listRowBackground(MirsaRowBackground()) }
                     .mirsaScreen()
                     .navigationTitle(licensesTitle)
                     .navigationBarTitleDisplayMode(.inline)

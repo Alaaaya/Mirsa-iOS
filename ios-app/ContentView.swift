@@ -622,9 +622,6 @@ struct ContentView: View {
     }
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue // theme only recolors; the floating dock is shared by every theme
     private var liquidTheme: Bool { true }
-    @AppStorage(StoreStyle.key) private var storeStyle = StoreStyle.fallback.rawValue
-    /// The single-bar App Store (main dock hidden there) belongs to the New store style only.
-    private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
     @State private var chatComposerFocused = false
     @State private var wallpaperMakerFocused = false
 
@@ -666,8 +663,9 @@ struct ContentView: View {
                 ToolsTab()
                     .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
             }
-            // Classic (default) keeps the original store and the main dock; New draws its own single bar.
-            sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle)) }
+            // Both store styles keep the main Mirsa dock: the store's own section bar floats
+            // directly above it (the dock clearance lifts the tab, bar included).
+            sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme)) }
             sixTab(.personalHub) {
                 PersonalAppsHub()
                     .modifier(LiquidTabChrome(liquid: liquidTheme))
@@ -686,9 +684,8 @@ struct ContentView: View {
         .onChange(of: vm.selectedTab) { _, t in loadedTabs.insert(t) }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
-            // In the New store style the App Store tab draws its own single bottom bar (its
-            // sections plus a Mirsa menu back to the other tabs), so the main dock steps aside there.
-            if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
+            // The main dock is shown on every tab, the App Store included (its section bar sits above it).
+            if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused {
                 LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
                 .ignoresSafeArea(.keyboard)
             }
@@ -1087,7 +1084,7 @@ struct PairingTab: View {
                         CompactLogView(title: "Previous installation", lines: AppsStore.shared.legacyInstallDiagnostics)
                     }
                 }
-            }.listRowBackground(MirsaPalette.row) }
+            }.listRowBackground(MirsaRowBackground()) }
             .modifier(MirsaDiagnosticAccessLifecycle(access: diagnosticAccess))
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 60)

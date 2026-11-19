@@ -100,4 +100,32 @@ final class MirsaDesignReviewUITests: XCTestCase {
             }
         }
     }
+    /// Real SwiftUI screens with fixture data only, not generated mockups.
+    func testAppstoreDesignArabicLiquidScreens() {
+        let store = launch(lang: "ar", theme: "liquid", storeDetail: false)
+        let dock = store.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
+        let search = store.buttons["store-tab-search"]
+        XCTAssertTrue(dock.waitForExistence(timeout: 10))
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertLessThan(search.frame.midY, dock.frame.minY, "Store bar must be above the Mirsa dock")
+        shot("appstore_ar_liquid_store")
+        store.terminate()
+        let apps = launch(lang: "ar", theme: "liquid")
+        XCTAssertTrue(apps.buttons["main-tab-Apps"].waitForExistence(timeout: 10))
+        shot("appstore_ar_liquid_apps")
+        apps.terminate()
+        for page in ["settings", "mirsa-ai-chat"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", page,
+                                   "-mirsa.appLanguage", "ar", "-mirsa.theme", "liquid",
+                                   "-mirsa.store.style", "new", "-MirsaChatFixture",
+                                   "-AppleLanguages", "(ar)", "-AppleLocale", "ar"]
+            app.launch()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+            Thread.sleep(forTimeInterval: 3)
+            shot("appstore_ar_liquid_" + page)
+            app.terminate()
+        }
+    }
+
 }

@@ -133,7 +133,7 @@ struct BackupsSheet: View {
                         }
                     }
                 }
-            }.listRowBackground(MirsaPalette.row) }
+            }.listRowBackground(MirsaRowBackground()) }
             .navigationTitle(app.name)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(tr("Done", "تم")) { dismiss() } } }
             .confirmationDialog(tr("Restore this backup? The current data is backed up first.",
