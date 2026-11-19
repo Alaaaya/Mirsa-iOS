@@ -312,6 +312,11 @@ final class EncryptedAppsStore: ObservableObject {
             let report = try await Task.detached(priority: .userInitiated) {
                 try FairPlayDecryptor.decryptIPA(at: source)
             }.value
+            // The decryptor returned success — confirm the output file is
+            // really on disk before telling the user it worked.
+            guard FileManager.default.fileExists(atPath: report.outputURL.path) else {
+                throw FairPlayDecryptor.Error.ioError("Decrypted IPA missing at \(report.outputURL.path)")
+            }
             // Decryption succeeded. Show a clear "decryption complete"
             // confirmation first; the decrypted IPA is handed to the
             // installer only after the user confirms, so they see the
