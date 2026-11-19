@@ -101,6 +101,15 @@ struct EncryptedAppsTab: View {
         .alert(MirsaTr.lit("Notice"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button(MirsaTr.lit("OK")) { store.error = nil }
         } message: { Text(store.error ?? "") }
+        .alert(t("Decryption complete", "تم فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê qediya"),
+               isPresented: Binding(get: { store.decryptSuccess != nil }, set: { if !$0 { store.cancelDecrypted() } })) {
+            Button(t("Install", "تثبيت", "دامەزراندن", "Saz bike")) {
+                Task { await store.confirmDecryptedInstall(vm: vm) }
+            }
+            Button(tr("Cancel", "إلغاء", ckb: "هەڵوەشاندنەوە", kmr: "Betal"), role: .cancel) {
+                store.cancelDecrypted()
+            }
+        } message: { Text(store.decryptSuccess ?? "") }
         .confirmationDialog(t("Delete this IPA?", "تحذف هالـIPA؟", "ئەم IPAیە بسڕیتەوە؟", "Vê IPA jê bibî?"),
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible) {
