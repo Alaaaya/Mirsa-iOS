@@ -585,7 +585,12 @@ private struct EncryptedEntryCard: View {
                 .opacity(store.busy != nil ? 0.55 : 1)
                 if entry.encryptedBinary == true, entry.hasSinf {
                     Button { Task { await store.decrypt(entry, vm: vm) } } label: {
-                        Label(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"), systemImage: "lock.open")
+                        // Icon above the text: "التشفير" is one long word and
+                        // truncates next to the icon in the half-width button.
+                        VStack(spacing: 2) {
+                            Image(systemName: "lock.open")
+                            Text(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"))
+                        }
                             .font(MirsaFont.button)
                             .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
                             .frame(maxWidth: .infinity, minHeight: 44)
