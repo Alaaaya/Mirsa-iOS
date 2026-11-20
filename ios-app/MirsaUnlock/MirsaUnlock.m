@@ -718,6 +718,7 @@ typedef void (^MirsaUnlockRCCompletion)(NSData *data, NSURLResponse *response, N
 
 static NSMutableDictionary *MirsaUnlockRCProductEntitlements = nil;
 static NSURL *MirsaUnlockRCFakeReceiptURL = nil;
+static BOOL MirsaUnlockNetworkHooksInstalled = NO;
 
 static NSURLSessionDataTask *(*MirsaUnlockDataTaskWithRequestOrig)(id, SEL, NSURLRequest *, MirsaUnlockRCCompletion) = NULL;
 static NSURLSessionDataTask *(*MirsaUnlockDataTaskWithURLOrig)(id, SEL, NSURL *, MirsaUnlockRCCompletion) = NULL;
@@ -827,6 +828,92 @@ static NSData *MirsaUnlockRCRewriteResponse(NSData *data, NSURL *url)
     }
 }
 
+static BOOL MirsaUnlockIsRevenueCatHost(NSString *host)
+{
+    // The SDK falls back to api.rc-backup.com when the primary host is
+    // unreachable (Minutes 1.12.9 scan, 2026-11-21) — cover both, or the
+    // interceptor silently misses the fallback traffic.
+    return host != nil &&
+        ([host isEqualToString:@"api.revenuecat.com"] ||
+         [host isEqualToString:@"api.rc-backup.com"]);
+}
+
+static BOOL MirsaUnlockIsSuperwallHost(NSString *host)
+{
+    return host != nil &&
+        ([host isEqualToString:@"api.superwall.com"] ||
+         [host isEqualToString:@"subscriptions-api.superwall.com"]);
+}
+
+// Superwall network rewrite (heuristic — Superwall's response schema is
+// not public, so this walks the JSON and flips every entitlement state it
+// can recognise: isActive/is_active -> YES, status "inactive" -> "active",
+// expiresDate/expires_date -> 2099. A response with none of these fields
+// passes through untouched, so an unknown shape can never break the SDK.
+static BOOL MirsaUnlockSWRewriteValue(id value)
+{
+    BOOL changed = NO;
+    if ([value isKindOfClass:[NSMutableDictionary class]]) {
+        NSMutableDictionary *dict = (NSMutableDictionary *)value;
+        for (NSString *key in [dict allKeys]) {
+            id v = dict[key];
+            if (([key isEqualToString:@"isActive"] || [key isEqualToString:@"is_active"]) &&
+                [v isKindOfClass:[NSNumber class]] && ![v boolValue]) {
+                dict[key] = @YES;
+                changed = YES;
+            } else if ([key isEqualToString:@"status"] &&
+                       [v isKindOfClass:[NSString class]] &&
+                       [v isEqualToString:@"inactive"]) {
+                dict[key] = @"active";
+                changed = YES;
+            } else if (([key isEqualToString:@"expiresDate"] || [key isEqualToString:@"expires_date"]) &&
+                       [v isKindOfClass:[NSString class]]) {
+                dict[key] = @"2099-01-01T00:00:00Z";
+                changed = YES;
+            } else if (MirsaUnlockSWRewriteValue(v)) {
+                changed = YES;
+            }
+        }
+    } else if ([value isKindOfClass:[NSMutableArray class]]) {
+        for (id item in (NSMutableArray *)value) {
+            if (MirsaUnlockSWRewriteValue(item)) {
+                changed = YES;
+            }
+        }
+    }
+    return changed;
+}
+
+static NSData *MirsaUnlockSWRewriteResponse(NSData *data, NSURL *url)
+{
+    if (data == nil || data.length == 0) {
+        return data;
+    }
+    @try {
+        id json = [NSJSONSerialization JSONObjectWithData:data
+                                                  options:NSJSONReadingMutableContainers
+                                                    error:nil];
+        if (json == nil) {
+            return data;
+        }
+        if (!MirsaUnlockSWRewriteValue(json)) {
+            return data;
+        }
+        NSError *error = nil;
+        NSData *out = [NSJSONSerialization dataWithJSONObject:json options:0 error:&error];
+        if (out == nil) {
+            return data;
+        }
+        NSLog(@"[MirsaUnlock] superwall: rewrote entitlement state in response from %@",
+              url.path);
+        return out;
+    } @catch (NSException *exception) {
+        NSLog(@"[MirsaUnlock] superwall: exception rewriting response: %@ %@",
+              exception.name, exception.reason);
+        return data;
+    }
+}
+
 static id MirsaUnlockDataTaskWithRequest(id self, SEL _cmd, NSURLRequest *request, MirsaUnlockRCCompletion completionHandler)
 {
     if (MirsaUnlockDataTaskWithRequestOrig == NULL) {
@@ -836,13 +923,17 @@ static id MirsaUnlockDataTaskWithRequest(id self, SEL _cmd, NSURLRequest *reques
         return MirsaUnlockDataTaskWithRequestOrig(self, _cmd, request, NULL);
     }
     NSURL *url = request.URL;
-    if (url == nil || ![url.host isEqualToString:@"api.revenuecat.com"]) {
+    if (url == nil || (!MirsaUnlockIsRevenueCatHost(url.host) && !MirsaUnlockIsSuperwallHost(url.host))) {
         return MirsaUnlockDataTaskWithRequestOrig(self, _cmd, request, completionHandler);
     }
     MirsaUnlockRCCompletion saved = (MirsaUnlockRCCompletion)[completionHandler copy];
     MirsaUnlockRCCompletion wrapped = ^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error == nil && data != nil) {
-            data = MirsaUnlockRCRewriteResponse(data, url);
+            if (MirsaUnlockIsRevenueCatHost(url.host)) {
+                data = MirsaUnlockRCRewriteResponse(data, url);
+            } else if (MirsaUnlockIsSuperwallHost(url.host)) {
+                data = MirsaUnlockSWRewriteResponse(data, url);
+            }
         }
         saved(data, response, error);
     };
@@ -857,13 +948,17 @@ static id MirsaUnlockDataTaskWithURL(id self, SEL _cmd, NSURL *url, MirsaUnlockR
     if (completionHandler == NULL) {
         return MirsaUnlockDataTaskWithURLOrig(self, _cmd, url, NULL);
     }
-    if (url == nil || ![url.host isEqualToString:@"api.revenuecat.com"]) {
+    if (url == nil || (!MirsaUnlockIsRevenueCatHost(url.host) && !MirsaUnlockIsSuperwallHost(url.host))) {
         return MirsaUnlockDataTaskWithURLOrig(self, _cmd, url, completionHandler);
     }
     MirsaUnlockRCCompletion saved = (MirsaUnlockRCCompletion)[completionHandler copy];
     MirsaUnlockRCCompletion wrapped = ^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error == nil && data != nil) {
-            data = MirsaUnlockRCRewriteResponse(data, url);
+            if (MirsaUnlockIsRevenueCatHost(url.host)) {
+                data = MirsaUnlockRCRewriteResponse(data, url);
+            } else if (MirsaUnlockIsSuperwallHost(url.host)) {
+                data = MirsaUnlockSWRewriteResponse(data, url);
+            }
         }
         saved(data, response, error);
     };
@@ -883,6 +978,13 @@ static NSURL *MirsaUnlockAppStoreReceiptURL(id self, SEL _cmd)
 
 static void MirsaUnlockApplyRevenueCatNetworkHooks(void)
 {
+    // Installed once: the constructor calls this for RevenueCat and for
+    // Superwall (both route through the same NSURLSession swizzle), and a
+    // second install would capture the wrapped IMP as the original.
+    if (MirsaUnlockNetworkHooksInstalled) {
+        return;
+    }
+    MirsaUnlockNetworkHooksInstalled = YES;
     @try {
         if (MirsaUnlockRCProductEntitlements == nil) {
             MirsaUnlockRCProductEntitlements = [[NSMutableDictionary alloc] init];
@@ -2342,6 +2444,7 @@ __attribute__((constructor)) static void MirsaUnlockLoad(void)
         // 2. Built-in SDK hooks.
         NSArray *sdks = config[@"sdks"];
         BOOL hasRevenueCat = NO;
+        BOOL hasSuperwall = NO;
         BOOL hasStoreKit = NO;
         if ([sdks isKindOfClass:[NSArray class]]) {
             for (id entry in sdks) {
@@ -2350,12 +2453,20 @@ __attribute__((constructor)) static void MirsaUnlockLoad(void)
                 }
                 if ([entry isEqualToString:@"RevenueCat"]) {
                     hasRevenueCat = YES;
+                } else if ([entry isEqualToString:@"Superwall"]) {
+                    hasSuperwall = YES;
                 } else if ([entry isEqualToString:@"StoreKit"]) {
                     hasStoreKit = YES;
                 }
             }
         }
-        if (hasRevenueCat) {
+        if (hasRevenueCat || hasSuperwall) {
+            // The Entitlement hook above matches any class whose name
+            // contains "Entitlement", so SWKEntitlement.isActive is
+            // covered by it too — Superwall's paywall is SWKPaywallViewController
+            // and its state comes from api.superwall.com /
+            // subscriptions-api.superwall.com, which the network hooks
+            // below rewrite (Minutes 1.12.9, 2026-11-21).
             MirsaUnlockApplyRevenueCatHooks();
             MirsaUnlockApplyRevenueCatNetworkHooks();
         }
