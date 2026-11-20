@@ -24,7 +24,8 @@
 //                    "update": true, "trial": true, "connectivity": true},
 //       "location": {"latitude": 40.7128, "longitude": -74.006},
 //       "aggressive": false}
-//  "class" may be empty, meaning "any class that responds to the selector".
+//  "class" may be empty, meaning "any class in the host app's own bundle
+//  that responds to the selector" (system classes are never hooked).
 //  "returns" (new in v2, optional — missing means "yes", so v1 configs
 //  keep working) tells the dylib what the replacement must return:
 //      "yes"     BOOL YES    (classic premium getters)
@@ -458,11 +459,38 @@ static void MirsaUnlockDismissMethod(Class cls, SEL sel)
     }
 }
 
+// YES when this class is defined in the host app's own bundle (main
+// executable or an embedded Frameworks/ framework). System classes
+// (UIKit, Foundation, NSUserDefaults, ...) live in /System/Library or
+// /usr/lib and must NEVER receive a config hook: a class-less hook such
+// as boolForKey: -> YES applied to NSUserDefaults forces every
+// UserDefaults flag in the process to YES, which corrupts the app and
+// killed ReverseAudio 1.5.9 with _xpc_api_misuse in the remote-keyboard
+// handshake (crash log 2026-11-20 11:55). The built-in feature hooks
+// (jailbreak / SSL / location / ads) target their classes explicitly and
+// are unaffected by this guard.
+static BOOL MirsaUnlockClassIsFromAppBundle(Class cls)
+{
+    if (cls == Nil) {
+        return NO;
+    }
+    const char *image = class_getImageName(cls);
+    if (image == NULL) {
+        return NO;
+    }
+    // App code lives under ".../Something.app/..." (executable and
+    // embedded frameworks); system images do not contain ".app/".
+    return strstr(image, ".app/") != NULL;
+}
+
 // Apply ONE config hook to one class, dispatching on its "returns"
 // value ("yes" | "no" | "count" | "zero" | "future" | "noop" |
 // "dismiss"). Unknown values are logged and skipped.
 static void MirsaUnlockApplyHookToClass(Class cls, SEL sel, NSString *returns)
 {
+    if (!MirsaUnlockClassIsFromAppBundle(cls)) {
+        return;
+    }
     if ([returns isEqualToString:@"yes"]) {
         MirsaUnlockSwizzleBOOLGetter(cls, sel, YES);
     } else if ([returns isEqualToString:@"no"]) {
@@ -1499,6 +1527,9 @@ static void MirsaUnlockTraceInstallOnAllClasses(SEL sel)
                 }
                 Class cls = classes[i];
                 if (cls == Nil) {
+                    continue;
+                }
+                if (!MirsaUnlockClassIsFromAppBundle(cls)) {
                     continue;
                 }
                 if (class_getInstanceMethod(cls, sel) == NULL) {
