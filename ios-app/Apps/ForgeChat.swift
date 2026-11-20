@@ -180,6 +180,17 @@ enum ForgeChatImage {
                 messages[t] = (messages[t] ?? []) + [ForgeChatMessage(id: UUID(), threadID: t, role: "result", text: text, result: result)]
             }
             #endif
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaVoiceBubbleFixture"),
+               let file = Bundle.main.url(forResource: "voice-fixture", withExtension: "m4a"),
+               let data = try? Data(contentsOf: file) {
+                let meta = ChatAttachmentMeta(id: UUID(), kind: "audio", name: "voice.m4a", mime: "audio/mp4",
+                    size: Int64(data.count), durationMS: 2_000, sha256: ChatVoiceFixture.sha(data))
+                var message = ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: nil, attachments: [meta])
+                message.botReaction = "🔥"
+                messages[t] = [message]
+            }
+            #endif
             ackedThreads.insert(t)
             return
         }
@@ -263,7 +274,7 @@ enum ForgeChatImage {
     @discardableResult
     func send(threadID: UUID?, text: String, jpeg: Data?, attachmentIDs: [UUID] = [], replyTo: ForgeChatReplyRef? = nil) -> UUID? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return nil }
+        guard !t.isEmpty || attachmentIDs.contains(where: { AttachmentUploader.shared.known[$0]?.kind == "audio" }) else { return nil }
         guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return nil }
         if let tid = threadID, deleting.contains(tid) { return nil }
         let ids = ChatAttachmentRules.sendIDs(attachmentIDs)
@@ -693,6 +704,8 @@ struct ForgeChatThreadView: View {
     private var chatRim: Color { darkChat ? .white.opacity(0.12) : .black.opacity(0.06) }
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
+    @StateObject private var voice = ChatVoiceRecorder()
+    @State private var sendingVoice = false
     @FocusState private var composerFocused: Bool
     @State private var photo: PhotosPickerItem?
     @State private var jpeg: Data?
@@ -737,7 +750,7 @@ struct ForgeChatThreadView: View {
     private var draftCount: Int { ForgeChatText.messageCount(text) }
     private var attachmentsUI: Bool { ChatAttachmentConfig.uiEnabled }
     private var attachmentsReady: Bool { !attachmentsUI || drafts.readyIDs(threadID) != nil }
-    private var canSend: Bool { draftCount > 0 && draftCount <= ForgeChatText.messageMax && (editingID != nil || attachmentsReady) }
+    private var canSend: Bool { (draftCount > 0 || drafts.items(threadID).contains(where: { $0.payload.kind == "audio" })) && draftCount <= ForgeChatText.messageMax && (editingID != nil || attachmentsReady) }
     private var threadStatus: String { (store.threads.first { $0.id == threadID }?.status ?? "").lowercased() }
     /// Edit only while nothing has started on it: the newest row, a user message, and the request not yet being built.
     private func canEdit(_ id: UUID) -> Bool {
@@ -775,6 +788,10 @@ struct ForgeChatThreadView: View {
             }
             content()
                 .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
+            if isUser, let e = msgs.first(where: { $0.id == id })?.botReaction {
+                HStack(spacing: 4) { ForgeChatReactionChip(emoji: e); Text(ForgeChatText.title).font(.caption2).foregroundStyle(chatMuted) }
+                    .accessibilityIdentifier("chat-mirsa-reaction")
+            }
             if let e = reaction(id) {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
             }
@@ -802,7 +819,7 @@ struct ForgeChatThreadView: View {
                                 if let ids = o.attachmentIDs, !ids.isEmpty {
                                     ChatAttachmentStrip(metas: ids.compactMap { AttachmentUploader.shared.known[$0] }, threadID: o.threadID)
                                 }
-                                userBubble(o.text)
+                                if !o.text.isEmpty { userBubble(o.text) }
                                 if sending { Text(ForgeChatText.sending).font(.caption2).foregroundStyle(chatMuted) }
                             }
                         }
@@ -812,7 +829,7 @@ struct ForgeChatThreadView: View {
                 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
             }
             if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
-                HStack(spacing: 10) { MirsaBreathingOrbs(); Text(ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
+                HStack(spacing: 10) { MirsaBreathingOrbs(); Text(msgs.last?.attachments?.contains(where: { $0.kind == "audio" }) == true ? ChatVoiceText.queued : ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4).accessibilityIdentifier("chat-waiting").transition(.opacity)
@@ -972,7 +989,8 @@ struct ForgeChatThreadView: View {
 
     var body: some View {
         conversationAttachments
-        .onChange(of: scenePhase) { _, p in if p == .active { Task { await store.read(threadID) } } }
+        .onDisappear { voice.pause() }
+        .onChange(of: scenePhase) { _, p in if p != .active { voice.pause() }; if p == .active { Task { await store.read(threadID) } } }
         .onChange(of: store.threads) { _, _ in Task { await store.read(threadID) } }
         .task {
             while !Task.isCancelled && !ForgeChatStore.fixture { if scenePhase == .active { await store.read(threadID) }; try? await Task.sleep(nanoseconds: 8_000_000_000) } // stops reading in the background
@@ -986,7 +1004,7 @@ struct ForgeChatThreadView: View {
             Button { showFiles = true } label: { Label(ChatAttachmentText.files, systemImage: "doc") }.accessibilityIdentifier("chat-attach-files")
             Button { showLink = true } label: { Label(ChatAttachmentText.fromLink, systemImage: "link") }.accessibilityIdentifier("chat-attach-link")
         } label: {
-            Image(systemName: "paperclip").font(.system(size: 20)).foregroundStyle(chatMuted).frame(width: 36, height: 36)
+            Image(systemName: "plus").font(.system(size: 20)).foregroundStyle(chatInk).frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle()).overlay(Circle().stroke(chatRim, lineWidth: 0.5))
         }
         .disabled(!drafts.canAdd(threadID))
         .accessibilityLabel(ChatAttachmentText.attach)
@@ -1015,7 +1033,7 @@ struct ForgeChatThreadView: View {
                     Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(chatMuted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
             }
             inputBar
-            if let e = actionError ?? store.error {
+            if let e = actionError ?? voice.error ?? store.error {
                 Text(e).font(.caption).foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 18).padding(.bottom, 6)
@@ -1155,116 +1173,114 @@ struct ForgeChatThreadView: View {
         .accessibilityIdentifier("chat-black-background")
     }
 
-    @ViewBuilder private var inputBar: some View {
-        if classicChat { classicInputBar } else { isletInputBar }
-    }
-
-    private var classicInputBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if draftCount >= 3600 {
-                Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
-                    .font(.caption).foregroundStyle(draftCount > ForgeChatText.messageMax ? Color.red : MirsaChatTheme.muted)
-                    .accessibilityIdentifier("chat-character-limit")
-                    .accessibilityLabel(ForgeChatText.counter(draftCount))
-                    .accessibilityValue(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : "")
-            }
-            HStack(alignment: .center, spacing: 10) {
-                HStack(spacing: 8) {
-                    if attachmentsUI {
-                        attachMenu
-                    } else {
-                        PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(.white).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
-                    }
-                    TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(MirsaChatTheme.muted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(.white).tint(MirsaChatTheme.blue)
-                }.padding(.horizontal, 14).padding(.vertical, 10).background(.ultraThinMaterial).overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5)).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                Button {
-                    started = true
-                    if let eid = editingID {
-                        let newText = text
-                        Task {
-                            let r = await store.editMessage(threadID: threadID, messageID: eid, text: newText)
-                            if r == .ok { editingID = nil; text = ""; actionError = nil } else { actionError = ForgeChatExtrasText.editFailed }
-                        }
-                        return
-                    }
-                    let quote = replyTo
-                    replyTo = nil
-                    if attachmentsUI {
-                        drafts.expireStale(threadID)
-                        guard let ids = drafts.readyIDs(threadID) else { attachNote = ChatAttachmentText.needsUpload; return }
-                        // Same draft thread UUID the uploads used; the first send still says newThread true.
-                        store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids, replyTo: quote)
-                        drafts.clearAfterSend(threadID); attachNote = nil
-                        text = ""; jpeg = nil; photo = nil
-                    } else {
-                        store.send(threadID: threadID, text: text, jpeg: jpeg, replyTo: quote)
-                        text = ""; jpeg = nil; photo = nil
-                    }
-                } label: { Image(systemName: "paperplane.fill").font(.system(size: 20)).foregroundStyle(.white).frame(width: 52, height: 52).background(MirsaPalette.accentGradient.opacity(canSend ? 1 : 0.4)).clipShape(Circle()) }
-                    .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
-                    .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
-                    .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
-            }
-        }.padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
-        // Do not assign an identifier to this transparent layout container.
-        // SwiftUI propagates it to the text editor and buttons, replacing their
-        // distinct identifiers and hiding those controls from accessibility queries.
-    }
-
-    private var isletInputBar: some View {
+    private var inputBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             if draftCount >= 3600 {
                 Text(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : ForgeChatText.counter(draftCount))
                     .font(.caption).foregroundStyle(draftCount > ForgeChatText.messageMax ? Color.red : chatMuted)
                     .accessibilityIdentifier("chat-character-limit")
-                    .accessibilityLabel(ForgeChatText.counter(draftCount))
-                    .accessibilityValue(draftCount > ForgeChatText.messageMax ? ForgeChatText.tooLong : "")
             }
-            HStack(alignment: .center, spacing: 10) {
-                HStack(spacing: 8) {
-                    if attachmentsUI {
-                        attachMenu
-                    } else {
-                        PhotosPicker(selection: $photo, matching: .images) { Image(systemName: "photo").font(.system(size: 20)).foregroundStyle(chatMuted).frame(width: 36, height: 36) }.accessibilityLabel(ForgeChatText.photo)
-                    }
-                    TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(chatMuted), axis: .vertical).lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused).foregroundStyle(chatInk).tint(MirsaPalette.accent)
-                }.padding(.leading, 10).padding(.vertical, 8)
-                Button {
-                    started = true
-                    if let eid = editingID {
-                        let newText = text
-                        Task {
-                            let r = await store.editMessage(threadID: threadID, messageID: eid, text: newText)
-                            if r == .ok { editingID = nil; text = ""; actionError = nil } else { actionError = ForgeChatExtrasText.editFailed }
+            HStack(spacing: 10) {
+                if voice.hasRecording {
+                    Button { voice.discard() } label: { composerCircle("trash") }
+                        .accessibilityLabel(ChatVoiceText.discard).accessibilityIdentifier("chat-voice-discard")
+                        .disabled(sendingVoice)
+                } else if attachmentsUI {
+                    attachMenu
+                } else {
+                    PhotosPicker(selection: $photo, matching: .images) { composerCircle("plus") }
+                        .accessibilityLabel(ForgeChatText.photo)
+                }
+                Group {
+                    if voice.hasRecording {
+                        HStack(spacing: 12) {
+                            Text(ChatVoiceRules.clock(voice.elapsed)).monospacedDigit().foregroundStyle(Color(red: 0.95, green: 0.52, blue: 0.50))
+                            ChatVoiceWaveform(levels: voice.levels)
                         }
-                        return
-                    }
-                    let quote = replyTo
-                    replyTo = nil
-                    if attachmentsUI {
-                        drafts.expireStale(threadID)
-                        guard let ids = drafts.readyIDs(threadID) else { attachNote = ChatAttachmentText.needsUpload; return }
-                        // Same draft thread UUID the uploads used; the first send still says newThread true.
-                        store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids, replyTo: quote)
-                        drafts.clearAfterSend(threadID); attachNote = nil
-                        text = ""; jpeg = nil; photo = nil
+                        .accessibilityIdentifier("chat-voice-recording")
+                        .accessibilityLabel(ChatVoiceText.recording)
                     } else {
-                        store.send(threadID: threadID, text: text, jpeg: jpeg, replyTo: quote)
-                        text = ""; jpeg = nil; photo = nil
+                        TextField("", text: $text, prompt: Text(ForgeChatText.placeholder).foregroundColor(chatMuted), axis: .vertical)
+                            .lineLimit(1...5).accessibilityIdentifier("chat-input").focused($composerFocused)
+                            .foregroundStyle(chatInk).tint(MirsaChatTheme.blue)
                     }
-                } label: { Image(systemName: "arrow.up").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white).frame(width: 44, height: 44).background((canSend ? MirsaPalette.accent : Color(white: 0.30)).opacity(canSend ? 1 : 0.45), in: Circle()) }
-                    .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
-                    .scaleEffect(canSend ? 1 : 0.94).animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: canSend)
-                    .sensoryFeedback(.impact(weight: .light), trigger: store.outgoing.count)
+                }
+                .padding(.horizontal, 16).frame(minHeight: 44)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(chatRim, lineWidth: 0.5))
+                if voice.hasRecording {
+                    Button { sendVoice() } label: {
+                        if sendingVoice { ProgressView().frame(width: 44, height: 44) }
+                        else { composerCircle("arrow.up", active: true) }
+                    }
+                    .disabled(sendingVoice).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-voice-send")
+                } else if !text.isEmpty || !drafts.items(threadID).isEmpty || editingID != nil || jpeg != nil {
+                    Button(action: submitComposer) { composerCircle("arrow.up", active: canSend) }
+                        .disabled(!canSend).accessibilityLabel(ForgeChatText.send).accessibilityIdentifier("chat-send")
+                } else {
+                    Button {
+                        composerFocused = false; replyTo = nil
+                        Task { await voice.start() }
+                    } label: { composerCircle("waveform") }
+                    .disabled(!attachmentsUI || !drafts.items(threadID).isEmpty || voice.requesting)
+                    .accessibilityLabel(ChatVoiceText.record).accessibilityIdentifier("chat-voice-record")
+                }
             }
-            .padding(.trailing, 7).padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).stroke(chatRim, lineWidth: 1))
-            .shadow(color: .black.opacity(darkChat ? 0.16 : 0.05), radius: 18, y: 5)
-        }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 12)
-        // Do not assign an identifier to this transparent layout container.
-        // SwiftUI propagates it to the text editor and buttons, replacing their
-        // distinct identifiers and hiding those controls from accessibility queries.
+            .environment(\.layoutDirection, .leftToRight)
+        }
+        .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 12)
+    }
+
+    private func composerCircle(_ icon: String, active: Bool = false) -> some View {
+        Image(systemName: icon).font(.system(size: 20, weight: .medium))
+            .foregroundStyle(active ? Color.white : chatInk).frame(width: 44, height: 44)
+            .background { if active { Circle().fill(MirsaChatTheme.blue) } else { Circle().fill(.ultraThinMaterial) } }
+            .overlay(Circle().stroke(chatRim, lineWidth: 0.5))
+    }
+
+    private func submitComposer() {
+        started = true
+        if let eid = editingID {
+            let newText = text
+            Task {
+                let r = await store.editMessage(threadID: threadID, messageID: eid, text: newText)
+                if r == .ok { editingID = nil; text = ""; actionError = nil } else { actionError = ForgeChatExtrasText.editFailed }
+            }
+            return
+        }
+        let quote = replyTo
+        replyTo = nil
+        if attachmentsUI {
+            drafts.expireStale(threadID)
+            guard let ids = drafts.readyIDs(threadID) else { attachNote = ChatAttachmentText.needsUpload; return }
+            // Same draft thread UUID the uploads used; the first send still says newThread true.
+            store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: ids, replyTo: quote)
+            drafts.clearAfterSend(threadID); attachNote = nil
+            text = ""; jpeg = nil; photo = nil
+        } else {
+            store.send(threadID: threadID, text: text, jpeg: jpeg, replyTo: quote)
+            text = ""; jpeg = nil; photo = nil
+        }
+
+    }
+
+    private func sendVoice() {
+        guard !sendingVoice else { return }
+        sendingVoice = true
+        Task {
+            defer { sendingVoice = false }
+            do {
+                let payload = try voice.finish()
+                guard drafts.items(threadID).isEmpty, replyTo == nil, ForgeChatText.messageCount(text) <= ForgeChatText.messageMax else { actionError = ChatAttachmentText.needsUpload; return }
+                // Keep the recorded draft on failure. Retrying never discards the audio.
+                let meta = try await AttachmentUploader.shared.put(payload, threadID: threadID)
+                guard drafts.items(threadID).isEmpty else { actionError = ChatAttachmentText.needsUpload; return }
+                guard store.send(threadID: threadID, text: text, jpeg: nil, attachmentIDs: [meta.id]) != nil else { return }
+                started = true; replyTo = nil; text = ""; actionError = nil
+                drafts.clearAfterSend(threadID); voice.discard()
+            } catch let e as ChatAttachmentError { actionError = e.message }
+            catch { actionError = ChatVoiceText.failed }
+        }
     }
 
     @ViewBuilder private func userBubble(_ t: String) -> some View {

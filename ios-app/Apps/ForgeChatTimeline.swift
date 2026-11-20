@@ -3,7 +3,8 @@ import Foundation
 struct ForgeChatThread: Codable, Identifiable, Equatable {
     let id: UUID; let title: String?; let status: String?; let createdAt: String?; let updatedAt: String?
 }
-struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let size: Int64?; let sha256: String?; let expiresAt: String? }
+struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let size: Int64?; let durationMS: Int?
+    let sha256: String?; let expiresAt: String? }
 struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UUID?; let bundleID: String?; let name: String?; let version: Int?; let artifact: ForgeChatArtifact? }
 /// Public attachment metadata (Mirsa 2.1 attachments contract): returned by chat-attachment-put,
 /// in chat-send's message.attachments and in chat-read messages. Expired rows come back with
@@ -11,12 +12,12 @@ struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UU
 struct ChatAttachmentMeta: Codable, Identifiable, Equatable, Hashable {
     let id: UUID; let kind: String; let name: String?; let mime: String?; let size: Int64?
     let sha256: String?; let expiresAt: String?; let available: Bool; let url: String?
-    init(id: UUID, kind: String, name: String?, mime: String? = nil, size: Int64? = nil, sha256: String? = nil,
+    init(id: UUID, kind: String, name: String?, mime: String? = nil, size: Int64? = nil, durationMS: Int? = nil, sha256: String? = nil,
          expiresAt: String? = nil, available: Bool = true, url: String? = nil) {
         self.id = id; self.kind = kind; self.name = name; self.mime = mime; self.size = size
-        self.sha256 = sha256; self.expiresAt = expiresAt; self.available = available; self.url = url
+        self.durationMS = durationMS; self.sha256 = sha256; self.expiresAt = expiresAt; self.available = available; self.url = url
     }
-    enum CodingKeys: String, CodingKey { case id, kind, name, mime, size, sha256, expiresAt, available, url }
+    enum CodingKeys: String, CodingKey { case id, kind, name, mime, size, durationMS, sha256, expiresAt, available, url }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -24,6 +25,7 @@ struct ChatAttachmentMeta: Codable, Identifiable, Equatable, Hashable {
         name = try? c.decode(String.self, forKey: .name)
         mime = try? c.decode(String.self, forKey: .mime)
         size = try? c.decode(Int64.self, forKey: .size)
+        durationMS = try? c.decode(Int.self, forKey: .durationMS)
         sha256 = try? c.decode(String.self, forKey: .sha256)
         expiresAt = try? c.decode(String.self, forKey: .expiresAt)
         available = (try? c.decode(Bool.self, forKey: .available)) ?? true
@@ -49,11 +51,12 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
     var replyQuoteText: String? = nil
     var replyQuoteRole: String? = nil
     var reaction: String? = nil
+    var botReaction: String? = nil
     var editedAt: String? = nil
     init(id: UUID, threadID: UUID, role: String, text: String?, createdAt: String? = nil, hasImage: Bool? = nil, result: ForgeChatResult? = nil, attachments: [ChatAttachmentMeta]? = nil) {
         self.id = id; self.threadID = threadID; self.role = role; self.text = text; self.createdAt = createdAt; self.hasImage = hasImage; self.result = result; self.attachments = attachments
     }
-    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, editedAt }
+    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, botReaction, editedAt }
     enum QK: String, CodingKey { case replyQuote, replyQuoteText, replyQuoteRole }
     struct Quote: Codable { let text: String?; let role: String? }
     /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
@@ -79,6 +82,8 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
             replyQuoteRole = try? legacy.decode(String.self, forKey: .replyQuoteRole)
         }
         reaction = try? c.decode(String.self, forKey: .reaction)
+        let bot = try? c.decode(String.self, forKey: .botReaction)
+        botReaction = bot.flatMap { ForgeChatMutationPolicy.reactions.contains($0) ? $0 : nil }
         editedAt = try? c.decode(String.self, forKey: .editedAt)
     }
     func encode(to encoder: Encoder) throws {
@@ -88,6 +93,7 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
         try c.encodeIfPresent(createdAt, forKey: .createdAt); try c.encodeIfPresent(hasImage, forKey: .hasImage)
         try c.encodeIfPresent(result, forKey: .result); try c.encodeIfPresent(attachments, forKey: .attachments)
         try c.encodeIfPresent(replyToMessageID, forKey: .replyToMessageID)
+        try c.encodeIfPresent(botReaction, forKey: .botReaction)
         try c.encodeIfPresent(reaction, forKey: .reaction); try c.encodeIfPresent(editedAt, forKey: .editedAt)
         if replyQuoteText != nil || replyQuoteRole != nil {
             var q = encoder.container(keyedBy: QK.self)
@@ -111,7 +117,8 @@ enum ForgeChatMutationPolicy {
     static func accepts(_ reaction: String?) -> Bool { reaction.map { reactions.contains($0) } ?? true }
     static func canMutate(messageID: UUID, messages: [ForgeChatMessage], hasPending: Bool, status: String) -> Bool {
         guard !hasPending, let latest = messages.last(where: { $0.role == "user" }),
-              latest.id == messageID, latest.result == nil else { return false }
+              latest.id == messageID, latest.result == nil,
+              latest.attachments?.contains(where: { $0.kind == "audio" }) != true else { return false }
         return ["", "open", "new", "queued", "pending"].contains(status.lowercased())
     }
 }
