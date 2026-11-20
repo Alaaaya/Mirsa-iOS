@@ -268,7 +268,7 @@ struct ChatVoiceBubble: View {
 }
 
 
-// Kept out of production flows. The fixture is a two-second sine tone, not user audio.
+// Kept out of production flows. The fixture is a twelve-second sine tone, not user audio.
 #if DEBUG
 enum ChatVoiceFixture {
     static func sha(_ data: Data) -> String {
