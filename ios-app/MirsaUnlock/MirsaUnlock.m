@@ -1456,7 +1456,7 @@ static void MirsaUnlockApplyLocationHooks(double latitude, double longitude)
 // host app was signed with. Capped at 500 calls.
 
 #define MirsaUnlockTraceMaxEntries 500
-#define MirsaUnlockTraceMaxSlots 128
+#define MirsaUnlockTraceMaxSlots 1024
 
 typedef struct {
     Class cls;
@@ -2265,6 +2265,21 @@ __attribute__((constructor)) static void MirsaUnlockLoad(void)
             }
             NSLog(@"[MirsaUnlock] tracing enabled (%d methods wrapped)",
                   MirsaUnlockTraceSlotCount);
+            // Second header line: how many methods actually got wrapped.
+            // The user only sees the trace file, not the console, so the
+            // count has to live in the file — a trace with 0 wrapped
+            // methods records nothing no matter what the user taps
+            // (Minutes 1.12.10, 2026-11-20: trace had only trace-start).
+            [MirsaUnlockTraceLock lock];
+            @try {
+                MirsaUnlockTraceAppendJSON(@{
+                    @"event": @"trace-ready",
+                    @"wrapped": @(MirsaUnlockTraceSlotCount),
+                    @"t": @([[NSDate date] timeIntervalSince1970] * 1000.0),
+                });
+            } @finally {
+                [MirsaUnlockTraceLock unlock];
+            }
             // Floating "● Trace" button, shortly after launch so the
             // app's window exists. Main queue only; no-op if no window.
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
