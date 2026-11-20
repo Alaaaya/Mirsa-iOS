@@ -627,6 +627,12 @@ struct ContentView: View {
     private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
     @State private var chatComposerFocused = false
     @State private var wallpaperMakerFocused = false
+    @State private var toolsStoreActive = false
+    @AppStorage(SourcesTheme.key) private var sourceThemeRaw = SourcesTheme.aurora.rawValue
+    private var lightSourcesDock: Bool {
+        (vm.selectedTab == .sources || (vm.selectedTab == .pairing && toolsStoreActive))
+            && sourceThemeRaw == SourcesTheme.light.rawValue
+    }
 
     @State private var loadedTabs: Set<AppTab> = []
 
@@ -689,12 +695,13 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             // The main dock stays visible on every tab, the App Store included in both store styles.
             if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused {
-                LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
+                LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
                 .ignoresSafeArea(.keyboard)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in vm.selectedTab = .encrypted }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
+        .onPreferenceChange(ToolsStoreActiveKey.self) { toolsStoreActive = $0 }
         .onPreferenceChange(WallpaperMakerFocusKey.self) { wallpaperMakerFocused = $0 }
         .onOpenURL { url in
             if url.scheme == "mirsa", url.host == "wishlist" {

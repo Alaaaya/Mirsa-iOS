@@ -242,10 +242,12 @@ struct ToolsStoreView: View {
     private func header(_ t: SourcesTheme) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(ToolsStoreText.subtitle).font(.system(size: 12, weight: .medium)).foregroundStyle(t.secondary).lineLimit(1)
+                Text(ToolsStoreText.subtitle).font(.system(size: 12, weight: .medium)).foregroundStyle(t.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(ToolsStoreText.title).font(.system(size: 28, weight: .heavy, design: .rounded)).foregroundStyle(t.text)
-                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .layoutPriority(1)
             Spacer(minLength: 4)
             SourcesThemeMenu()
             Button { withAnimation(.easeInOut(duration: 0.2)) { showSaved.toggle() } } label: {
@@ -295,6 +297,7 @@ struct ToolsStoreView: View {
                     } label: {
                         Label(c.title, systemImage: c.icon)
                             .font(.system(size: 13, weight: .bold))
+                            .fixedSize(horizontal: true, vertical: true)
                             .foregroundStyle(selected ? Color.white : t.text)
                             .padding(.horizontal, 13).padding(.vertical, 8)
                             .background {
@@ -367,7 +370,7 @@ struct ToolsStoreView: View {
 
     private func carousel(_ items: [ToolsStoreItem], t: SourcesTheme) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 10) {
+            LazyHStack(alignment: .top, spacing: 10) {
                 ForEach(items) { item in
                     ToolsStoreCard(item: item, theme: t) { selected = item }
                 }
@@ -398,6 +401,7 @@ struct ToolsStoreView: View {
         Text(text).font(.subheadline).foregroundStyle(t.secondary)
             .frame(maxWidth: .infinity).padding(22)
             .sourcesGlass(t, radius: 22)
+            .accessibilityIdentifier("tools-store-empty")
     }
 }
 
@@ -452,9 +456,11 @@ private struct ToolsStoreCard: View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 6) {
                 ToolsStorePreview(item: item, theme: theme, size: 64)
-                Text(item.title).font(.system(size: 14, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
+                Text(item.title).font(.system(size: 14, weight: .bold)).foregroundStyle(theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let target = item.targetTitle {
-                    Text(ToolsStoreText.forApp + " " + target).font(.system(size: 11)).foregroundStyle(theme.secondary).lineLimit(1)
+                    Text(ToolsStoreText.forApp + " " + target).font(.system(size: 11)).foregroundStyle(theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 4) {
                     ToolsStoreStars(value: item.ratingAvg, size: 9)
@@ -488,13 +494,15 @@ private struct ToolsStoreItemRow: View {
                 HStack(spacing: 12) {
                     ToolsStorePreview(item: item, theme: theme, size: 54)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(item.title).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
+                        Text(item.title).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
                         let meta = [item.targetTitle.map { ToolsStoreText.forApp + " " + $0 },
                                     item.version.flatMap { $0.isEmpty ? nil : "v" + $0 },
                                     item.authorName.flatMap { $0.isEmpty ? nil : ToolsStoreText.by + " " + $0 }]
                             .compactMap { $0 }.joined(separator: " · ")
                         if !meta.isEmpty {
-                            Text(meta).font(.system(size: 12)).foregroundStyle(theme.secondary).lineLimit(1)
+                            Text(meta).font(.system(size: 12)).foregroundStyle(theme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         HStack(spacing: 6) {
                             ToolsStoreStars(value: item.ratingAvg)
@@ -560,7 +568,9 @@ private struct ToolsStoreActionBar: View {
             Label(title, systemImage: icon)
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.white)
-                .lineLimit(1)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 36)
                 .background(Capsule().fill(theme.accentGradient))
                 .shadow(color: theme.accent[0].opacity(0.35), radius: 8, y: 4)
@@ -573,7 +583,9 @@ private struct ToolsStoreActionBar: View {
             Label(title, systemImage: icon)
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(theme.text)
-                .lineLimit(1)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 36)
                 .background(Capsule().fill(theme.card).overlay(Capsule().stroke(theme.stroke)))
         }
@@ -601,7 +613,8 @@ private struct ToolsStoreItemSheet: View {
                 HStack(alignment: .top, spacing: 14) {
                     ToolsStorePreview(item: item, theme: t, size: 84)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title).font(.system(size: 22, weight: .bold)).foregroundStyle(t.text).lineLimit(3)
+                        Text(item.title).font(.system(size: 22, weight: .bold)).foregroundStyle(t.text)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let c = item.kind { Label(c.title, systemImage: c.icon).font(.system(size: 12)).foregroundStyle(t.secondary) }
                         if let target = item.targetTitle {
                             Text(ToolsStoreText.forApp + " " + target).font(.system(size: 12)).foregroundStyle(t.secondary)

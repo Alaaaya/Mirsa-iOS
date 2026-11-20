@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// The retained Tools subtree reports only its current section. ContentView scopes it to the active tab.
+struct ToolsStoreActiveKey: PreferenceKey {
+    static var defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
 /// Second tab: pairing and the device tools, all in one place, in Mirsa's design.
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
@@ -55,7 +61,8 @@ struct ToolsTab: View {
                 AuroraBackground().ignoresSafeArea()
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(section == .store ? storeTheme.colorScheme : .dark)
+        .preference(key: ToolsStoreActiveKey.self, value: section == .store)
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
     }
 
