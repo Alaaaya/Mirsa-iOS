@@ -54,7 +54,7 @@ final class ToolsStoreActions: ObservableObject {
                 defer { MirsaManagedTmp.end(folder) }
                 // Same import as Mirsa AI's inject path (no multi-pick prompt here: a package with several
                 // code files reports the library's own "selection required" message instead).
-                _ = try await IPATweakLibrary.shared.addFile(file)
+                _ = try await IPATweakLibrary.shared.addFile(file, displayName: item.title)
                 self.message = ToolsStoreText.addedToLibrary
             case .wallpapers:
                 defer { MirsaManagedTmp.end(folder) }

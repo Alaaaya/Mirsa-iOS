@@ -278,7 +278,7 @@ B.dylib
    match variant {
     "arm64e"=>put32(&mut d,8,2),
     "fat"=>d=super::super::fat_macho::tests::fat(&[d],false,false),
-    "encrypted"=>{let m=macho(d,true).unwrap();let mut cs:Vec<_>=m.commands.iter().map(|c|c.data.clone()).collect();let mut c=vec![0;24];put32(&mut c,0,0x2c);put32(&mut c,4,24);put32(&mut c,16,1);cs.push(c);d=write_commands(m,cs).unwrap()},
+    "encrypted"=>{let m=macho(d,true).unwrap();let mut cs:Vec<_>=m.commands.iter().map(|c|c.data.clone()).collect();let mut c=vec![0;24];put32(&mut c,0,0x2c);put32(&mut c,4,24);put32(&mut c,16,1);cs.push(c);d=write_commands(m,cs).unwrap().to_vec()},
     _=>put32(&mut d,12,2)
    }
    fs::write(&file,&d).unwrap();let main=fs::read(a.join("Main")).unwrap();

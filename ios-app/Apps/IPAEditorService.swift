@@ -40,7 +40,19 @@ enum IPAEditorService {
             let detail = result?["error"] as? String ?? "IPA editor failed."
             if operation == "tweak_import" { throw SideloadError.message(IPATweakImportText.error(detail)) }
             let archiveOperation = ["extract", "extract_inspection", "deb", "package_roots"].contains(operation)
-            throw SideloadError.message(archiveOperation ? archiveError(detail) : detail)
+            throw SideloadError.message(archiveOperation ? archiveError(detail) : editingError(detail))
+        }
+    }
+
+    static func editingError(_ detail: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        let lower = detail.lowercased()
+        guard lower.contains("mach-o"), lower.contains("limit") || lower.contains("editing storage") || lower.contains("editing mapping") else { return detail }
+        switch language {
+        case .english: return "Cannot safely edit this app binary. The supported size is up to 1.5 GB; make sure enough free storage is available, then try again."
+        case .arabic: return "ما قدرت أعدّل ملف التطبيق بأمان. الحجم المدعوم لحد 1.5 GB؛ تأكد من وجود مساحة فاضية كافية وجرّب مرة تانية."
+        case .german: return "Diese App-Datei kann nicht sicher bearbeitet werden. Unterstützt werden bis zu 1,5 GB. Sorge für genügend freien Speicher und versuche es erneut."
+        case .kurmanji: return "Ev dosyeya sepanê bi ewlehî nayê guherandin. Mezinahiya piştgirîkirî heta 1.5 GB ye; cihê vala yê têr peyda bike û dîsa biceribîne."
+        case .sorani: return "ناتوانرێت فایلی ئەپەکە بە سەلامەتی دەستکاری بکرێت. قەبارەی پشتگیریکراو تا 1.5 GB ـە؛ دڵنیابە شوێنی بەتاڵی پێویست هەیە و دووبارە هەوڵ بدە."
         }
     }
 

@@ -701,6 +701,10 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in vm.selectedTab = .encrypted }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
+        // UIVisualEffect materials resolve from the hosting window's appearance.
+        // A child colorScheme environment alone leaves the dock's UIKit blur dark.
+        // Scope the window preference to the active page, not retained hidden tabs.
+        .preferredColorScheme(lightSourcesDock ? .light : .dark)
         .onPreferenceChange(ToolsStoreActiveKey.self) { toolsStoreActive = $0 }
         .onPreferenceChange(WallpaperMakerFocusKey.self) { wallpaperMakerFocused = $0 }
         .onOpenURL { url in

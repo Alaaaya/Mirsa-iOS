@@ -183,14 +183,14 @@ pub(super) fn inject_loader_scoped(
     }
     // Existing conservative injector validates thin arm64, encrypted code,
     // bounds, dependencies, resource copying and symlink rejection.
-    let original_main = fs::read(&main).map_err(err)?;
+    let original_main = read_macho(&main)?;
     inject(&app, executable, libraries, first)?;
     let roots: Vec<PathBuf> = entries
         .iter()
         .map(|s| fs::canonicalize(frameworks.join(s)).map_err(err))
         .collect::<Result<_>>()?;
     // Temporarily inspect original main commands, not direct refs just added by inject.
-    let patched_main = fs::read(&main).map_err(err)?;
+    let patched_main = read_macho(&main)?;
     fs::write(&main, &original_main).map_err(err)?;
     let eager_check = reject_eager_graph(container, &main, &roots);
     fs::write(&main, &patched_main).map_err(err)?;

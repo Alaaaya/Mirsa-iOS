@@ -441,20 +441,57 @@ struct Command {
     name: Option<String>,
 }
 struct Mach {
-    data: Vec<u8>,
+    data: MachBytes,
     commands: Vec<Command>,
     first_data: usize,
     subtype: u32,
 }
-fn read_macho(p: &Path) -> Result<Vec<u8>> {
-    if fs::metadata(p).map_err(err)?.len() > 128 * 1024 * 1024 {
-        return Err("Mach-O exceeds the 128 MiB editing limit".into());
-    }
-    fs::read(p).map_err(err)
+// Large executables stay disk-backed. The mapping owns an unlinked private
+// snapshot, never the caller's file: writing the patched target cannot truncate
+// or mutate its backing store. Only changed header pages become resident COW.
+enum MachStorage { Owned(Vec<u8>), Mapped(memmap2::MmapMut) }
+struct MachBytes { storage: MachStorage, start: usize, end: usize }
+impl From<Vec<u8>> for MachBytes {
+    fn from(v: Vec<u8>) -> Self { let end=v.len(); Self {storage:MachStorage::Owned(v),start:0,end} }
 }
-fn macho(d: Vec<u8>, dylib: bool) -> Result<Mach> {
-    // Thin only in the working model. Shared source dylibs remain universal.
-    let d = fat_macho::arm64(&d)?.to_vec();
+impl std::ops::Deref for MachBytes {
+    type Target=[u8];
+    fn deref(&self)->&[u8] { let all: &[u8]=match &self.storage {MachStorage::Owned(v)=>v, MachStorage::Mapped(m)=>m}; &all[self.start..self.end] }
+}
+impl std::ops::DerefMut for MachBytes {
+    fn deref_mut(&mut self)->&mut[u8] { let all: &mut[u8]=match &mut self.storage {MachStorage::Owned(v)=>v, MachStorage::Mapped(m)=>m}; &mut all[self.start..self.end] }
+}
+impl AsRef<[u8]> for MachBytes { fn as_ref(&self)->&[u8] { self } }
+fn read_macho(p: &Path) -> Result<MachBytes> {
+    let mut input=File::open(p).map_err(err)?;
+    let size=input.metadata().map_err(err)?.len();
+    if size > IPA_EXECUTABLE_LIMIT { return Err("Mach-O exceeds safe editing size limit".into()); }
+    if size <= 16 * 1024 * 1024 {
+        let mut data=Vec::new();
+        input.take(size+1).read_to_end(&mut data).map_err(err)?;
+        if data.len() as u64 != size {return Err("Mach-O changed while reading".into())}
+        return Ok(data.into());
+    }
+    let mut snapshot=tempfile::tempfile_in(p.parent().ok_or("Missing Mach-O parent")?)
+        .map_err(|_| "Mach-O editing storage unavailable")?;
+    let copied=io::copy(&mut input.by_ref().take(size+1),&mut snapshot)
+        .map_err(|_| "Mach-O editing storage unavailable")?;
+    if copied!=size {return Err("Mach-O changed while reading".into())}
+    // SAFETY: tempfile is unlinked and exclusively owned here. Its descriptor
+    // is never exposed, written or truncated after mapping. mmap retains the
+    // backing object after this descriptor closes; COW edits do not mutate it.
+    let map=unsafe {memmap2::MmapOptions::new().map_copy(&snapshot)}
+        .map_err(|_| "Mach-O editing mapping unavailable")?;
+    Ok(MachBytes { storage:MachStorage::Mapped(map),start:0,end:size as usize })
+}
+fn macho(d: impl Into<MachBytes>, dylib: bool) -> Result<Mach> {
+    let mut d=d.into();
+    // Select the arm64 FAT slice as a view, not another executable-sized copy.
+    let selected=fat_macho::arm64(&d)?;
+    let offset=selected.as_ptr() as usize-d.as_ptr() as usize;
+    let len=selected.len();
+    d.start+=offset;
+    d.end=d.start+len;
     if d.len() < 32 || u32at(&d, 0)? != 0xfeedfacf || u32at(&d, 4)? != 0x0100000c {
         return Err(
             "Only generic 64-bit little-endian arm64 Mach-O is supported".into(),
@@ -472,7 +509,7 @@ fn macho(d: Vec<u8>, dylib: bool) -> Result<Mach> {
     let end = 32usize
         .checked_add(u32at(&d, 20)? as usize)
         .ok_or("Mach-O size overflow")?;
-    if end > d.len() || n > 65536 {
+    if end > d.len() || end > 16 * 1024 * 1024 || n > 65536 {
         return Err("Invalid Mach-O load table".into());
     }
     let mut o = 32;
@@ -717,10 +754,7 @@ pub(crate) fn signing_encryption(app: &Path, opts: &crate::personal_sign::Option
         .ok_or("Missing main executable")?;
     if name.is_empty() || name.contains(['/', '\\', ':']) || name == "." || name == ".." {return Err("Unsafe main executable".into())}
     let main = app.join(name);
-    let read = |p: &Path| -> Result<Vec<u8>> {
-        if fs::metadata(p).map_err(err)?.len() > IPA_EXECUTABLE_LIMIT {return Err("Mach-O exceeds inspection limit".into())}
-        fs::read(p).map_err(err)
-    };
+    let read = read_macho;
     let mut report = SigningEncryption {main_encrypted: encryption_status(&read(&main)?)?, embedded_encrypted:0};
     let mut files = Vec::new(); walk(app,&mut files)?;
     for file in files {
@@ -752,7 +786,7 @@ fn dylib_command(kind: u32, name: &str, original: Option<&[u8]>) -> Result<Vec<u
     d[24..24 + name.len()].copy_from_slice(name.as_bytes());
     Ok(d)
 }
-fn write_commands(mut m: Mach, commands: Vec<Vec<u8>>) -> Result<Vec<u8>> {
+fn write_commands(mut m: Mach, commands: Vec<Vec<u8>>) -> Result<MachBytes> {
     let old_end = 32 + u32at(&m.data, 20)? as usize;
     let new_size: usize = commands.iter().map(Vec::len).sum();
     let new_end = 32 + new_size;
@@ -884,7 +918,7 @@ fn dependencies(path: &Path) -> Result<Vec<String>> {
     if d.len() < 32 || u32at(d, 0)? != 0xfeedfacf { return Err("Only 64-bit little-endian Mach-O is supported".into()); }
     let count = u32at(d, 16)? as usize;
     let end = 32usize.checked_add(u32at(d, 20)? as usize).ok_or("Mach-O table overflow")?;
-    if count > 65536 || end > d.len() { return Err("Invalid load table".into()); }
+    if count > 65536 || end > d.len() || end > 16 * 1024 * 1024 { return Err("Invalid load table".into()); }
     let (mut at, mut out) = (32usize, Vec::new());
     for _ in 0..count {
         if at + 8 > end { return Err("Truncated load command".into()); }
@@ -1963,6 +1997,73 @@ mod signing_encryption_tests {
         assert!(signing_encryption(&app,&o).unwrap().main_encrypted);
         fs::write(&extension,[0xcf,0xfa,0xed,0xfe]).unwrap();
         assert!(signing_encryption(&app,&crate::personal_sign::Options::default()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod large_binary_tests {
+    use super::*;
+    use std::io::Write;
+    fn app() -> (PathBuf, PathBuf) {
+        let root = integration_tests::temporary();
+        let app = root.join("Large.app");
+        fs::create_dir(&app).unwrap();
+        let mut header = include_bytes!("../../loader/MirsaLoader.dylib").to_vec();
+        put32(&mut header, 12, 2);
+        fs::write(app.join("Main"), header).unwrap();
+        let mut file = fs::OpenOptions::new().write(true).open(app.join("Main")).unwrap();
+        file.set_len(384 * 1024 * 1024).unwrap();
+        file.seek(SeekFrom::End(-8)).unwrap();
+        file.write_all(b"TAILSAFE").unwrap();
+        let info = plist::Value::Dictionary([(String::from("CFBundleExecutable"), plist::Value::String("Main".into()))].into_iter().collect());
+        info.to_file_xml(app.join("Info.plist")).unwrap();
+        (root, app)
+    }
+    #[test]
+    fn large_executable_injection_is_disk_backed_and_preserves_tail() {
+        let (root, app) = app();
+        let main = app.join("Main");
+        let original = read_macho(&main).unwrap();
+        assert!(matches!(original.storage, MachStorage::Mapped(_)));
+        let old_count = u32at(&original, 16).unwrap();
+        let library = root.join("Example.dylib");
+        fs::write(&library, include_bytes!("../../loader/MirsaLoader.dylib")).unwrap();
+        inject(&app, "Main", &[library.to_string_lossy().into_owned()], false).unwrap();
+        let patched = read_macho(&main).unwrap();
+        assert_eq!(patched.len(), 384 * 1024 * 1024);
+        assert_eq!(&patched[patched.len()-8..], b"TAILSAFE");
+        assert_eq!(u32at(&patched, 16).unwrap(), old_count + 1);
+        assert!(dependencies(&main).unwrap().iter().any(|p| p.ends_with("/Example.dylib")));
+        // Snapshot remains valid after the source was truncated/replaced by write.
+        assert_eq!(u32at(&original, 16).unwrap(), old_count);
+        assert_eq!(&original[original.len()-8..], b"TAILSAFE");
+        drop((original, patched));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn large_loader_injection_and_size_guard() {
+        let (root, app) = app();
+        let library = root.join("Example.dylib");
+        fs::write(&library, include_bytes!("../../loader/MirsaLoader.dylib")).unwrap();
+        load_control::inject_loader(&app, "Main", &[library.to_string_lossy().into_owned()], false).unwrap();
+        let patched = read_macho(&app.join("Main")).unwrap();
+        assert_eq!(&patched[patched.len()-8..], b"TAILSAFE");
+        assert!(dependencies(&app.join("Main")).unwrap().iter().any(|p| p.ends_with("/MirsaLoader.dylib")));
+        let oversized = root.join("Oversized");
+        File::create(&oversized).unwrap().set_len(IPA_EXECUTABLE_LIMIT+1).unwrap();
+        assert!(read_macho(&oversized).err().unwrap().contains("safe editing size limit"));
+        drop(patched);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn malformed_large_header_still_fails_closed() {
+        let (root, app) = app();
+        let main = app.join("Main");
+        let mut f = fs::OpenOptions::new().write(true).open(&main).unwrap();
+        f.seek(SeekFrom::Start(20)).unwrap();
+        f.write_all(&(32u32 * 1024 * 1024).to_le_bytes()).unwrap();
+        assert!(macho(read_macho(&main).unwrap(), false).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }
