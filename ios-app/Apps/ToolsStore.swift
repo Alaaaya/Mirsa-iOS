@@ -72,6 +72,8 @@ struct ToolsStoreItem: Codable, Identifiable, Hashable, Sendable {
     var fileName: String
     var fileSize: Int64?
     var previewURL: String?
+    var previewVideoURL: String?
+    var previews: [ToolsStorePreviewMedia] = []
     var authorName: String?
     var downloads: Int
     var ratingAvg: Double
@@ -87,6 +89,8 @@ struct ToolsStoreItem: Codable, Identifiable, Hashable, Sendable {
         case fileName = "file_name"
         case fileSize = "file_size"
         case previewURL = "preview_url"
+        case previewVideoURL = "preview_video_url"
+        case previews
         case authorName = "author_name"
         case ratingAvg = "rating_avg"
         case ratingCount = "rating_count"
@@ -106,6 +110,8 @@ struct ToolsStoreItem: Codable, Identifiable, Hashable, Sendable {
         fileName = (try? c.decodeIfPresent(String.self, forKey: .fileName)) ?? ""
         fileSize = try? c.decodeIfPresent(Int64.self, forKey: .fileSize)
         previewURL = try? c.decodeIfPresent(String.self, forKey: .previewURL)
+        previewVideoURL = try? c.decodeIfPresent(String.self, forKey: .previewVideoURL)
+        previews = (try? c.decodeIfPresent([ToolsStorePreviewMedia].self, forKey: .previews)) ?? []
         authorName = try? c.decodeIfPresent(String.self, forKey: .authorName)
         downloads = (try? c.decodeIfPresent(Int.self, forKey: .downloads)) ?? 0
         ratingAvg = (try? c.decodeIfPresent(Double.self, forKey: .ratingAvg)) ?? 0
@@ -116,6 +122,19 @@ struct ToolsStoreItem: Codable, Identifiable, Hashable, Sendable {
         createdAt = try? c.decodeIfPresent(String.self, forKey: .createdAt)
     }
 
+    /// Gallery media: the previews array, or the legacy single image/video fields.
+    var gallery: [ToolsStorePreviewMedia] {
+        if !previews.isEmpty { return previews.filter { $0.mediaURL != nil } }
+        var out: [ToolsStorePreviewMedia] = []
+        if let u = previewURL, preview != nil { out.append(.init(id: "legacy-image", kind: "image", url: u)) }
+        if let v = previewVideoURL, ToolsStorePreviewMedia.safe(v) != nil { out.append(.init(id: "legacy-video", kind: "video", url: v, posterURL: previewURL)) }
+        return out
+    }
+    /// Still image for cards: first image, else the poster of the first video.
+    var cardStill: URL? {
+        if let i = gallery.first(where: { !$0.isVideo })?.stillURL { return i }
+        return gallery.first?.stillURL ?? preview
+    }
     var kind: ToolsStoreCategory? { ToolsStoreCategory(rawValue: category) }
     var fileExtension: String { (fileName as NSString).pathExtension.lowercased() }
     /// Preview image, only plain https without credentials.
@@ -318,6 +337,31 @@ enum ToolsStoreClient {
         var targetApp: String?
         var authorName: String
         var file: URL
+        var previews: [ToolsStorePickedPreview] = []
+        /// Wallpapers: the server asks for a prompt image when it cannot extract a snapshot.
+        var previewRequired = false
+    }
+
+    /// preview_begin -> PUT raw bytes (matching Content-Type) -> preview_commit. Runs before upload_commit.
+    static func uploadPreview(_ p: ToolsStorePickedPreview, itemID: String) async throws {
+        let isVideo = p.kind == "video"
+        guard p.size > 0, p.size <= (isVideo ? ToolsStorePickedPreview.maxVideoBytes : ToolsStorePickedPreview.maxImageBytes) else { throw ToolsStoreError.tooLarge }
+        var body: [String: Any] = ["action": "preview_begin", "id": itemID, "file_name": p.file.lastPathComponent,
+                                   "file_size": p.size, "content_type": p.contentType]
+        if isVideo { body["duration_seconds"] = max(0, min(30, p.duration)) }
+        struct Begin: Decodable { let preview_id: String; let upload_url: String }
+        let begin = try JSONDecoder().decode(Begin.self, from: try await call(body))
+        guard let url = URL(string: begin.upload_url), url.scheme?.lowercased() == "https", url.host?.isEmpty == false,
+              url.user == nil, url.password == nil else { throw ToolsStoreError.unavailable }
+        var put = URLRequest(url: url, timeoutInterval: 300)
+        put.httpMethod = "PUT"
+        put.setValue(p.contentType, forHTTPHeaderField: "Content-Type")
+        let s = session(timeout: 300)
+        defer { s.finishTasksAndInvalidate() }
+        let (_, response) = try await s.upload(for: put, fromFile: p.file)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else { throw ToolsStoreError.server(code) }
+        _ = try await call(["action": "preview_commit", "id": itemID, "preview_id": begin.preview_id])
     }
 
     /// upload_begin (server creates the row as `uploading` and returns a signed upload URL) → PUT the bytes
@@ -339,6 +383,7 @@ enum ToolsStoreClient {
         let author = draft.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !author.isEmpty { body["author_name"] = author }
         if let target = draft.targetApp?.trimmingCharacters(in: .whitespacesAndNewlines), !target.isEmpty { body["target_app"] = target }
+        if draft.previewRequired { body["preview_required"] = true }
         struct Begin: Decodable { let id: String; let upload_url: String }
         let begin = try JSONDecoder().decode(Begin.self, from: try await call(body))
         guard let uploadURL = URL(string: begin.upload_url), uploadURL.scheme?.lowercased() == "https", uploadURL.host?.isEmpty == false,
@@ -352,6 +397,11 @@ enum ToolsStoreClient {
         let (_, response) = try await s.upload(for: put, fromFile: draft.file)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else { throw ToolsStoreError.server(code) }
+        progress(0.7)
+        for (i, p) in draft.previews.enumerated() {
+            try await uploadPreview(p, itemID: begin.id)
+            progress(0.7 + 0.2 * Double(i + 1) / Double(max(draft.previews.count, 1)))
+        }
         progress(0.9)
         _ = try await call(["action": "upload_commit", "id": begin.id])
         progress(1)
