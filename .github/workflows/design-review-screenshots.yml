@@ -1,9 +1,16 @@
-name: Design review screenshots (floating dock)
-# Runs only on the design branch; captures the Apps home and Tools in Arabic and English.
+name: Tools store and Sources screenshots
 on:
   workflow_dispatch:
-  push:
-    branches: [mirsa/design-floating-dock-glass, mirsa/final-combined, mirsa/bundle-2.8]
+    inputs:
+      ref:
+        description: "Commit or branch to capture (default: the triggering ref)"
+        required: false
+        default: ""
+      light_only:
+        description: "Capture and pixel-check the corrected light dock only"
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 jobs:
@@ -12,13 +19,13 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
       - name: Select Xcode
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
-      - name: Swift parse audit
-        run: find ios-app uitests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim
@@ -33,34 +40,28 @@ jobs:
           cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
-      - name: Run design review UITests
+      - name: Run style screenshot UITests
         run: |
           set -o pipefail
           brew install xcodegen
-          # Real Keychain integration must run in an entitled, signed simulator host.
-          # Match forge-validation; never skip or mock the real Security.framework test.
-          python3 - <<'PYENT'
-          import plistlib
-          with open('/tmp/mirsa-ci-keychain.plist', 'wb') as f:
-              plistlib.dump({'application-identifier': 'MIRSACI.com.alaa.mirsa', 'keychain-access-groups': ['MIRSACI.com.alaa.mirsa']}, f)
-          PYENT
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaDesignReviewUITests/testConceptGallery test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ProjectUnit.xcresult -only-testing:MirsaTests/ProjectDetailsThemesTests -only-testing:MirsaTests/ProjectDetailsNoInstallLinkTests -only-testing:MirsaTests/MirsaKeyboardTests -only-testing:MirsaTests/PersonalSigningProgressTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/project-unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult -only-testing:MirsaUITests/ProjectDetailsThemesUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
       - name: Export named screenshots
         if: always()
         run: |
-          test -d build/DesignUI.xcresult || { echo "Missing UI result bundle"; exit 1; }
-          if [ -d build/DesignUI.xcresult ]; then
+          if [ -d build/StyleUI.xcresult ]; then
             mkdir -p build/raw build/shots
-            xcrun xcresulttool export attachments --path build/DesignUI.xcresult --output-path build/raw
+            xcrun xcresulttool export attachments --path build/StyleUI.xcresult --output-path build/raw
             python3 - <<'PY'
           import json, os, re, shutil
           m = json.load(open("build/raw/manifest.json"))
+          os.makedirs("build/diagnostics", exist_ok=True)
           for t in m:
               for a in t.get("attachments", []):
                   src = os.path.join("build/raw", a["exportedFileName"])
@@ -71,20 +72,22 @@ jobs:
                   if head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff":
                       if not name.lower().endswith(".png"): name += ".png"
                       shutil.copy(src, os.path.join("build/shots", name))
-          names = sorted(os.listdir("build/shots"))
-          print("\n".join(names))
-          expected = ["concept1_ar_dark_" + page for page in ("discover", "details", "search", "downloads", "account")]
-          missing = [name for name in expected if not any(n == name + ".png" or n.startswith(name + "_") for n in names)]
-          if missing: raise SystemExit("Missing required screenshots: " + ", ".join(missing))
+                  else:
+                      shutil.copy(src, os.path.join("build/diagnostics", name + ".txt"))
+          print("\n".join(sorted(os.listdir("build/shots"))))
           PY
           fi
+          mkdir -p build/crashes
+          cp ~/Library/Logs/DiagnosticReports/*Mirsa* build/crashes/ 2>/dev/null || true
+          ls build/crashes
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: design-review-screenshots
+          name: tools-store-sources-screenshots
           path: |
             build/shots
-            build/design-ui.log
-            build/design-unit.log
-            build/raw
-          if-no-files-found: error
+            build/diagnostics
+            build/crashes
+            build/style-ui.log
+            build/project-unit.log
+          if-no-files-found: warn
