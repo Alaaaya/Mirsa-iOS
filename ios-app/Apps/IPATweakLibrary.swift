@@ -21,6 +21,19 @@ final class IPATweakLibrary: ObservableObject {
     private var selectionContinuation: CheckedContinuation<[String]?, Never>?
     private var activeCancellation: URL?
 
+    #if DEBUG
+    /// Inert UI screenshot fixture, never imported or executed.
+    func projectThemesScreenshotFixture() -> UUID {
+        let id = UUID(uuidString: "D8A35F00-0000-4000-8000-000000000001")!
+        if !items.contains(where: { $0.id == id }) {
+            items.append(IPATweak(id: id,
+                name: "Mirsa Long Package Name For Verifying Multiline Tweak Titles Without Truncation",
+                roots: ["LongFixture.dylib"], addedAt: Date(), packageOnlyCode: true))
+        }
+        return id
+    }
+    #endif
+
     func finishImportSelection(_ ids: [String]?) {
         let continuation = selectionContinuation
         selectionContinuation = nil
