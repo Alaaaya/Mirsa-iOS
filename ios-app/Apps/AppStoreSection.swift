@@ -404,7 +404,7 @@ struct AppStoreAccountPage: View {
                     if model.account != nil { signOutButton }
                 }
                 .padding(.horizontal, MirsaSpacing.page)
-                .padding(.bottom, MirsaSpacing.xl)
+                .padding(.bottom, MirsaSpacing.tabBarClearance)
             }
             .refreshable { await model.refresh() }
             .background(StoreLuxeBackground())
@@ -1001,7 +1001,7 @@ struct AppStorePurchasesPage: View {
                                     title: tr("Not signed in", "مو مسجّل دخول", ckb: "نەچوویتە ژوورەوە", kmr: "Te têneketiye"),
                                     message: tr("Sign in from the Account tab to load your Apple purchases.", "سجّل دخول من تبويب الحساب لتشوف مشتريات Apple تبعك.", ckb: "بچۆ ژوورەوە بۆ بینینی کڕینەکان.", kmr: "Ji bo kirînan têkeve hesabê te."))
                 }
-            }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.xl)
+            }.padding(.horizontal, MirsaSpacing.page).padding(.bottom, MirsaSpacing.tabBarClearance)
         }
         .refreshable { _ = try? await model.purchases(force: true); await reload() }
         .sheet(item: $openDetail) { item in
