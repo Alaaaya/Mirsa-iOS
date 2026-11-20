@@ -39,7 +39,9 @@ final class MirsaVoiceUITests: XCTestCase {
             XCTAssertTrue(bubble.descendants(matching: .any)["chat-mirsa-reaction"].exists)
             shot("voice_audio_reaction_\(language)")
             play.tap()
-            XCTAssertTrue(play.waitForExistence(timeout: 5))
+            let pauseLabels = ["ar": "وقّف الصوت", "en": "Pause voice message", "de": "Wiedergabe pausieren", "kmr": "Deng rawestîne", "ckb": "دەنگ بوەستێنە"]
+            let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", pauseLabels[language]!), object: play)
+            XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed)
             shot("voice_audio_playing_\(language)")
             bubble.terminate()
         }

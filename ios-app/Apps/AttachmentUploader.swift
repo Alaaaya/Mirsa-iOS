@@ -186,12 +186,13 @@ enum ChatAttachmentImage {
         case .audio(let data, _, let durationMS):
             guard !data.isEmpty, data.count <= ChatVoiceRules.maxBytes else { throw ChatAttachmentError(status: 422, code: "attachment_size") }
             guard (1...300_000).contains(durationMS) else { throw ChatAttachmentError(status: 422, code: "attachment_audio") }
+            body["id"] = UUID().uuidString.lowercased()
             body["durationMS"] = durationMS
             body["mime"] = "audio/mp4"; body["base64"] = data.base64EncodedString()
         case .link(let url, _): body["url"] = url.absoluteString
         }
         // 5 MiB decoded is ~7 MB of JSON: give the upload more time on slow connections.
-        let (data, _) = try await post(body, maxBytes: 64 * 1024, timeout: payload.isBinary ? 180 : 60)
+        let (data, _) = try await post(body, maxBytes: 64 * 1024, timeout: (payload.isBinary || payload.kind == "audio") ? 180 : 60)
         struct W: Decodable { let attachment: ChatAttachmentMeta; let replayed: Bool? }
         guard let w = try? JSONDecoder().decode(W.self, from: data) else { throw ChatAttachmentError(status: 503, code: "attachment_unavailable") }
         return remember(w.attachment, payload)
@@ -204,9 +205,10 @@ enum ChatAttachmentImage {
             switch p { case .image(let d, _): return .bytes(d, mime: "image/jpeg"); case .text(let d, _, let m), .binary(let d, _, let m): return .bytes(d, mime: m); case .audio(let d, _, _): try ChatVoiceRules.verify(d, meta: expected ?? known[id]); return .bytes(d, mime: "audio/mp4"); case .link(let u, _): return .link(u) }
         }
         let binaryOK = MirsaFeatures.binaryAttachmentsEnabled
+        let audioRead = (expected ?? known[id])?.kind == "audio"
         let (data, http) = try await post(["action": "chat-attachment-read", "id": id.uuidString.lowercased(), "threadID": threadID.uuidString.lowercased()],
-                                          maxBytes: (binaryOK ? ChatAttachmentRules.binaryMaxBytes : ChatAttachmentRules.imageMaxBytes) + 1024,
-                                          timeout: binaryOK ? 180 : 60)
+                                          maxBytes: (audioRead ? ChatVoiceRules.maxBytes : (binaryOK ? ChatAttachmentRules.binaryMaxBytes : ChatAttachmentRules.imageMaxBytes)) + 1024,
+                                          timeout: (binaryOK || audioRead) ? 180 : 60)
         let mime = (http.mimeType ?? "").lowercased()
         if mime == "application/json", let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], o["contextOnly"] as? Bool == true,
            let s = o["url"] as? String, case .success(let url) = ChatAttachmentRules.validateLink(s) {

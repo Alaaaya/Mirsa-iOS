@@ -3,14 +3,13 @@ import Foundation
 struct ForgeChatThread: Codable, Identifiable, Equatable {
     let id: UUID; let title: String?; let status: String?; let createdAt: String?; let updatedAt: String?
 }
-struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let size: Int64?; let durationMS: Int?
-    let sha256: String?; let expiresAt: String? }
+struct ForgeChatArtifact: Codable, Equatable { let id: UUID; let kind: String; let name: String?; let size: Int64?; let sha256: String?; let expiresAt: String? }
 struct ForgeChatResult: Codable, Equatable { let inboxID: UUID?; let tweakID: UUID?; let bundleID: String?; let name: String?; let version: Int?; let artifact: ForgeChatArtifact? }
 /// Public attachment metadata (Mirsa 2.1 attachments contract): returned by chat-attachment-put,
 /// in chat-send's message.attachments and in chat-read messages. Expired rows come back with
 /// available:false and no bytes. Never carries file contents.
 struct ChatAttachmentMeta: Codable, Identifiable, Equatable, Hashable {
-    let id: UUID; let kind: String; let name: String?; let mime: String?; let size: Int64?
+    let id: UUID; let kind: String; let name: String?; let mime: String?; let size: Int64?; let durationMS: Int?
     let sha256: String?; let expiresAt: String?; let available: Bool; let url: String?
     init(id: UUID, kind: String, name: String?, mime: String? = nil, size: Int64? = nil, durationMS: Int? = nil, sha256: String? = nil,
          expiresAt: String? = nil, available: Bool = true, url: String? = nil) {

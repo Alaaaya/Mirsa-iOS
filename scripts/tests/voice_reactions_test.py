@@ -13,6 +13,7 @@ assert "SFSpeechRecognizer" not in voice and "Speech.framework" not in voice
 assert "maxDuration: TimeInterval = 300" in voice
 assert "5 * 1024 * 1024" in voice
 assert 'body["durationMS"] = durationMS' in upload
+assert 'body["id"] = UUID().uuidString.lowercased()' in upload
 assert 'body["mime"] = "audio/mp4"' in upload
 assert "ChatVoiceRules.verify(data" in upload
 assert "ChatVoiceRules.verify(d, meta: expected ?? known[id])" in upload
