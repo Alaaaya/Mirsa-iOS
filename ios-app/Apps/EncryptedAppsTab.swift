@@ -27,6 +27,7 @@ struct EncryptedAppsTab: View {
     @State private var packagesSegment: PackageSegment = .original
     @State private var packagesQuery = ""
     @State private var appliedPackagesQuery = ""
+    @State private var packageSort: PackageSort = .newestFirst
     /// Share / Save-to-Files targets for the Packages tab.
     @State private var packageShareTarget: PackageShareTarget?
     @State private var packageExportTarget: PackageExportTarget?
@@ -361,6 +362,37 @@ struct EncryptedAppsTab: View {
         packageFilteredEntries.filter { store.decryptedIDs.contains($0.id) }
     }
 
+    /// Originals sorted by the pill-row filter (newest first by default).
+    private var packageSortedOriginal: [EncryptedIPAEntry] {
+        switch packageSort {
+        case .newestFirst: return packageOriginalEntries.sorted { $0.addedAt > $1.addedAt }
+        case .oldestFirst: return packageOriginalEntries.sorted { $0.addedAt < $1.addedAt }
+        case .name: return packageOriginalEntries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
+    /// Originals added today, for the "اليوم" timeline group.
+    private var packageTodayOriginal: [EncryptedIPAEntry] {
+        packageSortedOriginal.filter { Calendar.current.isDateInToday($0.addedAt) }
+    }
+
+    /// Originals added before today, for the "سابقًا" timeline group.
+    private var packageEarlierOriginal: [EncryptedIPAEntry] {
+        packageSortedOriginal.filter { !Calendar.current.isDateInToday($0.addedAt) }
+    }
+
+    /// Decrypted outputs sorted by the pill-row filter (newest decrypt first by default).
+    private var packageSortedDecrypted: [EncryptedIPAEntry] {
+        switch packageSort {
+        case .newestFirst:
+            return packageDecryptedEntries.sorted { (store.decryptedDate($0) ?? .distantPast) > (store.decryptedDate($1) ?? .distantPast) }
+        case .oldestFirst:
+            return packageDecryptedEntries.sorted { (store.decryptedDate($0) ?? .distantPast) < (store.decryptedDate($1) ?? .distantPast) }
+        case .name:
+            return packageDecryptedEntries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
     /// The Packages library: original source IPAs and their decrypted
     /// outputs, in two segments. Swipe left on a card for Install /
     /// Share / Delete; long-press for the full action menu.
@@ -385,54 +417,42 @@ struct EncryptedAppsTab: View {
                                                            de: "Nach Name, Version oder Bundle-ID suchen",
                                                            ckb: "گەڕان بە ناو، وەشان یان Bundle ID", kmr: "Bi nav, guherto an Bundle ID bigere"),
                                     text: $packagesQuery)
-                Picker("", selection: $packagesSegment) {
-                    Text(storeText("Original IPA files (\(packageOriginalEntries.count))", "ملفات IPA الأصلية (\(packageOriginalEntries.count))",
-                                   de: "Originale IPA-Dateien (\(packageOriginalEntries.count))",
-                                   ckb: "فایلە IPA ئەسڵییەکان (\(packageOriginalEntries.count))", kmr: "Pelên IPA yên orjînal (\(packageOriginalEntries.count))"))
-                        .tag(PackageSegment.original)
-                    Text(storeText("Decrypted (\(packageDecryptedEntries.count))", "المفككة (\(packageDecryptedEntries.count))",
-                                   de: "Entschlüsselt (\(packageDecryptedEntries.count))",
-                                   ckb: "ڕەمزکراوە (\(packageDecryptedEntries.count))", kmr: "Şîfre hat vekirin (\(packageDecryptedEntries.count))"))
-                        .tag(PackageSegment.decrypted)
-                }
-                .pickerStyle(.segmented)
-                .modifier(StoreListRow())
+                packageSegmentPills
+                    .modifier(StoreListRow())
             }
             .modifier(StoreListRow())
 
             if packagesSegment == .original {
-                Section {
-                    if packageOriginalEntries.isEmpty {
-                        Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
-                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-                            .modifier(StoreListRow())
+                if packageOriginalEntries.isEmpty {
+                    Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
+                        .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                        .modifier(StoreListRow())
+                } else {
+                    if !packageTodayOriginal.isEmpty {
+                        timelineSection(title: t("Today", "اليوم", "ئەمڕۆ", "Îro"),
+                                        entries: packageTodayOriginal, kind: .original, dotColor: .orange)
                     }
-                    ForEach(packageOriginalEntries) { entry in
-                        packageRow(entry, kind: .original)
+                    if !packageEarlierOriginal.isEmpty {
+                        timelineSection(title: t("Earlier", "سابقًا", "پێشتر", "Berê"),
+                                        entries: packageEarlierOriginal, kind: .original, dotColor: .orange)
                     }
-                    Text(storeText("Original IPA files are the source files; they may be encrypted or not encrypted originally.",
+                }
+                Text(storeText("Original IPA files are the source files; they may be encrypted or not encrypted originally.",
                                    "ملفات IPA الأصلية هي ملفات المصدر، وقد تكون مشفّرة أو غير مشفّرة أصلاً.",
                                    de: "Originale IPA-Dateien sind die Quelldateien; sie können ursprünglich verschlüsselt sein oder auch nicht.",
                                    ckb: "فایلە IPA ئەسڵییەکان فایلە سەرچاوەییەکانن؛ لەوانەیە لە بنەڕەتدا شفرەکرابن یان نا.",
                                    kmr: "Pelên IPA yên orjînal pelên çavkaniyê ne; dibe ku di eslê xwe de şîfrekirî bin an na."))
                         .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
                         .modifier(StoreListRow())
-                }
             } else {
-                Section {
-                    if packageDecryptedEntries.isEmpty {
-                        Text(t("Nothing decrypted yet.", "لسّا ما انفك تشفير شي.", "هێشتا هیچ شتێک ڕەمز نەکراوەتەوە.", "Hêj tiştek nehatiye vekirin."))
-                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
-                            .modifier(StoreListRow())
-                    }
-                    ForEach(packageDecryptedEntries) { entry in
-                        packageRow(entry, kind: .decrypted)
-                    }
-                } header: {
-                    StoreSectionTitle(title: storeText("Passed verification", "اجتاز التحقق", de: "Verifizierung bestanden", ckb: "پشکنینی تێپەڕاند", kmr: "Verastkirin derbas bû"),
-                                      trailing: "\(packageDecryptedEntries.count)")
-                        .textCase(nil)
-                        .padding(.vertical, 6)
+                if packageDecryptedEntries.isEmpty {
+                    Text(t("Nothing decrypted yet.", "لسّا ما انفك تشفير شي.", "هێشتا هیچ شتێک ڕەمز نەکراوەتەوە.", "Hêj tiştek nehatiye vekirin."))
+                        .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                        .modifier(StoreListRow())
+                } else {
+                    timelineSection(title: storeText("Passed verification", "اجتاز التحقق", de: "Verifizierung bestanden", ckb: "پشکنینی تێپەڕاند", kmr: "Verastkirin derbas bû"),
+                                    count: packageDecryptedEntries.count,
+                                    entries: packageSortedDecrypted, kind: .decrypted, dotColor: MirsaPalette.success)
                 }
             }
         }
@@ -448,9 +468,109 @@ struct EncryptedAppsTab: View {
         .refreshable { await refreshDownloads() }
     }
 
-    /// One Packages card with its swipe actions, shared by both segments.
+    /// Pill row replacing the segmented control: a filter button plus
+    /// "الأصلية · N" / "المفككة · N" pills; the selected pill is white.
+    /// In RTL the first pill (الأصلية) sits on the right, matching the mockup.
+    private var packageSegmentPills: some View {
+        HStack(spacing: 8) {
+            packagePill(title: t("Original", "الأصلية", "ئەسڵییەکان", "Orjînal"),
+                        count: packageOriginalEntries.count,
+                        selected: packagesSegment == .original) {
+                withAnimation(MirsaMotion.select) { packagesSegment = .original }
+            }
+            packagePill(title: t("Decrypted", "المفككة", "ڕەمزکراوە", "Vekirî"),
+                        count: packageDecryptedEntries.count,
+                        selected: packagesSegment == .decrypted) {
+                withAnimation(MirsaMotion.select) { packagesSegment = .decrypted }
+            }
+            Menu {
+                Button(t("Newest first", "الأحدث أولاً", "نوێترین سەرەتا", "Ya herî nû pêşî")) { packageSort = .newestFirst }
+                Button(t("Oldest first", "الأقدم أولاً", "کۆنترین سەرەتا", "Ya herî kevin pêşî")) { packageSort = .oldestFirst }
+                Button(t("Name", "الاسم", "ناو", "Nav")) { packageSort = .name }
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Color.white.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(t("Sort", "ترتيب", "ڕیزکردن", "Rêzkirin"))
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func packagePill(title: String, count: Int, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("\(title) · \(count)")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(selected ? Color.black : Color.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(selected ? Color.white : Color.white.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// One timeline group: a purple section title plus cards on a vertical
+    /// rail with a dot per card (orange = original, green = decrypted).
     @ViewBuilder
-    private func packageRow(_ entry: EncryptedIPAEntry, kind: PackageSegment) -> some View {
+    private func timelineSection(title: String, count: Int? = nil, entries: [EncryptedIPAEntry], kind: PackageSegment, dotColor: Color) -> some View {
+        Section {
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                timelineRow(entry, kind: kind, dotColor: dotColor, isFirst: index == 0, isLast: index == entries.count - 1)
+            }
+        } header: {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(MirsaFont.sectionTitle)
+                    .foregroundStyle(MirsaPalette.accent)
+                if let count {
+                    Text("· \(count)")
+                        .font(MirsaFont.sectionTitle)
+                        .foregroundStyle(MirsaPalette.accent)
+                        .monospacedDigit()
+                }
+                Spacer()
+            }
+            .textCase(nil)
+            .padding(.vertical, 6)
+        }
+    }
+
+    /// One card on the timeline rail. In RTL the rail (first in the HStack)
+    /// sits on the right edge and the card on the left, matching the mockup.
+    @ViewBuilder
+    private func timelineRow(_ entry: EncryptedIPAEntry, kind: PackageSegment, dotColor: Color, isFirst: Bool, isLast: Bool) -> some View {
+        HStack(spacing: 10) {
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 2)
+                    .frame(maxHeight: .infinity)
+                    .opacity(isFirst ? 0 : 1)
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 12, height: 12)
+                Rectangle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 2)
+                    .frame(maxHeight: .infinity)
+                    .opacity(isLast ? 0 : 1)
+            }
+            .frame(width: 16)
+            packageCard(entry, kind: kind)
+        }
+        .modifier(StoreListRow())
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            packageSwipeActions(entry, kind: kind)
+        }
+    }
+
+    /// The card itself (glass), without list-row chrome. The timeline row
+    /// wraps it with the rail and applies the row insets + swipe actions.
+    @ViewBuilder
+    private func packageCard(_ entry: EncryptedIPAEntry, kind: PackageSegment) -> some View {
         PackageEntryRow(entry: entry, kind: kind, store: store, vm: vm,
                         onInstall: { install(entry) },
                         onInstallDecrypted: { installDecrypted(entry) },
@@ -458,30 +578,32 @@ struct EncryptedAppsTab: View {
                         onShareURL: { url in packageShareTarget = PackageShareTarget(id: entry.id, url: url) },
                         onSaveURL: { url in packageExportTarget = PackageExportTarget(id: entry.id, url: url) },
                         onShowDecrypted: { withAnimation(MirsaMotion.select) { packagesSegment = .decrypted } })
-            .modifier(StoreListRow())
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button {
-                    if kind == .decrypted { installDecrypted(entry) } else { install(entry) }
-                } label: {
-                    Label(t("Install", "تثبيت", "دامەزراندن", "Saz bike"), systemImage: "arrow.down.app.fill")
-                }
-                .tint(StoreLuxe.accent)
-                .disabled(store.busy != nil)
-                Button {
-                    do {
-                        let url = kind == .decrypted ? try StoreIPAProtection.shareDecryptedURL(id: entry.id) : try StoreIPAProtection.shareURL(id: entry.id)
-                        packageShareTarget = PackageShareTarget(id: entry.id, url: url)
-                    } catch { store.error = error.localizedDescription }
-                } label: {
-                    Label(t("Share", "مشاركة", "هاوبەشکردن", "Parve bike"), systemImage: "square.and.arrow.up.fill")
-                }
-                .tint(.blue)
-                Button { StoreHaptics.delete(); pendingDelete = entry } label: {
-                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash.fill")
-                }
-                .tint(MirsaPalette.danger)
-                .disabled(store.installingID == entry.id)
-            }
+    }
+
+    /// Swipe actions for a Packages card (Install / Share / Delete).
+    @ViewBuilder
+    private func packageSwipeActions(_ entry: EncryptedIPAEntry, kind: PackageSegment) -> some View {
+        Button {
+            if kind == .decrypted { installDecrypted(entry) } else { install(entry) }
+        } label: {
+            Label(t("Install", "تثبيت", "دامەزراندن", "Saz bike"), systemImage: "arrow.down.app.fill")
+        }
+        .tint(StoreLuxe.accent)
+        .disabled(store.busy != nil)
+        Button {
+            do {
+                let url = kind == .decrypted ? try StoreIPAProtection.shareDecryptedURL(id: entry.id) : try StoreIPAProtection.shareURL(id: entry.id)
+                packageShareTarget = PackageShareTarget(id: entry.id, url: url)
+            } catch { store.error = error.localizedDescription }
+        } label: {
+            Label(t("Share", "مشاركة", "هاوبەشکردن", "Parve bike"), systemImage: "square.and.arrow.up.fill")
+        }
+        .tint(.blue)
+        Button { StoreHaptics.delete(); pendingDelete = entry } label: {
+            Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash.fill")
+        }
+        .tint(MirsaPalette.danger)
+        .disabled(store.installingID == entry.id)
     }
 
     /// Install the persisted decrypted IPA (Packages › Decrypted).
@@ -932,6 +1054,11 @@ private enum PackageSegment: String, CaseIterable {
     case original, decrypted
 }
 
+/// Sort order for the Packages tab (filter button in the pill row).
+private enum PackageSort: String, CaseIterable {
+    case newestFirst, oldestFirst, name
+}
+
 /// A share-sheet target: the entry id (for StoreIPAProtection.endSharing)
 /// plus the file URL to share.
 private struct PackageShareTarget: Identifiable {
@@ -1009,26 +1136,41 @@ private struct PackageEntryRow: View {
         return f.string(from: date)
     }
 
+    /// Status pill shown inline after the version · size line:
+    /// orange "مشفر" for an encrypted original, green "اكتمل فك التشفير"
+    /// for a decrypted output. A plain (non-encrypted) original shows
+    /// grey "غير مشفّر" text instead of a pill.
     @ViewBuilder
-    private var statusLine: some View {
+    private var statusPill: some View {
         if kind == .decrypted {
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark.circle.fill")
-                Text(t("Decryption complete", "اكتمل فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê temam bû"))
-            }
-            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
-        } else if isDecrypted {
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark.circle.fill")
-                Text(t("Encrypted · decrypted output available", "مشفر · يتوفر ناتج مفكوك التشفير", "شفرەکراوە · ئەنجامی ڕەمزکراوە بەردەستە", "Şîfrekirî · encama vekirî berdest e"))
-            }
-            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
+            Text(t("Decryption complete", "اكتمل فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê temam bû"))
+                .font(MirsaFont.caption).fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(MirsaPalette.success, in: Capsule())
         } else if entry.encryptedBinary == true {
             Text(t("Encrypted", "مشفر", "شفرەکراوە", "Şîfrekirî"))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                .font(MirsaFont.caption).fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.orange, in: Capsule())
         } else {
             Text(t("Not encrypted", "غير مشفّر", "شفرە نەکراوە", "Ne şîfrekirî"))
-                .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                .font(MirsaFont.caption)
+                .foregroundStyle(MirsaPalette.textSecondary)
+        }
+    }
+
+    /// Green "decrypted output available" line under the version · size row
+    /// (original cards that already have a decrypted output).
+    @ViewBuilder
+    private var decryptedAvailableLine: some View {
+        if kind == .original && isDecrypted {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down.left")
+                Text(t("Decrypted output available", "يتوفر ناتج مفكوك التشفير", "ئەنجامی ڕەمزکراوە بەردەستە", "Encama vekirî berdest e"))
+            }
+            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
         }
     }
 
@@ -1068,16 +1210,16 @@ private struct PackageEntryRow: View {
             .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8))
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
-                Text("\(entry.version) · \(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))")
-                    .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
-                statusLine
+                HStack(spacing: 6) {
+                    Text("\(entry.version) · \(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))")
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                    statusPill
+                }
+                decryptedAvailableLine
             }
             Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 4) {
-                if let time = timeText {
-                    Text(time).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary).monospacedDigit()
-                }
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(MirsaPalette.textTertiary)
+            if let time = timeText {
+                Text(time).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary).monospacedDigit()
             }
         }
         .padding(MirsaSpacing.m)
