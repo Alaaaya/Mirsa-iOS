@@ -35,6 +35,7 @@ struct ProjectInstallLogView: View {
     let appName: String
     let close: () -> Void
     @State private var confirmStop = false
+    @State private var shareArchive = false
 
     private static let clock: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"; f.locale = Locale(identifier: "en_US_POSIX"); return f
@@ -55,7 +56,8 @@ struct ProjectInstallLogView: View {
     }
 
     private func title(_ state: PersonalSigningOperation.State) -> String {
-        if state.running { return personalText("Processing", "جاري المعالجة") }
+        if state.running { return state.stoppedByUser ? personalText("Stopping…", "جاري الإيقاف…") : personalText("Processing", "جاري المعالجة") }
+        if state.stage == .handedOff { return personalText("Sent to iOS", "انرسل إلى iOS") }
         return state.stage == .failed ? personalText("Not completed", "ما اكتملت العملية") : personalText("Completed", "اكتمل")
     }
 
@@ -89,18 +91,31 @@ struct ProjectInstallLogView: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(LCPalette.pill)
                     Capsule().fill(state.stage == .failed ? LCPalette.red : LCPalette.mint)
-                        .frame(width: geo.size.width * (state.running ? state.overallFraction : (state.stage == .failed ? 1 : 1)))
+                        .frame(width: geo.size.width * state.overallFraction)
                 }
             }.frame(height: 3)
             logList(state)
             if state.running {
                 Button { confirmStop = true } label: {
-                    Text(personalText("Stop", "إيقاف")).font(.subheadline.weight(.semibold)).foregroundStyle(Color(red: 0.898, green: 0.282, blue: 0.302))
+                    Text(state.stoppedByUser ? personalText("Stopping at next checkpoint…", "الإيقاف عند النقطة الآمنة التالية…") : personalText("Stop", "إيقاف")).font(.subheadline.weight(.semibold)).foregroundStyle(Color(red: 0.898, green: 0.282, blue: 0.302))
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                         .background(Color(red: 0.212, green: 0.086, blue: 0.09), in: Capsule())
-                }.buttonStyle(.plain).accessibilityIdentifier("mirsa.project.install-log.stop")
+                }.buttonStyle(.plain).disabled(state.stoppedByUser).accessibilityIdentifier("mirsa.project.install-log.stop")
                 Text(PersonalSigningLabels.weighted).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            } else if state.stage == .handedOff {
+            }
+            if !state.running, let archive = state.signedArchive {
+                HStack {
+                    Button(personalText("Install later", "التثبيت لاحقاً"), action: close)
+                        .accessibilityIdentifier("mirsa.project.install-log.later")
+                    Spacer()
+                    Button(personalText("Share IPA", "مشاركة IPA")) { shareArchive = true }
+                        .accessibilityIdentifier("mirsa.project.install-log.share")
+                }.font(.subheadline.weight(.semibold)).tint(LCPalette.mint)
+                Text(personalText("Signed IPA saved in this project. Sharing does not confirm installation.", "الـ IPA الموقّع محفوظ بالمشروع. المشاركة مو تأكيد للتثبيت."))
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Color.clear.frame(height: 0).sheet(isPresented: $shareArchive) { PersonalSignedShare(url: archive) }
+            }
+            if !state.running, state.stage == .handedOff {
                 Text(personalText("Handed off to the iOS installer. iOS finishes the installation; Mirsa cannot confirm it.", "انسلّم التثبيت لنظام iOS. النظام بيكمل التثبيت وMirsa ما بيقدر يأكده."))
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
@@ -109,6 +124,8 @@ struct ProjectInstallLogView: View {
         .confirmationDialog(personalText("Stop signing?", "إيقاف التوقيع؟"), isPresented: $confirmStop, titleVisibility: .visible) {
             Button(personalText("Stop", "إيقاف"), role: .destructive) { signing.stop() }
             Button(personalText("Keep going", "كمّل"), role: .cancel) {}
+        } message: {
+            Text(personalText("Stops at the next safe checkpoint, not immediately. A request already sent to iOS cannot be recalled. Any signed IPA already saved is kept.", "بيتوقف عند النقطة الآمنة التالية، مو فوراً. طلب وصل لـ iOS ما فينا نسحبه. أي IPA موقّع ومحفوظ بيضل موجود."))
         }
     }
 
