@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Apple Store style (Settings › شكل متجر Apple): Classic (default) or New
+// MARK: - Apple Store style (Settings › شكل متجر Apple): New (default) or Classic
 //
 // View layer only. Both styles host the same shared models and services
 // (MirsaStoreOnDeviceClient, AppStoreSectionModel, EncryptedAppsStore, StoreLibraryModel),
@@ -10,7 +10,7 @@ enum StoreStyle: String, CaseIterable, Identifiable {
     case classic, new
     /// UserDefaults / @AppStorage key. UI tests can pass `-mirsa.store.style new`.
     static let key = "mirsa.store.style"
-    static let fallback = StoreStyle.classic
+    static let fallback = StoreStyle.new
     var id: String { rawValue }
 
     static func from(_ raw: String) -> StoreStyle { StoreStyle(rawValue: raw) ?? fallback }
