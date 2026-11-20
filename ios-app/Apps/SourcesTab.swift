@@ -625,8 +625,6 @@ struct SourceDetailView: View {
     @ObservedObject private var store: SourcesStore
     @ObservedObject private var apps = AppsStore.shared
     @State private var query = ""
-    @State private var selectedNewsApp: RepoApp?
-    @Environment(\.openURL) private var openURL
 
     init(source: RepoSource, store: SourcesStore = .shared, onSelectIPA: ((URL) async throws -> Void)? = nil) {
         self.source = source
@@ -641,11 +639,6 @@ struct SourceDetailView: View {
             sourceHeader
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-            if let metadata = store.presentation[source.url], !metadata.news.isEmpty {
-                newsSection(metadata.news, all: all)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
             ForEach(shown) { app in
                 RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA)
                     .listRowBackground(Color.clear)
@@ -698,13 +691,6 @@ struct SourceDetailView: View {
         .task(id: source.url) { await store.ensureLoaded(source.url) }
         .refreshable { await store.refresh(source.url) }
         .navigationTitle(currentSource.name)
-        .sheet(item: $selectedNewsApp) { app in
-            NavigationStack {
-                List { RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA) }
-                    .navigationTitle(app.name)
-                    .mirsaScreen()
-            }
-        }
         .mirsaScreen()
     }
 
@@ -751,45 +737,6 @@ struct SourceDetailView: View {
         .frame(height: height).frame(maxWidth: .infinity)
         .clipped().clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityHidden(true)
-    }
-
-    private var newsTitle: String {
-        switch L.lang {
-        case .english: return "Source news"
-        case .arabic: return "أخبار السورس"
-        case .german: return "Neuigkeiten der Quelle"
-        case .sorani: return "هەواڵەکانی سەرچاوە"
-        case .kurmanji: return "Nûçeyên çavkaniyê"
-        }
-    }
-
-    private func newsSection(_ news: [RepoNews], all: [RepoApp]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(newsTitle).font(.headline).accessibilityAddTraits(.isHeader)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(news) { item in
-                        let app = all.first { $0.bundleID == item.appID }
-                        Button {
-                            if let app { selectedNewsApp = app }
-                            else if let url = item.url { openURL(url) }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 10) {
-                                if let image = item.imageURL { sourceImage(image, height: 120) }
-                                if let date = item.date { Text(date, style: .date).font(.caption).foregroundStyle(.secondary) }
-                                Text(item.title).font(.headline).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
-                                if !item.caption.isEmpty { Text(item.caption).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                            }
-                            .frame(width: 252, alignment: .leading).padding(14)
-                            .appsGlass(cornerRadius: MirsaRadius.l, tint: Color(hex: item.tint) ?? sourceTint)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(app == nil && item.url == nil)
-                        .accessibilityIdentifier("source-news-\(item.id)")
-                    }
-                }.padding(.vertical, 4)
-            }
-        }.accessibilityIdentifier("source-detail-news")
     }
 
     private var searchPrompt: String {
