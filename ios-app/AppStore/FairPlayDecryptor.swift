@@ -297,34 +297,36 @@ enum FairPlayDecryptor {
         return machOMagics.contains(head)
     }
 
-    /// Main executable, top-level frameworks, app extensions, and frameworks
-    /// nested inside app extensions. Watch apps are skipped: they cannot run
-    /// on iPhone.
+    /// Every Mach-O in the app bundle, found by a recursive scan: the main
+    /// executable first, then every other file whose header is a Mach-O
+    /// (frameworks at any depth, app extensions, bare .dylib files, and any
+    /// other place the app hides a binary). A hardcoded Frameworks /
+    /// PlugIns walk misses nested frameworks and bare dylibs, and a binary
+    /// it misses stays FairPlay-encrypted: the decrypt then reports success
+    /// and the install fails later at signing with "not a valid Mach-O
+    /// file". Watch apps are skipped: they cannot run on iPhone.
     private static func collectBinaries(appDir: URL, executable: String) throws -> [Binary] {
         let fm = FileManager.default
         var out: [Binary] = []
+        var seen = Set<String>()
         let main = appDir.appendingPathComponent(executable)
         guard fm.fileExists(atPath: main.path), isMachO(main) else { throw Error.noExecutable }
         out.append(Binary(name: executable, url: main))
-        func scanFrameworks(in dir: URL) {
-            for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where name.hasSuffix(".framework") {
-                let binaryName = String(name.dropLast(".framework".count))
-                let binary = dir.appendingPathComponent(name, isDirectory: true).appendingPathComponent(binaryName)
-                if fm.fileExists(atPath: binary.path), isMachO(binary) {
-                    out.append(Binary(name: binaryName, url: binary))
-                }
+        seen.insert(main.standardizedFileURL.path)
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey]
+        guard let enumerator = fm.enumerator(at: appDir, includingPropertiesForKeys: keys) else { return out }
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            if values?.isSymbolicLink == true { continue }
+            if values?.isDirectory == true {
+                if url.lastPathComponent == "Watch" { enumerator.skipDescendants() }
+                continue
             }
-        }
-        scanFrameworks(in: appDir.appendingPathComponent("Frameworks", isDirectory: true))
-        let plugins = appDir.appendingPathComponent("PlugIns", isDirectory: true)
-        for name in (try? fm.contentsOfDirectory(atPath: plugins.path)) ?? [] where name.hasSuffix(".appex") {
-            let appexDir = plugins.appendingPathComponent(name, isDirectory: true)
-            let binaryName = String(name.dropLast(".appex".count))
-            let binary = appexDir.appendingPathComponent(binaryName)
-            if fm.fileExists(atPath: binary.path), isMachO(binary) {
-                out.append(Binary(name: binaryName, url: binary))
-            }
-            scanFrameworks(in: appexDir.appendingPathComponent("Frameworks", isDirectory: true))
+            guard values?.isRegularFile == true else { continue }
+            let path = url.standardizedFileURL.path
+            guard !seen.contains(path), isMachO(url) else { continue }
+            seen.insert(path)
+            out.append(Binary(name: url.lastPathComponent, url: url))
         }
         return out
     }
