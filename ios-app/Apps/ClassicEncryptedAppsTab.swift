@@ -399,6 +399,37 @@ private struct ClassicEncryptedEntryCard: View {
                 }
             }
             if installing { installProgress }
+            // FairPlay decrypt — the same shared store as the New style, so
+            // it works in Classic too. Decrypt button → progress → a
+            // "تم فك التشفير" badge plus an Install button for the decrypted IPA.
+            if store.decryptingID == entry.id {
+                HStack(spacing: 8) {
+                    ProgressView().tint(MirsaPalette.accentSoft)
+                    Text(t("Decrypting…", "عم يفك التشفير…", "ڕەمز دەکاتەوە…", "Şîfre tê vekirin…"))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                }
+            } else if store.decryptedIDs.contains(entry.id) {
+                HStack(spacing: MirsaSpacing.xs) {
+                    Label(t("Decryption complete", "تم فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê qediya"), systemImage: "checkmark.circle.fill")
+                        .font(MirsaFont.button).foregroundStyle(MirsaPalette.success)
+                    Spacer(minLength: 0)
+                    Button { Task { await store.installDecrypted(entry, vm: vm) } } label: {
+                        Label(t("Install", "تثبيت", "دامەزراندن", "Saz bike"), systemImage: "arrow.down.app.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.mirsaPrimary)
+                    .disabled(store.busy != nil)
+                    .accessibilityIdentifier("encrypted-install-decrypted")
+                }
+            } else if entry.encryptedBinary == true, entry.hasSinf {
+                Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                    Label(t("Decrypt", "فك التشفير", "ڕەمزکردنەوە", "Şîfre veke"), systemImage: "lock.open")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.mirsaSecondary)
+                .disabled(store.busy != nil)
+                .accessibilityIdentifier("encrypted-decrypt")
+            }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { Task { await store.install(entry, vm: vm) } } label: {
                     InstallKeyedLabel(key: "entry:" + entry.id.uuidString) {
