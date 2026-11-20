@@ -1,0 +1,3 @@
+Public synthetic test material only. Not Apple authorization or a runnable app.
+
+The 512-byte arm64 executable uses the same minimal layout as the passing bundle signing fixture in rust-core/vendor/apple-codesign-quick/src/bundle.rs. The P12 and CMS profile are copies of the existing public rust-core/tests/p12-fixtures/modern.p12 (password mirsa-test) and cms-fixtures/valid-test.der. No user secrets, real identities, installer calls or network access. Hosted tests call the production signer and capture its actual bundle callbacks. They must not seed progress/log rows or claim device installation.

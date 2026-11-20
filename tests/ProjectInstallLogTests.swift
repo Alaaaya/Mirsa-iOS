@@ -46,7 +46,7 @@ final class ProjectInstallLogTests: XCTestCase {
     /// This is NOT Apple authorization or proof of system/device installation.
     private func captureRealSigner(language: AppLanguage, stop: Bool) async throws {
         let bundle = Bundle(for: Self.self)
-        let input = try XCTUnwrap(bundle.url(forResource: "PersonalUIFixture", withExtension: "zip"))
+        let input = try XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "ipa"))
         let material = PersonalIdentityVault.Material(
             p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
             password: "mirsa-test",
