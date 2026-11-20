@@ -57,6 +57,8 @@ struct MirsaStyleShotHost: View {
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "dock-clearance-29": SourcesDock29ValidationHost()
         case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
+        case "store-preview-detail": ToolsStorePreviewShotHost(detail: true)
+        case "store-preview-card": ToolsStorePreviewShotHost(detail: false)
         case "sources-ts-list": SourcesToolsStoreListHost()
         case "sources-ts-small": SourcesToolsStoreDetailHost(large: false)
         case "sources-ts-large": SourcesToolsStoreDetailHost(large: true)

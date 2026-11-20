@@ -445,6 +445,8 @@ private struct ToolsStorePreview: View {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() } else { Color.clear }
                 }
+            } else if let first = item.gallery.first, first.isVideo, let v = first.mediaURL {
+                ToolsStoreLoopingVideo(url: v).frame(width: size, height: size).allowsHitTesting(false)
             }
         }
         .frame(width: size, height: size)
@@ -980,3 +982,34 @@ private struct ToolsStoreUploadSheet: View {
         }
     }
 }
+
+#if DEBUG
+/// Fixture host for native preview screenshots. Evidence only: item JSON is local, image path comes from -MirsaPreviewFixture.
+struct ToolsStorePreviewShotHost: View {
+    let detail: Bool
+    @StateObject private var actions = ToolsStoreActions()
+    @StateObject private var model = ToolsStoreModel()
+    @AppStorage(SourcesTheme.key) private var themeRaw = SourcesTheme.aurora.rawValue
+    private var theme: SourcesTheme { SourcesTheme(rawValue: themeRaw) ?? .aurora }
+    private var item: ToolsStoreItem {
+        let path = UserDefaults.standard.string(forKey: "MirsaPreviewFixture") ?? ""
+        let json = """
+        {"id":"fixture-naruto","category":"wallpapers","title":"Naruto","description":"Fixture entry with real Naruto package preview pixels.","file_name":"Naruto.tendies","file_size":1234567,"downloads":12,"previews":[{"id":"p1","kind":"image","url":"file://\(path)","content_type":"image/jpeg"}]}
+        """
+        return try! JSONDecoder().decode(ToolsStoreItem.self, from: Data(json.utf8))
+    }
+    var body: some View {
+        if detail {
+            ToolsStoreItemSheet(item: item, actions: actions, model: model)
+        } else {
+            ScrollView {
+                VStack(spacing: 16) {
+                    ScrollView(.horizontal) { HStack { ToolsStoreCard(item: item, theme: theme, open: {}) }.padding() }
+                    ToolsStoreItemRow(item: item, actions: actions, theme: theme, open: {}).padding()
+                }
+            }
+            .background(Color.black.ignoresSafeArea())
+        }
+    }
+}
+#endif

@@ -18,6 +18,9 @@ struct ToolsStorePreviewMedia: Codable, Hashable, Sendable, Identifiable {
     /// Still frame: the poster for videos, the image itself otherwise.
     var stillURL: URL? { isVideo ? Self.safe(posterURL) : Self.safe(url) }
     static func safe(_ raw: String?) -> URL? {
+        #if DEBUG
+        if let raw, raw.hasPrefix("file://"), let u = URL(string: raw) { return u }
+        #endif
         guard let raw, let u = URL(string: raw), u.scheme?.lowercased() == "https",
               u.host?.isEmpty == false, u.user == nil, u.password == nil else { return nil }
         return u
