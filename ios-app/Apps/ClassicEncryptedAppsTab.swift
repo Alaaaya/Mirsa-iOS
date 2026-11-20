@@ -15,6 +15,10 @@ struct ClassicEncryptedAppsTab: View {
     @State private var storeLoginAvailable = false
     @State private var showingAppStore = false
     @State private var pendingDelete: EncryptedIPAEntry?
+    @State private var packagesSegment: ClassicPackageSegment = .original
+    @State private var packagesQuery = ""
+    @State private var packageShareTarget: ClassicPackageShareTarget?
+    @State private var packageExportTarget: ClassicPackageExportTarget?
     @State private var section: AppStoreSectionTab = AppStoreSectionTab.initial
     /// Recreates the inline sign-in/search screen when the session changed elsewhere.
     @State private var storeViewID = UUID()
@@ -32,6 +36,7 @@ struct ClassicEncryptedAppsTab: View {
             AuroraBackground().ignoresSafeArea()
             page(.search) { searchPage }
             page(.downloads) { downloadsPage }
+            page(.packages) { packagesPage }
             page(.purchases) { ClassicAppStorePurchasesPage(store: store, model: storeAccount, vm: vm, isActive: section == .purchases) }
             page(.account) {
                 ClassicAppStoreAccountPage(model: storeAccount, library: store, storeAvailable: storeLoginAvailable,
@@ -73,6 +78,12 @@ struct ClassicEncryptedAppsTab: View {
                                       _ = try? await MirsaStoreOnDeviceClient.shared.beginAddAccount()
                                       storeAccount.updateAccount(nil); storeViewID = UUID()
                                       showingAppStore = true } })
+        }
+        .sheet(item: $packageShareTarget) { target in
+            ClassicPackageActivitySheet(url: target.url) { StoreIPAProtection.endSharing(id: target.id) }
+        }
+        .sheet(item: $packageExportTarget) { target in
+            ClassicPackageExportPicker(url: target.url) { StoreIPAProtection.endSharing(id: target.id) }
         }
         .mirsaStatusBarScrim()
         .preferredColorScheme(.dark)
@@ -231,6 +242,102 @@ struct ClassicEncryptedAppsTab: View {
             .padding(.bottom, MirsaSpacing.xl)
         }
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    // MARK: Packages (Classic) — the same library as the New style's
+    // Packages tab: original source IPAs and their decrypted outputs, in
+    // two segments. Buttons on the card for Install / Share / Delete;
+    // long-press for the full action menu.
+
+    private var packageFilteredEntries: [EncryptedIPAEntry] {
+        let q = packagesQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return store.entries }
+        return store.entries.filter {
+            $0.name.localizedCaseInsensitiveContains(q) || $0.version.localizedCaseInsensitiveContains(q)
+                || $0.bundleID.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    private var packageOriginalEntries: [EncryptedIPAEntry] { packageFilteredEntries }
+    private var packageDecryptedEntries: [EncryptedIPAEntry] {
+        packageFilteredEntries.filter { store.decryptedIDs.contains($0.id) }
+    }
+
+    private var packagesPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MirsaSpacing.m) {
+                MirsaPageHeader(title: AppStoreSectionTab.packages.title, subtitle: EncryptedText.tabTitle) {
+                    HStack(spacing: MirsaSpacing.xs) {
+                        Button { showingAdd = true } label: { MirsaIconButtonLabel(systemName: "plus") }
+                            .modifier(MirsaSolidCard(shape: Circle(), tint: nil, elevation: 1))
+                            .disabled(store.busy != nil)
+                            .accessibilityLabel(t("Add a download", "إضافة تنزيل", "زیادکردنی داگرتن", "Daxistinekê zêde bike"))
+                            .accessibilityIdentifier("store-add-download")
+                        Button { showingTools = true } label: { MirsaIconButtonLabel(systemName: "wrench.and.screwdriver") }
+                            .modifier(MirsaSolidCard(shape: Circle(), tint: nil, elevation: 1))
+                            .accessibilityLabel(StoreFeatureText.tools)
+                        LanguageGlobeMenu(size: MirsaIconSize.button)
+                    }
+                }
+                ClassicAppStoreSearchField(placeholder: t("Search by name, version or Bundle ID", "البحث بالاسم أو الإصدار أو Bundle ID",
+                                                   "گەڕان بە ناو، وەشان یان Bundle ID", "Bi nav, guherto an Bundle ID bigere"),
+                                    text: $packagesQuery)
+                Picker(t("Packages", "الحزم", "پاکێجەکان", "Pakêt"), selection: $packagesSegment) {
+                    Text(t("Original", "الأصلية", "ئەسڵییەکان", "Orjînal") + " · \(packageOriginalEntries.count)").tag(ClassicPackageSegment.original)
+                    Text(t("Decrypted", "المفككة", "ڕەمزکراوە", "Vekirî") + " · \(packageDecryptedEntries.count)").tag(ClassicPackageSegment.decrypted)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("classic-packages-segment")
+                if packagesSegment == .original {
+                    if packageOriginalEntries.isEmpty {
+                        Text(t("Nothing matches.", "ما في شي مطابق.", "هیچ شتێک ناگونجێت.", "Tiştek li hev nayê."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                    } else {
+                        ForEach(packageOriginalEntries) { entry in
+                            ClassicPackageEntryRow(entry: entry, kind: .original, store: store, vm: vm,
+                                onInstall: { installPackage(entry, kind: .original) },
+                                onDelete: { pendingDelete = entry },
+                                onShareURL: { url in packageShareTarget = ClassicPackageShareTarget(id: entry.id, url: url) },
+                                onSaveURL: { url in packageExportTarget = ClassicPackageExportTarget(id: entry.id, url: url) },
+                                onShowDecrypted: { withAnimation(MirsaMotion.select) { packagesSegment = .decrypted } })
+                        }
+                    }
+                    Text(t("Original IPA files are the source files; they may be encrypted or not encrypted originally.",
+                           "ملفات IPA الأصلية هي ملفات المصدر، وقد تكون مشفّرة أو غير مشفّرة أصلاً.",
+                           "فایلە IPA ئەسڵییەکان فایلە سەرچاوەییەکانن؛ لەوانەیە لە بنەڕەتدا شفرەکرابن یان نا.",
+                           "Pelên IPA yên orjînal pelên çavkaniyê ne; dibe ku di eslê xwe de şîfrekirî bin an na."))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    if packageDecryptedEntries.isEmpty {
+                        Text(t("Nothing decrypted yet.", "لسّا ما انفك تشفير شي.", "هێشتا هیچ شتێک ڕەمز نەکراوەتەوە.", "Hêj tiştek nehatiye vekirin."))
+                            .font(MirsaFont.secondary).foregroundStyle(MirsaPalette.textSecondary)
+                    } else {
+                        ForEach(packageDecryptedEntries) { entry in
+                            ClassicPackageEntryRow(entry: entry, kind: .decrypted, store: store, vm: vm,
+                                onInstall: { installPackage(entry, kind: .decrypted) },
+                                onDelete: { pendingDelete = entry },
+                                onShareURL: { url in packageShareTarget = ClassicPackageShareTarget(id: entry.id, url: url) },
+                                onSaveURL: { url in packageExportTarget = ClassicPackageExportTarget(id: entry.id, url: url) },
+                                onShowDecrypted: {})
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, MirsaSpacing.page)
+            .padding(.bottom, MirsaSpacing.xl)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func installPackage(_ entry: EncryptedIPAEntry, kind: ClassicPackageSegment) {
+        guard store.busy == nil else { return }
+        StoreHaptics.install()
+        if kind == .decrypted {
+            Task { await store.installDecrypted(entry, vm: vm) }
+        } else {
+            Task { await store.install(entry, vm: vm) }
+        }
     }
 
     private var introCard: some View {
@@ -516,5 +623,246 @@ private struct ClassicEncryptedEntryCard: View {
                          "Apple ID ya kirrîyar di vê IPA de tune. Tenê li ser iPhone ku bi hesabê ku ew kirî ketiye vedibe."))
         }
         return out
+    }
+}
+
+private enum ClassicPackageSegment: String, CaseIterable {
+    case original, decrypted
+}
+
+/// A share-sheet target: the entry id (for StoreIPAProtection.endSharing)
+/// plus the file URL to share.
+private struct ClassicPackageShareTarget: Identifiable {
+    let id: UUID
+    let url: URL
+}
+
+/// A Save-to-Files target: the entry id plus the file URL to export.
+private struct ClassicPackageExportTarget: Identifiable {
+    let id: UUID
+    let url: URL
+}
+
+/// Share sheet for a Packages IPA file.
+private struct ClassicPackageActivitySheet: UIViewControllerRepresentable {
+    let url: URL
+    let onDismiss: () -> Void
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let c = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        c.completionWithItemsHandler = { _, _, _, _ in onDismiss() }
+        return c
+    }
+    func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
+}
+
+/// Save-to-Files export picker for a Packages IPA file.
+private struct ClassicPackageExportPicker: UIViewControllerRepresentable {
+    let url: URL
+    let onDismiss: () -> Void
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let p = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        p.delegate = context.coordinator
+        return p
+    }
+    func updateUIViewController(_ c: UIDocumentPickerViewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onDismiss: () -> Void
+        init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onDismiss() }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { onDismiss() }
+    }
+}
+
+/// One row in the Classic Packages tab: the app icon, name, version, size
+/// and a decrypt status, with Install / Share / Delete buttons; long-press
+/// opens the full action menu (same actions as the New style).
+private struct ClassicPackageEntryRow: View {
+    let entry: EncryptedIPAEntry
+    let kind: ClassicPackageSegment
+    @ObservedObject var store: EncryptedAppsStore
+    let vm: AppViewModel
+    let onInstall: () -> Void
+    let onDelete: () -> Void
+    let onShareURL: (URL) -> Void
+    let onSaveURL: (URL) -> Void
+    let onShowDecrypted: () -> Void
+
+    private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
+
+    private var isDecrypted: Bool { store.decryptedIDs.contains(entry.id) }
+
+    private var sizeBytes: Int64 {
+        if kind == .decrypted { return store.decryptedSize(entry) ?? entry.sizeBytes }
+        return entry.sizeBytes
+    }
+
+    /// Decryption completion time (the decrypted file's modification time).
+    private var timeText: String? {
+        guard kind == .decrypted, let date = store.decryptedDate(entry) else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
+    }
+
+    private var installing: Bool { store.installingID == entry.id }
+
+    /// Status pill after the version · size line: orange "مشفر" for an
+    /// encrypted original, green "اكتمل فك التشفير" for a decrypted output.
+    /// A plain (non-encrypted) original shows grey "غير مشفّر" text instead.
+    @ViewBuilder
+    private var statusPill: some View {
+        if kind == .decrypted {
+            Text(t("Decryption complete", "اكتمل فك التشفير", "ڕەمزکردنەوە تەواو بوو", "Vekirina şîfreyê temam bû"))
+                .font(MirsaFont.caption).fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(MirsaPalette.success, in: Capsule())
+        } else if entry.encryptedBinary == true {
+            Text(t("Encrypted", "مشفر", "شفرەکراوە", "Şîfrekirî"))
+                .font(MirsaFont.caption).fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.orange, in: Capsule())
+        } else {
+            Text(t("Not encrypted", "غير مشفّر", "شفرە نەکراوە", "Ne şîfrekirî"))
+                .font(MirsaFont.caption)
+                .foregroundStyle(MirsaPalette.textSecondary)
+        }
+    }
+
+    /// Green "decrypted output available" line under the version · size row
+    /// (original cards that already have a decrypted output).
+    @ViewBuilder
+    private var decryptedAvailableLine: some View {
+        if kind == .original && isDecrypted {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down.left")
+                Text(t("Decrypted output available", "يتوفر ناتج مفكوك التشفير", "ئەنجامی ڕەمزکراوە بەردەستە", "Encama vekirî berdest e"))
+            }
+            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
+        }
+    }
+
+    private func shareOriginal() {
+        do { onShareURL(try StoreIPAProtection.shareURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func shareDecrypted() {
+        do { onShareURL(try StoreIPAProtection.shareDecryptedURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func saveOriginal() {
+        do { onSaveURL(try StoreIPAProtection.shareURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func saveDecrypted() {
+        do { onSaveURL(try StoreIPAProtection.shareDecryptedURL(id: entry.id)) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MirsaSpacing.s) {
+            HStack(spacing: MirsaSpacing.s) {
+                Group {
+                    if let img = store.icon(entry) { Image(uiImage: img).resizable().scaledToFill() }
+                    else { Image(systemName: "app.dashed").font(.title).foregroundStyle(MirsaPalette.textTertiary) }
+                }
+                .frame(width: 60, height: 60)
+                .background(MirsaPalette.cardRaised)
+                .clipShape(RoundedRectangle(cornerRadius: MirsaRadius.icon, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.name).font(MirsaFont.cardTitle).foregroundStyle(.white).lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text("\(entry.version) · \(ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file))")
+                            .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                        statusPill
+                    }
+                    decryptedAvailableLine
+                }
+                Spacer(minLength: 0)
+                if let time = timeText {
+                    Text(time).font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary).monospacedDigit()
+                }
+            }
+            if store.decryptingID == entry.id {
+                HStack(spacing: 8) {
+                    ProgressView().tint(MirsaPalette.accentSoft)
+                    Text(t("Decrypting…", "عم يفك التشفير…", "ڕەمز دەکاتەوە…", "Şîfre tê vekirin…"))
+                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                }
+            }
+            HStack(spacing: MirsaSpacing.xs) {
+                Button { onInstall() } label: {
+                    Label(t("Install", "تثبيت", "دامەزراندن", "Saz bike"), systemImage: "arrow.down.app.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.mirsaPrimary)
+                .disabled(store.busy != nil)
+                if kind == .original {
+                    StoreShareIPAButton(entry: entry).buttonStyle(.mirsaSecondary)
+                } else {
+                    Button { shareDecrypted() } label: {
+                        Label(t("Share", "مشاركة", "هاوبەشکردن", "Parve bike"), systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.mirsaSecondary)
+                }
+                Button(role: .destructive, action: onDelete) {
+                    Label(t("Delete", "حذف", "سڕینەوە", "Jê bibe"), systemImage: "trash")
+                        .foregroundStyle(MirsaPalette.danger)
+                }
+                .buttonStyle(.mirsaSecondary)
+                .disabled(installing)
+            }
+        }
+        .padding(MirsaSpacing.card)
+        .mirsaCard()
+        .contextMenu {
+            if kind == .original {
+                if isDecrypted {
+                    Button { onShowDecrypted() } label: {
+                        Label(t("View decrypt result", "عرض نتيجة فك التشفير", "بینینی ئەنجامی ڕەمزکردنەوە", "Encama vekirinê bibîne"), systemImage: "checkmark.circle")
+                    }
+                }
+                Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                    Label(t("Decrypt again", "فك التشفير مجددًا", "دووبارە ڕەمزکردنەوە", "Dîsa şîfreyê veke"), systemImage: "arrow.counterclockwise")
+                }
+                .disabled(store.busy != nil)
+                Button { saveOriginal() } label: {
+                    Label(t("Save original IPA", "حفظ IPA الأصلي", "پاشەکەوتکردنی IPA ئەسڵییەکە", "IPA ya orjînal tomar bike"), systemImage: "folder")
+                }
+                Button { shareOriginal() } label: {
+                    Label(t("Share original IPA", "مشاركة IPA الأصلي", "هاوبەشکردنی IPA ئەسڵییەکە", "IPA ya orjînal parve bike"), systemImage: "square.and.arrow.up")
+                }
+                Button { Task { await store.reinspect(entry) } } label: {
+                    Label(t("Re-inspect", "الفحص مجددًا", "دووبارە پشکنین", "Dîsa kontrol bike"), systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(store.busy != nil)
+                Button(role: .destructive) { StoreHaptics.delete(); onDelete() } label: {
+                    Label(t("Delete original IPA", "حذف IPA الأصلي", "سڕینەوەی IPA ئەسڵییەکە", "IPA ya orjînal jê bibe"), systemImage: "trash")
+                }
+            } else {
+                Button { saveDecrypted() } label: {
+                    Label(t("Save to Files", "حفظ في الملفات", "پاشەکەوتکردن لە Files", "Di Files de tomar bike"), systemImage: "folder")
+                }
+                Button { shareDecrypted() } label: {
+                    Label(t("Share IPA", "مشاركة IPA", "هاوبەشکردنی IPA", "IPA parve bike"), systemImage: "square.and.arrow.up")
+                }
+                Button { Task { await store.decrypt(entry, vm: vm) } } label: {
+                    Label(t("Decrypt again", "فك التشفير مجددًا", "دووبارە ڕەمزکردنەوە", "Dîsa şîfreyê veke"), systemImage: "arrow.counterclockwise")
+                }
+                .disabled(store.busy != nil)
+                Button(role: .destructive) { StoreHaptics.delete(); store.deleteDecrypted(entry) } label: {
+                    Label(t("Delete output file", "حذف ملف الناتج", "سڕینەوەی فایلی ئەنجام", "Pelê encamê jê bibe"), systemImage: "trash")
+                }
+                Button(role: .destructive) { StoreHaptics.delete(); onDelete() } label: {
+                    Label(t("Remove processing record", "إزالة سجل المعالجة", "لابردنی تۆماری پرۆسەکردن", "Tomara pêvajoyê jê bibe"), systemImage: "clock.badge.xmark")
+                }
+            }
+        }
     }
 }
