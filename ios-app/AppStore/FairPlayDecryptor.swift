@@ -304,7 +304,12 @@ enum FairPlayDecryptor {
     /// PlugIns walk misses nested frameworks and bare dylibs, and a binary
     /// it misses stays FairPlay-encrypted: the decrypt then reports success
     /// and the install fails later at signing with "not a valid Mach-O
-    /// file". Watch apps are skipped: they cannot run on iPhone.
+    /// file". Watch apps are NOT skipped: their binaries must be decrypted
+    /// too — a Watch binary left encrypted makes the signer refuse the whole
+    /// IPA, even though the Watch app itself never runs on iPhone. (Minutes
+    /// ships a Watch app — App Store lists watchOS 10.6+ — and that was the
+    /// missed binary: fresh decrypts kept failing at install with the
+    /// encryption warning until Watch was included.)
     private static func collectBinaries(appDir: URL, executable: String) throws -> [Binary] {
         let fm = FileManager.default
         var out: [Binary] = []
@@ -318,10 +323,7 @@ enum FairPlayDecryptor {
         for case let url as URL in enumerator {
             let values = try? url.resourceValues(forKeys: Set(keys))
             if values?.isSymbolicLink == true { continue }
-            if values?.isDirectory == true {
-                if url.lastPathComponent == "Watch" { enumerator.skipDescendants() }
-                continue
-            }
+            if values?.isDirectory == true { continue }
             guard values?.isRegularFile == true else { continue }
             let path = url.standardizedFileURL.path
             guard !seen.contains(path), isMachO(url) else { continue }
