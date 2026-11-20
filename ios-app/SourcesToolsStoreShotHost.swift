@@ -4,12 +4,21 @@ import SwiftUI
 /// Deterministic, local-only fixtures for the Sources redesign screenshots. Never compiled into release builds.
 enum SourcesToolsStoreShotHost {
     static func fixtureApps(_ n: Int, prefix: String) -> [RepoApp] {
-        (1...n).map { i in
-            RepoApp(name: "\(prefix) \(i)", bundleID: "com.example.\(prefix.lowercased())\(i)", developer: "Fixture Dev",
-                    subtitle: "Fixture subtitle \(i)", description: "Deterministic fixture app \(i) used only for layout screenshots.",
-                    version: "1.\(i)", iconURL: nil, downloadURL: URL(string: "https://example.org/\(prefix)\(i).ipa")!,
-                    size: Int64(10_000_000 + i * 1_000_000), date: "2026-11-1\(i % 10)",
-                    category: i % 2 == 0 ? "Utilities" : "Media")
+        guard n > 0 else { return [] }
+        return (1...n).map { (i: Int) -> RepoApp in
+            let name: String = "\(prefix) \(i)"
+            let bundleID: String = "com.example.\(prefix.lowercased())\(i)"
+            let subtitle: String = "Fixture subtitle \(i)"
+            let description: String = "Deterministic fixture app \(i) used only for layout screenshots."
+            let version: String = "1.\(i)"
+            let downloadURL: URL = URL(string: "https://example.org/\(prefix)\(i).ipa")!
+            let size: Int64 = 10_000_000 + Int64(i) * 1_000_000
+            let date: String = "2026-11-1\(i % 10)"
+            let category: String = i % 2 == 0 ? "Utilities" : "Media"
+            return RepoApp(name: name, bundleID: bundleID, developer: "Fixture Dev",
+                           subtitle: subtitle, description: description, version: version,
+                           iconURL: nil, downloadURL: downloadURL, size: size, date: date,
+                           category: category)
         }
     }
 
