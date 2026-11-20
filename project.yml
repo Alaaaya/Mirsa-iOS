@@ -90,7 +90,7 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
   MirsaUnlock:
-    type: dynamic-library
+    type: library.dynamic
     platform: iOS
     sources:
       - path: ios-app/MirsaUnlock
@@ -98,7 +98,7 @@ targets:
       base:
         PRODUCT_NAME: MirsaUnlock
         PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa.MirsaUnlock
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
   MirsaUITests:
     type: bundle.ui-testing
