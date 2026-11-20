@@ -164,12 +164,17 @@ final class SourcesStore: ObservableObject {
 
     /// Sources that ship with Mirsa: present on first launch (added once, so a
     /// user who deletes one keeps it deleted).
+    static let alaaDefaults: [(url: String, name: String)] = [
+        ("https://mirsa-app.duckdns.org/source.json", "Alaa IPA"),
+        ("https://alaa-mirsa.duckdns.org/source2.json", "Alaa IPA 2"),
+    ]
     static let builtIn: [(url: String, name: String)] = [
         ("https://repository.apptesters.org", "AppTesters IPA Repo"),
         (MirsaSourceFeed.primary, "Mirsa"),
         ("https://itslevii.dev/repo.json", "itslevii"),
         ("https://raw.githubusercontent.com/Sami-Wali/ryP0-repository/main/repo.json", "ryP0"),
-    ]
+    ] + alaaDefaults
+    private let alaaSeededKey = "mirsa.sources.builtin.alaa.294"
     private let seededKey = "mirsa.sources.builtin.v2"
 
     init(defaults: UserDefaults = .standard, load: @escaping Loader = { try await URLSession.shared.data(for: $0) }) {
@@ -180,11 +185,20 @@ final class SourcesStore: ObservableObject {
         if let d = defaults.data(forKey: key),
            let s = try? JSONDecoder().decode([RepoSource].self, from: d) { list = s }
         if !defaults.bool(forKey: seededKey) {
-            func norm(_ u: String) -> String { u.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
-            for b in Self.builtIn where !list.contains(where: { norm($0.url) == norm(b.url) }) {
+            for b in Self.builtIn where !list.contains(where: { MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(b.url) }) {
                 list.append(RepoSource(url: b.url, name: b.name))
             }
             defaults.set(true, forKey: seededKey)
+        }
+        // Separate additive migration also reaches users who already seeded v2.
+        // Keep existing rows, identities, order and hidden/deleted choices intact.
+        if !defaults.bool(forKey: alaaSeededKey) {
+            for b in Self.alaaDefaults where !list.contains(where: {
+                MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(b.url)
+            }) {
+                list.append(RepoSource(url: b.url, name: b.name))
+            }
+            defaults.set(true, forKey: alaaSeededKey)
         }
         sources = MirsaSourceFeed.migrate(list)
         // Old builds hid sources by URL; carry that over to the stable ids once.
@@ -309,24 +323,25 @@ final class SourcesStore: ObservableObject {
             }
             try Task.checkCancellation()
             // Full catalogues (including 10,098 AppTesters entries) are decoded off the UI actor.
-            let parsed = try await Task.detached(priority: .userInitiated) {
-                try Self.decodeSource(data, base: base)
-            }.value
+            let parsed = try await Self.decodeSourceInBackground(data, base: base)
             try Task.checkCancellation()
             // Deleting a source while it loads must not resurrect its cache or row.
             guard sources.contains(where: { $0.url == url }) else { return false }
             apps[url] = parsed.apps
             presentation[url] = parsed
             loadErrors[url] = nil
-            for i in sources.indices where sources[i].url == url {
-                var source = sources[i]
+            var refreshed = sources
+            for i in refreshed.indices where refreshed[i].url == url {
+                var source = refreshed[i]
                 source.name = parsed.name ?? source.name
                 source.iconURL = parsed.iconURL ?? source.iconURL
                 source.tint = parsed.tint ?? source.tint
                 source.updated = parsed.updated ?? source.updated
                 source.appCount = parsed.apps.count
-                sources[i] = source
+                refreshed[i] = source
             }
+            // One persistence write and one row-list publication per catalogue.
+            sources = refreshed
             return true
         } catch {
             guard sources.contains(where: { $0.url == url }) else { return false }
@@ -359,6 +374,14 @@ final class SourcesStore: ObservableObject {
         return resolved
     }
 
+    /// Detached work never inherits the store's main actor, even for immediate/cache loaders.
+    nonisolated static func decodeSourceInBackground(_ data: Data, base: URL) async throws -> DecodedSource {
+        try await Task.detached(priority: .userInitiated) {
+            assert(!Thread.isMainThread, "Source catalogue decoding must stay off the UI thread")
+            return try decodeSource(data, base: base)
+        }.value
+    }
+
     nonisolated static func decodeSource(_ data: Data, base: URL) throws -> DecodedSource {
         let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         let root = (json as? [String: Any]) ?? ((json as? [Any]).map { ["apps": $0] })
@@ -369,7 +392,8 @@ final class SourcesStore: ObservableObject {
             name: (root["name"] as? String) ?? (meta["repoName"] as? String) ?? (meta["name"] as? String),
             iconURL: (root["iconURL"] as? String) ?? (root["icon"] as? String) ?? (meta["repoIcon"] as? String),
             tint: (root["tintColor"] as? String) ?? (root["tint"] as? String),
-            updated: parsed.compactMap(\.date).compactMap(Self.date).max(),
+            // Feeds repeat dates across thousands of apps. Parse each distinct date only once.
+            updated: Set(parsed.compactMap(\.date)).compactMap(Self.date).max(),
             headerURL: contentURL(root["headerURL"], base: base),
             subtitle: root["subtitle"] as? String,
             description: (root["description"] as? String) ?? (root["localizedDescription"] as? String),

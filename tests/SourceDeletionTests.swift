@@ -13,6 +13,49 @@ final class SourceDeletionTests: XCTestCase {
     override func tearDown() { UserDefaults().removePersistentDomain(forName: suite) }
     private func makeStore() -> SourcesStore { SourcesStore(defaults: defaults) }
 
+    func testAlaaDefaultsOnFreshInstallAndDeletedStaysDeleted() {
+        let store = makeStore()
+        for item in SourcesStore.alaaDefaults {
+            let rows = store.sources.filter { $0.url == item.url }
+            XCTAssertEqual(rows.count, 1)
+            XCTAssertEqual(rows.first?.name, item.name)
+            XCTAssertFalse(store.isProtected(rows[0]))
+            XCTAssertTrue(store.remove(id: rows[0].id))
+        }
+        let reloaded = makeStore()
+        for item in SourcesStore.alaaDefaults {
+            XCTAssertFalse(reloaded.sources.contains { $0.url == item.url })
+        }
+        XCTAssertEqual(reloaded.sources.filter { $0.isCanonical }.count, 1)
+    }
+
+    func testAlaaMigrationExistingV2PreservesRowsHiddenIDsAndIsIdempotent() throws {
+        defaults.set(true, forKey: "mirsa.sources.builtin.v2")
+        let original = [
+            RepoSource(url: "https://custom.example/source.json", name: "Custom"),
+            RepoSource(url: "HTTPS://MIRSA-APP.DUCKDNS.ORG/source.json/", name: "My Alaa"),
+            RepoSource(url: "https://custom.example/source.json", name: "Second custom")
+        ]
+        defaults.set(try JSONEncoder().encode(original), forKey: "mirsa.sources.v1")
+        defaults.set([original[1].id], forKey: "mirsa.sources.hiddenIDs")
+        let store = makeStore()
+        XCTAssertEqual(Array(store.sources.prefix(3)).map(\.id), original.map(\.id))
+        XCTAssertEqual(store.sources[1].name, "My Alaa")
+        XCTAssertTrue(store.hiddenIDs.contains(original[1].id))
+        for item in SourcesStore.alaaDefaults {
+            XCTAssertEqual(store.sources.filter {
+                MirsaSourceFeed.norm($0.url) == MirsaSourceFeed.norm(item.url)
+            }.count, 1)
+        }
+        XCTAssertFalse(store.sources.contains { $0.url == "https://itslevii.dev/repo.json" },
+                       "Do not resurrect previously deleted v2 defaults")
+        let ids = store.sources.map(\.id)
+        XCTAssertEqual(makeStore().sources.map(\.id), ids)
+        let added = store.sources.first { $0.url == SourcesStore.alaaDefaults[1].url }!
+        XCTAssertTrue(store.remove(id: added.id))
+        XCTAssertFalse(makeStore().sources.contains { $0.id == added.id })
+    }
+
     func testCanonicalProtectedAndFixedIdentity() {
         let store = makeStore()
         let canon = store.sources.first { $0.isCanonical }
