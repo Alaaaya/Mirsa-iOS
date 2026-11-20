@@ -278,6 +278,10 @@ enum ForgeChatImage {
         guard ForgeChatText.messageCount(t) <= ForgeChatText.messageMax else { error = ForgeChatText.tooLong; return nil }
         if let tid = threadID, deleting.contains(tid) { return nil }
         let ids = ChatAttachmentRules.sendIDs(attachmentIDs)
+        if ids.contains(where: { AttachmentUploader.shared.known[$0]?.kind == "audio" }),
+           ids.count != 1 || jpeg != nil || replyTo != nil {
+            error = ChatVoiceText.exclusive; return nil
+        }
         // Only an explicit Send of the same text can resume a paused conflict.
         // Reuse the saved attachment IDs when the composer has no new chips.
         // Never synthesize approval text or assign a second message UUID.
@@ -1249,6 +1253,10 @@ struct ForgeChatThreadView: View {
             return
         }
         let quote = replyTo
+        if drafts.items(threadID).contains(where: { $0.payload.kind == "audio" }),
+           drafts.items(threadID).count != 1 || quote != nil {
+            actionError = ChatVoiceText.exclusive; return
+        }
         replyTo = nil
         if attachmentsUI {
             drafts.expireStale(threadID)

@@ -36,7 +36,27 @@ enum ChatVoiceText {
     static var pause: String { pick("Pause voice message", "وقّف الصوت", "Wiedergabe pausieren", "Deng rawestîne", "دەنگ بوەستێنە") }
     static var permission: String { pick("Allow microphone access in Settings to record a voice message.", "اسمح للميكروفون من الإعدادات لتسجّل رسالة صوتية.", "Erlaube den Mikrofonzugriff in den Einstellungen, um eine Sprachnachricht aufzunehmen.", "Di Mîhengan de destûra mîkrofonê bide da ku peyameke dengî tomar bikî.", "لە ڕێکخستنەکان ڕێگە بە مایکرۆفۆن بدە بۆ تۆمارکردنی نامەی دەنگی.") }
     static var failed: String { pick("Couldn't use the recording. Try again.", "ما زبط التسجيل. جرّب مرة تانية.", "Die Aufnahme konnte nicht verwendet werden. Versuche es erneut.", "Tomar nehat bikaranîn. Dîsa biceribîne.", "تۆمارەکە بەکارنەهات. دووبارە هەوڵ بدەرەوە.") }
+    static var exclusive: String { pick("Send a voice message on its own, without other attachments or a quoted reply.", "ابعث الصوت لحاله، بلا مرفقات تانية أو اقتباس.", "Sende die Sprachnachricht einzeln, ohne andere Anhänge oder zitierte Antwort.", "Peyama dengî bi tenê bişîne, bê pêvekên din an bersiva vegotî.", "نامەی دەنگی بە تەنها بنێرە، بەبێ هاوپێچی تر یان وەڵامی وەرگیراو.") }
     static var queued: String { pick("Voice message awaiting review", "الرسالة الصوتية بانتظار المراجعة", "Sprachnachricht wartet auf Prüfung", "Peyama dengî li benda nirxandinê ye", "نامەی دەنگی چاوەڕێی پێداچوونەوەیە") }
+}
+
+/// The shared audio session has one chat owner. An idle/offscreen bubble cannot
+/// deactivate another player or recorder. Weak callbacks avoid retaining a view.
+@MainActor enum ChatVoiceSession {
+    private static var owner: UUID?
+    private static var stopOwner: (() -> Void)?
+    static func acquire(_ token: UUID, stop: @escaping () -> Void) {
+        guard owner != token else { return }
+        let previous = stopOwner
+        owner = nil; stopOwner = nil
+        previous?()
+        owner = token; stopOwner = stop
+    }
+    static func release(_ token: UUID) {
+        guard owner == token else { return }
+        owner = nil; stopOwner = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
 }
 
 /// Records locally. No speech recognition, model, transcription, or third-party audio service.
@@ -51,6 +71,7 @@ enum ChatVoiceText {
     private var timer: Timer?
     private var generation = UUID()
     private var interruption: NSObjectProtocol?
+    private let sessionToken = UUID()
 
     init() {
         interruption = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
@@ -72,6 +93,7 @@ enum ChatVoiceText {
         guard await AVAudioApplication.requestRecordPermission() else { error = ChatVoiceText.permission; return }
         guard generation == ticket else { return }
         do {
+            ChatVoiceSession.acquire(sessionToken) { [weak self] in self?.pause() }
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
@@ -105,7 +127,7 @@ enum ChatVoiceText {
         generation = UUID()
         if let recorder { elapsed = max(elapsed, recorder.currentTime); recorder.stop() }
         recorder = nil; timer?.invalidate(); timer = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        ChatVoiceSession.release(sessionToken)
     }
 
     func finish() throws -> ChatAttachmentPayload {
@@ -127,6 +149,8 @@ enum ChatVoiceText {
         timer?.invalidate(); recorder?.stop()
         if let interruption { NotificationCenter.default.removeObserver(interruption) }
         if let url { try? FileManager.default.removeItem(at: url) }
+        let token = sessionToken
+        Task { @MainActor in ChatVoiceSession.release(token) }
     }
 }
 
@@ -152,11 +176,14 @@ struct ChatVoiceWaveform: View {
     @Published var error: String?
     private var player: AVAudioPlayer?
     private var timer: Timer?
+    private var generation = UUID()
+    private let sessionToken = UUID()
     func toggle(meta: ChatAttachmentMeta, threadID: UUID) async {
         guard !loading, !meta.isExpired() else { return }
         if playing { stop(); return }
         loading = true; error = nil
-        defer { loading = false }
+        let ticket = UUID(); generation = ticket
+        defer { if generation == ticket { loading = false } }
         do {
             if player == nil {
                 let data: Data
@@ -172,8 +199,11 @@ struct ChatVoiceWaveform: View {
                 guard case .bytes(let bytes, let mime) = try await AttachmentUploader.shared.read(meta.id, threadID: threadID, expected: meta), mime == "audio/mp4" else { throw ChatAttachmentError.network }
                 data = bytes
                 #endif
+                guard generation == ticket, !Task.isCancelled else { return }
                 player = try AVAudioPlayer(data: data)
             }
+            guard generation == ticket, !Task.isCancelled else { return }
+            ChatVoiceSession.acquire(sessionToken) { [weak self] in self?.stop() }
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio)
             try session.setActive(true)
@@ -191,13 +221,18 @@ struct ChatVoiceWaveform: View {
                     if self.player?.isPlaying != true { self.stop() }
                 }
             }
-        } catch { stop(); self.error = ChatVoiceText.failed }
+        } catch { if generation == ticket { stop(); self.error = ChatVoiceText.failed } }
     }
     func stop() {
+        generation = UUID(); loading = false
         player?.pause(); playing = false; timer?.invalidate(); timer = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        ChatVoiceSession.release(sessionToken)
     }
-    deinit { timer?.invalidate(); player?.stop() }
+    deinit {
+        timer?.invalidate(); player?.stop()
+        let token = sessionToken
+        Task { @MainActor in ChatVoiceSession.release(token) }
+    }
 }
 
 struct ChatVoiceBubble: View {
