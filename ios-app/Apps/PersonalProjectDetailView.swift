@@ -53,7 +53,8 @@ struct PersonalProjectDetailView: View {
     private func tweak(_ id: UUID) -> IPATweak? { tweaks.items.first { $0.id == id } }
 
     var body: some View {
-        themedPage
+        // Bound device runtime metadata depth without changing persisted theme selection.
+        AnyView(themedPage)
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
         .sheet(isPresented: $showCertificates, onDismiss: reloadIdentities) { PersonalCertificateManagerView() }
@@ -140,17 +141,20 @@ struct PersonalProjectDetailView: View {
 
     /// Classic is the original page, untouched. The other themes compose the same sections
     /// (same state, same actions) in their own layout. Sheets, alerts and tasks stay on `body`, once.
-    @ViewBuilder private var themedPage: some View {
+    private var themedPage: AnyView {
+        AnyView(Group {
         if theme == .classic {
             classicPage
         } else {
             themedLayout
         }
+            })
     }
 
     // MARK: Classic (default, original design)
 
-    private var classicPage: some View {
+    private var classicPage: AnyView {
+        AnyView(
         ZStack {
             PersonalProjectBackdrop(paused: keyboard.isVisible || scrolling).equatable()
             ScrollView {
@@ -210,6 +214,7 @@ struct PersonalProjectDetailView: View {
             .overlay(alignment: .top) { Rectangle().fill(MirsaPalette.stroke).frame(height: 1) }
             }
         }
+            )
     }
 
     private var appCard: some View {
@@ -246,7 +251,8 @@ struct PersonalProjectDetailView: View {
             }
     }
     /// Name, bundle ID, version, workspace note and the extension info. Shared by every theme.
-    private var appFields: some View {
+    private var appFields: AnyView {
+        AnyView(
         VStack(alignment: .leading, spacing: 8) {
             field(personalText("Name", "الاسم"), $draft.name)
             field(personalText("Bundle ID", "معرّف التطبيق"), $draft.bundleID, mono: true)
@@ -259,6 +265,7 @@ struct PersonalProjectDetailView: View {
             Text(tr("App extensions are parts already inside the app (widgets, share sheet…). They are not tweaks injected by Mirsa.", "إضافات التطبيق هي أجزاء موجودة أصلاً داخل التطبيق (ودجات، المشاركة…). مو إضافات حقنها Mirsa.", ckb: "پێوەکراوەکانی ئەپ ئەو بەشانەن کە پێشتر لەناو ئەپەکەدان (ویجێت، هاوبەشکردن…). ئەوە ئەو زیادکراوانە نین کە Mirsa تێیکردوون.", kmr: "Pêvekên sepanê beşên ku jixwe di nav sepanê de ne (widget, parvekirin…). Ew ne tweakên ku Mirsa danîne ne."))
                 .font(.caption2).foregroundStyle(.secondary)
         }
+            )
     }
     private var extensionCountText: String {
         extensionCount.map { "\($0) " + tr("app extensions", "إضافات تطبيق", ckb: "پێوەکراوەکانی ئەپ", kmr: "pêvekên sepanê") } ?? "…"
@@ -571,7 +578,8 @@ struct PersonalProjectDetailView: View {
         settingsContent.padding(16).appsGlass(cornerRadius: 24)
     }
     /// Every project setting toggle, game mode, minimum iOS and custom entitlements. Shared by every theme.
-    private var settingsContent: some View {
+    private var settingsContent: AnyView {
+        AnyView(
         VStack(alignment: .leading, spacing: 12) {
             Label(personalText("Project settings", "إعدادات المشروع"), systemImage: "gearshape.fill").font(.subheadline.weight(.semibold))
             toggle(personalText("Enable Files access", "تمكين الوصول إلى الملفات"), personalText("Shows app documents in Files.", "بيظهر ملفات التطبيق بتطبيق الملفات."), $draft.fileSharing)
@@ -614,6 +622,7 @@ struct PersonalProjectDetailView: View {
                 Button { pickingEntitlements = true } label: { Image(systemName: "square.and.arrow.down") }
             }.buttonStyle(.mirsaPress)
         }
+            )
     }
     private func toggle(_ title: String, _ sub: String, _ value: Binding<Bool>) -> some View {
         Toggle(isOn: value) {
@@ -687,7 +696,8 @@ struct PersonalProjectDetailView: View {
         certificateContent.padding(16).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: 24)
     }
     /// Certificate selection, warnings, expiry, nested profiles, choose and manage. Shared by every theme.
-    private var certificateContent: some View {
+    private var certificateContent: AnyView {
+        AnyView(
         VStack(alignment: .leading, spacing: 10) {
             Label(personalText("Signing certificate", "شهادة التوقيع"), systemImage: "key.fill").font(.subheadline.weight(.semibold))
             if let selected {
@@ -727,6 +737,7 @@ struct PersonalProjectDetailView: View {
                 Label(personalText("Manage certificates", "إدارة الشهادات"), systemImage: "slider.horizontal.3")
             }
         }
+            )
     }
 
     private func load() async {
@@ -875,7 +886,8 @@ extension PersonalProjectDetailView {
     /// RTL for Arabic and Sorani, LTR otherwise. Classic never gets here and stays LTR.
     private var languageDirection: LayoutDirection { theme.layoutDirection(for: AppLanguageStore.shared.current) }
 
-    private var themedLayout: some View {
+    private var themedLayout: AnyView {
+        AnyView(
         ZStack {
             themeBackground
             ScrollView {
@@ -898,9 +910,11 @@ extension PersonalProjectDetailView {
         .environment(\.colorScheme, theme.colorScheme)
         .environment(\.layoutDirection, languageDirection)
         .animation(.easeInOut(duration: 0.25), value: themeTab)
+            )
     }
 
-    @ViewBuilder private var themedScrollContent: some View {
+    private var themedScrollContent: AnyView {
+        AnyView(Group {
         switch theme {
         case .classic: EmptyView()
         case .obsidianGold: obsidianContent
@@ -909,6 +923,7 @@ extension PersonalProjectDetailView {
         case .buildPipeline: pipelineContent
         case .lightPearl: pearlContent
         }
+            })
     }
 
     @ViewBuilder private var themeBackground: some View {
@@ -1145,7 +1160,8 @@ extension PersonalProjectDetailView {
     }
     private var shownTab: ProjectDetailsTab { visibleTabs.contains(themeTab) ? themeTab : .versions }
 
-    @ViewBuilder private var tabContent: some View {
+    private var tabContent: AnyView {
+        AnyView(Group {
         switch shownTab {
         case .tweaks:
             if theme == .aurora {
@@ -1171,9 +1187,11 @@ extension PersonalProjectDetailView {
         case .files:
             themedSection { themedToolRows }
         }
+            })
     }
 
-    private var goldTabBar: some View {
+    private var goldTabBar: AnyView {
+        AnyView(
         HStack(spacing: 0) {
             ForEach(visibleTabs) { tab in
                 let on = tab == shownTab
@@ -1190,8 +1208,10 @@ extension PersonalProjectDetailView {
                     .accessibilityAddTraits(on ? .isSelected : [])
             }
         }.padding(.horizontal, 10).padding(.vertical, 12)
+            )
     }
-    private var auroraTabBar: some View {
+    private var auroraTabBar: AnyView {
+        AnyView(
         HStack(spacing: 0) {
             ForEach(visibleTabs) { tab in
                 let on = tab == shownTab
@@ -1208,8 +1228,10 @@ extension PersonalProjectDetailView {
                     .accessibilityAddTraits(on ? .isSelected : [])
             }
         }.padding(4).sourcesGlass(.aurora, radius: 16)
+            )
     }
-    private var pearlTabBar: some View {
+    private var pearlTabBar: AnyView {
+        AnyView(
         ScrollView(.horizontal) {
             HStack(spacing: 7) {
                 ForEach(visibleTabs) { tab in
@@ -1225,11 +1247,13 @@ extension PersonalProjectDetailView {
             }
         }.scrollIndicators(.hidden)
                 .clipped()
+            )
     }
 
     // MARK: Obsidian Gold
 
-    private var obsidianContent: some View {
+    private var obsidianContent: AnyView {
+        AnyView(
         VStack(spacing: 0) {
             themedHeader.padding(.horizontal, 22).padding(.vertical, 6)
             VStack(spacing: 4) {
@@ -1249,6 +1273,7 @@ extension PersonalProjectDetailView {
             VStack(alignment: .leading, spacing: 0) { tabContent }
             themedMessage.padding(.horizontal, 22).padding(.top, 12)
         }
+            )
     }
     private var obsidianMetaLine: some View {
         HStack(spacing: 14) {
@@ -1264,7 +1289,8 @@ extension PersonalProjectDetailView {
 
     // MARK: Aurora
 
-    private var auroraContent: some View {
+    private var auroraContent: AnyView {
+        AnyView(
         VStack(spacing: 0) {
             themedHeader.padding(.horizontal, 18).padding(.top, 4)
             VStack(spacing: 4) {
@@ -1285,6 +1311,7 @@ extension PersonalProjectDetailView {
                 themedMessage
             }.padding(.horizontal, 18).padding(.top, 12)
         }
+            )
     }
     private func auroraPill(_ text: String) -> some View {
         Text(text).font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
@@ -1294,7 +1321,8 @@ extension PersonalProjectDetailView {
 
     // MARK: Bento
 
-    private var bentoContent: some View {
+    private var bentoContent: AnyView {
+        AnyView(
         VStack(alignment: .leading, spacing: 9) {
             themedHeader.padding(.bottom, 4)
             bentoHeroTile
@@ -1311,6 +1339,7 @@ extension PersonalProjectDetailView {
             if let panel = bentoPanel, panel == .settings || panel == .tools { bentoPanelView(panel) }
             themedMessage
         }.padding(.horizontal, 16)
+            )
     }
     private func toggleBento(_ panel: ProjectBentoPanel) {
         withAnimation(.easeInOut(duration: 0.25)) { bentoPanel = bentoPanel == panel ? nil : panel }
@@ -1425,7 +1454,8 @@ extension PersonalProjectDetailView {
 
     // MARK: Build Pipeline
 
-    private var pipelineContent: some View {
+    private var pipelineContent: AnyView {
+        AnyView(
         VStack(alignment: .leading, spacing: 0) {
             themedHeader.padding(.horizontal, 18).padding(.vertical, 4)
             HStack(spacing: 13) {
@@ -1445,6 +1475,7 @@ extension PersonalProjectDetailView {
             }.padding(.horizontal, 18)
             themedMessage.padding(.horizontal, 18).padding(.top, 8)
         }
+            )
     }
     private func pipelineStep(_ step: ProjectPipelineStep, last: Bool) -> some View {
         let status = pipelineStatus(step)
@@ -1549,7 +1580,8 @@ extension PersonalProjectDetailView {
 
     // MARK: Light Pearl
 
-    private var pearlContent: some View {
+    private var pearlContent: AnyView {
+        AnyView(
         VStack(alignment: .leading, spacing: 12) {
             themedHeader
             HStack(spacing: 14) {
@@ -1572,6 +1604,7 @@ extension PersonalProjectDetailView {
             tabContent
             themedMessage
         }.padding(.horizontal, 16)
+            )
     }
     private func pearlHeroPill(_ text: String) -> some View {
         Text(text).font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
@@ -1602,7 +1635,8 @@ extension PersonalProjectDetailView {
         .accessibilityIdentifier("mirsa.project.sign")
         .disabled(busy)
     }
-    @ViewBuilder private var themedSignBar: some View {
+    private var themedSignBar: AnyView {
+        AnyView(Group {
         switch theme {
         case .obsidianGold:
             VStack(spacing: 10) {
@@ -1634,6 +1668,7 @@ extension PersonalProjectDetailView {
                 .padding(.horizontal, theme == .bento ? 16 : 18).padding(.top, 8).padding(.bottom, MirsaSpacing.s)
                 .background(signBarFade)
         }
+            })
     }
     private var signBarFade: some View {
         LinearGradient(colors: [theme.background.opacity(0), theme.background.opacity(0.92), theme.background], startPoint: .top, endPoint: .bottom)
