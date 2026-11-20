@@ -516,9 +516,17 @@ enum FairPlayDecryptor {
                 try archive.addEntry(with: entry.rel + "/", type: .directory, uncompressedSize: Int64(0),
                                      compressionMethod: .none) { _, _ in Data() }
             } else {
-                let fileSize =
-                    (try fm.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber)?
-                    .int64Value ?? 0
+                let attrs = try fm.attributesOfItem(atPath: entry.url.path)
+                let fileSize = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+                // Preserve the on-disk POSIX permissions. ZIPFoundation's
+                // provider-based addEntry defaults every file to 0644 when
+                // no permissions are passed, which strips the executable
+                // bit from the main binary and every dylib — signers then
+                // reject the IPA as "not a valid Mach-O file". (The unlock
+                // path round-trips through the Rust packer, which preserves
+                // modes — that is why an unlocked IPA installed while a
+                // plain-decrypted one did not. Minutes, 2026-11-20.)
+                let permissions = (attrs[.posixPermissions] as? NSNumber)?.uint16Value
 
                 let handle = try FileHandle(forReadingFrom: entry.url)
                 defer { try? handle.close() }
@@ -527,6 +535,7 @@ enum FairPlayDecryptor {
                     with: entry.rel,
                     type: .file,
                     uncompressedSize: fileSize,
+                    permissions: permissions,
                     compressionMethod: .deflate
                 ) { position, requestedSize in
                     // ZIPFoundation may call the provider at end-of-file or
