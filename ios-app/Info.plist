@@ -348,6 +348,6 @@
 		</dict>
 	</dict>
 	<key>MirsaToolsStoreEndpoint</key>
-	<string></string>
+	<string>https://hirebeofomiyumwysppj.supabase.co/functions/v1/mirsa-tools-store</string>
 </dict>
 </plist>
