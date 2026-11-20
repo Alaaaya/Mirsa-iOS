@@ -23,6 +23,14 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Whole-tree Swift parse and voice contract audit
+        run: |
+          find ios-app uitests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
+          python3 scripts/tests/voice_reactions_test.py
+      - name: Prepare pinned simulator private linker inputs
+        run: |
+          cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+          bash scripts/prepare-privatekits-sdk.sh iphonesimulator
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim
@@ -41,13 +49,19 @@ jobs:
         run: |
           set -o pipefail
           brew install xcodegen
+          python3 - <<'PYENT'
+          import plistlib
+          with open('/tmp/mirsa-ci-keychain.plist', 'wb') as f:
+              plistlib.dump({'application-identifier': 'MIRSACI.com.alaa.mirsa', 'keychain-access-groups': ['MIRSACI.com.alaa.mirsa']}, f)
+          PYENT
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaAIChatFixtureUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/ai-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/VoiceUnit.xcresult -only-testing:MirsaTests/ChatVoiceTests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/voice-unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/AIUI.xcresult -only-testing:MirsaUITests/MirsaVoiceUITests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/ai-ui.log
       - name: Export named screenshots
         if: always()
         run: |
@@ -57,11 +71,18 @@ jobs:
             python3 - <<'PY'
           import json, os, re, shutil
           m = json.load(open("build/raw/manifest.json"))
-          for t in m:
-              for a in t.get("attachments", []):
+          for ti, t in enumerate(m):
+              for ai, a in enumerate(t.get("attachments", [])):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
-                  if not name.lower().endswith(".png"): name += ".png"
+                  # Failure attachments include text hierarchies as well as PNGs.
+                  # Preserve their extension and sanitize artifact-invalid characters.
+                  name = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", name)
+                  stem, ext = os.path.splitext(name)
+                  if not ext: name += os.path.splitext(a["exportedFileName"])[1]
+                  if os.path.exists(os.path.join("build/shots", name)):
+                      stem, ext = os.path.splitext(name)
+                      name = f"{stem}_{ti}_{ai}{ext}"
                   shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY
@@ -77,6 +98,7 @@ jobs:
             build/shots
             build/crashes
             build/ai-ui.log
+            build/voice-unit.log
           if-no-files-found: warn
 
   unsigned-ipa:
@@ -91,6 +113,12 @@ jobs:
           if [ -z "$XC" ]; then XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1); fi
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Whole-tree Swift audit and pinned device linker inputs
+        run: |
+          find ios-app uitests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
+          python3 scripts/tests/voice_reactions_test.py
+          cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+          bash scripts/prepare-privatekits-sdk.sh iphoneos
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios

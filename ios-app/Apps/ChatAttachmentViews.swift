@@ -12,7 +12,7 @@ struct ChatDraftAttachmentChip: View {
     let onUploadAgain: () -> Void
 
     private var icon: String {
-        switch item.payload { case .image: return "photo"; case .text: return "doc.text"; case .binary: return "doc.zipper"; case .link: return "link" }
+        switch item.payload { case .image: return "photo"; case .text: return "doc.text"; case .binary: return "doc.zipper"; case .audio: return "waveform"; case .link: return "link" }
     }
     private var sizeText: String? {
         guard case .binary = item.payload, let n = item.payload.byteCount else { return nil }
@@ -78,7 +78,9 @@ struct ChatAttachmentMetaChip: View {
 
     var body: some View {
         Group {
-            if meta.kind == "image", !unavailable, let image {
+            if meta.kind == "audio" {
+                ChatVoiceBubble(meta: meta, threadID: threadID)
+            } else if meta.kind == "image", !unavailable, let image {
                 MirsaTappableImage(image: image, maxWidth: 220, maxHeight: 200, cornerRadius: 14)
             } else {
                 chip

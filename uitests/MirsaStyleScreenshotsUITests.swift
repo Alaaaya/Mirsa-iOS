@@ -61,10 +61,11 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.2)
     }
 
-    func testSourceNewsApprovedBrandingArabicAndEnglish() {
+    func testSourceNewsRemovedArabicAndEnglish() {
         for lang in ["ar", "en"] {
             let app = launch("source-news-fixture", lang: lang)
-            XCTAssertTrue(app.descendants(matching: .any)["source-detail-news"].waitForExistence(timeout: 30))
+            XCTAssertTrue(app.descendants(matching: .any)["source-detail-header"].waitForExistence(timeout: 30))
+            XCTAssertFalse(app.descendants(matching: .any)["source-detail-news"].exists)
             shot(app, "\(lang)_source-news-approved-branding")
             app.swipeUp()
             shot(app, "\(lang)_source-news-approved-branding-bottom")

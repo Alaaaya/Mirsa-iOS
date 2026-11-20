@@ -57,6 +57,9 @@ struct MirsaStyleShotHost: View {
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "dock-clearance-29": SourcesDock29ValidationHost()
         case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
+        case "sources-ts-list": SourcesToolsStoreListHost()
+        case "sources-ts-small": SourcesToolsStoreDetailHost(large: false)
+        case "sources-ts-large": SourcesToolsStoreDetailHost(large: true)
         case "source-news-fixture": SourceNewsValidationHost()
         case "source-news-live":
             NavigationStack { SourceDetailView(source: RepoSource(url: MirsaSourceFeed.primary, name: "Mirsa", uid: RepoSource.canonicalID)) }

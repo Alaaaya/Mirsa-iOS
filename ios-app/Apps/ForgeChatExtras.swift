@@ -143,6 +143,7 @@ extension ForgeChatStore {
         var replacement = ForgeChatMessage(id: m.id, threadID: m.threadID, role: m.role, text: text, createdAt: m.createdAt, hasImage: m.hasImage, result: m.result, attachments: m.attachments)
         replacement.replyToMessageID = m.replyToMessageID
         replacement.replyQuoteText = m.replyQuoteText; replacement.replyQuoteRole = m.replyQuoteRole
+        replacement.botReaction = m.botReaction
         replacement.reaction = m.reaction; replacement.editedAt = m.editedAt
         list[i] = replacement
         var all = messages; all[threadID] = list; messages = all

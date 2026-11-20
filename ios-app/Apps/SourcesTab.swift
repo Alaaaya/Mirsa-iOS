@@ -49,6 +49,12 @@ struct RepoApp: Identifiable, Hashable, Sendable {
     let size: Int64?
     let date: String?
     var screenshots: [URL] = []
+    /// Release notes of the latest version (AltStore `versions[0].localizedDescription`), when the source has them.
+    var versionNotes: String? = nil
+    /// Minimum iOS version declared by the source (`minOSVersion`), when present.
+    var minOSVersion: String? = nil
+    /// Source-declared category (AltStore `category`), when present. Never inferred.
+    var category: String? = nil
 }
 
 struct RepoNews: Identifiable, Sendable {
@@ -469,7 +475,11 @@ final class SourcesStore: ObservableObject {
                 downloadURL: dl,
                 size: int(latest?["size"]) ?? int(a["size"]) ?? int(a["fileSize"]),
                 date: (latest.flatMap { str($0, "date") }) ?? str(a, "versionDate", "date", "updated"),
-                screenshots: ScreenshotPolicy.sourceScreenshots(a, latest: latest, base: base)
+                screenshots: ScreenshotPolicy.sourceScreenshots(a, latest: latest, base: base),
+                versionNotes: (latest.flatMap { str($0, "localizedDescription", "changelog", "whatsNew") })
+                    ?? str(a, "versionDescription", "changelog", "whatsNew"),
+                minOSVersion: (latest.flatMap { str($0, "minOSVersion", "minimumOSVersion") }) ?? str(a, "minOSVersion", "minimumOSVersion", "minOS"),
+                category: str(a, "category", "genre")
             )
             return app
         }.filter { seen.insert($0.id).inserted }
@@ -495,20 +505,53 @@ struct SourcesTab: View {
     @State private var sharingURL: URL?
     @State private var input = ""
     @State private var finding = false
+    @State private var searching = false
+    @State private var query = ""
+    @State private var editMode: EditMode = .inactive
+    @AppStorage(SourcesTheme.key) private var themeRaw = SourcesTheme.aurora.rawValue
+    private var theme: SourcesTheme { SourcesTheme(rawValue: themeRaw) ?? .aurora }
 
     init(onSelectIPA: ((URL) async throws -> Void)? = nil, store: SourcesStore = .shared) {
         self.onSelectIPA = onSelectIPA
         _store = StateObject(wrappedValue: store)
     }
 
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isFiltering: Bool { !trimmedQuery.isEmpty }
+    /// Search filters the visible list by name or link. Reordering is only offered on the unfiltered list.
+    private var shownSources: [RepoSource] {
+        let term = trimmedQuery
+        guard !term.isEmpty else { return store.visibleSources }
+        return store.visibleSources.filter {
+            $0.name.localizedCaseInsensitiveContains(term) || $0.url.localizedCaseInsensitiveContains(term)
+        }
+    }
+
     var body: some View {
+        let t = theme
         NavigationStack {
             List {
+                Group {
+                    header(t)
+                    if searching {
+                        SourcesSearchField(placeholder: SourcesText.searchSources, theme: t, text: $query, identifier: "sources-list-search")
+                    }
+                    if !store.visibleSources.isEmpty {
+                        statsCard(t)
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
+                .moveDisabled(true)
+                .deleteDisabled(true)
+
                 if store.sources.isEmpty {
                     Text(tr("Add a source link (AltStore, SideStore or Feather format) to browse its apps.",
                             "ضيف رابط سورس (بصيغة AltStore أو SideStore أو Feather) لتتصفّح تطبيقاته."))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(t.secondary)
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
                 if !store.availableUpdates().isEmpty || store.updatingAll {
                     Button {
@@ -516,20 +559,29 @@ struct SourcesTab: View {
                     } label: {
                         Label(store.updatingAll ? tr("Updating apps…", "عم يحدّث التطبيقات…") : tr("Update All", "تحديث الكل"),
                               systemImage: "arrow.down.circle")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(Capsule().fill(t.accentGradient))
                     }
+                    .buttonStyle(.mirsaPress)
                     .disabled(store.updatingAll || AppsStore.shared.busy != nil)
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: MirsaSpacing.page, bottom: 4, trailing: MirsaSpacing.page))
                 }
-                ForEach(store.visibleSources) { s in
+                ForEach(shownSources) { s in
                     // The row is the card; the link stays invisible so the system chevron
                     // no longer floats outside the card.
                     ZStack {
                         NavigationLink { SourceDetailView(source: s, store: store, onSelectIPA: onSelectIPA) } label: { EmptyView() }.opacity(0)
-                        SourceRow(source: s, loading: store.loading.contains(s.url))
+                        SourceRow(source: s, loading: store.loading.contains(s.url), theme: t)
                     }
                         .deleteDisabled(store.isProtected(s))
+                        .moveDisabled(isFiltering)
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
+                        .listRowInsets(EdgeInsets(top: 5, leading: MirsaSpacing.page, bottom: 5, trailing: MirsaSpacing.page))
                         .listRowSeparator(.hidden)
                         .swipeActions(edge: .leading) {
                             Button { store.hiddenIDs.insert(s.id) } label: {
@@ -552,16 +604,29 @@ struct SourcesTab: View {
                             }
                         }
                 }
-                .onMove { store.moveVisible(from: $0, to: $1) }
+                // Rows are move-disabled while a search filter is active; the guard keeps offsets honest.
+                .onMove { from, to in
+                    guard !isFiltering else { return }
+                    store.moveVisible(from: from, to: to)
+                }
                 .onDelete { offsets in
                     // Edit-mode delete goes through the same confirmation; protected source is skipped.
-                    if let first = offsets.map({ store.visibleSources[$0] }).first(where: { !store.isProtected($0) }) { store.requestDelete(id: first.id) }
+                    let list = shownSources
+                    if let first = offsets.compactMap({ list.indices.contains($0) ? list[$0] : nil }).first(where: { !store.isProtected($0) }) {
+                        store.requestDelete(id: first.id)
+                    }
+                }
+                if isFiltering && shownSources.isEmpty {
+                    Text(SourcesText.noMatchingSources)
+                        .foregroundStyle(t.secondary)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
                 if !store.hiddenSources.isEmpty {
-                    Section(tr("Hidden Sources", "السورسات المخفية")) {
+                    Section {
                         ForEach(store.hiddenSources) { source in
                             HStack {
-                                Text(source.name)
+                                Text(source.name).foregroundStyle(t.text)
                                 Spacer()
                                 Button {
                                     store.hiddenIDs.remove(source.id)
@@ -573,21 +638,20 @@ struct SourcesTab: View {
                             }
                             .listRowBackground(Color.clear)
                         }
+                    } header: {
+                        Text(tr("Hidden Sources", "السورسات المخفية")).foregroundStyle(t.secondary)
                     }
                 }
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.editMode, $editMode)
+            .environment(\.defaultMinListRowHeight, 44)
             .refreshable { await store.refreshAll() }
-            .navigationTitle(tr("Sources", "السورسات"))
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { input = UIPasteboard.general.string ?? ""; adding = true } label: { Image(systemName: "plus") }
-                }
-                ToolbarItem(placement: .topBarTrailing) { EditButton() }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { finding = true } label: { Image(systemName: "sparkle.magnifyingglass") }
-                }
-            }
+            .background(SourcesThemeBackground(theme: t))
+            .mirsaStatusBarScrim()
+            .navigationTitle(SourcesText.title)
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $finding) { DiscoveryView() }
             .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟", ckb: "ئەم سەرچاوەیە بسڕدرێتەوە؟", kmr: "Ev çavkanî were jêbirin?"), isPresented: Binding(get: { store.pendingDelete != nil }, set: { if !$0 { store.cancelDelete() } }), titleVisibility: .visible, presenting: store.pendingDelete) { src in
                 Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jêbirin"), role: .destructive) { store.confirmDelete() }
@@ -606,41 +670,152 @@ struct SourcesTab: View {
                 Button(MirsaTr.lit("OK")) { store.error = nil }
             } message: { Text(store.error ?? "") }
             .task { await store.loadMissing() }
-            .mirsaScreen()
         }
+        .tint(t.accent[0])
+        .environment(\.colorScheme, t.colorScheme)
+        .environment(\.sourcesTheme, t)
+    }
+
+    private func header(_ t: SourcesTheme) -> some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(SourcesText.library)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(t.secondary)
+                    .lineLimit(1)
+                Text(SourcesText.title)
+                    .font(MirsaFont.pageTitle)
+                    .foregroundStyle(t.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            Spacer(minLength: 4)
+            SourcesThemeMenu()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    searching.toggle()
+                    if !searching { query = "" }
+                }
+            } label: { SourcesCircleLabel(systemName: searching ? "xmark" : "magnifyingglass", theme: t) }
+            .buttonStyle(.mirsaPress)
+            .accessibilityLabel(SourcesText.searchSources)
+            .accessibilityIdentifier("sources-search-toggle")
+            if editMode.isEditing {
+                Button { withAnimation { editMode = .inactive } } label: {
+                    Text(SourcesText.done)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(t.text)
+                        .padding(.horizontal, 14).frame(height: 42)
+                        .background(Capsule().fill(t.card).overlay(Capsule().stroke(t.stroke)))
+                }
+                .buttonStyle(.mirsaPress)
+                .accessibilityIdentifier("sources-edit-done")
+            } else {
+                Menu {
+                    Button { finding = true } label: {
+                        Label(SourcesText.findOnWeb, systemImage: "sparkle.magnifyingglass")
+                    }
+                    Button { withAnimation { editMode = .active } } label: {
+                        Label(SourcesText.edit, systemImage: "arrow.up.arrow.down")
+                    }
+                } label: { SourcesCircleLabel(systemName: "ellipsis", theme: t) }
+                .accessibilityIdentifier("sources-more-menu")
+            }
+            Button { input = UIPasteboard.general.string ?? ""; adding = true } label: {
+                SourcesCircleLabel(systemName: "plus", theme: t, filled: true)
+            }
+            .buttonStyle(.mirsaPress)
+            .accessibilityLabel(SourcesText.addSource)
+            .accessibilityIdentifier("sources-add")
+        }
+        .padding(.top, 8)
+    }
+
+    private func statsCard(_ t: SourcesTheme) -> some View {
+        let visible = store.visibleSources
+        let total = visible.reduce(0) { $0 + $1.appCount }
+        let updatedToday = visible.filter { source in source.updated.map { Calendar.current.isDateInToday($0) } ?? false }.count
+        return HStack(spacing: 0) {
+            stat(visible.count.formatted(), SourcesText.statSources, t)
+            Rectangle().fill(t.stroke).frame(width: 1, height: 36)
+            stat(total.formatted(), SourcesText.statApps, t)
+            Rectangle().fill(t.stroke).frame(width: 1, height: 36)
+            stat(updatedToday.formatted(), SourcesText.statUpdatedToday, t, color: t.success)
+        }
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(LinearGradient(colors: [t.accent[0].opacity(t.isLight ? 0.18 : 0.35), t.accent[1].opacity(t.isLight ? 0.08 : 0.15)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+        )
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(t.stroke))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("sources-stats")
+    }
+
+    private func stat(_ value: String, _ label: String, _ t: SourcesTheme, color: Color? = nil) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.system(size: 20, weight: .bold)).monospacedDigit()
+                .foregroundStyle(color ?? t.text)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 11)).foregroundStyle(t.secondary).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
 private struct SourceRow: View {
     let source: RepoSource
     let loading: Bool
-    @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
+    let theme: SourcesTheme
     var body: some View {
         let tint = Color(hex: source.tint) ?? Color(red: 0.45, green: 0.38, blue: 0.95)
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             RemoteIcon(url: source.iconURL.flatMap(URL.init(string:)), size: 48, corner: MirsaRadius.icon)
+                .shadow(color: tint.opacity(0.45), radius: 10, y: 4)
             VStack(alignment: .leading, spacing: 3) {
-                Text(source.name).font(MirsaFont.cardTitle).foregroundStyle(.white)
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(source.name).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text)
+                        .lineLimit(1)
+                    if SourcesDates.isRecent(source.updated) {
+                        Text(SourcesText.newBadge)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color(sourcesRGB: 0x04210F))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(sourcesRGB: 0x22C55E)))
+                            .fixedSize()
+                            .accessibilityIdentifier("source-new-badge")
+                    }
+                }
                 if let d = source.updated {
-                    Text(tr("Last updated: ", "آخر تحديث: ") + d.formatted(date: .numeric, time: .omitted))
-                        .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textSecondary)
+                    Text(SourcesText.lastUpdated + " · " + d.formatted(date: .numeric, time: .omitted))
+                        .font(.system(size: 11.5)).foregroundStyle(theme.secondary)
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: MirsaSpacing.xs)
-            if loading { ProgressView().tint(.white) }
+            if loading { ProgressView().tint(theme.text) }
             else {
-                Text("\(source.appCount)").font(MirsaFont.badge.monospacedDigit()).foregroundStyle(.white)
-                    .lineLimit(1).fixedSize()
-                    .padding(.horizontal, 10).frame(minWidth: 32, minHeight: 28)
-                    .background(MirsaPalette.cardRaised, in: Capsule())
-                    .overlay(Capsule().strokeBorder(MirsaPalette.strokeStrong, lineWidth: 1))
+                VStack(spacing: 0) {
+                    Text(source.appCount.formatted()).font(.system(size: 15, weight: .bold).monospacedDigit())
+                        .foregroundStyle(theme.text).lineLimit(1).fixedSize()
+                    Text(SourcesText.statApps).font(.system(size: 9.5)).foregroundStyle(theme.secondary).lineLimit(1)
+                }
             }
         }
-        .padding(MirsaSpacing.card)
-        .modifier(SourceRowBackground(liquid: theme == MirsaTheme.liquid.rawValue, tint: tint))
+        .padding(.leading, 14).padding(.trailing, 12).padding(.vertical, 10)
+        .sourcesGlass(theme, radius: 20)
+        .overlay(alignment: .leading) {
+            Capsule().fill(tint).frame(width: 3).padding(.vertical, 14)
+        }
+        .mirsaAppear()
     }
+}
+
+/// Two apps per list row, so a 10,000-app catalogue keeps the List's lazy row loading.
+private struct SourceAppPair: Identifiable {
+    let id: String
+    let apps: [RepoApp]
 }
 
 struct SourceDetailView: View {
@@ -649,6 +824,17 @@ struct SourceDetailView: View {
     @ObservedObject private var store: SourcesStore
     @ObservedObject private var apps = AppsStore.shared
     @State private var query = ""
+    @State private var category: String?
+    /// nil = automatic (grid for large catalogues), otherwise the user's choice for this page.
+    @State private var gridOverride: Bool?
+    @State private var newThisWeek: Int?
+    @State private var sharingURL: URL?
+    @Environment(\.openURL) private var openURL
+    @AppStorage(SourcesTheme.key) private var themeRaw = SourcesTheme.aurora.rawValue
+    private var theme: SourcesTheme { SourcesTheme(rawValue: themeRaw) ?? .aurora }
+
+    /// Catalogues with at least this many apps open as a two-column grid with stat boxes.
+    static let largeCatalogue = 40
 
     init(source: RepoSource, store: SourcesStore = .shared, onSelectIPA: ((URL) async throws -> Void)? = nil) {
         self.source = source
@@ -656,101 +842,291 @@ struct SourceDetailView: View {
         self.onSelectIPA = onSelectIPA
     }
 
+    /// Category chips only exist when the source itself declares at least two categories.
+    static func categories(_ apps: [RepoApp]) -> [String] {
+        var seen = Set<String>()
+        for app in apps {
+            if let c = app.category?.trimmingCharacters(in: .whitespacesAndNewlines), !c.isEmpty { seen.insert(c) }
+        }
+        return seen.count >= 2 ? seen.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending } : []
+    }
+
     var body: some View {
+        let t = theme
         let all = store.listing(for: source.url)
-        let shown = store.listing(for: source.url, query: query)
+        let categories = Self.categories(all)
+        let activeCategory = category.flatMap { categories.contains($0) ? $0 : nil }
+        let searched = store.listing(for: source.url, query: query)
+        let shown = activeCategory.map { c in searched.filter { $0.category?.trimmingCharacters(in: .whitespacesAndNewlines) == c } } ?? searched
+        let large = all.count >= Self.largeCatalogue
+        let grid = gridOverride ?? large
         List {
-            sourceHeader
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            ForEach(shown) { app in
-                RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA)
-                    .listRowBackground(Color.clear)
-            }
-            if store.loading.contains(source.url) || (store.apps[source.url] == nil && store.loadErrors[source.url] == nil) {
-                ProgressView(tr("Loading source…", "عم تتحمّل تطبيقات السورس…", ckb: "ئەپەکانی سەرچاوە بار دەکرێن…", kmr: "Sepanên çavkaniyê tên barkirin…"))
-                    .listRowBackground(Color.clear)
-            } else if let message = store.loadErrors[source.url] {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(tr("Couldn't load this source.", "ما قدرت حمّل تطبيقات هالسورس.", ckb: "نەتوانرا ئەپەکانی سەرچاوە بار بکرێن.", kmr: "Sepanên vê çavkaniyê nehatin barkirin."))
-                    Text(message).font(.caption).foregroundStyle(.secondary)
-                    Button(tr("Try again", "جرّب كمان مرة", ckb: "دووبارە هەوڵ بدە", kmr: "Dîsa biceribîne")) { Task { await store.refresh(source.url) } }
+            Group {
+                sourceHeader(t, all: all, large: large)
+                searchRow(t, grid: grid, hasApps: !all.isEmpty)
+                if !categories.isEmpty {
+                    categoryChips(categories, active: activeCategory, t: t)
                 }
-                .listRowBackground(Color.clear)
-            } else if all.isEmpty {
-                Text(tr("No apps in this source.", "ما في تطبيقات بهالسورس.", ckb: "هیچ ئەپێک لەم سەرچاوەیە نییە.", kmr: "Di vê çavkaniyê de sepan tune ne."))
-                    .foregroundStyle(.secondary).listRowBackground(Color.clear)
-            } else if shown.isEmpty {
-                Text(tr("No matching apps.", "ما لقيت تطبيقات بهالاسم.", ckb: "هیچ ئەپێکی گونجاو نەدۆزرایەوە.", kmr: "Sepanên lihevhatî nehatin dîtin."))
-                    .foregroundStyle(.secondary).listRowBackground(Color.clear)
             }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
+
+            if grid {
+                ForEach(Self.pairs(shown)) { pair in
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(pair.apps) { app in
+                            RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA,
+                                       style: .tile, sourceName: currentSource.name)
+                        }
+                        if pair.apps.count == 1 { Color.clear.frame(maxWidth: .infinity) }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 5, leading: MirsaSpacing.page, bottom: 5, trailing: MirsaSpacing.page))
+                }
+            } else {
+                ForEach(shown) { app in
+                    RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA,
+                               sourceName: currentSource.name)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparatorTint(t.stroke)
+                        .listRowInsets(EdgeInsets(top: 8, leading: MirsaSpacing.page, bottom: 8, trailing: MirsaSpacing.page))
+                }
+            }
+            Group {
+                if store.loading.contains(source.url) || (store.apps[source.url] == nil && store.loadErrors[source.url] == nil) {
+                    ProgressView(tr("Loading source…", "عم تتحمّل تطبيقات السورس…", ckb: "ئەپەکانی سەرچاوە بار دەکرێن…", kmr: "Sepanên çavkaniyê tên barkirin…"))
+                        .tint(t.text)
+                        .foregroundStyle(t.secondary)
+                } else if let message = store.loadErrors[source.url] {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(tr("Couldn't load this source.", "ما قدرت حمّل تطبيقات هالسورس.", ckb: "نەتوانرا ئەپەکانی سەرچاوە بار بکرێن.", kmr: "Sepanên vê çavkaniyê nehatin barkirin."))
+                            .foregroundStyle(t.text)
+                        Text(message).font(.caption).foregroundStyle(t.secondary)
+                        Button(tr("Try again", "جرّب كمان مرة", ckb: "دووبارە هەوڵ بدە", kmr: "Dîsa biceribîne")) { Task { await store.refresh(source.url) } }
+                            .buttonStyle(.borderless)
+                    }
+                } else if all.isEmpty {
+                    Text(tr("No apps in this source.", "ما في تطبيقات بهالسورس.", ckb: "هیچ ئەپێک لەم سەرچاوەیە نییە.", kmr: "Di vê çavkaniyê de sepan tune ne."))
+                        .foregroundStyle(t.secondary)
+                } else if shown.isEmpty {
+                    Text(tr("No matching apps.", "ما لقيت تطبيقات بهالاسم.", ckb: "هیچ ئەپێکی گونجاو نەدۆزرایەوە.", kmr: "Sepanên lihevhatî nehatin dîtin."))
+                        .foregroundStyle(t.secondary)
+                }
+            }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
-        // Keep search visible without relying on the navigation drawer, which
-        // can collapse behind the custom glass navigation chrome.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField(searchPrompt, text: $query)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .accessibilityIdentifier("source-app-search")
-                if !query.isEmpty {
-                    Button { query = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel(MirsaTr.lit("Clear"))
-                    .accessibilityIdentifier("source-app-search-clear")
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .appsGlass(cornerRadius: MirsaRadius.l)
-            .padding(.horizontal, MirsaSpacing.page)
-            .padding(.vertical, 8)
-        }
+        .scrollContentBackground(.hidden)
+        .background(SourcesThemeBackground(theme: t, glowTint: large ? sourceTint : t.accent[0]))
         .task(id: source.url) { await store.ensureLoaded(source.url) }
+        .task(id: "\(source.url)|\(all.count)") { await countNewThisWeek(all) }
         .refreshable { await store.refresh(source.url) }
         .navigationTitle(currentSource.name)
-        .mirsaScreen()
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    SourceURLButtons(stored: currentSource.url, sharing: $sharingURL)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel(SourcesText.shareSource)
+                .accessibilityIdentifier("source-detail-share")
+            }
+        }
+        .sheet(item: Binding(get: { sharingURL.map { SharedSourceURL(url: $0) } }, set: { if $0 == nil { sharingURL = nil } })) {
+            SourceShareSheet(url: $0.url).presentationDetents([.medium, .large])
+        }
+        .tint(t.accent[0])
+        .environment(\.colorScheme, t.colorScheme)
+        .environment(\.sourcesTheme, t)
     }
 
     private var currentSource: RepoSource { store.sources.first { $0.id == source.id } ?? source }
-    private var sourceTint: Color { Color(hex: currentSource.tint) ?? .accentColor }
+    private var sourceTint: Color { Color(hex: currentSource.tint) ?? theme.accent[0] }
 
-    private var sourceHeader: some View {
+    private static func pairs(_ list: [RepoApp]) -> [SourceAppPair] {
+        stride(from: 0, to: list.count, by: 2).map { i in
+            let chunk = Array(list[i..<min(i + 2, list.count)])
+            return SourceAppPair(id: chunk.map(\.id).joined(separator: "||"), apps: chunk)
+        }
+    }
+
+    /// Counts apps whose version date (from the source) falls in the last 7 days. Off the main actor for big catalogues.
+    private func countNewThisWeek(_ all: [RepoApp]) async {
+        let dates = all.compactMap(\.date)
+        guard !dates.isEmpty else { newThisWeek = nil; return }
+        let count = await Task.detached(priority: .utility) { () -> Int in
+            let now = Date()
+            let cutoff = now.addingTimeInterval(-7 * 86_400)
+            let future = now.addingTimeInterval(86_400)
+            var n = 0
+            for raw in dates {
+                if let d = SourcesStore.date(raw), d >= cutoff, d <= future { n += 1 }
+            }
+            return n
+        }.value
+        guard !Task.isCancelled else { return }
+        newThisWeek = count
+    }
+
+    @ViewBuilder
+    private func sourceHeader(_ t: SourcesTheme, all: [RepoApp], large: Bool) -> some View {
         let metadata = store.presentation[source.url]
-        return VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: large ? .leading : .center, spacing: 0) {
             if let url = metadata?.headerURL {
                 sourceImage(url, height: 132)
                     .accessibilityIdentifier("source-detail-banner")
+                    .padding(.bottom, 14)
             }
-            HStack(spacing: 12) {
-                RemoteIcon(url: SourceURLAction.shareableURL(currentSource.iconURL ?? ""), size: 56, corner: 14)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(currentSource.name).font(.title2.bold())
-                    if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            if large {
+                HStack(spacing: 14) {
+                    RemoteIcon(url: SourceURLAction.shareableURL(currentSource.iconURL ?? ""), size: 72, corner: 18)
+                        .shadow(color: sourceTint.opacity(0.5), radius: 14, y: 6)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(currentSource.name).font(.system(size: 24, weight: .bold)).foregroundStyle(t.text)
+                            .lineLimit(2).minimumScaleFactor(0.8)
+                        if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
+                            Text(subtitle).font(.system(size: 12.5)).foregroundStyle(t.secondary).lineLimit(2)
+                        }
+                        websiteLink(metadata?.website, t: t, compact: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                if let description = metadata?.description, !description.isEmpty {
+                    Text(description).font(.system(size: 12.5)).foregroundStyle(t.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                }
+                HStack(spacing: 8) {
+                    statBox(all.count.formatted(), SourcesText.statApps, t)
+                    if let updated = currentSource.updated {
+                        statBox(SourcesDates.label(updated), SourcesText.lastUpdated, t)
+                    }
+                    if let n = newThisWeek, n > 0 {
+                        statBox("+" + n.formatted(), SourcesText.newThisWeek, t, color: t.success)
                     }
                 }
-                Spacer(minLength: 0)
-            }
-            if let description = metadata?.description, !description.isEmpty {
-                Text(description).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            if let website = metadata?.website {
-                Link(destination: website) {
-                    Label(website.host ?? website.absoluteString, systemImage: "arrow.up.right.square")
-                        .font(.subheadline.weight(.semibold))
-                }.tint(sourceTint).accessibilityIdentifier("source-detail-website")
+                .padding(.top, 12)
+            } else {
+                RemoteIcon(url: SourceURLAction.shareableURL(currentSource.iconURL ?? ""), size: 96, corner: 26)
+                    .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.white.opacity(0.2)))
+                    .shadow(color: t.accent[0].opacity(0.55), radius: 18, y: 6)
+                    .padding(.top, 8)
+                Text(currentSource.name).font(.system(size: 30, weight: .bold)).foregroundStyle(t.text)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 10)
+                if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
+                    Text(subtitle).font(.system(size: 12.5)).foregroundStyle(t.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                if let description = metadata?.description, !description.isEmpty {
+                    Text(description).font(.system(size: 13)).foregroundStyle(t.text.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8).padding(.horizontal, 10)
+                }
+                HStack(spacing: 8) {
+                    websiteLink(metadata?.website, t: t, compact: false)
+                    if !all.isEmpty {
+                        chip(Label(all.count.formatted(), systemImage: "square.grid.2x2"), t: t)
+                    }
+                    if let updated = currentSource.updated {
+                        chip(Label(SourcesDates.label(updated), systemImage: "clock"), t: t)
+                    }
+                }
+                .padding(.top, 12)
             }
         }
-        .padding(16)
-        .appsGlass(cornerRadius: MirsaRadius.l, tint: sourceTint)
+        .frame(maxWidth: .infinity, alignment: large ? .leading : .center)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("source-detail-header")
+    }
+
+    @ViewBuilder
+    private func websiteLink(_ website: URL?, t: SourcesTheme, compact: Bool) -> some View {
+        if let website {
+            Link(destination: website) {
+                if compact {
+                    Label(website.host ?? website.absoluteString, systemImage: "arrow.up.right")
+                        .font(.system(size: 12)).foregroundStyle(t.secondary).lineLimit(1)
+                } else {
+                    chip(Label(website.host ?? website.absoluteString, systemImage: "link"), t: t)
+                }
+            }
+            .accessibilityIdentifier("source-detail-website")
+        }
+    }
+
+    private func chip<C: View>(_ content: C, t: SourcesTheme) -> some View {
+        content
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(t.text)
+            .lineLimit(1)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .sourcesGlassCapsule(t)
+    }
+
+    private func statBox(_ value: String, _ label: String, _ t: SourcesTheme, color: Color? = nil) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.system(size: 17, weight: .bold)).foregroundStyle(color ?? t.text)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 10.5)).foregroundStyle(t.secondary).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 9)
+        .sourcesGlass(t, radius: 16)
+    }
+
+    private func searchRow(_ t: SourcesTheme, grid: Bool, hasApps: Bool) -> some View {
+        HStack(spacing: 8) {
+            SourcesSearchField(placeholder: SourcesText.searchApps, theme: t, text: $query, identifier: "source-app-search")
+            if hasApps {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { gridOverride = !grid }
+                } label: {
+                    SourcesCircleLabel(systemName: grid ? "list.bullet" : "square.grid.2x2", theme: t)
+                }
+                .buttonStyle(.mirsaPress)
+                .accessibilityLabel(grid ? SourcesText.list : SourcesText.grid)
+                .accessibilityIdentifier("source-layout-toggle")
+            }
+        }
+    }
+
+    private func categoryChips(_ categories: [String], active: String?, t: SourcesTheme) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                categoryButton(SourcesText.all, selected: active == nil, t: t) { category = nil }
+                ForEach(categories, id: \.self) { c in
+                    categoryButton(c.capitalized, selected: active == c, t: t) { category = c }
+                }
+            }
+        }
+        .accessibilityIdentifier("source-categories")
+    }
+
+    private func categoryButton(_ title: String, selected: Bool, t: SourcesTheme, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { action() }
+        } label: {
+            Text(title).font(.system(size: 13, weight: .bold))
+                .foregroundStyle(selected ? (t.isLight ? Color.white : Color(sourcesRGB: 0x1A1238)) : t.text)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background {
+                    if selected {
+                        Capsule().fill(t.isLight ? AnyShapeStyle(t.accentGradient) : AnyShapeStyle(Color.white))
+                    } else {
+                        Capsule().fill(t.card).overlay(Capsule().stroke(t.stroke))
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func sourceImage(_ url: URL, height: CGFloat) -> some View {
@@ -775,9 +1151,13 @@ struct SourceDetailView: View {
 }
 
 struct RepoAppRow: View {
+    enum Style { case row, tile }
     let app: RepoApp
     let installed: ManagedApp?
     var onSelectIPA: ((URL) async throws -> Void)? = nil
+    var style: Style = .row
+    /// Shown in the detail sheet's info row when the caller knows the source.
+    var sourceName: String? = nil
     @ObservedObject private var apps = AppsStore.shared
     @StateObject private var downloader = PersonalIPADownloader()
     @State private var selecting = false
@@ -785,42 +1165,85 @@ struct RepoAppRow: View {
     @State private var showInfo = false
     @State private var selectToken: UUID?
     @ObservedObject private var tracker = InstallTracker.shared
+    /// Themed inside the Sources screens; elsewhere (Discovery) the dark default matches that screen.
+    @Environment(\.sourcesTheme) private var sourcesTheme
+    private var theme: SourcesTheme { sourcesTheme ?? .aurora }
     /// Identity is the exact URL the user tapped, never a feed-supplied bundle ID.
     private var requestKey: String { InstallTracker.urlKey(app.downloadURL) }
 
     var body: some View {
-        HStack(spacing: 12) {
-            RemoteIcon(url: app.iconURL, size: 52, corner: MirsaRadius.icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(app.name).font(MirsaFont.cardTitle).lineLimit(1)
-                Text([app.developer, app.version.isEmpty ? nil : "v" + app.version]
-                        .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if !app.subtitle.isEmpty {
-                    Text(app.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer()
-            Button {
-                if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) }
-                else { install() }
-            } label: {
-                InstallKeyedLabel(key: requestKey) {
-                    Text(buttonTitle).lineLimit(1).fixedSize()
-                }
-            }
-            .buttonStyle(.mirsaSecondary)
-            .controlSize(.small)
-            .disabled(!downloading && (selecting || apps.busy != nil || apps.downloadTask != nil || tracker.current != nil))
-            .onChange(of: downloader.fraction) { _, f in
-                if onSelectIPA != nil, downloader.active { tracker.set(selectToken, phase: .downloading, fraction: f) }
+        Group {
+            switch style {
+            case .row: rowBody
+            case .tile: tileBody
             }
         }
         .contentShape(Rectangle())
         .onTapGesture { showInfo = true }
-        .sheet(isPresented: $showInfo) { RepoAppInfo(app: app, requestKey: requestKey, install: install) }
+        .onChange(of: downloader.fraction) { _, f in
+            if onSelectIPA != nil, downloader.active { tracker.set(selectToken, phase: .downloading, fraction: f) }
+        }
+        .sheet(isPresented: $showInfo) {
+            SourceAppDetailSheet(app: app, sourceName: sourceName, requestKey: requestKey, installTitle: detailInstallTitle,
+                                 allowsDownload: onSelectIPA == nil, theme: theme, install: install)
+        }
         .alert(tr("Notice", "تنبيه"), isPresented: Binding(get: { selectionError != nil }, set: { if !$0 { selectionError = nil } })) { Button(tr("OK", "تمام")) { selectionError = nil } } message: { Text(selectionError ?? "") }
+    }
 
+    private var rowBody: some View {
+        HStack(spacing: 12) {
+            RemoteIcon(url: app.iconURL, size: 52, corner: MirsaRadius.icon)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.name).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
+                let meta = [app.developer, app.version.isEmpty ? nil : "v" + app.version]
+                    .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+                if !meta.isEmpty {
+                    Text(meta).font(.caption).foregroundStyle(theme.secondary).lineLimit(1)
+                }
+                if !app.subtitle.isEmpty {
+                    Text(app.subtitle).font(.caption2).foregroundStyle(theme.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            actionButton(expand: false)
+        }
+    }
+
+    private var tileBody: some View {
+        VStack(spacing: 6) {
+            RemoteIcon(url: app.iconURL, size: 62, corner: 15)
+            Text(app.name).font(.system(size: 14.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
+            let meta = [app.version.isEmpty ? nil : "v" + app.version,
+                        app.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }]
+                .compactMap { $0 }.joined(separator: " · ")
+            Text(meta.isEmpty ? " " : meta).font(.system(size: 11)).foregroundStyle(theme.secondary).lineLimit(1)
+            if let category = app.category?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
+                Text(category.capitalized).font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(theme.isLight ? Color(sourcesRGB: 0xB45309) : Color(sourcesRGB: 0xFCD34D))
+                    .lineLimit(1)
+                    .padding(.horizontal, 7).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(sourcesRGB: 0xF59E0B).opacity(0.14)))
+            }
+            actionButton(expand: true)
+                .padding(.top, 2)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .sourcesGlass(theme, radius: 20)
+    }
+
+    private func actionButton(expand: Bool) -> some View {
+        Button {
+            if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) }
+            else { install() }
+        } label: {
+            InstallKeyedLabel(key: requestKey) {
+                SourcesPillLabel(title: buttonTitle, theme: theme, installed: isCurrentInstalled, expand: expand)
+            }
+        }
+        .buttonStyle(.mirsaPress)
+        .disabled(!downloading && (selecting || apps.busy != nil || apps.downloadTask != nil || tracker.current != nil))
+        .accessibilityIdentifier("source-app-action")
     }
 
     private var downloading: Bool {
@@ -832,10 +1255,22 @@ struct RepoAppRow: View {
         return apps.downloadHasKnownSize ? apps.progress : nil
     }
 
+    /// Installed with the same version (or the source has none). Still tappable: it reinstalls, as before.
+    private var isCurrentInstalled: Bool {
+        guard onSelectIPA == nil, let i = installed else { return false }
+        return i.version == app.version || app.version.isEmpty
+    }
+
     private var buttonTitle: String {
-        if onSelectIPA != nil { return selecting ? tr("Downloading…", "عم يتحمّل…") : tr("Choose", "اختيار") }
-        guard let i = installed else { return tr("GET", "تثبيت") }
-        return i.version == app.version || app.version.isEmpty ? tr("OPEN", "مثبّت") : tr("UPDATE", "تحديث")
+        if onSelectIPA != nil { return selecting ? SourcesText.downloading : SourcesText.choose }
+        guard installed != nil else { return SourcesText.get }
+        return isCurrentInstalled ? SourcesText.installed : SourcesText.update
+    }
+
+    private var detailInstallTitle: String {
+        if onSelectIPA != nil { return selecting ? SourcesText.downloading : SourcesText.choose }
+        guard installed != nil else { return SourcesText.installNow }
+        return isCurrentInstalled ? SourcesText.reinstall : SourcesText.updateNow
     }
 
     private func install() {
@@ -861,44 +1296,175 @@ struct RepoAppRow: View {
     }
 }
 
-private struct RepoAppInfo: View {
+/// App detail sheet: every value comes from the source entry; anything the source does not provide is hidden.
+private struct SourceAppDetailSheet: View {
     let app: RepoApp
+    let sourceName: String?
     let requestKey: String
+    let installTitle: String
+    let allowsDownload: Bool
+    let theme: SourcesTheme
     let install: () -> Void
     @ObservedObject private var tracker = InstallTracker.shared
+    @StateObject private var ipaDownloader = PersonalIPADownloader()
+    @State private var downloadMessage: String?
+    @Environment(\.dismiss) private var dismiss
+
+    private struct InfoItem: Identifiable { let id: String; let label: String; let value: String }
+
+    private var infoItems: [InfoItem] {
+        var out: [InfoItem] = []
+        if !app.version.isEmpty { out.append(InfoItem(id: "version", label: SourcesText.version, value: app.version)) }
+        if let s = app.size, s > 0 { out.append(InfoItem(id: "size", label: SourcesText.size, value: ByteCountFormatter.string(fromByteCount: s, countStyle: .file))) }
+        if let sourceName, !sourceName.isEmpty { out.append(InfoItem(id: "source", label: SourcesText.source, value: sourceName)) }
+        if let os = app.minOSVersion?.trimmingCharacters(in: .whitespacesAndNewlines), !os.isEmpty {
+            out.append(InfoItem(id: "os", label: SourcesText.compatibility, value: "iOS " + os + "+"))
+        }
+        return out
+    }
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 14) {
-                        RemoteIcon(url: app.iconURL, size: 72, corner: MirsaRadius.m)
-                        VStack(alignment: .leading) {
-                            Text(app.name).font(MirsaFont.sheetTitle)
-                            Text(app.developer).foregroundStyle(.secondary)
+        let t = theme
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 14) {
+                    RemoteIcon(url: app.iconURL, size: 88, corner: 22)
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.15)))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(app.name).font(.system(size: 24, weight: .bold)).foregroundStyle(t.text)
+                            .lineLimit(2).minimumScaleFactor(0.8)
+                        if !app.subtitle.isEmpty {
+                            Text(app.subtitle).font(.system(size: 12.5)).foregroundStyle(t.secondary).lineLimit(2)
+                        }
+                        if !app.developer.isEmpty {
+                            Text(app.developer).font(.system(size: 12.5)).foregroundStyle(t.secondary).lineLimit(1)
                         }
                     }
+                    Spacer(minLength: 0)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.system(size: 14, weight: .bold)).foregroundStyle(t.text)
+                            .frame(width: 34, height: 34).background(Circle().fill(t.card))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(SourcesText.close)
+                }
+
+                let items = infoItems
+                if !items.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 { Rectangle().fill(t.stroke).frame(width: 1, height: 34) }
+                            VStack(spacing: 3) {
+                                Text(item.label).font(.system(size: 10)).foregroundStyle(t.secondary).lineLimit(1)
+                                Text(item.value).font(.system(size: 15, weight: .bold)).foregroundStyle(t.text)
+                                    .lineLimit(1).minimumScaleFactor(0.6)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .frame(height: 52)
+                    .padding(.vertical, 8)
+                    .overlay(alignment: .top) { Rectangle().fill(t.stroke).frame(height: 1) }
+                    .overlay(alignment: .bottom) { Rectangle().fill(t.stroke).frame(height: 1) }
+                    .padding(.top, 16)
+                }
+
+                HStack(spacing: 10) {
                     Button {
                         if tracker.isActive(requestKey) { tracker.cancelIfSupported(requestKey) } else { install() }
                     } label: {
-                        InstallKeyedLabel(key: requestKey) { Text(tr("Install", "ثبّت")) }
-                            .frame(maxWidth: .infinity)
+                        InstallKeyedLabel(key: requestKey) {
+                            Text(installTitle).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                        }
+                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(t.accentGradient))
+                        .shadow(color: t.accent[0].opacity(0.45), radius: 12, y: 6)
                     }
-                    .buttonStyle(.mirsaPrimary)
+                    .buttonStyle(.mirsaPress)
                     .disabled(!tracker.isActive(requestKey) && tracker.current != nil)
                     .accessibilityIdentifier("source-detail-install")
-                    HStack {
-                        if !app.version.isEmpty { Label("v" + app.version, systemImage: "tag") }
-                        if let s = app.size { Label(ByteCountFormatter.string(fromByteCount: s, countStyle: .file), systemImage: "internaldrive") }
+                    if allowsDownload {
+                        Button { downloadOnly() } label: {
+                            Group {
+                                if ipaDownloader.active {
+                                    SourceDownloadIndicator(fraction: ipaDownloader.fraction)
+                                } else {
+                                    Image(systemName: "arrow.down.to.line").font(.system(size: 18, weight: .semibold))
+                                }
+                            }
+                            .foregroundStyle(t.text)
+                            .frame(minWidth: 52, minHeight: 52)
+                            .padding(.horizontal, ipaDownloader.active ? 8 : 0)
+                            .sourcesGlass(t, radius: 18)
+                        }
+                        .buttonStyle(.mirsaPress)
+                        .accessibilityLabel(SourcesText.downloadIPA)
+                        .accessibilityIdentifier("source-detail-download")
                     }
-                    .font(.caption).foregroundStyle(.secondary)
-                    AppScreenshotGallery(app: app)
-                    Text(app.description).font(.body)
                 }
-                .padding()
+                .padding(.top, 16)
+                if let downloadMessage {
+                    Text(downloadMessage).font(.footnote).foregroundStyle(t.secondary).padding(.top, 8)
+                }
+
+                AppScreenshotGallery(app: app)
+                    .foregroundStyle(t.text)
+                    .padding(.top, 20)
+
+                if let notes = app.versionNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+                    Text(SourcesText.whatsNew).font(.system(size: 18, weight: .bold)).foregroundStyle(t.text).padding(.top, 20)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            if !app.version.isEmpty {
+                                Text(SourcesText.version + " " + app.version).font(.system(size: 13, weight: .bold))
+                            }
+                            Spacer()
+                            if let raw = app.date, let date = SourcesStore.date(raw) {
+                                Text(SourcesDates.label(date)).font(.system(size: 12)).foregroundStyle(t.secondary)
+                            }
+                        }
+                        Text(notes).font(.system(size: 13)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(t.text.opacity(0.9))
+                    .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                    .sourcesGlass(t, radius: 18)
+                    .padding(.top, 10)
+                }
+
+                if !app.description.isEmpty && app.description != app.subtitle {
+                    Text(SourcesText.about).font(.system(size: 18, weight: .bold)).foregroundStyle(t.text).padding(.top, 20)
+                    Text(app.description).font(.system(size: 14)).foregroundStyle(t.text.opacity(0.88))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                }
             }
-            .mirsaScreen()
+            .padding(.horizontal, 18).padding(.top, 24).padding(.bottom, 30)
         }
-        .presentationDetents([.medium, .large])
+        .background(LinearGradient(colors: t.sheetBase, startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+        .tint(t.accent[0])
+        .environment(\.colorScheme, t.colorScheme)
+        .presentationDetents([.large, .medium])
+        .presentationDragIndicator(.visible)
+        .onDisappear { if ipaDownloader.active { ipaDownloader.cancel() } }
+    }
+
+    /// Saves the IPA to Mirsa's Downloads library (Apps › Downloads) without installing it.
+    private func downloadOnly() {
+        if ipaDownloader.active { ipaDownloader.cancel(); return }
+        downloadMessage = nil
+        Task { @MainActor in
+            do {
+                let file = try await ipaDownloader.download(app.downloadURL.absoluteString)
+                defer { MirsaManagedTmp.end(file.deletingLastPathComponent()) }
+                let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
+                DownloadsLibrary.shared.add(ipa: file, bundleID: app.bundleID, name: app.name,
+                                            version: app.version.isEmpty ? "0" : app.version, size: bytes, icon: nil)
+                downloadMessage = SourcesText.savedToDownloads
+            } catch {
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                downloadMessage = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -916,17 +1482,6 @@ struct RemoteIcon: View {
     }
 }
 
-
-private struct SourceRowBackground: ViewModifier {
-    let liquid: Bool
-    let tint: Color
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        // One solid card for both themes; the source colour is a light wash.
-        content.appsGlass(cornerRadius: MirsaRadius.l, tint: tint)
-            .mirsaAppear()
-    }
-}
 
 /// Inline transfer control. Unknown length stays indeterminate, never a made-up percent.
 struct SourceDownloadIndicator: View {
