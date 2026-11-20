@@ -55,16 +55,19 @@ jobs:
       - name: Export named screenshots
         if: always()
         run: |
-          if [ -d build/StyleUI.xcresult ]; then
-            mkdir -p build/raw build/shots
-            xcrun xcresulttool export attachments --path build/StyleUI.xcresult --output-path build/raw
+          for RESULT in StyleUI ProjectUnit; do
+          if [ -d "build/$RESULT.xcresult" ]; then
+            mkdir -p "build/raw/$RESULT" build/shots
+            xcrun xcresulttool export attachments --path "build/$RESULT.xcresult" --output-path "build/raw/$RESULT"
+            export RESULT
             python3 - <<'PY'
           import json, os, re, shutil
-          m = json.load(open("build/raw/manifest.json"))
+          raw = os.path.join("build/raw", os.environ["RESULT"])
+          m = json.load(open(os.path.join(raw, "manifest.json")))
           os.makedirs("build/diagnostics", exist_ok=True)
           for t in m:
               for a in t.get("attachments", []):
-                  src = os.path.join("build/raw", a["exportedFileName"])
+                  src = os.path.join(raw, a["exportedFileName"])
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
                   name = re.sub(r'[^A-Za-z0-9._-]+', "_", name)
@@ -77,6 +80,7 @@ jobs:
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY
           fi
+          done
           mkdir -p build/crashes
           cp ~/Library/Logs/DiagnosticReports/*Mirsa* build/crashes/ 2>/dev/null || true
           ls build/crashes
