@@ -426,7 +426,7 @@ struct EncryptedAppsTab: View {
     }
 
     private func nowCardBody<Icon: View, Controls: View>(title: String, name: String, fraction: Double?, detail: String, live: String?,
-                                                         @ViewBuilder icon: () -> Icon, @ViewBuilder controls: () -> Controls) -> some View {
+                                                         @ViewBuilder icon: @escaping () -> Icon, @ViewBuilder controls: () -> Controls) -> some View {
         HStack(alignment: .center, spacing: MirsaSpacing.m) {
             StoreGalleryProgressRing(fraction: fraction, diameter: 112, lineWidth: 9) { icon() }
             VStack(alignment: .leading, spacing: 5) {
