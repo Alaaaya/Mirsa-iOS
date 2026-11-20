@@ -4,95 +4,22 @@ final class ProjectDetailsThemesUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
     private func capture(_ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
     private func verify(_ language: String) {
-        for theme in ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
-                "-MirsaProjectThemesFixture", "-mirsa.projectDetailsTheme", theme,
-                "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
-            app.launch()
-            let menu = app.buttons["mirsa.project.theme-menu"]
-            XCTAssertTrue(menu.waitForExistence(timeout: 20), "\(theme) header")
-            XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
-            capture("project-\(language)-\(theme)-top")
-            let scroll = app.scrollViews["mirsa.project.editor-scroll"]
-            for index in 1...2 {
-                scroll.swipeUp()
-                capture("project-\(language)-\(theme)-scroll-\(index)")
-            }
-            app.terminate()
-        }
-    }
-
-    /// Select through the real palette, never launch-override the persisted key.
-    private func liveSwitches(_ language: String) {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
-            "-MirsaProjectThemesFixture", "-mirsa.appLanguage", language,
-            "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+            "-MirsaProjectThemesFixture", "-mirsa.projectDetailsTheme", "obsidianGold",
+            "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
         app.launch()
-        let names = language == "ar"
-            ? ["الأساسي", "الذهبي الأسود", "الشفق", "بينتو", "خط البناء"]
-            : ["Classic", "Obsidian Gold", "Aurora", "Bento", "Build Pipeline"]
-        let themes = ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"]
-        func select(_ index: Int) {
-            let menu = app.buttons["mirsa.project.theme-menu"]
-            XCTAssertTrue(menu.waitForExistence(timeout: 20))
-            menu.tap()
-            let identified = app.buttons["mirsa.project.theme." + themes[index]]
-            let choice = identified.exists ? identified : app.buttons[names[index]]
-            XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
-            choice.tap()
-            XCTAssertTrue(menu.waitForExistence(timeout: 10))
-            XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
-            XCTAssertEqual(app.state, .runningForeground)
-        }
-        for index in themes.indices {
-            select(index)
-            capture("live-project-\(language)-\(themes[index])-top")
-            app.terminate()
-            app.launch() // Reopen every saved palette, not just Gold.
-            XCTAssertTrue(app.buttons["mirsa.project.theme-menu"].waitForExistence(timeout: 20), "saved \(themes[index])")
-            XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
-            XCTAssertEqual(app.state, .runningForeground)
-            capture("saved-project-\(language)-\(themes[index])-top")
-        }
-        select(1)
-        app.terminate()
-        app.launch() // Must read the real saved obsidianGold, no launch argument override.
-        XCTAssertTrue(app.buttons["mirsa.project.theme-menu"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
-        capture("live-project-\(language)-persisted-obsidianGold")
-        select(0)
+        XCTAssertTrue(app.buttons["mirsa.project.sign"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["mirsa.project.more"].exists)
+        XCTAssertFalse(app.buttons["mirsa.project.theme-menu"].exists)
+        capture("project-\(language)-top")
+        let scroll = app.scrollViews["mirsa.project.editor-scroll"]
+        for index in 1...2 { scroll.swipeUp(); capture("project-\(language)-scroll-\(index)") }
         app.terminate()
     }
-    func testLiveArabicPaletteAndPersistedGold() { liveSwitches("ar") }
-    func testLiveEnglishPaletteAndPersistedGold() { liveSwitches("en") }
-    /// A raw stored lightPearl (from before the theme was removed) must open Classic, and the picker lists 5 themes.
-    func testStoredLightPearlReopensClassicAndPickerHasFive() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
-            "-MirsaProjectThemesFixture", "-mirsa.projectDetailsTheme", "lightPearl",
-            "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en"]
-        app.launch()
-        let menu = app.buttons["mirsa.project.theme-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
-        XCTAssertEqual(app.state, .runningForeground)
-        capture("pearl-removed-reopen-classic")
-        menu.tap()
-        for id in ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"] {
-            XCTAssertTrue(app.buttons["mirsa.project.theme." + id].waitForExistence(timeout: 5), id)
-        }
-        XCTAssertFalse(app.buttons["mirsa.project.theme.lightPearl"].exists)
-        XCTAssertFalse(app.buttons["Light Pearl"].exists)
-        capture("theme-picker-five")
-        app.terminate()
-    }
-    func testArabicThemes() { verify("ar") }
-    func testEnglishThemes() { verify("en") }
+    func testArabicPage() { verify("ar") }
+    func testEnglishPage() { verify("en") }
 }
