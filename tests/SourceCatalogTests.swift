@@ -24,6 +24,37 @@ final class SourceCatalogTests: XCTestCase {
         return SourcesStore(defaults: defaults, load: load)
     }
 
+    func testFullAlaaCataloguesDecodeOffMainAndPublishWithoutBlockingMainActor() async throws {
+        for (name, url, bytes, count) in [
+            ("alaa1", SourcesStore.alaaDefaults[0].url, 7_615_167, 10_380),
+            ("alaa2", SourcesStore.alaaDefaults[1].url, 9_989_723, 9_728)
+        ] {
+            let data = try fixture(name)
+            XCTAssertEqual(data.count, bytes)
+            let store = makeStore { request in (data, self.response(request.url!)) }
+            var beats = 0
+            let heartbeat = Task { @MainActor in
+                while !Task.isCancelled {
+                    beats += 1
+                    try? await Task.sleep(nanoseconds: 1_000_000)
+                }
+            }
+            let start = Date()
+            await store.ensureLoaded(url)
+            heartbeat.cancel()
+            XCTAssertGreaterThan(beats, 0, "Main actor must run while the full catalogue decodes")
+            let all = store.listing(for: url)
+            XCTAssertEqual(all.count, count)
+            XCTAssertEqual(store.sources.first { $0.url == url }?.appCount, count)
+            XCTAssertNotNil(store.sources.first { $0.url == url }?.updated)
+            XCTAssertNil(store.loadErrors[url])
+            let tail = try XCTUnwrap(all.last)
+            XCTAssertFalse(store.listing(for: url, query: tail.name).isEmpty)
+            XCTAssertNotNil(URL(string: tail.downloadURL.absoluteString))
+            print("Alaa source performance \(name): \(bytes) bytes, \(all.count) apps, \(Date().timeIntervalSince(start))s, main-actor heartbeats=\(beats)")
+        }
+    }
+
     func testSourceNewsPresentationAndSafeRelativeLinks() throws {
         let feed = Data(##"{"name":"Mirsa","headerURL":"banner.png","subtitle":"Welcome","description":"My source","website":"https://x.com/rasmtk30","news":[{"identifier":"welcome","title":"Hello","caption":"New source","imageURL":"news.png","tintColor":"#123456","date":"2026-11-18","appID":"test.sample","url":"https://example.org/story"},{"title":"Unsafe","imageURL":"file:///private/test","url":"javascript:alert(1)"},{"caption":"Missing title"},42],"apps":[]}"##.utf8)
         let parsed = try SourcesStore.decodeSource(feed, base: URL(string: "https://example.org/source.json")!)

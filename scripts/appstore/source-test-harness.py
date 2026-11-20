@@ -33,6 +33,6 @@ for name in ['SourceCatalogTests.swift','SourceDeletionTests.swift']:
   text=re.sub(r'(    func test\w+\(\))\s*(throws)?\s*\{',lambda m:m[1]+' async'+(' throws' if m[2] else '')+' {',text)
  (tests/name).write_text(text)
 fixtures=work/'source-fixtures';fixtures.mkdir()
-for name in ['apptesters','ryp0']:
+for name in ['apptesters','ryp0','alaa1','alaa2']:
  (fixtures/(name+'.json')).write_bytes(gzip.decompress((root/'tests/SourceFixtures'/(name+'.json.gz')).read_bytes()))
-print('Actual production catalogue/persistence/parser extracted; two full pinned JSON fixtures decompressed')
+print('Actual production catalogue/persistence/parser extracted; four full pinned JSON fixtures decompressed')
