@@ -286,7 +286,10 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         };
         let p = &profiles[index].parsed;
         if p.team_id() != team { return Err(format!("فريق البروفايل مختلف للتطبيق {id}.")); }
-        let mut requested = nested::read_entitlements(&std::fs::read(node.executable()?).map_err(err)?)?;
+        let executable = node.executable().map_err(|e| nested::file_error(app, &node.path, e))?;
+        let bytes = std::fs::read(&executable).map_err(|e| nested::file_error(app, &executable, e))?;
+        let mut requested = nested::read_entitlements(&bytes)
+            .map_err(|e| nested::file_error(app, &executable, e))?;
         if node.path == app && !opts.custom_entitlements_path.is_empty() {
             for (k, v) in custom_entitlements(&opts.custom_entitlements_path)? { requested.insert(k, v); }
         }
@@ -314,7 +317,7 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
     }
     // Validate every retained Mach-O before ANY rewrite/removal/signing.
     for file in files.iter().filter(|p| p.is_file() && !nested::removed(app, p, opts)) {
-        nested::check_macho_file(file)?;
+        nested::check_macho_file(file).map_err(|e| nested::file_error(app, file, e))?;
     }
     let signer = RustCryptoCmsSigner::from_der(&key, &cert, profiles[0].parsed.certificate_chain_der())
         .map_err(|_| "استخدم شهادة Apple RSA مع مفتاحها الخاص المطابق.")?;
@@ -335,7 +338,15 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
         }
         // Framework/dylib code receives neither app entitlements nor profile.
         if !node.framework { settings.embedded_mobileprovision = assignments.get(id).map(|i| profiles[*i].data.as_slice()); }
-        apple_codesign_quick::sign_bundle(&node.path, &settings).map_err(|_| format!("تعذّر توقيع التطبيق {id}."))?;
+        apple_codesign_quick::sign_bundle(&node.path, &settings).map_err(|e| {
+            use apple_codesign_quick::error::CodeSignError;
+            let path = match &e {
+                CodeSignError::MachO {path, ..} | CodeSignError::Io {path, ..}
+                | CodeSignError::NeedsCodeSignatureAllocation {path, ..} => path.as_path(),
+                _ => node.path.as_path(),
+            };
+            nested::file_error(app, path, e)
+        })?;
         crate::signing_progress::report(completed + 1, nodes.len())?;
     }
     status.device_authorization = if target_udid.is_empty() {

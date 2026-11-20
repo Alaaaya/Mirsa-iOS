@@ -659,45 +659,44 @@ struct SignedArch {
 }
 
 fn parse_fat_arches(path: &Path, data: &[u8]) -> Result<Option<Vec<FatArch>>> {
-    if data.len() < 4 {
-        return Err(CodeSignError::macho(path, "file is too small"));
+    ensure_len(path, data, 4, "Mach-O magic")?;
+    let magic = BigEndian::read_u32(&data[..4]);
+    let (wide, big) = match magic {
+        0xcafebabe => (false, true), 0xbebafeca => (false, false),
+        0xcafebabf => (true, true), 0xbfbafeca => (true, false),
+        _ => return Ok(None),
+    };
+    let read32 = |at: usize| -> Result<u32> {
+        ensure_len(path, data, checked_add(path, at, 4, "FAT word")?, "FAT word")?;
+        Ok(if big {BigEndian::read_u32(&data[at..at+4])} else {LittleEndian::read_u32(&data[at..at+4])})
+    };
+    let read_offset = |at: usize| -> Result<usize> {
+        if !wide {return Ok(read32(at)? as usize)}
+        ensure_len(path, data, checked_add(path, at, 8, "FAT64 word")?, "FAT64 word")?;
+        let n = if big {BigEndian::read_u64(&data[at..at+8])} else {LittleEndian::read_u64(&data[at..at+8])};
+        usize::try_from(n).map_err(|_| CodeSignError::macho(path,"FAT64 offset exceeds address space"))
+    };
+    let count = read32(4)? as usize;
+    if count == 0 || count > 128 {return Err(CodeSignError::macho(path,"invalid FAT architecture count"))}
+    let stride = if wide {32} else {20};
+    let end = checked_add(path,8,checked_mul(path,count,stride,"FAT table")?,"FAT table")?;
+    ensure_len(path,data,end,"FAT table")?;
+    let mut arches: Vec<FatArch> = Vec::new();
+    for i in 0..count {
+        let at=8+i*stride;
+        let off=read_offset(at+8)?;
+        let size=read_offset(at+if wide {16} else {12})?;
+        let align=read32(at+if wide {24} else {16})?;
+        let stop=checked_add(path,off,size,"FAT slice")?;
+        // Bound alignment before allocation, and reject overlap/table aliases.
+        if align > 20 || off < end || size < 28 || stop > data.len()
+            || off % (1usize << align) != 0
+            || arches.iter().any(|a| off < a.offset+a.size && stop > a.offset)
+            || (wide && read32(at+28)? != 0) {
+            return Err(CodeSignError::macho(path,"invalid FAT slice bounds/alignment"));
+        }
+        arches.push(FatArch {offset:off,size,align});
     }
-
-    let magic = BigEndian::read_u32(&data[0..4]);
-    if magic == FAT_MAGIC_64 {
-        return Err(CodeSignError::macho(
-            path,
-            "64-bit fat Mach-O headers are not supported yet",
-        ));
-    }
-    if magic != FAT_MAGIC {
-        return Ok(None);
-    }
-
-    ensure_len(path, data, FAT_HEADER_SIZE, "fat header")?;
-    let nfat_arch = BigEndian::read_u32(&data[4..8]) as usize;
-    let table_len = checked_mul(path, nfat_arch, FAT_ARCH_SIZE, "fat architecture table")?;
-    ensure_len(
-        path,
-        data,
-        FAT_HEADER_SIZE + table_len,
-        "fat architecture table",
-    )?;
-
-    let mut arches = Vec::with_capacity(nfat_arch);
-    for index in 0..nfat_arch {
-        let offset = FAT_HEADER_SIZE + index * FAT_ARCH_SIZE;
-        let arch_offset = BigEndian::read_u32(&data[offset + 8..offset + 12]) as usize;
-        let size = BigEndian::read_u32(&data[offset + 12..offset + 16]) as usize;
-        let align = BigEndian::read_u32(&data[offset + 16..offset + 20]);
-        ensure_len(path, data, arch_offset + size, "fat architecture slice")?;
-        arches.push(FatArch {
-            offset: arch_offset,
-            size,
-            align,
-        });
-    }
-
     Ok(Some(arches))
 }
 
@@ -942,6 +941,60 @@ mod tests {
         fn sign(&self, _: CmsSigningRequest<'_>) -> Result<Vec<u8>> {
             Ok(vec![0x30, 0x00])
         }
+    }
+
+    fn encrypted_embedded(filetype: u32) -> Vec<u8> {
+        let mut d = minimal_macho_with_empty_signature();
+        LittleEndian::write_u32(&mut d[12..16], filetype);
+        LittleEndian::write_u32(&mut d[8..12], 2); // arm64e
+        LittleEndian::write_u32(&mut d[16..20], 4);
+        LittleEndian::write_u32(&mut d[20..24], 184);
+        let at=32+72+72+16;
+        for (delta,n) in [(0,0x2c),(4,24),(8,256),(12,128),(16,1)] {
+            LittleEndian::write_u32(&mut d[at+delta..at+delta+4],n);
+        }
+        d[256..384].fill(0xa7);
+        d
+    }
+    #[test]
+    fn encrypted_framework_and_appex_sign_without_decrypting_or_changing_cryptid() {
+        for (name,kind) in [("Frameworks/F.framework/F",6),("PlugIns/E.appex/E",2)] {
+            let d=encrypted_embedded(kind);
+            let ent=Dictionary::new();
+            let signer=TestCmsSigner;
+            let config=MachOSigningConfig::new("com.test.embedded","TEAM",&ent,Some(&signer));
+            let out=sign_macho_data(Path::new(name),&d,&config).unwrap();
+            assert_eq!(&out[256..384],&d[256..384]);
+            assert_eq!(&out[192..216],&d[192..216]); // whole encryption command
+            assert_eq!(LittleEndian::read_u32(&out[208..212]),1);
+            assert_eq!(LittleEndian::read_u32(&out[8..12]),2);
+        }
+    }
+    #[test]
+    fn encrypted_fat_all_headers_sign_and_preserve_slice_ciphertext() {
+        for wide in [false,true] { for big in [false,true] {
+            let thin=encrypted_embedded(6);
+            let mut d=vec![0;4096+thin.len()];
+            let magic: u32=if wide {0xcafebabf} else {0xcafebabe};
+            let put=|d:&mut [u8],at:usize,n:u32| {
+                d[at..at+4].copy_from_slice(&if big {n.to_be_bytes()} else {n.to_le_bytes()});
+            };
+            put(&mut d,0,magic);put(&mut d,4,1);
+            put(&mut d,8,0x100000c);put(&mut d,12,2);
+            if wide {
+                d[16..24].copy_from_slice(&if big {4096u64.to_be_bytes()} else {4096u64.to_le_bytes()});
+                d[24..32].copy_from_slice(&if big {(thin.len() as u64).to_be_bytes()} else {(thin.len() as u64).to_le_bytes()});
+                put(&mut d,32,12);
+            } else {put(&mut d,16,4096);put(&mut d,20,thin.len() as u32);put(&mut d,24,12);}
+            d[4096..].copy_from_slice(&thin);
+            let ent=Dictionary::new();
+            let config=MachOSigningConfig::new("com.test.fat","TEAM",&ent,None);
+            let out=sign_macho_data(Path::new("Frameworks/F.framework/F"),&d,&config).unwrap();
+            let arches=parse_fat_arches(Path::new("F"),&out).unwrap().unwrap();
+            let off=arches[0].offset;
+            assert_eq!(&out[off+256..off+384],&thin[256..384]);
+            assert_eq!(LittleEndian::read_u32(&out[off+208..off+212]),1);
+        }}
     }
 
     #[test]
