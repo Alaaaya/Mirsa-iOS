@@ -321,10 +321,10 @@ struct ChatDraftAttachment: Identifiable, Equatable {
     func items(_ thread: UUID) -> [ChatDraftAttachment] { byThread[thread] ?? [] }
     var uploader: AttachmentUploader { .shared }
 
-    func canAdd(_ thread: UUID) -> Bool { items(thread).count < ChatAttachmentRules.maxPerMessage }
+    func canAdd(_ thread: UUID) -> Bool { items(thread).count < ChatAttachmentRules.maxPerMessage && !items(thread).contains(where: { $0.payload.kind == "audio" }) }
 
     func add(_ payload: ChatAttachmentPayload, thread: UUID) {
-        guard canAdd(thread) else { return }
+        guard canAdd(thread), payload.kind != "audio" || items(thread).isEmpty else { return }
         let d = ChatDraftAttachment(id: UUID(), payload: payload, state: .uploading)
         byThread[thread, default: []].append(d)
         upload(d.id, thread: thread)

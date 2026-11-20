@@ -52,4 +52,15 @@ final class ChatVoiceTests: XCTestCase {
         }
         XCTAssertEqual(values.count, 5)
     }
+    @MainActor func testOnlyCurrentAudioOwnerCanStopSession() {
+        let first = UUID(), second = UUID(), third = UUID()
+        var stops: [UUID] = []
+        ChatVoiceSession.acquire(first) { stops.append(first) }
+        ChatVoiceSession.acquire(second) { stops.append(second) }
+        XCTAssertEqual(stops, [first])
+        ChatVoiceSession.release(first) // An idle/offscreen bubble must not evict second.
+        ChatVoiceSession.acquire(third) { stops.append(third) }
+        XCTAssertEqual(stops, [first, second])
+        ChatVoiceSession.release(third)
+    }
 }

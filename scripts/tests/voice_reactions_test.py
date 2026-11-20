@@ -19,6 +19,14 @@ assert "ChatVoiceRules.verify(data" in upload
 assert "ChatVoiceRules.verify(d, meta: expected ?? known[id])" in upload
 assert "meta.size == Int64(data.count)" in voice and "sha.lowercased()" in voice
 assert "botReaction = bot.flatMap" in meta
+assert 'let durationMS: Int?' in meta.split('struct ChatAttachmentMeta:')[1].split('init(')[0]
+assert 'durationMS' not in meta.split('struct ForgeChatArtifact:')[1].split('struct ForgeChatResult:')[0]
+assert 'record(forDuration: ChatVoiceRules.maxDuration)' in voice
+assert 'guard generation == ticket, !Task.isCancelled else { return }' in voice
+assert 'guard owner == token else { return }' in voice
+assert voice.count('setActive(false') == 1
+assert 'payload.kind != "audio" || items(thread).isEmpty' in upload
+assert 'drafts.items(threadID).count != 1 || quote != nil' in chat
 assert "botReaction, editedAt" in meta
 assert 'latest.attachments?.contains(where: { $0.kind == "audio" }) != true' in meta
 assert 'attachmentIDs: [meta.id])' in chat
