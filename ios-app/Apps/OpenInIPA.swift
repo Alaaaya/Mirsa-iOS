@@ -3,7 +3,7 @@ import Foundation
 /// File-provider handoff only. Never reads a remote URL or modifies the original.
 /// UUID-owned directories avoid filename traversal and isolate cleanup.
 enum OpenInIPA {
-    static let maximumBytes = 512 * 1024 * 1024
+    static let maximumBytes = 4 * 1024 * 1024 * 1024
 
     static func snapshot(_ source: URL) throws -> URL {
         guard source.isFileURL, source.pathExtension.lowercased() == "ipa" else {

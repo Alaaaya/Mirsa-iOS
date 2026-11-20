@@ -86,6 +86,21 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    func testLiquidProgress() {
+        for lang in ["ar", "en"] {
+            let app = launch("liquid-review", lang: lang)
+            XCTAssertTrue(app.scrollViews["liquid.review"].waitForExistence(timeout: 15))
+            XCTAssertEqual(app.staticTexts["liquid.title"].label, lang == "ar" ? "تقدّم التنزيل" : "Liquid progress")
+            let completion = app.descendants(matching: .any)["liquid.completion-orb"].firstMatch
+            XCTAssertTrue(completion.exists)
+            shot(app, "liquid_\(lang)_levels")
+            app.buttons["liquid.complete"].tap()
+            XCTAssertTrue(String(describing: completion.value ?? "").contains("100") || String(describing: completion.value ?? "").contains("١٠٠"))
+            shot(app, "liquid_\(lang)_completion")
+            app.terminate()
+        }
+    }
+
     private func run(lang: String) {
         for page in Self.pages {
             let app = launch(page, lang: lang)
@@ -210,6 +225,12 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Match identifiers only, never a translated visible label or an arbitrary descendant.
+    /// Keep the button type constraint to catch accessibility-container regressions.
+    private func dockButton(_ app: XCUIApplication, _ destination: String) -> XCUIElement {
+        app.buttons.matching(identifier: "main-tab-" + destination).element
+    }
+
     /// Classic theme must also expose all six destinations directly, never native More.
     func testClassicSixTabs() {
         continueAfterFailure = false
@@ -217,18 +238,47 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
             let app = launch("tools", lang: lang, extra: ["-mirsa.theme", "classic"])
             let ids = ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"]
             for id in ids {
-                let b = app.buttons["main-tab-" + id]
+                let b = dockButton(app, id)
                 XCTAssertTrue(b.waitForExistence(timeout: 10), id)
                 XCTAssertTrue(b.isHittable, id)
             }
-            app.buttons["main-tab-Personal Apps Hub"].tap()
+            dockButton(app, "Personal Apps Hub").tap()
             XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "personal-hub-root").firstMatch.waitForExistence(timeout: 10))
             XCTAssertFalse(app.navigationBars["More"].exists || app.navigationBars["المزيد"].exists)
-            XCTAssertTrue(app.buttons["main-tab-Personal Apps Hub"].isSelected)
+            XCTAssertTrue(dockButton(app, "Personal Apps Hub").isSelected)
             shot(app, lang + "_445_classic_sixth_tab")
-            app.buttons["main-tab-Mirsa AI"].tap()
+            dockButton(app, "Mirsa AI").tap()
             XCTAssertTrue(app.buttons["chat-new"].waitForExistence(timeout: 10))
             app.terminate()
+        }
+    }
+
+    /// Actual dock materials in both system appearances and all supported languages.
+    func testGlassDockMaterials() {
+        continueAfterFailure = false
+        for lang in ["ar", "en", "de", "kmr", "ckb"] {
+            for appearance in ["dark", "light"] {
+                let app = launch("glass-dock-review", lang: lang,
+                                 extra: appearance == "light" ? ["-GlassDockLight"] : [])
+                let pill = app.descendants(matching: .any).matching(identifier: "mirsa-main-tab-pill").firstMatch
+                XCTAssertTrue(pill.waitForExistence(timeout: 10))
+                let ai = dockButton(app, "Mirsa AI")
+                XCTAssertTrue(ai.isHittable)
+                XCTAssertEqual(ai.frame.width, ai.frame.height, accuracy: 2)
+                XCTAssertGreaterThan(ai.frame.minX, pill.frame.maxX)
+                for id in ["Apps", "Sources", "Pairing", "Encrypted", "Personal Apps Hub", "Mirsa AI"] {
+                    let b = dockButton(app, id)
+                    XCTAssertTrue(b.waitForExistence(timeout: 10), "\(lang) \(id)")
+                    XCTAssertTrue(b.isHittable, "\(lang) \(id)")
+                    XCTAssertFalse(b.label.isEmpty)
+                    b.tap()
+                    XCTAssertTrue(b.isSelected, id)
+                    if lang == "ar" || lang == "en" {
+                        shot(app, "glass_\(lang)_\(appearance)_\(id.replacingOccurrences(of: " ", with: "_"))")
+                    }
+                }
+                app.terminate()
+            }
         }
     }
 
@@ -240,7 +290,7 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 let app = launch("tools", lang: lang, extra: ["-mirsa.theme", theme])
                 XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch.waitForExistence(timeout: 10))
                 for id in ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"] {
-                    let b = app.buttons["main-tab-" + id]
+                    let b = dockButton(app, id)
                     XCTAssertTrue(b.waitForExistence(timeout: 10), id)
                     b.tap(); Thread.sleep(forTimeInterval: 0.8)
                     XCTAssertTrue(b.isSelected, id)

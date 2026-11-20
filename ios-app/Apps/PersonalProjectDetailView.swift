@@ -26,6 +26,7 @@ struct PersonalProjectDetailView: View {
     @State private var sharing = false
     @State private var icon: UIImage?
     @State private var iconPhoto: PhotosPickerItem?
+    @State private var pickingIconPhoto = false
     @State private var pickingIcon = false
     @State private var extensionCount: Int?
     @State private var deps: [String]?
@@ -130,6 +131,8 @@ struct PersonalProjectDetailView: View {
                 try setProjectIcon(Data(contentsOf: url))
             } catch { message = error.localizedDescription }
         }
+        // Keep the presenter on the editor, not inside the transient Menu.
+        .photosPicker(isPresented: $pickingIconPhoto, selection: $iconPhoto, matching: .images)
         .onChange(of: iconPhoto) { _, selection in
             Task {
                 do {
@@ -193,7 +196,7 @@ struct PersonalProjectDetailView: View {
             }.frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(alignment: .bottomTrailing) {
                     Menu {
-                        PhotosPicker(selection: $iconPhoto, matching: .images) {
+                        Button { pickingIconPhoto = true } label: {
                             Label(personalText("Photos", "الصور"), systemImage: "photo")
                         }
                         Button { pickingIcon = true } label: { Label(personalText("Files", "الملفات"), systemImage: "folder") }
@@ -510,7 +513,7 @@ struct PersonalProjectDetailView: View {
             Label(personalText("Project settings", "إعدادات المشروع"), systemImage: "gearshape.fill").font(.subheadline.weight(.semibold))
             toggle(personalText("Enable Files access", "تمكين الوصول إلى الملفات"), personalText("Shows app documents in Files.", "بيظهر ملفات التطبيق بتطبيق الملفات."), $draft.fileSharing)
             toggle(personalText("Remove URL schemes", "إزالة مخططات URL"), personalText("Deletes the app's custom URL schemes.", "بيحذف مخططات URL تبع التطبيق."), $draft.removeURLSchemes)
-            toggle(personalText("Omit embedded profile", "عدم تضمين البروفايل"), personalText("The final signed app contains no embedded profile. Normal certificate installation may fail.", "النسخة الموقّعة ما رح تحتوي بروفايل مضمّن. التثبيت العادي بالشهادة ممكن يفشل."), $draft.removeEmbeddedProfile)
+            toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile)
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))

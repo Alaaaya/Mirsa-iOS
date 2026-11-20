@@ -993,7 +993,7 @@ struct AppStoreAccountView: View {
             StorePauseStatus()
             if let transfer {
                 if let fraction = transfer.fraction {
-                    ProgressView(value: fraction, total: 1).tint(StoreLuxe.cyan)
+                    MirsaLiquidProgress(value: fraction, diameter: 80)
                     Text("\(Int(fraction * 100))%").font(MirsaFont.caption.monospacedDigit())
                 } else {
                     MirsaIndeterminateBar()
@@ -1444,20 +1444,7 @@ extension AppStoreAccountView {
 /// Indeterminate progress bar (UI only).
 struct MirsaIndeterminateBar: View {
     var body: some View {
-        TimelineView(.animation) { ctx in
-            GeometryReader { g in
-                let phase = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.10))
-                    Capsule().fill(MirsaPalette.accentGradient)
-                        .frame(width: g.size.width * 0.3)
-                        .offset(x: g.size.width * 1.3 * phase - g.size.width * 0.3)
-                }
-                .clipShape(Capsule())
-            }
-        }
-        .frame(height: 6)
-        .accessibilityHidden(true)
+        MirsaLiquidProgress()
     }
 }
 

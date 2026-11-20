@@ -200,58 +200,110 @@ struct LiquidTabBar: View {
     let items: [LiquidTabItem]
     @ObservedObject private var chatStore = ForgeChatStore.shared
     @ObservedObject private var chatLocal = ForgeChatLocal.shared
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var chatUnread: Int { chatLocal.unreadCount(chatStore.threads) }
 
-    var body: some View {
-        HStack(spacing: MirsaSpacing.xxs) {
-            ForEach(items) { item in
-                let on = selection == item.tab
-                Button {
-                    withAnimation(MirsaMotion.select) { selection = item.tab }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: item.icon).font(.system(size: 19, weight: on ? .semibold : .regular))
-                            .overlay(alignment: .topTrailing) { if item.tab == .mirsaAI { ForgeChatUnreadDot(count: chatUnread).offset(x: 10, y: -6) } }
-                            .frame(height: 22)
-                        Text(item.title).font(MirsaFont.tabLabel).lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .allowsTightening(true)
-                    }
-                    .foregroundStyle(on ? .white : MirsaPalette.textTertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func glow(for tab: AppTab) -> Color {
+        switch tab {
+        case .apps: return Color(red: 1, green: 0.52, blue: 0.24)
+        case .sources: return Color(red: 0.28, green: 0.62, blue: 1)
+        case .pairing: return Color(red: 0.72, green: 0.48, blue: 1)
+        case .encrypted: return Color(red: 0.26, green: 0.84, blue: 0.68)
+        case .personalHub: return Color(red: 1, green: 0.72, blue: 0.30)
+        case .mirsaAI: return Color(red: 0.42, green: 0.80, blue: 1)
+        case .walletCards, .passcodeThemes, .wallpapers: return .gray
+        }
+    }
+
+    private func glass<S: InsettableShape>(_ shape: S) -> some View {
+        shape.fill(.ultraThinMaterial)
+            .overlay(shape.fill(Color.black.opacity(reduceTransparency ? 0.86 : 0.36)))
+            .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.30), radius: 14, y: 7)
+            .allowsHitTesting(false)
+    }
+
+    private func tabButton(_ item: LiquidTabItem) -> some View {
+        let selected = selection == item.tab
+        return Button {
+            withAnimation(MirsaMotion.select) { selection = item.tab }
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 19, weight: selected ? .semibold : .regular))
+                    .frame(height: 23)
                     .background {
-                        if on {
-                            Capsule()
-                                .fill(MirsaPalette.accentGradient)
-                                .opacity(0.9)
-                                .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 1))
-                                .shadow(color: MirsaPalette.accent.opacity(0.45), radius: 8, y: 3)
-                                // Cell-local highlight cannot be stranded between tabs
-                                // if a navigation/Form layout changes during selection.
+                        Ellipse()
+                            .fill(glow(for: item.tab).opacity(selected ? 0.8 : 0.18))
+                            .frame(width: selected ? 29 : 21, height: 15)
+                            .blur(radius: selected ? 10 : 9)
+                            .offset(y: 3)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if item.tab == .mirsaAI {
+                            ForgeChatUnreadDot(count: chatUnread).offset(x: 9, y: -5)
                         }
                     }
-                    .contentShape(Capsule())
+                Text(item.title)
+                    .font(MirsaFont.tabLabel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .allowsTightening(true)
+            }
+            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.57))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                if selected {
+                    if item.tab == .mirsaAI {
+                        Circle()
+                            .fill(.white.opacity(0.14))
+                            .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    } else {
+                        Capsule()
+                            .fill(.white.opacity(0.14))
+                            .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    }
                 }
-                .buttonStyle(.mirsaPress)
-                .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
-                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.mirsaPress)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 1) {
+                ForEach(items.filter { $0.tab != .mirsaAI }) { item in
+                    tabButton(item)
+                }
+            }
+            .padding(5)
+            .frame(height: MirsaTabBarMetrics.height)
+            .background { glass(Capsule()) }
+            // Give the pill its own container so its identifier cannot replace child IDs.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("mirsa-main-tab-pill")
+
+            if let ai = items.first(where: { $0.tab == .mirsaAI }) {
+                tabButton(ai)
+                    .padding(5)
+                    .frame(width: MirsaTabBarMetrics.height, height: MirsaTabBarMetrics.height)
+                    // No clipShape here: the glass and the selection fill are already
+                    // circles, and clipping cut off the unread badge at the top edge.
+                    .background { glass(Circle()) }
+                    .contentShape(Circle())
             }
         }
-        .padding(6)
-        .frame(height: MirsaTabBarMetrics.height)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mirsa-tab-dock")
+        // Preserve Mirsa's physical tab order in every language; Arabic/Sorani
+        // labels keep their native text shaping without mirroring the icons.
         .environment(\.layoutDirection, .leftToRight)
-        .modifier(MirsaSolidCard(shape: Capsule(), tint: nil, elevation: 1.2))
-        // Floating look: a light rim on the upper edge and a soft shadow under the
-        // capsule only. Nothing is drawn behind the dock; the page shows around it.
-        .overlay {
-            Capsule()
-                .strokeBorder(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.06)],
-                                             startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
-                .allowsHitTesting(false)
-        }
-        .shadow(color: .black.opacity(0.38), radius: 18, y: 10)
         .padding(.horizontal, MirsaTabBarMetrics.sideInset)
         .padding(.bottom, MirsaTabBarMetrics.bottomGap)
     }

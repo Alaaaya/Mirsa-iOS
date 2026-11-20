@@ -52,6 +52,8 @@ struct MirsaStyleShotHost: View {
         case "apps": tab(.apps)
         case "sources": tab(.sources)
         #if DEBUG
+        case "liquid-review": MirsaLiquidReviewHost()
+        case "glass-dock-review": GlassDockReviewHost()
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "dock-clearance-29": SourcesDock29ValidationHost()
         case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
@@ -96,7 +98,7 @@ struct MirsaStyleShotHost: View {
         case "chat-image-fixture":
             ZStack { MirsaChatTheme.bg.ignoresSafeArea(); MirsaTappableImage(image: Self.fixtureImage, maxWidth: 220, maxHeight: 200, cornerRadius: 14) }
         #endif
-        case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(.dark)
+        case "mirsa-ai-chat": NavigationStack { ForgeChatThreadView(threadID: ForgeChatStore.fixtureThreadID) }.preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-MirsaChatLightFixture") ? .light : .dark)
         default: sheetHost
         }
     }
@@ -214,5 +216,24 @@ private struct SourceNewsValidationHost: View {
         _store = StateObject(wrappedValue: store)
     }
     var body: some View { NavigationStack { SourceDetailView(source: source, store: store) } }
+}
+#endif
+
+#if DEBUG
+/// Isolated real dock for system light/dark material review, not an app theme change.
+private struct GlassDockReviewHost: View {
+    @State private var selection: AppTab = .apps
+    private var light: Bool { ProcessInfo.processInfo.arguments.contains("-GlassDockLight") }
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            LinearGradient(colors: light
+                ? [Color(red: 0.93, green: 0.89, blue: 0.84), Color(red: 0.65, green: 0.53, blue: 0.44)]
+                : [Color(red: 0.16, green: 0.12, blue: 0.10), Color(red: 0.29, green: 0.20, blue: 0.17)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+            LiquidTabBar(selection: $selection, items: LiquidTabItem.mainTabs)
+        }
+        .preferredColorScheme(light ? .light : .dark)
+    }
 }
 #endif

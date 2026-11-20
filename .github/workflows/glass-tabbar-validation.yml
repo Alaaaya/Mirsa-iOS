@@ -1,0 +1,145 @@
+name: Glass tab bar validation
+# Branch-only validation; never publishes.
+on:
+  push:
+    branches: [mirsa/glass-tabbar, mirsa/ai-cat]
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - name: Parse every first-party Swift source
+        run: |
+          find ios-app uitests tests MirsaLiveActivity LiveActivityShared -name "*.swift" -print0 | xargs -0 -n 1 xcrun swiftc -frontend -parse
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Boot simulator with bounded recovery
+        timeout-minutes: 13
+        run: |
+          python3 - <<'PYBOOT'
+          import json, os, subprocess, sys
+
+          def simctl(*args, timeout=30, capture=False):
+              return subprocess.run(
+                  ["xcrun", "simctl", *args], check=True, timeout=timeout,
+                  text=True, stdout=subprocess.PIPE if capture else None,
+              )
+
+          inventory = json.loads(simctl("list", "-j", capture=True).stdout)
+          available = [
+              (runtime, device)
+              for runtime, devices in inventory["devices"].items()
+              for device in devices
+              if device.get("isAvailable", False) and device["name"].startswith("iPhone")
+          ]
+          preferred = [pair for pair in available if pair[1]["name"] in ("iPhone 16 Pro", "iPhone 17 Pro")]
+          if not available:
+              raise SystemExit("No available iPhone simulator")
+          runtime, original = (preferred or available)[0]
+          device_type = original.get("deviceTypeIdentifier") or next(
+              kind["identifier"] for kind in inventory["devicetypes"]
+              if kind["name"] == original["name"]
+          )
+          device = original["udid"]
+          for attempt in (1, 2):
+              try:
+                  if attempt == 2:
+                      device = simctl(
+                          "create", "Mirsa Glass Boot Recovery", device_type, runtime,
+                          capture=True,
+                      ).stdout.strip()
+                  print(f"Simulator boot attempt {attempt}/2: {device}", flush=True)
+                  if attempt == 2 or original["state"] != "Booted":
+                      simctl("boot", device)
+                  # bootstatus can hang forever during migration without this deadline.
+                  simctl("bootstatus", device, "-b", timeout=240)
+                  with open(os.environ["GITHUB_ENV"], "a") as env:
+                      env.write(f"DEVICE={device}\n")
+                  break
+              except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+                  print(f"::warning::Simulator boot attempt {attempt}/2 failed: {error}", file=sys.stderr, flush=True)
+                  try:
+                      simctl("shutdown", device, timeout=20)
+                  except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as cleanup_error:
+                      print(f"Simulator shutdown failed: {cleanup_error}", file=sys.stderr, flush=True)
+                  if attempt == 2:
+                      raise SystemExit("Simulator boot failed after two bounded attempts; UI tests did not run")
+          PYBOOT
+      - name: Run design review UITests
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          # Real Keychain integration must run in an entitled, signed simulator host.
+          # Match forge-validation; never skip or mock the real Security.framework test.
+          python3 - <<'PYENT'
+          import plistlib
+          with open('/tmp/mirsa-ci-keychain.plist', 'wb') as f:
+              plistlib.dump({'application-identifier': 'MIRSACI.com.alaa.mirsa', 'keychain-access-groups': ['MIRSACI.com.alaa.mirsa']}, f)
+          PYENT
+          xcodegen generate
+          xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
+          mkdir -p build
+          # Keep unit failure blocking, but still collect independent UI evidence.
+          set +e
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUnit.xcresult test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-unit.log
+          UNIT_STATUS=$?
+          set -e
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DesignUI.xcresult -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testGlassDockMaterials -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFloatingDockAllThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testClassicSixTabs test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=/tmp/mirsa-ci-keychain.plist 2>&1 | tee build/design-ui.log
+          exit "$UNIT_STATUS"
+      - name: Export named screenshots
+        if: always()
+        run: |
+          test -d build/DesignUI.xcresult || { echo "Missing UI result bundle"; exit 1; }
+          if [ -d build/DesignUI.xcresult ]; then
+            mkdir -p build/raw build/shots
+            xcrun xcresulttool export attachments --path build/DesignUI.xcresult --output-path build/raw
+            python3 - <<'PY'
+          import json, os, re, shutil
+          m = json.load(open("build/raw/manifest.json"))
+          for t in m:
+              for a in t.get("attachments", []):
+                  src = os.path.join("build/raw", a["exportedFileName"])
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
+                  name = re.sub(r'[^A-Za-z0-9._-]+', "_", name)
+                  with open(src, "rb") as f: head = f.read(8)
+                  if head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff":
+                      if not name.lower().endswith(".png"): name += ".png"
+                      shutil.copy(src, os.path.join("build/shots", name))
+          names = sorted(os.listdir("build/shots"))
+          print("\n".join(names))
+          expected = [f"glass_{lang}_{mode}_{tab}" for lang in ("ar", "en") for mode in ("light", "dark") for tab in ("Apps", "Sources", "Pairing", "Encrypted", "Personal_Apps_Hub", "Mirsa_AI")]
+          missing = [name for name in expected if not any(n == name + ".png" or n.startswith(name + "_") for n in names)]
+          if missing: raise SystemExit("Missing required screenshots: " + ", ".join(missing))
+          PY
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: glass-tabbar-screenshots
+          path: |
+            build/shots
+            build/design-ui.log
+            build/design-unit.log
+            build/raw
+          if-no-files-found: error

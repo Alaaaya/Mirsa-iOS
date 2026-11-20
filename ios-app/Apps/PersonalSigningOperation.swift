@@ -211,7 +211,7 @@ struct PersonalSigningProgressView: View {
                 Spacer()
                 Text("\(Int(state.overallFraction * 100))%").monospacedDigit().fontWeight(.bold)
             }
-            ProgressView(value: state.overallFraction).tint(.green)
+            MirsaLiquidProgress(value: state.overallFraction, diameter: 88)
                 .accessibilityValue("\(Int(state.overallFraction * 100))%")
             Text(PersonalSigningLabels.weighted).font(.caption2).foregroundStyle(.secondary)
             if state.stage == .signing, state.totalUnits > 0 {
@@ -235,7 +235,8 @@ struct PersonalSigningProgressView: View {
 enum PersonalSigningLabels {
     static func text(_ en: String, _ ar: String, _ ckb: String, _ kmr: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
         switch language {
-        case .english, .german: return en
+        case .english: return en
+        case .german: return MirsaTr.deByEnglish[en] ?? en
         case .arabic: return ar
         case .sorani: return ckb
         case .kurmanji: return kmr

@@ -49,6 +49,9 @@ struct PersonalProfileVerification: Codable, Equatable {
     }
     var warningText: String { warnings.map(Self.localizedWarning).joined(separator: "\n") }
     static func localizedWarning(_ warning: Warning) -> String {
+        if warning.code == "omitted_profile_not_installed" {
+            return PersonalProfileOmissionText.deviceWarning(AppLanguageStore.snapshot)
+        }
         if warning.code == "encryption_accepted" {
             return PersonalEncryptionWarning.localized(AppLanguageStore.snapshot, [
                 "Encrypted code was kept unchanged. Signing does not decrypt it; installation or launch may fail.",
@@ -60,7 +63,8 @@ struct PersonalProfileVerification: Codable, Equatable {
         guard warning.code == "entitlements_dropped" else { return warning.message }
         let title: String
         switch AppLanguageStore.shared.current {
-        case .english, .german: title = "Compatibility mode removed unsupported entitlements; related features may not work."
+        case .english: title = "Compatibility mode removed unsupported entitlements; related features may not work."
+        case .german: title = "Der Kompatibilitätsmodus hat nicht unterstützte Entitlements entfernt; zugehörige Funktionen funktionieren eventuell nicht."
         case .arabic: title = "وضع التوافق حذف صلاحيات مو مدعومة؛ الميزات المرتبطة فيها ممكن ما تشتغل."
         case .sorani: title = "دۆخی گونجان دەسەڵاتە پشتگیرینەکراوەکانی سڕییەوە؛ تایبەتمەندییە پەیوەندیدارەکان لەوانەیە کار نەکەن."
         case .kurmanji: title = "Moda lihevhatinê destûrên bê piştgirî rakirin; dibe ku taybetmendiyên girêdayî wan nexebitin."
@@ -474,7 +478,7 @@ enum PersonalCertificateSigner {
         guard result?["ok"] as? Bool == true else {
             throw SideloadError.message(result?["error"] as? String ?? "Personal signing failed.")
         }
-        // Export artifact contains signed application and public profile only,
+        // Export contains the signed app and, unless omitted, its public profile,
         // never P12, password or private key.
         try control.checkpoint()
         progress(PersonalSigningEvent(stage: .packaging))
