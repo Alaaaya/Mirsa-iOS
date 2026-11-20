@@ -48,7 +48,10 @@
 //  (not unlockable), the ad hooks still block ads and — for rewarded ads —
 //  fire the reward callback immediately instead of playing the video.
 //  Ad hooks only activate when "block" (or "accelerate") is true and the
-//  SDK id is listed in "ads.sdks".
+//  SDK id is listed in "ads.sdks". When "accelerate" is true, the
+//  AVPlayer hook also runs (SDK-agnostic): rewarded video ads play at
+//  8x so they finish in seconds and the reward is granted — the
+//  AdSpeed idea, reimplemented here without Substrate.
 //
 //  Live tracing ("tracing": true, "trace_candidates": [{"class",
 //  "selector"}, ...]). Discovery mode for apps whose premium checks are
@@ -769,6 +772,93 @@ static void MirsaUnlockApplyMetaHooks(void)
         }
         MirsaUnlockVoidNoopMethod(cls, NSSelectorFromString(@"showAdFromRootViewController:"));
         MirsaUnlockBOOLNoMethod(cls, NSSelectorFromString(@"isAdValid"));
+    }
+}
+
+// MARK: - AVPlayer ad acceleration (the AdSpeed idea, without Substrate)
+//
+// Rewarded video ads play through AVPlayer whatever SDK serves them, so
+// forcing the player to a high rate finishes the ad in seconds and the
+// SDK grants the reward: the video did play to the end, just fast. This
+// is SDK-agnostic — unlike the per-SDK rewarded hooks above, which can
+// only accelerate AdMob (the other SDKs report the reward through a
+// delegate, whose implementing class cannot be identified safely).
+// Caveat, same as the original tweak: it speeds up EVERY AVPlayer in
+// the host app, not just ads — in apps with a normal video player, those
+// videos play fast too. Only active when "ads.accelerate" is true.
+// The setRate: replacement respects pause (rate 0 stays 0); the rate
+// getter reports 1.0 while actually playing fast, so ad-progress logic
+// that reads the rate sees ordinary playback.
+static const float MirsaUnlockAdSpeedRate = 8.0f;
+
+static void (*MirsaUnlockAVPlayerSetRateOrig)(id, SEL, float) = NULL;
+static float (*MirsaUnlockAVPlayerRateOrig)(id, SEL) = NULL;
+
+static void MirsaUnlockAVPlayerSetRate(id self, SEL _cmd, float rate)
+{
+    if (MirsaUnlockAVPlayerSetRateOrig == NULL) {
+        return;
+    }
+    float forced = (rate > 0.0f) ? MirsaUnlockAdSpeedRate : 0.0f;
+    MirsaUnlockAVPlayerSetRateOrig(self, _cmd, forced);
+}
+
+static float MirsaUnlockAVPlayerRate(id self, SEL _cmd)
+{
+    if (MirsaUnlockAVPlayerRateOrig == NULL) {
+        return 1.0f;
+    }
+    float real = MirsaUnlockAVPlayerRateOrig(self, _cmd);
+    return (real > 0.0f) ? 1.0f : 0.0f;
+}
+
+static void MirsaUnlockApplyAVPlayerAcceleration(void)
+{
+    Class player = MirsaUnlockClassNamed(@"AVPlayer");
+    if (player == Nil) {
+        return;
+    }
+    @try {
+        SEL setRateSel = NSSelectorFromString(@"setRate:");
+        Method setRate = class_getInstanceMethod(player, setRateSel);
+        if (setRate != NULL) {
+            const char *types = method_getTypeEncoding(setRate);
+            if (types != NULL && types[0] == 'v' &&
+                method_getNumberOfArguments(setRate) == 3) {
+                IMP orig = method_getImplementation(setRate);
+                if (class_addMethod(player, setRateSel,
+                                    (IMP)MirsaUnlockAVPlayerSetRate, types)) {
+                    NSLog(@"[MirsaUnlock] ad-accelerate: -[AVPlayer setRate:] -> %.0fx (was inherited)",
+                          (double)MirsaUnlockAdSpeedRate);
+                } else {
+                    method_setImplementation(setRate, (IMP)MirsaUnlockAVPlayerSetRate);
+                    NSLog(@"[MirsaUnlock] ad-accelerate: -[AVPlayer setRate:] -> %.0fx",
+                          (double)MirsaUnlockAdSpeedRate);
+                }
+                MirsaUnlockAVPlayerSetRateOrig =
+                    (void (*)(id, SEL, float))orig;
+            }
+        }
+        SEL rateSel = NSSelectorFromString(@"rate");
+        Method rate = class_getInstanceMethod(player, rateSel);
+        if (rate != NULL) {
+            const char *types = method_getTypeEncoding(rate);
+            if (types != NULL && types[0] == 'f' &&
+                method_getNumberOfArguments(rate) == 2) {
+                IMP orig = method_getImplementation(rate);
+                if (class_addMethod(player, rateSel,
+                                    (IMP)MirsaUnlockAVPlayerRate, types)) {
+                    NSLog(@"[MirsaUnlock] ad-accelerate: -[AVPlayer rate] -> reports 1.0 while fast (was inherited)");
+                } else {
+                    method_setImplementation(rate, (IMP)MirsaUnlockAVPlayerRate);
+                    NSLog(@"[MirsaUnlock] ad-accelerate: -[AVPlayer rate] -> reports 1.0 while fast");
+                }
+                MirsaUnlockAVPlayerRateOrig = (float (*)(id, SEL))orig;
+            }
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[MirsaUnlock] exception accelerating AVPlayer: %@ %@",
+              exception.name, exception.reason);
     }
 }
 
@@ -1999,6 +2089,12 @@ __attribute__((constructor)) static void MirsaUnlockLoad(void)
             }
             NSLog(@"[MirsaUnlock] ad hooks applied (block=%@, accelerate=%@)",
                   adsBlock ? @"YES" : @"NO", adsAccelerate ? @"YES" : @"NO");
+        }
+        if (adsAccelerate) {
+            // SDK-agnostic: every rewarded video ad plays through
+            // AVPlayer, so forcing the player to a high rate finishes
+            // the ad in seconds and the reward is granted.
+            MirsaUnlockApplyAVPlayerAcceleration();
         }
 
         // 4. Built-in feature hooks, gated by config["features"].
