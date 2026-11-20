@@ -471,6 +471,7 @@ struct ProjectDetailsThemeMenu: View {
             })) {
                 ForEach(ProjectDetailsTheme.allCases) { item in
                     Label(item.title, systemImage: item.symbol).tag(item)
+                        .accessibilityIdentifier("mirsa.project.theme." + item.rawValue)
                 }
             }
         } label: {
