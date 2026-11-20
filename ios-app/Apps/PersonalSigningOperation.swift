@@ -71,6 +71,8 @@ final class PersonalSigningOperation: ObservableObject {
             case .uploading, .serving, .installing: return "Installer"
             }
         }
+        /// Set only by this attempt after the signed IPA is retained, never a previous export.
+        var signedArchive: URL?
         var result: PersonalCertificateSigner.Result?
         var error: String?
         // OTA has no installation-completion callback. Once handed off, the
@@ -109,16 +111,18 @@ final class PersonalSigningOperation: ObservableObject {
         }
     }
     @Published private(set) var state: State?
-    init(initialState: State? = nil) { state = initialState }
+    init(initialState: State? = nil, control: PersonalSigningControl? = nil) {
+        state = initialState; self.control = control
+    }
     private var backgroundID: UIBackgroundTaskIdentifier = .invalid
     private var control: PersonalSigningControl?
     private var activityID: String?
     var running: Bool { state?.running == true }
     /// Cooperative stop requested from the install log screen; takes effect at the next checkpoint.
     func stop() {
-        guard state?.running == true else { return }
+        guard state?.running == true, state?.stoppedByUser == false else { return }
         state?.stoppedByUser = true
-        state?.addLog("System", personalText("Stop requested", "طُلب الإيقاف"), level: "W")
+        state?.addLog("System", personalText("Stop requested. Waiting for the next safe checkpoint.", "طُلب الإيقاف. بانتظار نقطة التوقّف الآمنة التالية."), level: "W")
         control?.cancel()
     }
 
@@ -146,7 +150,11 @@ final class PersonalSigningOperation: ObservableObject {
             do {
                 do {
                     _ = try await CertificateOTA.install(source: input, sourceIsArchive: true, control: control, material: material, options: options, projectID: projectID,
-                        signingProgress: { event in self.receive(event, id: id, operation: operation) })
+                        signingProgress: { event in self.receive(event, id: id, operation: operation) },
+                        retainedArchive: { url in
+                            guard self.state?.id == id else { return }
+                            self.state?.signedArchive = url
+                        })
                     if let current = self.state {
                         var done = current
                         done.addLog(State.source(for: done.stage), PersonalSigningLabels.stage(done.stage) + " (" + String(format: "%.1fs", Date().timeIntervalSince(done.stageStartedAt)) + ")")
@@ -183,9 +191,16 @@ final class PersonalSigningOperation: ObservableObject {
         }
     }
 
-    private func receive(_ event: PersonalSigningEvent, id: UUID, operation: UUID) {
-        guard var next = state, next.id == id, next.apply(event) else { return }
+    /// Shared reducer for real backend events and hosted signer regression tests.
+    @discardableResult
+    func record(_ event: PersonalSigningEvent, id: UUID) -> Bool {
+        guard var next = state, next.id == id, next.apply(event) else { return false }
         state = next
+        return true
+    }
+
+    private func receive(_ event: PersonalSigningEvent, id: UUID, operation: UUID) {
+        guard record(event, id: id), let next = state else { return }
         let phase: MirsaOperationProgress.Phase
         let activity: MirsaInstallActivity.Phase
         switch event.stage {

@@ -43,7 +43,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         return bytes
     }
     @discardableResult
-    static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil) async throws -> PersonalProfileVerification {
+    static func install(source: URL, sourceIsArchive: Bool = false, control: PersonalSigningControl = PersonalSigningControl(), material explicitMaterial: PersonalIdentityVault.Material? = nil, options explicitOptions: PersonalProjectOptions? = nil, projectID: UUID? = nil, progress: ((Double) -> Void)? = nil, signingProgress: ((PersonalSigningEvent) -> Void)? = nil, retainedArchive: ((URL) -> Void)? = nil) async throws -> PersonalProfileVerification {
         try control.checkpoint()
         try Task.checkCancellation()
         signingProgress?(PersonalSigningEvent(stage: .preparing))
@@ -81,6 +81,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
             let relative = kept.path.replacingOccurrences(of: base.path + "/", with: "")
             UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)
         }
+        retainedArchive?(kept)
         do {
         try control.checkpoint()
         try Task.checkCancellation()
