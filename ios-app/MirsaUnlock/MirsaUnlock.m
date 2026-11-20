@@ -494,6 +494,42 @@ static BOOL MirsaUnlockClassIsFromAppBundle(Class cls)
     return strstr(image, ".app/") != NULL;
 }
 
+// App-bundle classes, enumerated ONCE and cached. class_getImageName
+// takes the dyld loaders lock and scans every loaded image per call,
+// so calling it for every class on every hook/trace scan (tens of
+// thousands of classes x dozens of selectors) burns more than the
+// 20-second launch allowance and the watchdog kills the app
+// (0x8BADF00D, Minutes 1.12.10, 2026-11-20 23:08/23:09 — main thread
+// stuck in MirsaUnlockLoad -> MirsaUnlockClassIsFromAppBundle ->
+// class_getImageName, ~19-48s CPU in a 20s window). One pass here,
+// then every installer below reuses the set.
+static NSSet<Class> *MirsaUnlockAppBundleClasses(void)
+{
+    static NSSet<Class> *cached = nil;
+    static dispatch_once_t once = 0;
+    dispatch_once(&once, ^{
+        NSMutableSet<Class> *set = [NSMutableSet set];
+        int count = objc_getClassList(NULL, 0);
+        if (count > 0) {
+            Class *classes = (Class *)malloc(sizeof(Class) * (size_t)count);
+            if (classes != NULL) {
+                count = objc_getClassList(classes, count);
+                for (int i = 0; i < count; i++) {
+                    Class cls = classes[i];
+                    if (cls != Nil && MirsaUnlockClassIsFromAppBundle(cls)) {
+                        [set addObject:cls];
+                    }
+                }
+                free(classes);
+            }
+        }
+        cached = [set copy];
+        NSLog(@"[MirsaUnlock] app-bundle classes cached: %lu",
+              (unsigned long)cached.count);
+    });
+    return cached;
+}
+
 // Apply ONE config hook to one class, dispatching on its "returns"
 // value ("yes" | "no" | "count" | "zero" | "future" | "noop" |
 // "dismiss"). Unknown values are logged and skipped.
@@ -577,34 +613,21 @@ static void MirsaUnlockApplyHookToAllClasses(SEL sel, NSString *returns)
         return;
     }
     @try {
-        int count = objc_getClassList(NULL, 0);
-        if (count <= 0) {
-            return;
-        }
-        Class *classes = (Class *)malloc(sizeof(Class) * (size_t)count);
-        if (classes == NULL) {
-            return;
-        }
-        @try {
-            count = objc_getClassList(classes, count);
-            for (int i = 0; i < count; i++) {
-                Class cls = classes[i];
-                if (cls == Nil) {
-                    continue;
-                }
-                if (class_getInstanceMethod(cls, sel) == NULL) {
-                    continue;
-                }
-                MirsaUnlockApplyHookToClass(cls, sel, returns);
+        // Iterate the cached app-bundle class set (one enumeration,
+        // built by MirsaUnlockAppBundleClasses) instead of re-scanning
+        // every registered class with class_getImageName per selector —
+        // that is what blew the 20s launch watchdog (see above).
+        for (Class cls in MirsaUnlockAppBundleClasses()) {
+            if (cls == Nil) {
+                continue;
             }
-        } @catch (NSException *exception) {
-            NSLog(@"[MirsaUnlock] exception scanning classes: %@ %@",
-                  exception.name, exception.reason);
-        } @finally {
-            free(classes);
+            if (class_getInstanceMethod(cls, sel) == NULL) {
+                continue;
+            }
+            MirsaUnlockApplyHookToClass(cls, sel, returns);
         }
     } @catch (NSException *exception) {
-        NSLog(@"[MirsaUnlock] exception listing classes: %@ %@",
+        NSLog(@"[MirsaUnlock] exception scanning classes: %@ %@",
               exception.name, exception.reason);
     }
 }
@@ -1894,40 +1917,24 @@ static void MirsaUnlockTraceInstallOnAllClasses(SEL sel)
         return;
     }
     @try {
-        int count = objc_getClassList(NULL, 0);
-        if (count <= 0) {
-            return;
-        }
-        Class *classes = (Class *)malloc(sizeof(Class) * (size_t)count);
-        if (classes == NULL) {
-            return;
-        }
-        @try {
-            count = objc_getClassList(classes, count);
-            for (int i = 0; i < count; i++) {
-                if (MirsaUnlockTraceSlotCount >= MirsaUnlockTraceMaxSlots) {
-                    break;
-                }
-                Class cls = classes[i];
-                if (cls == Nil) {
-                    continue;
-                }
-                if (!MirsaUnlockClassIsFromAppBundle(cls)) {
-                    continue;
-                }
-                if (class_getInstanceMethod(cls, sel) == NULL) {
-                    continue;
-                }
-                MirsaUnlockTraceInstall(cls, sel);
+        // Iterate the cached app-bundle class set (one enumeration,
+        // built by MirsaUnlockAppBundleClasses) instead of re-scanning
+        // every registered class with class_getImageName per candidate —
+        // that is what blew the 20s launch watchdog (see above).
+        for (Class cls in MirsaUnlockAppBundleClasses()) {
+            if (MirsaUnlockTraceSlotCount >= MirsaUnlockTraceMaxSlots) {
+                break;
             }
-        } @catch (NSException *exception) {
-            NSLog(@"[MirsaUnlock] exception tracing classes: %@ %@",
-                  exception.name, exception.reason);
-        } @finally {
-            free(classes);
+            if (cls == Nil) {
+                continue;
+            }
+            if (class_getInstanceMethod(cls, sel) == NULL) {
+                continue;
+            }
+            MirsaUnlockTraceInstall(cls, sel);
         }
     } @catch (NSException *exception) {
-        NSLog(@"[MirsaUnlock] exception listing classes for tracing: %@ %@",
+        NSLog(@"[MirsaUnlock] exception tracing classes: %@ %@",
               exception.name, exception.reason);
     }
 }
