@@ -13,6 +13,7 @@ final class ProjectDetailsThemesTests: XCTestCase {
     override func tearDown() {
         UserDefaults.standard.removeObject(forKey: AppLanguageStore.key)
         UserDefaults.standard.removeObject(forKey: ProjectDetailsTheme.key)
+        UserDefaults.standard.removeObject(forKey: StoreStyle.key)
         super.tearDown()
     }
 
@@ -34,6 +35,17 @@ final class ProjectDetailsThemesTests: XCTestCase {
         UserDefaults.standard.set("lightPearl", forKey: ProjectDetailsTheme.key)
         XCTAssertEqual(ProjectDetailsTheme.current, .classic)
         XCTAssertEqual(ProjectDetailsTheme(stored: "lightPearl"), .classic)
+    }
+
+    func testStoreStyleDefaultsToNewButKeepsExplicitChoice() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: StoreStyle.key)
+        XCTAssertEqual(StoreStyle.fallback, .new)
+        XCTAssertEqual(StoreStyle.from(d.string(forKey: StoreStyle.key) ?? StoreStyle.fallback.rawValue), .new)
+        XCTAssertEqual(StoreStyle.from("classic"), .classic)
+        XCTAssertEqual(StoreStyle.from("new"), .new)
+        XCTAssertEqual(StoreStyle.from("garbage"), .new)
+        XCTAssertEqual(ProjectDetailsTheme.fallback, .classic)
     }
 
     func testEveryThemeAndTabHasALocalizedNameInAllLanguages() {
