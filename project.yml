@@ -37,6 +37,7 @@ targets:
         excludes:
           - VideoCAML
           - WallpaperMakerMetadata
+          - MirsaUnlock
       - path: ios-app/VideoCAML
         type: folder
         buildPhase: resources
@@ -54,6 +55,8 @@ targets:
       - package: swift-log
         product: Logging
       - target: MirsaLiveActivity
+        embed: true
+      - target: MirsaUnlock
         embed: true
       - framework: AirliftFFI.xcframework
         embed: false
@@ -85,6 +88,17 @@ targets:
         INFOPLIST_FILE: MirsaLiveActivity/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+  MirsaUnlock:
+    type: dynamic-library
+    platform: iOS
+    sources:
+      - path: ios-app/MirsaUnlock
+    settings:
+      base:
+        PRODUCT_NAME: MirsaUnlock
+        PRODUCT_BUNDLE_IDENTIFIER: com.alaa.mirsa.MirsaUnlock
+        GENERATE_INFOPLIST_FILE: YES
         SKIP_INSTALL: YES
   MirsaUITests:
     type: bundle.ui-testing
