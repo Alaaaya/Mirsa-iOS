@@ -9,7 +9,7 @@ final class ProjectDetailsThemesUITests: XCTestCase {
         add(shot)
     }
     private func verify(_ language: String) {
-        for theme in ["classic", "obsidianGold", "aurora", "bento", "buildPipeline", "lightPearl"] {
+        for theme in ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"] {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
                 "-MirsaProjectThemesFixture", "-mirsa.projectDetailsTheme", theme,
@@ -36,9 +36,9 @@ final class ProjectDetailsThemesUITests: XCTestCase {
             "-AppleLanguages", "(\(language))", "-AppleLocale", language]
         app.launch()
         let names = language == "ar"
-            ? ["الأساسي", "الذهبي الأسود", "الشفق", "بينتو", "خط البناء", "اللؤلؤي الفاتح"]
-            : ["Classic", "Obsidian Gold", "Aurora", "Bento", "Build Pipeline", "Light Pearl"]
-        let themes = ["classic", "obsidianGold", "aurora", "bento", "buildPipeline", "lightPearl"]
+            ? ["الأساسي", "الذهبي الأسود", "الشفق", "بينتو", "خط البناء"]
+            : ["Classic", "Obsidian Gold", "Aurora", "Bento", "Build Pipeline"]
+        let themes = ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"]
         func select(_ index: Int) {
             let menu = app.buttons["mirsa.project.theme-menu"]
             XCTAssertTrue(menu.waitForExistence(timeout: 20))
@@ -72,6 +72,27 @@ final class ProjectDetailsThemesUITests: XCTestCase {
     }
     func testLiveArabicPaletteAndPersistedGold() { liveSwitches("ar") }
     func testLiveEnglishPaletteAndPersistedGold() { liveSwitches("en") }
+    /// A raw stored lightPearl (from before the theme was removed) must open Classic, and the picker lists 5 themes.
+    func testStoredLightPearlReopensClassicAndPickerHasFive() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
+            "-MirsaProjectThemesFixture", "-mirsa.projectDetailsTheme", "lightPearl",
+            "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en"]
+        app.launch()
+        let menu = app.buttons["mirsa.project.theme-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
+        XCTAssertEqual(app.state, .runningForeground)
+        capture("pearl-removed-reopen-classic")
+        menu.tap()
+        for id in ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"] {
+            XCTAssertTrue(app.buttons["mirsa.project.theme." + id].waitForExistence(timeout: 5), id)
+        }
+        XCTAssertFalse(app.buttons["mirsa.project.theme.lightPearl"].exists)
+        XCTAssertFalse(app.buttons["Light Pearl"].exists)
+        capture("theme-picker-five")
+        app.terminate()
+    }
     func testArabicThemes() { verify("ar") }
     func testEnglishThemes() { verify("en") }
 }

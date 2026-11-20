@@ -876,7 +876,7 @@ struct PersonalProjectDetailView: View {
     }
 }
 
-// MARK: - Themed layouts (Obsidian Gold, Aurora, Bento, Build Pipeline, Light Pearl)
+// MARK: - Themed layouts (Obsidian Gold, Aurora, Bento, Build Pipeline)
 //
 // Every theme composes the same section builders above (appFields, outputContent, tweak rows +
 // methodControls, settingsContent, depsContent, certificateContent, MirsaVersionArchiveSection,
@@ -901,7 +901,6 @@ extension PersonalProjectDetailView {
                 .scrollDismissesKeyboard(.interactively)
                 .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
         }
-        .overlay(alignment: .top) { if theme.isLight { pearlStatusBand } }
         .safeAreaInset(edge: .bottom) {
             if !keyboard.isVisible { themedSignBar }
         }
@@ -921,7 +920,6 @@ extension PersonalProjectDetailView {
         case .aurora: auroraContent
         case .bento: bentoContent
         case .buildPipeline: pipelineContent
-        case .lightPearl: pearlContent
         }
             })
     }
@@ -942,18 +940,6 @@ extension PersonalProjectDetailView {
         default:
             theme.background.ignoresSafeArea().accessibilityHidden(true)
         }
-    }
-
-    /// The page keeps the app-wide dark status bar; on the light theme a slim indigo band keeps it readable.
-    private var pearlStatusBand: some View {
-        GeometryReader { proxy in
-            theme.accentGradient
-                .frame(height: proxy.safeAreaInsets.top)
-                .offset(y: -proxy.safeAreaInsets.top)
-        }
-        .frame(height: 0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     // MARK: Shared themed pieces
@@ -1144,17 +1130,14 @@ extension PersonalProjectDetailView {
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(sourcesRGB: 0x1F2937)))
         case .buildPipeline:
             Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(theme.accent).frame(width: 24, height: 24)
-        case .lightPearl:
-            Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(theme.accent).frame(width: 38, height: 38)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(sourcesRGB: 0xEEECFB)))
         case .classic:
             EmptyView()
         }
     }
 
-    // MARK: Tabs (Obsidian Gold, Aurora, Light Pearl)
+    // MARK: Tabs (Obsidian Gold, Aurora)
 
-    /// Obsidian Gold shows Files as its own tab; Aurora and Light Pearl show the tools under Versions.
+    /// Obsidian Gold shows Files as its own tab; Aurora shows the tools under Versions.
     private var visibleTabs: [ProjectDetailsTab] {
         theme == .obsidianGold ? ProjectDetailsTab.allCases : [.tweaks, .settings, .certificate, .versions]
     }
@@ -1230,26 +1213,6 @@ extension PersonalProjectDetailView {
         }.padding(4).sourcesGlass(.aurora, radius: 16)
             )
     }
-    private var pearlTabBar: AnyView {
-        AnyView(
-        ScrollView(.horizontal) {
-            HStack(spacing: 7) {
-                ForEach(visibleTabs) { tab in
-                    let on = tab == shownTab
-                    Button { themeTab = tab } label: {
-                        Text(tab.title).font(.footnote.weight(.semibold))
-                            .foregroundStyle(on ? Color.white : theme.secondaryText)
-                            .padding(.horizontal, 13).padding(.vertical, 7)
-                            .background(Capsule().fill(on ? theme.text : Color.white))
-                    }.buttonStyle(.mirsaPress)
-                        .accessibilityAddTraits(on ? .isSelected : [])
-                }
-            }
-        }.scrollIndicators(.hidden)
-                .clipped()
-            )
-    }
-
     // MARK: Obsidian Gold
 
     private var obsidianContent: AnyView {
@@ -1578,40 +1541,6 @@ extension PersonalProjectDetailView {
         }
     }
 
-    // MARK: Light Pearl
-
-    private var pearlContent: AnyView {
-        AnyView(
-        VStack(alignment: .leading, spacing: 12) {
-            themedHeader
-            HStack(spacing: 14) {
-                iconEditor(size: 64, radius: 16, border: Color.white.opacity(0.6), borderWidth: 2)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(displayName).font(.system(size: 21, weight: .bold)).fixedSize(horizontal: false, vertical: true)
-                    Text(draft.bundleID).font(.caption.monospaced()).opacity(0.75)
-                    HStack(spacing: 6) {
-                        pearlHeroPill("v" + draft.version)
-                        pearlHeroPill(tweaksSummary)
-                    }.padding(.top, 4)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(14)
-            .foregroundStyle(.white)
-            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(theme.accentGradient))
-            .environment(\.colorScheme, .dark)
-            pearlTabBar
-            tabContent
-            themedMessage
-        }.padding(.horizontal, 16)
-            )
-    }
-    private func pearlHeroPill(_ text: String) -> some View {
-        Text(text).font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
-            .padding(.horizontal, 8).padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.2)))
-    }
-
     // MARK: Sign & Install (one per theme; same action, identifier, progress and busy state)
 
     private func themedSignButton(trailing: String? = nil) -> some View {
@@ -1659,10 +1588,6 @@ extension PersonalProjectDetailView {
             .padding(5).sourcesGlass(.aurora, radius: 22)
             .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, MirsaSpacing.s)
             .background(signBarFade)
-        case .lightPearl:
-            themedSignButton(trailing: selected.map { $0.name + (certificateState == .valid ? " ✓" : "") })
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, MirsaSpacing.s)
-                .background(signBarFade)
         default:
             themedSignButton()
                 .padding(.horizontal, theme == .bento ? 16 : 18).padding(.top, 8).padding(.bottom, MirsaSpacing.s)
