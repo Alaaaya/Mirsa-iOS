@@ -58,6 +58,9 @@ targets:
         embed: true
       - target: MirsaUnlock
         embed: true
+        link: false
+        copy:
+          destination: frameworks
       - framework: AirliftFFI.xcframework
         embed: false
     settings:
