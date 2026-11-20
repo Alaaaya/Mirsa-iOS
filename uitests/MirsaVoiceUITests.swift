@@ -39,11 +39,24 @@ final class MirsaVoiceUITests: XCTestCase {
             XCTAssertTrue(play.waitForExistence(timeout: 10))
             XCTAssertTrue(bubble.descendants(matching: .any)["chat-mirsa-reaction"].exists)
             shot("voice_audio_reaction_\(language)")
+            let idleLabel = play.label
             play.tap()
             let pauseLabels = ["ar": "وقّف الصوت", "en": "Pause voice message", "de": "Wiedergabe pausieren", "kmr": "Deng rawestîne", "ckb": "دەنگ بوەستێنە"]
             let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", pauseLabels[language]!), object: play)
             XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed)
             shot("voice_audio_playing_\(language)")
+            play.tap()
+            let paused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", idleLabel), object: play)
+            XCTAssertEqual(XCTWaiter.wait(for: [paused], timeout: 5), .completed)
+            shot("voice_audio_paused_\(language)")
+            play.tap()
+            let resumed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", pauseLabels[language]!), object: play)
+            XCTAssertEqual(XCTWaiter.wait(for: [resumed], timeout: 5), .completed)
+            if language == "en" {
+                let completed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", idleLabel), object: play)
+                XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 20), .completed)
+                shot("voice_audio_completed_en")
+            }
             bubble.terminate()
         }
         for theme in ["light", "classic"] {

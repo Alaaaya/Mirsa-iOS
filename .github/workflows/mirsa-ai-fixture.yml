@@ -71,13 +71,18 @@ jobs:
             python3 - <<'PY'
           import json, os, re, shutil
           m = json.load(open("build/raw/manifest.json"))
-          for t in m:
-              for a in t.get("attachments", []):
+          for ti, t in enumerate(m):
+              for ai, a in enumerate(t.get("attachments", [])):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
                   # Failure attachments include text hierarchies as well as PNGs.
                   # Preserve their extension and sanitize artifact-invalid characters.
                   name = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", name)
+                  stem, ext = os.path.splitext(name)
+                  if not ext: name += os.path.splitext(a["exportedFileName"])[1]
+                  if os.path.exists(os.path.join("build/shots", name)):
+                      stem, ext = os.path.splitext(name)
+                      name = f"{stem}_{ti}_{ai}{ext}"
                   shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY

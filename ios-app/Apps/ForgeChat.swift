@@ -185,7 +185,7 @@ enum ForgeChatImage {
                let file = Bundle.main.url(forResource: "voice-fixture", withExtension: "m4a"),
                let data = try? Data(contentsOf: file) {
                 let meta = ChatAttachmentMeta(id: UUID(), kind: "audio", name: "voice.m4a", mime: "audio/mp4",
-                    size: Int64(data.count), durationMS: 2_000, sha256: ChatVoiceFixture.sha(data))
+                    size: Int64(data.count), durationMS: 12_000, sha256: ChatVoiceFixture.sha(data))
                 var message = ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: nil, attachments: [meta])
                 message.botReaction = "🔥"
                 messages[t] = [message]
