@@ -161,7 +161,7 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return Color.white.opacity(0.62)
         case .bento: return Color(sourcesRGB: 0x7D8896)
         case .buildPipeline: return Color(sourcesRGB: 0x8A8A8A)
-        case .lightPearl: return Color(sourcesRGB: 0x7A7891)
+        case .lightPearl: return Color(sourcesRGB: 0x5C5973)
         }
     }
     var surface: Color {
