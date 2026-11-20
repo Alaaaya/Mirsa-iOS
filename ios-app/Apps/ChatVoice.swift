@@ -12,7 +12,7 @@ enum ChatVoiceRules {
     static func verify(_ data: Data, meta: ChatAttachmentMeta?) throws {
         let bad = ChatAttachmentError(status: 422, code: "attachment_integrity")
         guard let meta, meta.kind == "audio", meta.mime == "audio/mp4",
-              !data.isEmpty, data.count <= maxBytes, meta.size == Int64(data.count),
+              !data.isEmpty, data.count <= maxBytes, meta.size == Int64(data.count), let ms = meta.durationMS, (1...300_000).contains(ms),
               let sha = meta.sha256, sha.count == 64,
               SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == sha.lowercased(),
               data.count >= 12, String(data: data[4..<8], encoding: .ascii) == "ftyp" else { throw bad }
@@ -83,7 +83,7 @@ enum ChatVoiceText {
             ])
             recorder = next
             next.isMeteringEnabled = true
-            guard next.prepareToRecord(), next.record() else { throw ChatAttachmentError.network }
+            guard next.prepareToRecord(), next.record(forDuration: ChatVoiceRules.maxDuration) else { throw ChatAttachmentError.network }
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: file.path)
             hasRecording = true; elapsed = 0
             timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
