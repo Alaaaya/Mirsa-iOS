@@ -573,31 +573,31 @@ enum PremiumScanner {
     private static func featureDetail(for id: String) -> String {
         switch id {
         case "paywall":
-            return tr("paywall screen", "شاشة الدفع", "شاشەی پارەدان", "Dîmendera dravdanê")
+            return tr("paywall screen", "شاشة الدفع", ckb: "شاشەی پارەدان", kmr: "Dîmendera dravdanê")
         case "tracking":
-            return tr("analytics / tracking", "تتبّع وتحليلات", "شوێنکەوتن و شیکاری", "Şopandin û analîtîk")
+            return tr("analytics / tracking", "تتبّع وتحليلات", ckb: "شوێنکەوتن و شیکاری", kmr: "Şopandin û analîtîk")
         case "watermark":
-            return tr("watermark", "علامة مائية", "نیشانەی ئاوی", "Nîşana avê")
+            return tr("watermark", "علامة مائية", ckb: "نیشانەی ئاوی", kmr: "Nîşana avê")
         case "login":
-            return tr("forced login", "تسجيل دخول إجباري", "چوونەژوورەوەی زۆرەملێ", "Têketina zorê")
+            return tr("forced login", "تسجيل دخول إجباري", ckb: "چوونەژوورەوەی زۆرەملێ", kmr: "Têketina zorê")
         case "jailbreak":
-            return tr("jailbreak / tamper check", "فحص جيلبريك / تلاعب", "پشکنینی جەیڵبرەیک", "Kontrola jailbreak")
+            return tr("jailbreak / tamper check", "فحص جيلبريك / تلاعب", ckb: "پشکنینی جەیڵبرەیک", kmr: "Kontrola jailbreak")
         case "ssl":
-            return tr("SSL pinning (diagnostic)", "تثبيت SSL (تشخيصي)", "پینکردنی SSL (دەستنیشانکردن)", "SSL pinning (teşhîs)")
+            return tr("SSL pinning (diagnostic)", "تثبيت SSL (تشخيصي)", ckb: "پینکردنی SSL (دەستنیشانکردن)", kmr: "SSL pinning (teşhîs)")
         case "location":
-            return tr("location / region", "الموقع / المنطقة", "شوێن / ناوچە", "Cih / herêm")
+            return tr("location / region", "الموقع / المنطقة", ckb: "شوێن / ناوچە", kmr: "Cih / herêm")
         case "flags":
-            return tr("hidden feature flag", "ميزة مخفية", "تایبەتمەندیی شاراوە", "Taybetmendiya veşartî")
+            return tr("hidden feature flag", "ميزة مخفية", ckb: "تایبەتمەندیی شاراوە", kmr: "Taybetmendiya veşartî")
         case "onboarding":
-            return tr("onboarding / splash screen", "شاشة البداية", "شاشەی دەستپێک", "Dîmendera destpêkê")
+            return tr("onboarding / splash screen", "شاشة البداية", ckb: "شاشەی دەستپێک", kmr: "Dîmendera destpêkê")
         case "update":
-            return tr("forced update check", "فحص تحديث إجباري", "پشکنینی نوێکردنەوەی زۆرەملێ", "Kontrola nûvekirina zorê")
+            return tr("forced update check", "فحص تحديث إجباري", ckb: "پشکنینی نوێکردنەوەی زۆرەملێ", kmr: "Kontrola nûvekirina zorê")
         case "trial":
-            return tr("trial expiry", "انتهاء التجربة", "بەسەرچوونی تاقیکردنەوە", "Qedandina ceribandinê")
+            return tr("trial expiry", "انتهاء التجربة", ckb: "بەسەرچوونی تاقیکردنەوە", kmr: "Qedandina ceribandinê")
         case "connectivity":
-            return tr("connectivity check", "فحص الاتصال", "پشکنینی پەیوەندی", "Kontrola girêdanê")
+            return tr("connectivity check", "فحص الاتصال", ckb: "پشکنینی پەیوەندی", kmr: "Kontrola girêdanê")
         default:
-            return tr("extra feature", "ميزة إضافية", "تایبەتمەندیی زیاتر", "Taybetmendiyeke zêde")
+            return tr("extra feature", "ميزة إضافية", ckb: "تایبەتمەندیی زیاتر", kmr: "Taybetmendiyeke zêde")
         }
     }
 
