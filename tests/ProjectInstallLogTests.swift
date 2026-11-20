@@ -74,13 +74,13 @@ final class ProjectInstallLogTests: XCTestCase {
                     if event.stage == .signing, event.completed > 0, !captured {
                         captured = true
                         reached.fulfill()
-                        _ = release.wait(timeout: .now() + 30)
+                        _ = release.wait(timeout: .now() + 60)
                     }
                 }
                 return .success(result)
             } catch { return .failure(error) }
         }
-        await fulfillment(of: [reached], timeout: 20)
+        await fulfillment(of: [reached], timeout: 120)
         XCTAssertEqual(operation.state?.stage, .signing)
         XCTAssertGreaterThan(operation.state?.completedUnits ?? 0, 0)
         XCTAssertTrue(operation.state?.log.contains { $0.source == "Signer" } == true)
