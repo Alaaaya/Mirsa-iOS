@@ -37,6 +37,11 @@ jobs:
       - name: Swift parse audit
         run: find ios-app uitests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
 
+      - name: Verify real tweak names and exact content deduplication
+        run: |
+          cat ios-app/Apps/IPATweakIdentity.swift scripts/diagnostics/tweak-identity.swift > /tmp/tweak-identity.swift
+          swift /tmp/tweak-identity.swift
+
       - name: Verify pinned platform private framework linker inputs
         run: bash scripts/prepare-privatekits-sdk.sh iphoneos
 
@@ -65,6 +70,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust-core
+
+      - name: Large executable disk-backed edit regressions
+        run: cargo test --manifest-path rust-core/Cargo.toml large_binary_tests -- --test-threads=1
 
       # rust-core changed (sideloader + container signer), so rebuild the
       # static library instead of using the prebuilt AirliftFFI.xcframework.

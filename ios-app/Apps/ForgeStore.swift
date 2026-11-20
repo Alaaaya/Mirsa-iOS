@@ -279,7 +279,7 @@ struct ForgeProject: Codable, Identifiable {
     }
     func addToLibrary(_ id: UUID) async throws {
         let url = try await build(id)
-        try await IPATweakLibrary.shared.addFile(url)
+        try await IPATweakLibrary.shared.addFile(url, displayName: project(id)?.name)
     }
     /// Primary output: the built tweak dylib itself.
     func exportDylib(_ id: UUID) async throws -> URL {

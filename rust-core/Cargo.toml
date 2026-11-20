@@ -58,6 +58,8 @@ hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 libc = "0.2"
+memmap2 = "=0.9.12"
+tempfile = "3"
 
 # isideload (MIT, github.com/nab138/isideload): Apple ID login (GSA/SRP + 2FA),
 # anisette, development certificate / App ID / provisioning profile management

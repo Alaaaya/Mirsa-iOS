@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Sources use explicit DEBUG fixtures; Tools > Store uses the bundled live endpoint, without catalogue fixtures.
 final class SourcesToolsStoreScreenshotsUITests: XCTestCase {
@@ -78,6 +79,37 @@ final class SourcesToolsStoreScreenshotsUITests: XCTestCase {
                 app.terminate()
             }
         }
+    }
+
+    /// Inspect rendered pixels, not only the light/dark accessibility marker.
+    func testLightDockRenderedPixels() throws {
+        let app = launch("tools", theme: "light")
+        app.buttons["tools-section-store"].tap()
+        let dock = app.descendants(matching: .any)["mirsa-tab-dock"].firstMatch
+        expectation(for: NSPredicate(format: "value == %@", "light"), evaluatedWith: dock)
+        waitForExpectations(timeout: 8)
+        Thread.sleep(forTimeInterval: 1)
+        shot("light_tools-store_dock-pixel-proof")
+        let pill = app.descendants(matching: .any)["mirsa-main-tab-pill"].firstMatch
+        XCTAssertTrue(pill.exists)
+        let screenshot = XCUIScreen.main.screenshot()
+        let image = try XCTUnwrap(screenshot.image.cgImage)
+        let scale = CGFloat(image.width) / app.frame.width
+        let frame = pill.frame
+        // A narrow inset strip of glass, above the icons and selected pill.
+        let rect = CGRect(x: (frame.minX+24)*scale, y: (frame.minY+7)*scale,
+                          width: (frame.width-48)*scale, height: 3*scale)
+        let crop = try XCTUnwrap(image.cropping(to: rect))
+        var pixel: [UInt8] = [0,0,0,0]
+        let brightness: Double = try pixel.withUnsafeMutableBytes { bytes in
+            let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return (Double(bytes[0])+Double(bytes[1])+Double(bytes[2])) / 765
+        }
+        XCTAssertGreaterThan(brightness, 0.65, "Light dock must render pale, not merely report light")
+        app.terminate()
     }
 
     func testLightDockDoesNotLeakToOtherToolsSections() {

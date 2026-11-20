@@ -40,7 +40,7 @@ extension ForgeChatStore {
         var handedOff = false
         defer { if !handedOff { MirsaManagedTmp.end(dir) } }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent(ext == "tendies" ? Self.safeTendiesName(a) : a.id.uuidString + "." + ext)
+        let dest = dir.appendingPathComponent(ext == "tendies" ? Self.safeTendiesName(a) : (["dylib", "deb", "zip", "framework"].contains(ext) ? (IPATweakIdentity.cleanName(a.name) ?? a.id.uuidString) : a.id.uuidString) + "." + ext)
         try? FileManager.default.removeItem(at: dest)
         FileManager.default.createFile(atPath: dest.path, contents: nil)
         let out = try FileHandle(forWritingTo: dest)

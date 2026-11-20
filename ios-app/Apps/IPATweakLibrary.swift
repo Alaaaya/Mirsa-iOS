@@ -3,9 +3,10 @@ import SwiftUI
 
 struct IPATweak: Identifiable, Codable {
     let id: UUID
-    let name: String
+    var name: String
     let roots: [String] // paths relative to this item's private directory
     let addedAt: Date
+    var contentID: String? = nil
     let packageOnlyCode: Bool
 }
 
@@ -46,6 +47,24 @@ final class IPATweakLibrary: ObservableObject {
                 item.roots.allSatisfy { FileManager.default.fileExists(atPath: Self.root.appendingPathComponent(item.id.uuidString).appendingPathComponent($0).path) }
             }
         }
+        Task { await normalizeSavedItems() }
+    }
+    /// Upgrade old UUID labels and collapse exact duplicates without deleting
+    /// old folders that may still be referenced by an already-open editor.
+    private func normalizeSavedItems() async {
+        let snapshot = items
+        let updated = await Task.detached { snapshot.map { original -> IPATweak in
+            var item = original
+            let roots = item.roots.map { Self.root.appendingPathComponent(item.id.uuidString).appendingPathComponent($0) }
+            if let hash = try? IPATweakIdentity.fingerprint(roots) {
+                item.contentID = hash
+                item.name = IPATweakIdentity.name(preferred: item.name, roots: roots, fingerprint: hash)
+            }
+            return item
+        } }.value
+        let byID = Dictionary(updated.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        items = IPATweakIdentity.deduplicated(items.map { byID[$0.id] ?? $0 }, identity: { $0.contentID })
+        try? save()
     }
     nonisolated private static func safeRelative(_ p: String) -> Bool {
         !p.isEmpty && !p.hasPrefix("/") && !p.contains("\\") && !p.contains("\0") &&
@@ -82,7 +101,7 @@ final class IPATweakLibrary: ObservableObject {
 
     /// A single result is automatic; archives with several roots require explicit selection.
     @discardableResult
-    func addFile(_ url: URL, allowSelection: Bool = false) async throws -> IPATweak {
+    func addFile(_ url: URL, allowSelection: Bool = false, displayName: String? = nil) async throws -> IPATweak {
         guard !importing else { throw SideloadError.message(IPATweakImportText.error("busy")) }
         importing = true
         defer { importing = false }
@@ -119,11 +138,25 @@ final class IPATweakLibrary: ObservableObject {
         }
         try Task.checkCancellation()
         let item = try await withTaskCancellationHandler(operation: {
-            try await Task.detached { try Self.commit(chosen, session: session, cancellation: cancellation, name: url.deletingPathExtension().lastPathComponent) }.value
+            try await Task.detached { try Self.commit(chosen, session: session, cancellation: cancellation, name: displayName ?? url.lastPathComponent) }.value
         }, onCancel: { try? Data().write(to: cancellation) })
         if Task.isCancelled || FileManager.default.fileExists(atPath: cancellation.path) {
             try? FileManager.default.removeItem(at: Self.root.appendingPathComponent(item.id.uuidString))
             throw CancellationError()
+        }
+        // Normalization and content hashing run off the UI thread, including
+        // legacy entries with no stored hash. The import lock serializes adds.
+        await normalizeSavedItems()
+        if let existing = items.first(where: { $0.contentID != nil && $0.contentID == item.contentID }) {
+            try? FileManager.default.removeItem(at: Self.root.appendingPathComponent(item.id.uuidString))
+            if IPATweakIdentity.cleanName(existing.name) == nil || existing.name.hasPrefix("Tweak ") {
+                if let index = items.firstIndex(where: { $0.id == existing.id }) {
+                    items[index].name = item.name
+                    try save()
+                    return items[index]
+                }
+            }
+            return existing
         }
         items.insert(item, at: 0)
         do { try save() } catch {
@@ -169,7 +202,10 @@ final class IPATweakLibrary: ObservableObject {
                 try copyValidated(session.appendingPathComponent(candidate.path), to: target, cancellation: cancellation)
                 roots.append(String(index) + "/" + candidate.name)
             }
-            return IPATweak(id: id, name: name, roots: roots, addedAt: Date(), packageOnlyCode: candidates.contains { $0.origin.hasPrefix("deb") })
+            let urls = roots.map { folder.appendingPathComponent($0) }
+            let hash = try IPATweakIdentity.fingerprint(urls)
+            let title = IPATweakIdentity.name(preferred: name, roots: urls, fingerprint: hash)
+            return IPATweak(id: id, name: title, roots: roots, addedAt: Date(), contentID: hash, packageOnlyCode: candidates.contains { $0.origin.hasPrefix("deb") })
         } catch { try? fm.removeItem(at: folder); throw error }
     }
 

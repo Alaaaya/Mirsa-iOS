@@ -42,7 +42,7 @@ fn ranges(d:&[u8])->Result<Vec<(usize,usize)>> {
 fn commands(d:&[u8])->Result<Vec<Cmd>> {
  if d.len()<32||d[..4]!=[0xcf,0xfa,0xed,0xfe]{return Err("Only 64-bit little-endian Mach-O library editing is supported".into())}
  let n=u32at(d,16)? as usize;let end=32usize.checked_add(u32at(d,20)? as usize).ok_or("Command overflow")?;
- if n>65536||end>d.len(){return Err("Invalid load table".into())}
+ if n>65536||end>d.len()||end>16*1024*1024{return Err("Invalid load table".into())}
  let mut at=32;let mut out=Vec::new();
  for _ in 0..n {
   if at+8>end{return Err("Truncated load table".into())}let k=u32at(d,at)?;let size=u32at(d,at+4)? as usize;
@@ -197,7 +197,11 @@ fn ordinals(d:&mut[u8],cmds:&[Cmd],map:&[Option<u64>],header:usize)->Result<()> 
   _=>{}
  }}Ok(())
 }
+#[cfg(test)]
 fn rewrite(d:&[u8],edit:&Edit)->Result<Vec<u8>> {
+ let mut out=d.to_vec();rewrite_in_place(&mut out,edit)?;Ok(out)
+}
+fn rewrite_in_place(d:&mut[u8],edit:&Edit)->Result<()> {
  let cmds=commands(d)?;let old:Vec<_>=cmds.iter().filter(|c|load(c.kind)).collect();
  let names:HashSet<_>=old.iter().map(|c|c.name.as_ref().unwrap().as_str()).collect();
  if old.len()!=names.len(){return Err("Duplicate dependency load commands cannot safely be edited".into())}
@@ -207,11 +211,11 @@ fn rewrite(d:&[u8],edit:&Edit)->Result<Vec<u8>> {
  let mut remaining:Vec<_>=old.iter().copied().filter(|c|!removed.contains(c.name.as_ref().unwrap().as_str())).collect();
  remaining.sort_by_key(|c|edit.order.iter().position(|n|Some(n)==c.name.as_ref()).unwrap_or(usize::MAX));
  let mut map=vec![Some(0)];for c in &old{map.push(remaining.iter().position(|r|r.at==c.at).map(|i|(i+1)as u64))}
- if map.iter().enumerate().all(|(i,v)|*v==Some(i as u64)){return Ok(d.to_vec())}
- let mut out=d.to_vec();let end=32+u32at(d,20)? as usize;ordinals(&mut out,&cmds,&map,end)?;
+ if map.iter().enumerate().all(|(i,v)|*v==Some(i as u64)){return Ok(())}
+ let end=32+u32at(d,20)? as usize;ordinals(d,&cmds,&map,end)?;
  let mut iter=remaining.into_iter();let mut packed=Vec::new();let mut count=0;
- for c in &cmds {let chosen=if load(c.kind){iter.next()}else{Some(c)};if let Some(c)=chosen{packed.extend_from_slice(&out[c.at..c.at+c.size]);count+=1}}
- out[32..end].fill(0);out[32..32+packed.len()].copy_from_slice(&packed);put32(&mut out,16,count);put32(&mut out,20,packed.len() as u32);Ok(out)
+ for c in &cmds {let chosen=if load(c.kind){iter.next()}else{Some(c)};if let Some(c)=chosen{packed.extend_from_slice(&d[c.at..c.at+c.size]);count+=1}}
+ d[32..end].fill(0);d[32..32+packed.len()].copy_from_slice(&packed);put32(d,16,count);put32(d,20,packed.len() as u32);Ok(())
 }
 pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
  if edits.len()>4096{return Err("Too many library edits".into())}let original=graph(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut owners=HashSet::new();let mut patches=BTreeMap::new();
@@ -222,7 +226,7 @@ pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
   let rel=relative(&edit.owner)?;if rel.to_str()!=Some(edit.owner.as_str()){return Err("Noncanonical owner path".into())}
   for name in edit.removed.iter().chain(&edit.disabled).chain(&edit.order){if !original.iter().any(|l|l.owner==edit.owner&&l.load_path==*name){return Err("Library edit references unknown or system dependency".into())}}
   if !original.iter().any(|l|l.owner==edit.owner){return Err("Unknown library owner".into())}
-  let path=app.join(rel);let mut d=read_macho(&path)?;for(a,b)in ranges(&d)?{if d[a..a+4]!=[0xcf,0xfa,0xed,0xfe]{continue}let updated=rewrite(&d[a..b],edit)?;d[a..b].copy_from_slice(&updated)}patches.insert(path,d);
+  let path=app.join(rel);let mut d=read_macho(&path)?;for(a,b)in ranges(&d)?{if d[a..a+4]!=[0xcf,0xfa,0xed,0xfe]{continue}rewrite_in_place(&mut d[a..b],edit)?;}patches.insert(path,d);
  }
  let mut candidates=HashSet::new();
  for l in &original {if edits.iter().any(|e|e.owner==l.owner&&e.removed.contains(&l.load_path)){if let Some(p)=&l.bundled_path{candidates.insert(p.clone());}}}
@@ -236,7 +240,7 @@ pub(super) fn apply(app:&Path,edits:&[Edit])->Result<()> {
  // All validation/remapping finishes before the first write. Caller discards the
  // entire disposable extraction on IO error. Framework resources and unresolved
  // or shared references are conservatively retained. Original IPA is untouched.
- if let Some(data)=runtime_patch{patches.insert(app.join(runtime_libraries::OWNER),data);}
+ if let Some(data)=runtime_patch{patches.insert(app.join(runtime_libraries::OWNER),data.into());}
  for(p,d)in patches{fs::write(p,d).map_err(err)?}
  for p in deletions{fs::remove_file(app.join(p)).map_err(err)?}Ok(())
 }
