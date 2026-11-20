@@ -103,7 +103,7 @@ enum PersonalIdentityVault {
         let status = SecItemCopyMatching(q as CFDictionary, &value)
         if status == errSecItemNotFound { return Collection(entries: [], selected: nil) }
         guard status == errSecSuccess, let data = value as? Data else {
-            throw SideloadError.message("افتح قفل الآيفون لتقدر تستخدم شهاداتك.")
+            throw SideloadError.message(tr5("Unlock your iPhone to use your certificates.", "افتح قفل الآيفون لتقدر تستخدم شهاداتك.", de: "Entsperre dein iPhone, um deine Zertifikate zu verwenden.", ckb: "ئایفۆنەکەت بکەرەوە بۆ بەکارهێنانی بڕوانامەکانت.", kmr: "Ji bo bikaranîna sertîfîkayên xwe kilîta iPhone vekin."))
         }
         if let list = try? JSONDecoder().decode(Collection.self, from: data) { return list }
         let legacy = try JSONDecoder().decode(Material.self, from: data)

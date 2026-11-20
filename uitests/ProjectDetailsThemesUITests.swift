@@ -54,6 +54,12 @@ final class ProjectDetailsThemesUITests: XCTestCase {
         for index in themes.indices {
             select(index)
             capture("live-project-\(language)-\(themes[index])-top")
+            app.terminate()
+            app.launch() // Reopen every saved palette, not just Gold.
+            XCTAssertTrue(app.buttons["mirsa.project.theme-menu"].waitForExistence(timeout: 20), "saved \(themes[index])")
+            XCTAssertTrue(app.buttons["mirsa.project.sign"].exists)
+            XCTAssertEqual(app.state, .runningForeground)
+            capture("saved-project-\(language)-\(themes[index])-top")
         }
         select(1)
         app.terminate()

@@ -185,6 +185,7 @@ struct PersonalProjectDetailView: View {
                 }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 32)
                     .contentShape(Rectangle())
             }.scrollIndicators(.hidden)
+                .clipped()
                 .accessibilityIdentifier("mirsa.project.editor-scroll")
                 .scrollDismissesKeyboard(.interactively)
                 .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
@@ -323,7 +324,7 @@ struct PersonalProjectDetailView: View {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                     }.buttonStyle(.mirsaPress)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(comp.title).font(.subheadline).lineLimit(1)
+                        Text(comp.title).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                         if comp.subtitle != comp.title { Text(comp.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
                         methodControls(comp)
                     }
@@ -883,6 +884,7 @@ extension PersonalProjectDetailView {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }.scrollIndicators(.hidden)
+                .clipped()
                 .accessibilityIdentifier("mirsa.project.editor-scroll")
                 .scrollDismissesKeyboard(.interactively)
                 .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
@@ -1222,6 +1224,7 @@ extension PersonalProjectDetailView {
                 }
             }
         }.scrollIndicators(.hidden)
+                .clipped()
     }
 
     // MARK: Obsidian Gold
