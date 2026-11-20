@@ -39,6 +39,12 @@ jobs:
       - name: Generate project and build unsigned IPA
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
+          python3 - <<'PYVERSION'
+          from pathlib import Path
+          p=Path('project.yml')
+          s=p.read_text().replace('MARKETING_VERSION: "2.2"', 'MARKETING_VERSION: "2.9.4"')
+          p.write_text(s)
+          PYVERSION
           xcodegen generate
           bash build-ipa.sh
       - name: Stamp isolated diagnostic build and verify IPA
