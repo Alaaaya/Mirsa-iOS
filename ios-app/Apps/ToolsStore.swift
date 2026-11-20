@@ -525,6 +525,7 @@ enum ToolsStoreText {
     static var myUploads: String { t("My uploads", "ملفاتي المرفوعة", "Meine Uploads", "بارکراوەکانم", "Barkirinên min") }
     static var statusPending: String { t("Pending review", "بانتظار المراجعة", "In Prüfung", "چاوەڕێی پشکنین", "Li benda kontrolê") }
     static var statusApproved: String { t("Published", "منشور", "Veröffentlicht", "بڵاوکراوە", "Weşandî") }
+    static var statusHeld: String { t("Held for safety review", "موقوف للمراجعة الأمنية", "Zur Sicherheitsprüfung zurückgehalten", "بۆ پشکنینی ئاسایش ڕاگیراوە", "Ji bo kontrola ewlehiyê hatiye ragirtin") }
     static var statusRejected: String { t("Rejected", "مرفوض", "Abgelehnt", "ڕەتکرایەوە", "Hate redkirin") }
     static var statusUploading: String { t("Upload incomplete", "الرفع ما كمل", "Upload unvollständig", "بارکردن تەواو نەبوو", "Barkirin neqediya") }
     static var cancel: String { t("Cancel", "إلغاء", "Abbrechen", "هەڵوەشاندنەوە", "Betal") }
