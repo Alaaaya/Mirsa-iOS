@@ -278,6 +278,41 @@ enum PremiumScanner {
         PremiumPatternStore.shared.snapshot().features
     }
 
+    /// Word-boundary pattern match for method names.
+    ///
+    /// Plain `contains` over-matches: "isPro" is a substring of ironSource's
+    /// "ISProgIsManager…"/"ISProductSettings…" and of "isProxy…", and
+    /// "hasPro" of "hasProloadVideo" — ad-SDK methods that were counted as
+    /// premium checks (267/187 "unlockable" on two ReverseAudio builds)
+    /// although no hook on them can unlock anything. A pattern only matches
+    /// at a camelCase word boundary: it must start at the string start, at
+    /// an uppercase letter, or after a non-letter, and must end at the
+    /// string end, before an uppercase letter, or before a non-letter.
+    /// Case-insensitive. Used for premium, limit and feature symbols.
+    private static func matchesAtWordBoundary(_ method: String, pattern: String) -> Bool {
+        let lowerMethod = Array(method.lowercased())
+        let lowerPattern = Array(pattern.lowercased())
+        guard !lowerPattern.isEmpty, lowerPattern.count <= lowerMethod.count else { return false }
+        let original = Array(method)
+        for start in 0...(lowerMethod.count - lowerPattern.count) {
+            guard lowerMethod[start..<(start + lowerPattern.count)].elementsEqual(lowerPattern) else { continue }
+            let startOK: Bool = {
+                if start == 0 { return true }
+                if original[start].isUppercase { return true }
+                return !original[start - 1].isLetter
+            }()
+            guard startOK else { continue }
+            let end = start + lowerPattern.count
+            let endOK: Bool = {
+                if end == original.count { return true }
+                if original[end].isUppercase { return true }
+                return !original[end].isLetter
+            }()
+            if endOK { return true }
+        }
+        return false
+    }
+
     /// What a detected method of this feature must return in the dylib.
     /// "none" means: finding only, no hook — the dylib handles the
     /// feature with a built-in hook gated by the feature flag instead
@@ -422,8 +457,10 @@ enum PremiumScanner {
         var hooks: [Hook] = []
         var seenSelectors = Set<String>()
         for method in methods {
-            let lower = method.lowercased()
-            guard loweredPatterns.contains(where: { lower.contains($0) }) else { continue }
+            // Underscore-prefixed selectors are ivars/private accessors
+            // (e.g. "_entitlement"), not hookable premium checks.
+            guard !method.hasPrefix("_") else { continue }
+            guard loweredPatterns.contains(where: { matchesAtWordBoundary(method, pattern: $0) }) else { continue }
             guard seenSelectors.insert(method).inserted else { continue }
             findings.append(Finding(kind: .custom, name: method,
                 detail: tr("premium check", "فحص الاشتراك المميز",
@@ -438,8 +475,7 @@ enum PremiumScanner {
         // names no method to hook, so it is not counted unlockable).
         let loweredLimit = limitPatterns.map { $0.lowercased() }
         for method in methods {
-            let lower = method.lowercased()
-            guard loweredLimit.contains(where: { lower.contains($0) }) else { continue }
+            guard loweredLimit.contains(where: { matchesAtWordBoundary(method, pattern: $0) }) else { continue }
             guard seenSelectors.insert(method).inserted else { continue }
             let ret = returnsFor(feature: "limit", method: method) ?? "no"
             findings.append(Finding(kind: .limit, name: method,
@@ -476,8 +512,7 @@ enum PremiumScanner {
             let pats = featurePatterns[id]!
             let loweredSymbols = pats.symbols.map { $0.lowercased() }
             for method in methods {
-                let lower = method.lowercased()
-                guard loweredSymbols.contains(where: { lower.contains($0) }) else { continue }
+                guard loweredSymbols.contains(where: { matchesAtWordBoundary(method, pattern: $0) }) else { continue }
                 guard seenSelectors.insert(method).inserted else { continue }
                 findings.append(Finding(kind: kind, name: method,
                     detail: featureDetail(for: id),
