@@ -57,6 +57,9 @@ struct ZipEntry: Equatable {
     let compressedSize: UInt64
     let uncompressedSize: UInt64
     let localHeaderOffset: UInt64
+    /// Unix mode from the central directory's external attributes
+    /// (high 16 bits). 0 when the zip stored no mode.
+    let unixMode: UInt32
 }
 
 struct ZipReader {
@@ -113,7 +116,7 @@ struct ZipReader {
             if limits.rejectSymlinks && (unixMode & 0xF000) == 0xA000 { throw IPAValidationError.unsafePath(name) }
             sum += usize
             guard sum <= limits.maxTotalUncompressed else { throw IPAValidationError.tooLarge }
-            out.append(ZipEntry(name: name, method: method, compressedSize: csize, uncompressedSize: usize, localHeaderOffset: off))
+            out.append(ZipEntry(name: name, method: method, compressedSize: csize, uncompressedSize: usize, localHeaderOffset: off, unixMode: unixMode))
             p += 46 + nlen + elen + clen
         }
         self.entries = out

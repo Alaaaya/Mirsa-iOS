@@ -249,6 +249,17 @@ enum FairPlayDecryptor {
                     off += UInt64(bytes.count)
                 }
                 guard off == e.uncompressedSize else { throw Error.ioError("corrupt entry " + clean) }
+                // Restore the zip entry's Unix mode. FileManager.createFile
+                // makes every file 0644, so without this the executable bit
+                // is lost before rezip even runs — build 39's rezip fix only
+                // preserved the already-wrong on-disk mode, which is why the
+                // plain-decrypted Minutes IPA still failed in LCSign as
+                // "not a valid Mach-O file" (2026-11-20). A stored mode of
+                // 0 means the zip carried none; leave the file as-is then
+                // (rezip forces 0755 for Mach-O files as a safety net).
+                if e.unixMode & 0o777 != 0 {
+                    try? fm.setAttributes([.posixPermissions: NSNumber(value: e.unixMode & 0o7777)], ofItemAtPath: target.path)
+                }
             } catch let error as BundleFileError {
                 throw Error.ioError("extracting \(clean): \(String(describing: error))")
             } catch let error as Error {
@@ -526,10 +537,27 @@ enum FairPlayDecryptor {
                 // path round-trips through the Rust packer, which preserves
                 // modes — that is why an unlocked IPA installed while a
                 // plain-decrypted one did not. Minutes, 2026-11-20.)
-                let permissions = (attrs[.posixPermissions] as? NSNumber)?.uint16Value
+                var permissions = (attrs[.posixPermissions] as? NSNumber)?.uint16Value
 
                 let handle = try FileHandle(forReadingFrom: entry.url)
                 defer { try? handle.close() }
+
+                // Safety net: a Mach-O file must be 0755 in the IPA or
+                // signers reject it as "not a valid Mach-O file". The
+                // on-disk mode can still be 0644 when extraction dropped
+                // the zip's stored mode, so force 0755 for Mach-O magic
+                // regardless of what is on disk. (The provider closure
+                // below seeks before every read, so peeking here is safe.)
+                if let header = try? handle.read(upToCount: 4), header.count == 4 {
+                    let b = [UInt8](header)
+                    let isMachO =
+                        (b[0] == 0xFE && b[1] == 0xED && b[2] == 0xFA && (b[3] == 0xCE || b[3] == 0xCF)) ||
+                        (b[0] == 0xCE && b[1] == 0xFA && b[2] == 0xED && b[3] == 0xFE) ||
+                        (b[0] == 0xCF && b[1] == 0xFA && b[2] == 0xED && b[3] == 0xFE) ||
+                        (b[0] == 0xCA && b[1] == 0xFE && b[2] == 0xBA && (b[3] == 0xBE || b[3] == 0xBF)) ||
+                        (b[0] == 0xBE && b[1] == 0xBA && b[2] == 0xFE && b[3] == 0xCA)
+                    if isMachO { permissions = 0o755 }
+                }
 
                 try archive.addEntry(
                     with: entry.rel,
