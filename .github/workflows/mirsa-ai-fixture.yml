@@ -75,7 +75,9 @@ jobs:
               for a in t.get("attachments", []):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   name = re.sub(r"_\d+_[0-9A-Fa-f-]{36}(\.\w+)$", r"\1", name)
-                  if not name.lower().endswith(".png"): name += ".png"
+                  # Failure attachments include text hierarchies as well as PNGs.
+                  # Preserve their extension and sanitize artifact-invalid characters.
+                  name = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", name)
                   shutil.copy(os.path.join("build/raw", a["exportedFileName"]), os.path.join("build/shots", name))
           print("\n".join(sorted(os.listdir("build/shots"))))
           PY
@@ -91,6 +93,7 @@ jobs:
             build/shots
             build/crashes
             build/ai-ui.log
+            build/voice-unit.log
           if-no-files-found: warn
 
   unsigned-ipa:

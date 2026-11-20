@@ -8,6 +8,9 @@ voice = read("ios-app/Apps/ChatVoice.swift")
 upload = read("ios-app/Apps/AttachmentUploader.swift")
 chat = read("ios-app/Apps/ForgeChat.swift")
 meta = read("ios-app/Apps/ForgeChatTimeline.swift")
+assert 'accessibilityIdentifier("chat-voice-play")' in voice
+assert 'accessibilityIdentifier("chat-voice-bubble")' not in voice
+assert 'accessibilityElement(children: .contain)' in voice
 assert ".requestRecordPermission()" in voice
 assert "SFSpeechRecognizer" not in voice and "Speech.framework" not in voice
 assert "maxDuration: TimeInterval = 300" in voice

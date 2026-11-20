@@ -19,6 +19,7 @@ final class MirsaVoiceUITests: XCTestCase {
         image.name = name; image.lifetime = .keepAlways; add(image)
     }
     func testVoiceComposerScreenshots() {
+        continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         for language in ["ar", "en", "de", "kmr", "ckb"] {
             let idle = launch(nil, language: language)

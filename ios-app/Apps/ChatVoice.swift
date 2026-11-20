@@ -259,7 +259,9 @@ struct ChatVoiceBubble: View {
         .padding(10).frame(maxWidth: 280)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
         .environment(\.layoutDirection, .leftToRight)
-        .accessibilityIdentifier("chat-voice-bubble")
+        // Keep the playback control a separate accessibility element. A parent
+        // identifier otherwise propagates to the single SwiftUI Button child.
+        .accessibilityElement(children: .contain)
         .onDisappear { player.stop() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { player.stop() } }
     }
