@@ -739,6 +739,14 @@ struct PersonalProjectDetailView: View {
         #if DEBUG
         if MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaProjectThemesFixture") {
             d.tweakIDs = [tweaks.projectThemesScreenshotFixture()]
+            // Inert presentation-only identity: never stored in the vault or used to sign.
+            let fixture = PersonalIdentityVault.SavedIdentity(
+                id: "project-theme-ui", material: .init(p12: Data(), password: "", profile: Data()),
+                name: "Mirsa UI Certificate", teamID: "UITESTONLY", bundleID: "*",
+                expiry: Date().addingTimeInterval(30 * 86_400), profileType: "Development",
+                verification: .unknown, entitlements: [:], devices: [])
+            identities = [fixture]
+            selectedID = fixture.id
         }
         #endif
         draftDestination = library.draftURL(app)
