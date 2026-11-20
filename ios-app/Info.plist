@@ -60,7 +60,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>An app running in the Mirsa Container wants to use the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>An app running in the Mirsa Container wants to use the microphone.</string>
+	<string>Record and send voice messages to Mirsa, or allow a container app to use the microphone.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>An app running in the Mirsa Container wants to save to your photo library.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -347,5 +347,7 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>MirsaToolsStoreEndpoint</key>
+	<string></string>
 </dict>
 </plist>

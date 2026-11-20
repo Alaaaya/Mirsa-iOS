@@ -90,16 +90,17 @@ enum ChatAttachmentPayload: Equatable {
     case text(data: Data, name: String, mime: String)
     /// .zip / .deb / .dylib, uploaded as kind=file. Stored opaque; never extracted, loaded or run.
     case binary(data: Data, name: String, mime: String)
+    case audio(data: Data, name: String, durationMS: Int)
     case link(url: URL, name: String)
 
     var kind: String {
-        switch self { case .image: return "image"; case .text, .binary: return "file"; case .link: return "link" }
+        switch self { case .image: return "image"; case .text, .binary: return "file"; case .audio: return "audio"; case .link: return "link" }
     }
     var name: String {
-        switch self { case .image(_, let n), .text(_, let n, _), .binary(_, let n, _), .link(_, let n): return n }
+        switch self { case .image(_, let n), .text(_, let n, _), .binary(_, let n, _), .audio(_, let n, _), .link(_, let n): return n }
     }
     var byteCount: Int? {
-        switch self { case .image(let d, _), .text(let d, _, _), .binary(let d, _, _): return d.count; case .link: return nil }
+        switch self { case .image(let d, _), .text(let d, _, _), .binary(let d, _, _), .audio(let d, _, _): return d.count; case .link: return nil }
     }
     var isBinary: Bool { if case .binary = self { return true }; return false }
 }
@@ -182,10 +183,16 @@ enum ChatAttachmentImage {
         switch payload {
         case .image(let jpeg, _): body["mime"] = "image/jpeg"; body["base64"] = jpeg.base64EncodedString()
         case .text(let data, _, let mime), .binary(let data, _, let mime): body["mime"] = mime; body["base64"] = data.base64EncodedString()
+        case .audio(let data, _, let durationMS):
+            guard !data.isEmpty, data.count <= ChatVoiceRules.maxBytes else { throw ChatAttachmentError(status: 422, code: "attachment_size") }
+            guard (1...300_000).contains(durationMS) else { throw ChatAttachmentError(status: 422, code: "attachment_audio") }
+            body["id"] = UUID().uuidString.lowercased()
+            body["durationMS"] = durationMS
+            body["mime"] = "audio/mp4"; body["base64"] = data.base64EncodedString()
         case .link(let url, _): body["url"] = url.absoluteString
         }
         // 5 MiB decoded is ~7 MB of JSON: give the upload more time on slow connections.
-        let (data, _) = try await post(body, maxBytes: 64 * 1024, timeout: payload.isBinary ? 180 : 60)
+        let (data, _) = try await post(body, maxBytes: 64 * 1024, timeout: (payload.isBinary || payload.kind == "audio") ? 180 : 60)
         struct W: Decodable { let attachment: ChatAttachmentMeta; let replayed: Bool? }
         guard let w = try? JSONDecoder().decode(W.self, from: data) else { throw ChatAttachmentError(status: 503, code: "attachment_unavailable") }
         return remember(w.attachment, payload)
@@ -195,18 +202,23 @@ enum ChatAttachmentImage {
     func read(_ id: UUID, threadID: UUID, expected: ChatAttachmentMeta? = nil) async throws -> ChatAttachmentReadResult {
         if let c = readCache.object(forKey: id as NSUUID), let mime = known[id]?.mime { return .bytes(c as Data, mime: mime) }
         if ChatAttachmentConfig.fixtureUI && !isEnabled, let p = payloads[id] {
-            switch p { case .image(let d, _): return .bytes(d, mime: "image/jpeg"); case .text(let d, _, let m), .binary(let d, _, let m): return .bytes(d, mime: m); case .link(let u, _): return .link(u) }
+            switch p { case .image(let d, _): return .bytes(d, mime: "image/jpeg"); case .text(let d, _, let m), .binary(let d, _, let m): return .bytes(d, mime: m); case .audio(let d, _, _): try ChatVoiceRules.verify(d, meta: expected ?? known[id]); return .bytes(d, mime: "audio/mp4"); case .link(let u, _): return .link(u) }
         }
         let binaryOK = MirsaFeatures.binaryAttachmentsEnabled
+        let audioRead = (expected ?? known[id])?.kind == "audio"
         let (data, http) = try await post(["action": "chat-attachment-read", "id": id.uuidString.lowercased(), "threadID": threadID.uuidString.lowercased()],
-                                          maxBytes: (binaryOK ? ChatAttachmentRules.binaryMaxBytes : ChatAttachmentRules.imageMaxBytes) + 1024,
-                                          timeout: binaryOK ? 180 : 60)
+                                          maxBytes: (audioRead ? ChatVoiceRules.maxBytes : (binaryOK ? ChatAttachmentRules.binaryMaxBytes : ChatAttachmentRules.imageMaxBytes)) + 1024,
+                                          timeout: (binaryOK || audioRead) ? 180 : 60)
         let mime = (http.mimeType ?? "").lowercased()
         if mime == "application/json", let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], o["contextOnly"] as? Bool == true,
            let s = o["url"] as? String, case .success(let url) = ChatAttachmentRules.validateLink(s) {
             return .link(url)
         }
-        guard ["image/jpeg", "text/plain", "application/json"].contains(mime) || (binaryOK && Self.isBinaryMime(mime)) else { throw ChatAttachmentError(status: 422, code: "attachment_type") }
+        guard ["image/jpeg", "text/plain", "application/json", "audio/mp4"].contains(mime) || (binaryOK && Self.isBinaryMime(mime)) else { throw ChatAttachmentError(status: 422, code: "attachment_type") }
+        if mime == "audio/mp4" {
+            try ChatVoiceRules.verify(data, meta: expected ?? known[id])
+            return .bytes(data, mime: mime)
+        }
         if Self.isBinaryMime(mime) { // not cached: up to 5 MiB
             try Self.verifyBinary(data, mime: mime, meta: expected ?? known[id])
             return .bytes(data, mime: mime)
@@ -248,11 +260,11 @@ enum ChatAttachmentImage {
 
     private func fixtureMeta(_ p: ChatAttachmentPayload) -> ChatAttachmentMeta {
         let size: Int64?
-        switch p { case .image(let d, _): size = Int64(d.count); case .text(let d, _, _), .binary(let d, _, _): size = Int64(d.count); case .link: size = nil }
+        switch p { case .image(let d, _): size = Int64(d.count); case .text(let d, _, _), .binary(let d, _, _), .audio(let d, _, _): size = Int64(d.count); case .link: size = nil }
         var url: String?
         if case .link(let u, _) = p { url = u.absoluteString }
-        let mime: String? = { switch p { case .image: return "image/jpeg"; case .text(_, _, let m), .binary(_, _, let m): return m; case .link: return nil } }()
-        return ChatAttachmentMeta(id: UUID(), kind: p.kind, name: ChatAttachmentRules.safeName(p.name), mime: mime, size: size,
+        let mime: String? = { switch p { case .image: return "image/jpeg"; case .text(_, _, let m), .binary(_, _, let m): return m; case .audio: return "audio/mp4"; case .link: return nil } }()
+        return ChatAttachmentMeta(id: UUID(), kind: p.kind, name: ChatAttachmentRules.safeName(p.name), mime: mime, size: size, durationMS: { if case .audio(_, _, let ms) = p { return ms }; return nil }(), sha256: { if case .audio(let d, _, _) = p { return SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }; return nil }(),
                                   expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400)), available: true, url: url)
     }
 
@@ -309,10 +321,10 @@ struct ChatDraftAttachment: Identifiable, Equatable {
     func items(_ thread: UUID) -> [ChatDraftAttachment] { byThread[thread] ?? [] }
     var uploader: AttachmentUploader { .shared }
 
-    func canAdd(_ thread: UUID) -> Bool { items(thread).count < ChatAttachmentRules.maxPerMessage }
+    func canAdd(_ thread: UUID) -> Bool { items(thread).count < ChatAttachmentRules.maxPerMessage && !items(thread).contains(where: { $0.payload.kind == "audio" }) }
 
     func add(_ payload: ChatAttachmentPayload, thread: UUID) {
-        guard canAdd(thread) else { return }
+        guard canAdd(thread), payload.kind != "audio" || items(thread).isEmpty else { return }
         let d = ChatDraftAttachment(id: UUID(), payload: payload, state: .uploading)
         byThread[thread, default: []].append(d)
         upload(d.id, thread: thread)

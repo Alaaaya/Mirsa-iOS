@@ -10,7 +10,7 @@ final class ForgeDylibDownload: NSObject, URLSessionDataDelegate, URLSessionTask
     private var bytes = 0
     private let maximumBytes: Int
     init(maximumBytes: Int = ForgeDylibInspector.maximumBytes) {
-        self.maximumBytes = min(max(1, maximumBytes), ForgeDylibInspector.maximumBytes)
+        self.maximumBytes = min(max(1, maximumBytes), 150 * 1024 * 1024)
         super.init()
     }
     private var redirects = 0
@@ -37,8 +37,8 @@ final class ForgeDylibDownload: NSObject, URLSessionDataDelegate, URLSessionTask
         if requireExtension && !["dylib", "deb"].contains(url.pathExtension.lowercased()) { throw ForgeDylibImportError.invalidURL }
     }
 
-    static func fetch(_ url: URL, configuration: URLSessionConfiguration = .ephemeral, maximumBytes: Int = ForgeDylibInspector.maximumBytes) async throws -> URL {
-        try validate(url)
+    static func fetch(_ url: URL, configuration: URLSessionConfiguration = .ephemeral, maximumBytes: Int = ForgeDylibInspector.maximumBytes, requireExtension: Bool = true) async throws -> URL {
+        try validate(url, requireExtension: requireExtension)
         let delegate = ForgeDylibDownload(maximumBytes: maximumBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in

@@ -4,8 +4,8 @@ import SwiftUI
 struct ToolsTab: View {
     @EnvironmentObject var vm: AppViewModel
     enum Section: String, CaseIterable, Identifiable {
-        // Fixed physical order in every language (same as the dock): Pairing, Device, Tendies, Tweaks.
-        case pairing, device, wallpapers, tweaks
+        // Fixed physical order in every language (same as the dock): Pairing, Device, Tendies, Tweaks, Store.
+        case pairing, device, wallpapers, tweaks, store
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -13,12 +13,15 @@ struct ToolsTab: View {
             case .device: return "iphone.gen3"
                 case .tweaks: return "wand.and.stars"
             case .wallpapers: return "play.rectangle.fill"
+            case .store: return "bag.fill"
             }
         }
     }
     @State private var section: Section = .pairing
     @Namespace private var ns
     @State private var chatComposerFocused = false
+    @AppStorage(SourcesTheme.key) private var storeThemeRaw = SourcesTheme.aurora.rawValue
+    private var storeTheme: SourcesTheme { SourcesTheme(rawValue: storeThemeRaw) ?? .aurora }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,6 +39,7 @@ struct ToolsTab: View {
                 case .device: DeviceToolsView()
                 case .wallpapers: TendiesView()
                 case .tweaks: NavigationView { ForgeView() }.navigationViewStyle(.stack)
+                case .store: ToolsStoreView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -43,7 +47,14 @@ struct ToolsTab: View {
             .animation(nil, value: section)
         }
         // One continuous page background behind the picker and every section.
-        .background(AuroraBackground().ignoresSafeArea())
+        // The Tools Store follows the Sources theme, so its whole page (picker strip included) uses that backdrop.
+        .background {
+            if section == .store {
+                SourcesThemeBackground(theme: storeTheme)
+            } else {
+                AuroraBackground().ignoresSafeArea()
+            }
+        }
         .preferredColorScheme(.dark)
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
     }
@@ -56,7 +67,7 @@ struct ToolsTab: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: s.icon).font(.system(size: 16, weight: .semibold)).frame(height: 18)
-                        Text(s == .device ? MirsaTr.german(tr("Device", "الجهاز")) : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(s == .device ? MirsaTr.german(tr("Device", "الجهاز")) : s == .wallpapers ? TendiesSection.name : s == .tweaks ? tr("Tweaks", "التويكس", ckb: "تویکەکان", kmr: "Tweak") : s == .store ? ToolsStoreText.tab : L.t("tools.\(s.rawValue)")).font(MirsaFont.tabLabel).lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(section == s ? .white : MirsaPalette.textTertiary)
                     .frame(maxWidth: .infinity)
