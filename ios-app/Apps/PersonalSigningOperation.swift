@@ -48,6 +48,29 @@ final class PersonalSigningOperation: ObservableObject {
         }
         var running = true
         var backgroundExpired = false
+        var stoppedByUser = false
+        /// Real events only, appended as the operation actually moves. Shown by the install log screen.
+        struct LogLine: Identifiable, Equatable {
+            let id = UUID()
+            let time: Date
+            let level: String
+            let source: String
+            let text: String
+        }
+        let startedAt = Date()
+        var stageStartedAt = Date()
+        var log: [LogLine] = [LogLine(time: Date(), level: "I", source: "System", text: PersonalSigningLabels.stage(.preparing))]
+        mutating func addLog(_ source: String, _ text: String, level: String = "I") {
+            log.append(LogLine(time: Date(), level: level, source: source, text: text))
+            if log.count > 400 { log.removeFirst(log.count - 400) }
+        }
+        static func source(for stage: Stage) -> String {
+            switch stage {
+            case .preparing, .connecting, .handedOff, .completed, .failed: return "System"
+            case .signing, .packaging: return "Signer"
+            case .uploading, .serving, .installing: return "Installer"
+            }
+        }
         var result: PersonalCertificateSigner.Result?
         var error: String?
         // OTA has no installation-completion callback. Once handed off, the
@@ -69,6 +92,17 @@ final class PersonalSigningOperation: ObservableObject {
             let nextReason = event.fallbackReason ?? fallbackReason
             guard stage != event.stage || fraction != nextFraction || nextReason != fallbackReason ||
                     completedUnits != nextCompleted || totalUnits != event.total else { return false }
+            if stage != event.stage {
+                let took = String(format: "%.1fs", Date().timeIntervalSince(stageStartedAt))
+                addLog(Self.source(for: stage), PersonalSigningLabels.stage(stage) + " (" + took + ")")
+                stageStartedAt = Date()
+                addLog(Self.source(for: event.stage), PersonalSigningLabels.stage(event.stage))
+            } else if event.stage == .signing, event.total > 0, nextCompleted != completedUnits {
+                addLog("Signer", personalText("Signed bundles", "الحزم الموقّعة") + " \(nextCompleted)/\(event.total)")
+            }
+            if nextReason != fallbackReason, let nextReason {
+                addLog("Installer", personalText("Local install unavailable, using upload instead. ", "التثبيت المحلي مو متاح، استخدمت الرفع. ") + personalText(nextReason.english, nextReason.arabic), level: "W")
+            }
             stage = event.stage; fraction = nextFraction; fallbackReason = nextReason
             completedUnits = nextCompleted; totalUnits = event.total
             return true
@@ -80,6 +114,13 @@ final class PersonalSigningOperation: ObservableObject {
     private var control: PersonalSigningControl?
     private var activityID: String?
     var running: Bool { state?.running == true }
+    /// Cooperative stop requested from the install log screen; takes effect at the next checkpoint.
+    func stop() {
+        guard state?.running == true else { return }
+        state?.stoppedByUser = true
+        state?.addLog("System", personalText("Stop requested", "طُلب الإيقاف"), level: "W")
+        control?.cancel()
+    }
 
     func start(projectID: UUID, title: String, input: URL, material: PersonalIdentityVault.Material,
                pairingPath: String, options: PersonalProjectOptions) {
@@ -106,6 +147,12 @@ final class PersonalSigningOperation: ObservableObject {
                 do {
                     _ = try await CertificateOTA.install(source: input, sourceIsArchive: true, control: control, material: material, options: options, projectID: projectID,
                         signingProgress: { event in self.receive(event, id: id, operation: operation) })
+                    if let current = self.state {
+                        var done = current
+                        done.addLog(State.source(for: done.stage), PersonalSigningLabels.stage(done.stage) + " (" + String(format: "%.1fs", Date().timeIntervalSince(done.stageStartedAt)) + ")")
+                        done.addLog("System", PersonalSigningLabels.stage(.handedOff) + " (" + String(format: "%.1fs", Date().timeIntervalSince(done.startedAt)) + ")")
+                        self.state = done
+                    }
                     self.state?.running = false
                     self.state?.stage = .handedOff
                     self.state?.error = nil
@@ -120,9 +167,12 @@ final class PersonalSigningOperation: ObservableObject {
                 }
             } catch {
                 guard self.state?.id == id else { return }
+                let stopped = self.state?.stoppedByUser == true
+                let reason = stopped ? personalText("Stopped.", "تم الإيقاف.") : error.localizedDescription
+                self.state?.addLog("System", reason, level: "E")
                 self.state?.stage = .failed
                 self.state?.fraction = nil
-                self.state?.error = error.localizedDescription
+                self.state?.error = reason
                 self.state?.running = false
                 self.finishActivity(success: false)
                 MirsaCompletionFeedback.shared.finish(operationID: operation, outcome: MirsaCompletionFeedback.outcome(for: error))
