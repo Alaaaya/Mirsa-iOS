@@ -881,6 +881,7 @@ private struct ToolsStoreUploadSheet: View {
     private func statusTitle(_ s: String?) -> String {
         switch s {
         case "approved": return ToolsStoreText.statusApproved
+        case "held": return ToolsStoreText.statusHeld
         case "rejected": return ToolsStoreText.statusRejected
         case "uploading": return ToolsStoreText.statusUploading
         default: return ToolsStoreText.statusPending
@@ -890,7 +891,7 @@ private struct ToolsStoreUploadSheet: View {
     private func statusColor(_ s: String?) -> Color {
         switch s {
         case "approved": return .green
-        case "rejected": return .red
+        case "held", "rejected": return .red
         default: return .orange
         }
     }
