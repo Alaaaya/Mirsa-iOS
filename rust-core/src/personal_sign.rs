@@ -345,7 +345,7 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
                 | CodeSignError::NeedsCodeSignatureAllocation {path, ..} => path.as_path(),
                 _ => node.path.as_path(),
             };
-            nested::file_error(app, path, e)
+            nested::file_error(app, path, &e)
         })?;
         crate::signing_progress::report(completed + 1, nodes.len())?;
     }
