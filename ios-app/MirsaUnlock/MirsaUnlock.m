@@ -52,6 +52,14 @@
 //  AVPlayer hook also runs (SDK-agnostic): rewarded video ads play at
 //  8x so they finish in seconds and the reward is granted — the
 //  AdSpeed idea, reimplemented here without Substrate.
+//  RevenueCat network interceptor (the 3BodSyPatch idea, no Substrate):
+//  when "RevenueCat" is in "sdks", NSURLSession data tasks to
+//  api.revenuecat.com get their JSON rewritten in flight — the
+//  product_entitlement_mapping response teaches the dylib which
+//  entitlements exist, and subscriber responses get active entries
+//  injected (expires 2099) — plus a fake App Store receipt, so the
+//  SDK always has a receipt to send. The local isActive getter hook
+//  above stays as a second layer.
 //
 //  Live tracing ("tracing": true, "trace_candidates": [{"class",
 //  "selector"}, ...]). Discovery mode for apps whose premium checks are
@@ -651,6 +659,291 @@ static void MirsaUnlockApplyRevenueCatHooks(void)
         }
     } @catch (NSException *exception) {
         NSLog(@"[MirsaUnlock] exception listing classes for RevenueCat: %@ %@",
+              exception.name, exception.reason);
+    }
+}
+
+// MARK: - RevenueCat network interceptor (the 3BodSyPatch idea, no Substrate)
+//
+// RevenueCat's SDK reports entitlements from the SERVER's subscriber
+// response, so forcing the local RCEntitlementInfo.isActive getter (above)
+// is only half the job: if the app reads CustomerInfo.entitlements and
+// the entitlement is not in the response at all, isActive is never called.
+// This hook rewrites the API responses in flight instead, the way
+// 3BodSyPatch does it: NSURLSession data tasks to api.revenuecat.com get
+// their JSON rewritten before the SDK's completion handler runs.
+// Two shapes are rewritten:
+//  * product_entitlement_mapping — cached (product id -> entitlement ids),
+//    so the subscriber rewrite knows which entitlements to grant. The
+//    mapping is normally fetched first (SDK configure / offerings), and
+//    the SDK re-fetches subscriber info on foreground, so a subscriber
+//    response that arrives before any mapping is simply left alone and
+//    the next fetch gets the injection.
+//  * subscriber (GET /v1/subscribers/<id>, POST /v1/receipts) — for every
+//    entitlement id learned from the mapping, an active entry is injected
+//    (expires 2099) plus a matching active subscription entry, so the
+//    SDK reports the entitlement as active and the app unlocks.
+// A fake App Store receipt is also written and returned from
+// appStoreReceiptURL, so the SDK always has a receipt to send (sideloaded
+// apps usually have none). The receipt content is a prop — a few bytes
+// shaped like an ASN.1 header — the response rewrite is what grants the
+// entitlement; the server never gets to say no.
+// Only active when the config lists "RevenueCat" in "sdks" (same gate as
+// the isActive hook above). Responses that are not RevenueCat JSON, or
+// that fail to parse, pass through untouched.
+typedef void (^MirsaUnlockRCCompletion)(NSData *data, NSURLResponse *response, NSError *error);
+
+static NSMutableDictionary *MirsaUnlockRCProductEntitlements = nil;
+static NSURL *MirsaUnlockRCFakeReceiptURL = nil;
+
+static NSURLSessionDataTask *(*MirsaUnlockDataTaskWithRequestOrig)(id, SEL, NSURLRequest *, MirsaUnlockRCCompletion) = NULL;
+static NSURLSessionDataTask *(*MirsaUnlockDataTaskWithURLOrig)(id, SEL, NSURL *, MirsaUnlockRCCompletion) = NULL;
+static NSURL *(*MirsaUnlockAppStoreReceiptURLOrig)(id, SEL) = NULL;
+
+static NSData *MirsaUnlockRCRewriteResponse(NSData *data, NSURL *url)
+{
+    if (data == nil || data.length == 0) {
+        return data;
+    }
+    @try {
+        id json = [NSJSONSerialization JSONObjectWithData:data
+                                                  options:NSJSONReadingMutableContainers
+                                                    error:nil];
+        if (![json isKindOfClass:[NSDictionary class]]) {
+            return data;
+        }
+        NSMutableDictionary *root = (NSMutableDictionary *)json;
+        BOOL changed = NO;
+        id mapping = root[@"product_entitlement_mapping"];
+        if ([mapping isKindOfClass:[NSDictionary class]]) {
+            @synchronized (MirsaUnlockRCProductEntitlements) {
+                for (NSString *productId in (NSDictionary *)mapping) {
+                    id entIds = ((NSDictionary *)mapping)[productId];
+                    if ([productId isKindOfClass:[NSString class]] &&
+                        [entIds isKindOfClass:[NSArray class]]) {
+                        MirsaUnlockRCProductEntitlements[productId] = entIds;
+                    }
+                }
+            }
+            NSLog(@"[MirsaUnlock] revenuecat: learned entitlement mapping for %@",
+                  url.path);
+        }
+        id subscriber = root[@"subscriber"];
+        if ([subscriber isKindOfClass:[NSMutableDictionary class]]) {
+            NSMutableDictionary *sub = (NSMutableDictionary *)subscriber;
+            NSMutableDictionary *entitlements = sub[@"entitlements"];
+            if (![entitlements isKindOfClass:[NSMutableDictionary class]]) {
+                entitlements = [NSMutableDictionary dictionary];
+                sub[@"entitlements"] = entitlements;
+            }
+            NSMutableDictionary *subscriptions = sub[@"subscriptions"];
+            if (![subscriptions isKindOfClass:[NSMutableDictionary class]]) {
+                subscriptions = [NSMutableDictionary dictionary];
+                sub[@"subscriptions"] = subscriptions;
+            }
+            NSDictionary *mappingCopy = nil;
+            @synchronized (MirsaUnlockRCProductEntitlements) {
+                mappingCopy = [MirsaUnlockRCProductEntitlements copy];
+            }
+            int injected = 0;
+            for (NSString *productId in mappingCopy) {
+                NSArray *entIds = mappingCopy[productId];
+                if (![entIds isKindOfClass:[NSArray class]]) {
+                    continue;
+                }
+                for (NSString *entId in entIds) {
+                    if (![entId isKindOfClass:[NSString class]]) {
+                        continue;
+                    }
+                    if (entitlements[entId] == nil) {
+                        entitlements[entId] = @{
+                            @"expires_date": @"2099-01-01T00:00:00Z",
+                            @"product_identifier": productId,
+                            @"purchase_date": @"2024-01-01T00:00:00Z"
+                        };
+                        injected++;
+                    }
+                }
+                if (subscriptions[productId] == nil) {
+                    subscriptions[productId] = @{
+                        @"expires_date": @"2099-01-01T00:00:00Z",
+                        @"purchase_date": @"2024-01-01T00:00:00Z",
+                        @"original_purchase_date": @"2024-01-01T00:00:00Z",
+                        @"is_sandbox": @NO,
+                        @"ownership_type": @"PURCHASED",
+                        @"period_type": @"normal",
+                        @"store": @"app_store",
+                        @"unsubscribe_detected_at": [NSNull null],
+                        @"billing_issues_detected_at": [NSNull null],
+                        @"grace_period_expires_date": [NSNull null],
+                        @"refunded_at": [NSNull null],
+                        @"auto_resume_date": [NSNull null]
+                    };
+                    changed = YES;
+                }
+            }
+            if (injected > 0) {
+                changed = YES;
+                NSLog(@"[MirsaUnlock] revenuecat: granted %d entitlements in subscriber response",
+                      injected);
+            }
+        }
+        if (!changed) {
+            return data;
+        }
+        NSError *error = nil;
+        NSData *out = [NSJSONSerialization dataWithJSONObject:root options:0 error:&error];
+        if (out == nil) {
+            return data;
+        }
+        return out;
+    } @catch (NSException *exception) {
+        NSLog(@"[MirsaUnlock] revenuecat: exception rewriting response: %@ %@",
+              exception.name, exception.reason);
+        return data;
+    }
+}
+
+static id MirsaUnlockDataTaskWithRequest(id self, SEL _cmd, NSURLRequest *request, MirsaUnlockRCCompletion completionHandler)
+{
+    if (MirsaUnlockDataTaskWithRequestOrig == NULL) {
+        return nil;
+    }
+    if (completionHandler == NULL) {
+        return MirsaUnlockDataTaskWithRequestOrig(self, _cmd, request, NULL);
+    }
+    NSURL *url = request.URL;
+    if (url == nil || ![url.host isEqualToString:@"api.revenuecat.com"]) {
+        return MirsaUnlockDataTaskWithRequestOrig(self, _cmd, request, completionHandler);
+    }
+    MirsaUnlockRCCompletion saved = (MirsaUnlockRCCompletion)[completionHandler copy];
+    MirsaUnlockRCCompletion wrapped = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error == nil && data != nil) {
+            data = MirsaUnlockRCRewriteResponse(data, url);
+        }
+        saved(data, response, error);
+    };
+    return MirsaUnlockDataTaskWithRequestOrig(self, _cmd, request, wrapped);
+}
+
+static id MirsaUnlockDataTaskWithURL(id self, SEL _cmd, NSURL *url, MirsaUnlockRCCompletion completionHandler)
+{
+    if (MirsaUnlockDataTaskWithURLOrig == NULL) {
+        return nil;
+    }
+    if (completionHandler == NULL) {
+        return MirsaUnlockDataTaskWithURLOrig(self, _cmd, url, NULL);
+    }
+    if (url == nil || ![url.host isEqualToString:@"api.revenuecat.com"]) {
+        return MirsaUnlockDataTaskWithURLOrig(self, _cmd, url, completionHandler);
+    }
+    MirsaUnlockRCCompletion saved = (MirsaUnlockRCCompletion)[completionHandler copy];
+    MirsaUnlockRCCompletion wrapped = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error == nil && data != nil) {
+            data = MirsaUnlockRCRewriteResponse(data, url);
+        }
+        saved(data, response, error);
+    };
+    return MirsaUnlockDataTaskWithURLOrig(self, _cmd, url, wrapped);
+}
+
+static NSURL *MirsaUnlockAppStoreReceiptURL(id self, SEL _cmd)
+{
+    if (MirsaUnlockRCFakeReceiptURL != nil) {
+        return MirsaUnlockRCFakeReceiptURL;
+    }
+    if (MirsaUnlockAppStoreReceiptURLOrig != NULL) {
+        return MirsaUnlockAppStoreReceiptURLOrig(self, _cmd);
+    }
+    return nil;
+}
+
+static void MirsaUnlockApplyRevenueCatNetworkHooks(void)
+{
+    @try {
+        if (MirsaUnlockRCProductEntitlements == nil) {
+            MirsaUnlockRCProductEntitlements = [[NSMutableDictionary alloc] init];
+        }
+        // Fake receipt prop: a few bytes shaped like an ASN.1 header, in
+        // Caches. The SDK base64s the file and sends it; the response
+        // rewrite above is what grants the entitlement.
+        @try {
+            NSArray *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+            NSString *dir = caches.firstObject;
+            if (dir != nil) {
+                NSString *path = [dir stringByAppendingPathComponent:@"MirsaUnlockReceipt"];
+                static const unsigned char bytes[] = { 0x30, 0x82, 0x01, 0x00, 0x02, 0x01, 0x00 };
+                NSData *receipt = [NSData dataWithBytes:bytes length:sizeof(bytes)];
+                if ([receipt writeToFile:path atomically:YES]) {
+                    MirsaUnlockRCFakeReceiptURL = [NSURL fileURLWithPath:path];
+                    NSLog(@"[MirsaUnlock] revenuecat: fake receipt written");
+                }
+            }
+        } @catch (NSException *exception) {
+            NSLog(@"[MirsaUnlock] revenuecat: exception writing fake receipt: %@ %@",
+                  exception.name, exception.reason);
+        }
+        Class session = MirsaUnlockClassNamed(@"NSURLSession");
+        if (session != Nil) {
+            SEL requestSel = NSSelectorFromString(@"dataTaskWithRequest:completionHandler:");
+            Method requestMethod = class_getInstanceMethod(session, requestSel);
+            if (requestMethod != NULL) {
+                const char *types = method_getTypeEncoding(requestMethod);
+                if (types != NULL && types[0] == '@' &&
+                    method_getNumberOfArguments(requestMethod) == 4) {
+                    IMP orig = method_getImplementation(requestMethod);
+                    if (class_addMethod(session, requestSel,
+                                        (IMP)MirsaUnlockDataTaskWithRequest, types)) {
+                        NSLog(@"[MirsaUnlock] revenuecat: hooked -[NSURLSession dataTaskWithRequest:completionHandler:] (was inherited)");
+                    } else {
+                        method_setImplementation(requestMethod, (IMP)MirsaUnlockDataTaskWithRequest);
+                        NSLog(@"[MirsaUnlock] revenuecat: hooked -[NSURLSession dataTaskWithRequest:completionHandler:]");
+                    }
+                    MirsaUnlockDataTaskWithRequestOrig =
+                        (NSURLSessionDataTask *(*)(id, SEL, NSURLRequest *, MirsaUnlockRCCompletion))orig;
+                }
+            }
+            SEL urlSel = NSSelectorFromString(@"dataTaskWithURL:completionHandler:");
+            Method urlMethod = class_getInstanceMethod(session, urlSel);
+            if (urlMethod != NULL) {
+                const char *types = method_getTypeEncoding(urlMethod);
+                if (types != NULL && types[0] == '@' &&
+                    method_getNumberOfArguments(urlMethod) == 3) {
+                    IMP orig = method_getImplementation(urlMethod);
+                    if (class_addMethod(session, urlSel,
+                                        (IMP)MirsaUnlockDataTaskWithURL, types)) {
+                        NSLog(@"[MirsaUnlock] revenuecat: hooked -[NSURLSession dataTaskWithURL:completionHandler:] (was inherited)");
+                    } else {
+                        method_setImplementation(urlMethod, (IMP)MirsaUnlockDataTaskWithURL);
+                        NSLog(@"[MirsaUnlock] revenuecat: hooked -[NSURLSession dataTaskWithURL:completionHandler:]");
+                    }
+                    MirsaUnlockDataTaskWithURLOrig =
+                        (NSURLSessionDataTask *(*)(id, SEL, NSURL *, MirsaUnlockRCCompletion))orig;
+                }
+            }
+        }
+        Class bundle = MirsaUnlockClassNamed(@"NSBundle");
+        if (bundle != Nil) {
+            SEL receiptSel = NSSelectorFromString(@"appStoreReceiptURL");
+            Method receiptMethod = class_getInstanceMethod(bundle, receiptSel);
+            if (receiptMethod != NULL) {
+                const char *types = method_getTypeEncoding(receiptMethod);
+                if (types != NULL && types[0] == '@' &&
+                    method_getNumberOfArguments(receiptMethod) == 2) {
+                    IMP orig = method_getImplementation(receiptMethod);
+                    if (class_addMethod(bundle, receiptSel,
+                                        (IMP)MirsaUnlockAppStoreReceiptURL, types)) {
+                        NSLog(@"[MirsaUnlock] revenuecat: hooked -[NSBundle appStoreReceiptURL] (was inherited)");
+                    } else {
+                        method_setImplementation(receiptMethod, (IMP)MirsaUnlockAppStoreReceiptURL);
+                        NSLog(@"[MirsaUnlock] revenuecat: hooked -[NSBundle appStoreReceiptURL]");
+                    }
+                    MirsaUnlockAppStoreReceiptURLOrig = (NSURL *(*)(id, SEL))orig;
+                }
+            }
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[MirsaUnlock] exception applying RevenueCat network hooks: %@ %@",
               exception.name, exception.reason);
     }
 }
@@ -2042,6 +2335,7 @@ __attribute__((constructor)) static void MirsaUnlockLoad(void)
         }
         if (hasRevenueCat) {
             MirsaUnlockApplyRevenueCatHooks();
+            MirsaUnlockApplyRevenueCatNetworkHooks();
         }
         if (hasStoreKit) {
             // StoreKit receipt validation has no single hook point: receipt
