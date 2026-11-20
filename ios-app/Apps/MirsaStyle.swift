@@ -198,6 +198,7 @@ struct LiquidTabItem: Identifiable {
 struct LiquidTabBar: View {
     @Binding var selection: AppTab
     let items: [LiquidTabItem]
+    var light = false
     @ObservedObject private var chatStore = ForgeChatStore.shared
     @ObservedObject private var chatLocal = ForgeChatLocal.shared
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -217,9 +218,9 @@ struct LiquidTabBar: View {
 
     private func glass<S: InsettableShape>(_ shape: S) -> some View {
         shape.fill(.ultraThinMaterial)
-            .overlay(shape.fill(Color.black.opacity(reduceTransparency ? 0.86 : 0.36)))
-            .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.75))
-            .shadow(color: .black.opacity(0.30), radius: 14, y: 7)
+            .overlay(shape.fill((light ? Color.white : Color.black).opacity(reduceTransparency ? 0.86 : 0.36)))
+            .overlay(shape.strokeBorder((light ? Color.black : Color.white).opacity(light ? 0.08 : 0.18), lineWidth: 0.75))
+            .shadow(color: .black.opacity(light ? 0.10 : 0.30), radius: 14, y: 7)
             .allowsHitTesting(false)
     }
 
@@ -250,18 +251,18 @@ struct LiquidTabBar: View {
                     .minimumScaleFactor(0.65)
                     .allowsTightening(true)
             }
-            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.57))
+            .foregroundStyle(light ? Color(sourcesRGB: 0x17132E).opacity(selected ? 1 : 0.6) : Color.white.opacity(selected ? 1 : 0.57))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 if selected {
                     if item.tab == .mirsaAI {
                         Circle()
-                            .fill(.white.opacity(0.14))
-                            .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                            .fill((light ? Color.black : Color.white).opacity(light ? 0.06 : 0.14))
+                            .overlay(Circle().strokeBorder((light ? Color.black : Color.white).opacity(light ? 0.06 : 0.12), lineWidth: 0.5))
                     } else {
                         Capsule()
-                            .fill(.white.opacity(0.14))
-                            .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                            .fill((light ? Color.black : Color.white).opacity(light ? 0.06 : 0.14))
+                            .overlay(Capsule().strokeBorder((light ? Color.black : Color.white).opacity(light ? 0.06 : 0.12), lineWidth: 0.5))
                     }
                 }
             }
@@ -301,6 +302,8 @@ struct LiquidTabBar: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mirsa-tab-dock")
+        .accessibilityValue(light ? "light" : "dark")
+        .environment(\.colorScheme, light ? .light : .dark)
         // Preserve Mirsa's physical tab order in every language; Arabic/Sorani
         // labels keep their native text shaping without mirroring the icons.
         .environment(\.layoutDirection, .leftToRight)
