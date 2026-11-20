@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
 // MARK: - Actions shared by the store page and the item sheet
 
@@ -220,6 +221,10 @@ struct ToolsStoreView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .refreshable { model.reload() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Preview URLs are private and expire (about 10 minutes): refetch for fresh ones.
+            if model.isConfigured { model.reload() }
+        }
         .background(SourcesThemeBackground(theme: t))
         .tint(t.accent[0])
         .environment(\.colorScheme, t.colorScheme)
@@ -436,7 +441,7 @@ private struct ToolsStorePreview: View {
             Image(systemName: item.kind?.icon ?? "shippingbox.fill")
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(.white)
-            if let url = item.preview {
+            if let url = item.cardStill {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() } else { Color.clear }
                 }
@@ -657,13 +662,8 @@ private struct ToolsStoreItemSheet: View {
                     Text(ToolsStoreText.soundHint).font(.footnote).foregroundStyle(t.secondary).fixedSize(horizontal: false, vertical: true)
                 }
 
-                if let url = item.preview {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image { image.resizable().scaledToFit() }
-                        else { RoundedRectangle(cornerRadius: 18).fill(t.card).frame(height: 160).overlay(ProgressView()) }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: 360)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                if !item.gallery.isEmpty {
+                    ToolsStorePreviewGallery(items: item.gallery, card: t.card)
                 }
 
                 if let d = item.description?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
@@ -753,6 +753,8 @@ private struct ToolsStoreUploadSheet: View {
     @State private var customBundle = ""
     @State private var file: URL?
     @State private var picking = false
+    @State private var pickedPhotos: [PhotosPickerItem] = []
+    @State private var previews: [ToolsStorePickedPreview] = []
     @State private var confirmed = false
     @State private var uploading = false
     @State private var progress: Double = 0
@@ -794,6 +796,37 @@ private struct ToolsStoreUploadSheet: View {
                     .accessibilityIdentifier("tools-store-upload-review-notice")
                     if !ToolsStoreConfig.isConfigured {
                         Text(ToolsStoreText.notConfigured).font(.footnote).foregroundStyle(.orange)
+                    }
+                }
+                Section {
+                    PhotosPicker(selection: $pickedPhotos, maxSelectionCount: 4, matching: .any(of: [.images, .videos])) {
+                        Label(category == .wallpapers ? "Preview (needed if none found in file)" : "Preview (optional)", systemImage: "photo.on.rectangle.angled")
+                    }
+                    .accessibilityIdentifier("tools-store-upload-preview-picker")
+                    if !previews.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack {
+                                ForEach(previews) { p in
+                                    ZStack(alignment: .bottomTrailing) {
+                                        if let th = p.thumb { Image(uiImage: th).resizable().scaledToFill().frame(width: 72, height: 96).clipShape(RoundedRectangle(cornerRadius: 10)) }
+                                        if p.kind == "video" { Image(systemName: "play.fill").font(.caption2).padding(4).background(.black.opacity(0.6), in: Circle()).foregroundStyle(.white).padding(4) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .onChange(of: pickedPhotos) { items in
+                    Task { @MainActor in
+                        var out: [ToolsStorePickedPreview] = []
+                        var videos = 0
+                        for it in items {
+                            if let p = await ToolsStorePickedPreview.load(it) {
+                                if p.kind == "video" { videos += 1; if videos > 1 { continue } }
+                                out.append(p)
+                            }
+                        }
+                        previews = out
                     }
                 }
                 Section {
@@ -920,7 +953,7 @@ private struct ToolsStoreUploadSheet: View {
         guard canSubmit, let picked = file else { return }
         uploading = true; progress = 0; result = nil; failure = nil
         let draftCategory = category, draftTitle = trimmedTitle, draftDetails = details, draftVersion = version
-        let draftAuthor = author, draftTarget = targetValue
+        let draftAuthor = author, draftTarget = targetValue, draftPreviews = previews
         Task { @MainActor in
             defer { uploading = false }
             var folder: URL?
@@ -932,12 +965,13 @@ private struct ToolsStoreUploadSheet: View {
                 defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
                 try FileManager.default.copyItem(at: picked, to: local)
                 let draft = ToolsStoreClient.UploadDraft(category: draftCategory, title: draftTitle, description: draftDetails,
-                                                         version: draftVersion, targetApp: draftTarget, authorName: draftAuthor, file: local)
+                                                         version: draftVersion, targetApp: draftTarget, authorName: draftAuthor, file: local,
+                                                         previews: draftPreviews, previewRequired: draftCategory == .wallpapers)
                 try await ToolsStoreClient.upload(draft) { value in
                     Task { @MainActor in progress = value }
                 }
                 result = ToolsStoreText.submitted
-                title = ""; details = ""; version = ""; file = nil; confirmed = false
+                title = ""; details = ""; version = ""; file = nil; confirmed = false; previews = []; pickedPhotos = []
                 await loadMine()
             } catch {
                 failure = error.localizedDescription
