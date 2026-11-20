@@ -447,7 +447,9 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         ]
         for style in ["classic", "new"] {
             for lang in ["ar", "en"] {
-                for page in pages {
+                // The New (gallery) style opens on Discover, a page the Classic style does not have.
+                let discover: [(tab: String, route: String?, name: String)] = style == "new" ? [(tab: "discover", route: nil, name: "discover")] : []
+                for page in discover + pages {
                     var extra = ["-mirsa.store.style", style, "-MirsaStoreFixtureAccount", "-MirsaStoreTab", page.tab]
                     if page.route == "detail" { extra.append("-MirsaStoreFixtureDetail") }
                     else if let route = page.route { extra += ["-MirsaStoreRoute", route] }
@@ -501,7 +503,9 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                                "-mirsa.store.style", style, "-MirsaStoreFixtureAccount", "-MirsaStoreTab", tab]
         let t0 = Date()
         app.launch()
-        let bar = app.descendants(matching: .any).matching(identifier: "store-tab-\(tab)").firstMatch
+        // In the New (gallery) style Purchases opens from Account, so its capsule lights the Account item.
+        let item = style == "new" && tab == "purchases" ? "account" : tab
+        let bar = app.descendants(matching: .any).matching(identifier: "store-tab-\(item)").firstMatch
         let ok = bar.waitForExistence(timeout: 20)
         print(String(format: "STORE-PERF %@ %@ first-frame %.3f %@", style, tab, Date().timeIntervalSince(t0), ok ? "ok" : "timeout"))
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")

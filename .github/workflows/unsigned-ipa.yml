@@ -34,6 +34,9 @@ jobs:
           sudo xcode-select -s "$XC"
           xcodebuild -version
 
+      - name: Swift parse audit
+        run: find ios-app uitests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
+
       - name: Verify pinned platform private framework linker inputs
         run: bash scripts/prepare-privatekits-sdk.sh iphoneos
 

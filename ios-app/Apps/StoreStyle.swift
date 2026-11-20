@@ -28,11 +28,11 @@ enum StoreStyle: String, CaseIterable, Identifiable {
 
     static var explanation: String {
         StoreFeatureText.t(
-            "Classic keeps the familiar store layout. New adds glass cards, animations and a single floating bar. Sign-in, downloads, installs and your wishlist stay the same.",
-            "الكلاسيكي بيحافظ على شكل المتجر المعتاد. الجديد بيضيف بطاقات زجاجية وحركات وشريط عائم واحد. تسجيل الدخول والتنزيلات والتثبيت وقائمة الأمنيات تبعك بيضلوا متل ما هني.",
-            "Klassisch behält das gewohnte Store-Layout. Neu bringt Glaskarten, Animationen und eine einzige schwebende Leiste. Anmeldung, Downloads, Installationen und deine Wunschliste bleiben gleich.",
-            "کلاسیکی ڕووکاری ئاشنای ستۆرەکە دەهێڵێتەوە. نوێ کارتی شووشەیی، جووڵە و یەک شریتی هەڵواسراو زیاد دەکات. چوونەژوورەوە، داگرتن، دامەزراندن و لیستی خواستەکانت وەک خۆیان دەمێننەوە.",
-            "Klasîk xuyanga naskirî ya store diparêze. Nû kartên camî, anîmasyon û yek darikê herikî lê zêde dike. Têketin, daxistin, sazkirin û lîsteya te ya daxwazan wekî xwe dimînin.")
+            "Classic keeps the familiar store layout. New is a dark gallery: a large featured app, ranked charts, collections and a floating glass bar above Mirsa's dock. Sign-in, downloads, installs and your wishlist stay the same.",
+            "الكلاسيكي بيحافظ على شكل المتجر المعتاد. الجديد معرض داكن: تطبيق مميّز كبير، ترتيب الأكثر تنزيلًا، مجموعات، وشريط زجاجي عائم فوق شريط مرسى. تسجيل الدخول والتنزيلات والتثبيت وقائمة الأمنيات تبعك بيضلوا متل ما هني.",
+            "Klassisch behält das gewohnte Store-Layout. Neu ist eine dunkle Galerie: eine große empfohlene App, Ranglisten, Sammlungen und eine schwebende Glasleiste über Mirsas Dock. Anmeldung, Downloads, Installationen und deine Wunschliste bleiben gleich.",
+            "کلاسیکی ڕووکاری ئاشنای ستۆرەکە دەهێڵێتەوە. نوێ پێشانگایەکی تاریکە: ئەپێکی دیاری گەورە، لیستی زۆرترین داگیراو، کۆمەڵەکان و شریتێکی شووشەیی هەڵواسراو لەسەر شریتی Mirsa. چوونەژوورەوە، داگرتن، دامەزراندن و لیستی خواستەکانت وەک خۆیان دەمێننەوە.",
+            "Klasîk xuyanga naskirî ya store diparêze. Nû galeriyeke tarî ye: sepaneke taybet a mezin, rêzbendiyên herî zêde daxistî, kom û darikekî camî yê herikî li ser darika Mirsa. Têketin, daxistin, sazkirin û lîsteya te ya daxwazan wekî xwe dimînin.")
     }
 }
 

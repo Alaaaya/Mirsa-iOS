@@ -623,7 +623,7 @@ struct ContentView: View {
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue // theme only recolors; the floating dock is shared by every theme
     private var liquidTheme: Bool { true }
     @AppStorage(StoreStyle.key) private var storeStyle = StoreStyle.fallback.rawValue
-    /// The single-bar App Store (main dock hidden there) belongs to the New store style only.
+    /// The New store style (gallery) reserves its own bottom space: its capsule floats above the main dock.
     private var newStoreStyle: Bool { StoreStyle.from(storeStyle) == .new }
     @State private var chatComposerFocused = false
     @State private var wallpaperMakerFocused = false
@@ -666,7 +666,8 @@ struct ContentView: View {
                 ToolsTab()
                     .modifier(LiquidTabChrome(liquid: liquidTheme, chatEditing: chatComposerFocused || wallpaperMakerFocused, nestedNavigation: true))
             }
-            // Classic (default) keeps the original store and the main dock; New draws its own single bar.
+            // Classic (default) keeps the original store; New (gallery) floats its capsule above the main
+            // dock and reserves the space for both itself. The main dock shows on this tab in both styles.
             sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle)) }
             sixTab(.personalHub) {
                 PersonalAppsHub()
@@ -686,9 +687,8 @@ struct ContentView: View {
         .onChange(of: vm.selectedTab) { _, t in loadedTabs.insert(t) }
         .environment(\.layoutDirection, .leftToRight)
         .overlay(alignment: .bottom) {
-            // In the New store style the App Store tab draws its own single bottom bar (its
-            // sections plus a Mirsa menu back to the other tabs), so the main dock steps aside there.
-            if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused && !(newStoreStyle && vm.selectedTab == .encrypted) {
+            // The main dock stays visible on every tab, the App Store included in both store styles.
+            if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused {
                 LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs)
                 .ignoresSafeArea(.keyboard)
             }
@@ -1247,8 +1247,8 @@ struct LiquidTabChrome: ViewModifier {
     let liquid: Bool
     var chatEditing: Bool = false
     var nestedNavigation: Bool = false
-    /// The tab draws its own bottom bar (App Store): hide the main bar in every theme
-    /// and reserve no extra clearance; the tab's own bar insets the content.
+    /// The tab reserves its own bottom space (New App Store style: its capsule above the main dock):
+    /// hide the system tab bar and add no extra clearance; the tab's own inset covers the dock too.
     var ownsBottomBar: Bool = false
     @ViewBuilder
     func body(content: Content) -> some View {
