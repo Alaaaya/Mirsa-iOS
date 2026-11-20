@@ -12,7 +12,6 @@ enum ProjectThemeText {
     static var aurora: String { tr5("Aurora", "الشفق", de: "Polarlicht", ckb: "شەفەق", kmr: "Berbang") }
     static var bento: String { tr5("Bento", "بينتو", de: "Bento", ckb: "بێنتۆ", kmr: "Bento") }
     static var buildPipeline: String { tr5("Build Pipeline", "خط البناء", de: "Build-Pipeline", ckb: "هێڵی دروستکردن", kmr: "Xeta avakirinê") }
-    static var lightPearl: String { tr5("Light Pearl", "اللؤلؤي الفاتح", de: "Helle Perle", ckb: "مرواریی ڕووناک", kmr: "Morîya ronî") }
 
     // Tabs and sections
     static var tweaks: String { tr5("Tweaks", "التويكات", de: "Tweaks", ckb: "تویکەکان", kmr: "Tweak") }
@@ -68,7 +67,7 @@ enum ProjectThemeText {
 
 /// Visual theme of the Project details page. `classic` is the original design and the default.
 enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
-    case classic, obsidianGold, aurora, bento, buildPipeline, lightPearl
+    case classic, obsidianGold, aurora, bento, buildPipeline
     static let key = "mirsa.projectDetailsTheme"
     static let fallback: ProjectDetailsTheme = .classic
     var id: String { rawValue }
@@ -85,7 +84,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return ProjectThemeText.aurora
         case .bento: return ProjectThemeText.bento
         case .buildPipeline: return ProjectThemeText.buildPipeline
-        case .lightPearl: return ProjectThemeText.lightPearl
         }
     }
 
@@ -96,11 +94,10 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return "sparkles"
         case .bento: return "square.grid.2x2"
         case .buildPipeline: return "list.number"
-        case .lightPearl: return "sun.max"
         }
     }
 
-    var isLight: Bool { self == .lightPearl }
+    var isLight: Bool { false }
     var colorScheme: ColorScheme { isLight ? .light : .dark }
 
     /// Classic keeps the original forced left-to-right layout; the new themes follow the app language.
@@ -120,7 +117,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return Color(sourcesRGB: 0x0A0A1C)
         case .bento: return Color(sourcesRGB: 0x0E1116)
         case .buildPipeline: return Color(sourcesRGB: 0x111111)
-        case .lightPearl: return Color(sourcesRGB: 0xF4F3F8)
         }
     }
     var accent: Color {
@@ -130,7 +126,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return Color(sourcesRGB: 0x8B5CF6)
         case .bento: return Color(sourcesRGB: 0x60A5FA)
         case .buildPipeline: return Color(sourcesRGB: 0xFF7A45)
-        case .lightPearl: return Color(sourcesRGB: 0x3730A3)
         }
     }
     var accentGradient: LinearGradient {
@@ -139,8 +134,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
             return LinearGradient(colors: [Color(sourcesRGB: 0xB8924A), Color(sourcesRGB: 0xE8CD8C), Color(sourcesRGB: 0xB8924A)], startPoint: .leading, endPoint: .trailing)
         case .aurora:
             return LinearGradient(colors: [Color(sourcesRGB: 0x8B5CF6), Color(sourcesRGB: 0x5B8CFF)], startPoint: .leading, endPoint: .trailing)
-        case .lightPearl:
-            return LinearGradient(colors: [Color(sourcesRGB: 0x3730A3), Color(sourcesRGB: 0x6D28D9)], startPoint: .topLeading, endPoint: .bottomTrailing)
         default:
             return LinearGradient(colors: [accent, accent], startPoint: .leading, endPoint: .trailing)
         }
@@ -151,7 +144,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .obsidianGold: return Color(sourcesRGB: 0xEEE6D6)
         case .bento: return Color(sourcesRGB: 0xE8EDF3)
         case .buildPipeline: return Color(sourcesRGB: 0xF3F3F3)
-        case .lightPearl: return Color(sourcesRGB: 0x16142B)
         }
     }
     var secondaryText: Color {
@@ -161,7 +153,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return Color.white.opacity(0.62)
         case .bento: return Color(sourcesRGB: 0x7D8896)
         case .buildPipeline: return Color(sourcesRGB: 0x8A8A8A)
-        case .lightPearl: return Color(sourcesRGB: 0x5C5973)
         }
     }
     var surface: Color {
@@ -171,7 +162,6 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return Color.white.opacity(0.07)
         case .bento: return Color(sourcesRGB: 0x161B22)
         case .buildPipeline: return Color(sourcesRGB: 0x1A1A1A)
-        case .lightPearl: return .white
         }
     }
     var stroke: Color {
@@ -181,14 +171,12 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: return Color.white.opacity(0.12)
         case .bento: return Color(sourcesRGB: 0x232A33)
         case .buildPipeline: return Color(sourcesRGB: 0x262626)
-        case .lightPearl: return Color.black.opacity(0.06)
         }
     }
     var success: Color {
         switch self {
         case .bento: return Color(sourcesRGB: 0x4ADE80)
         case .buildPipeline: return Color(sourcesRGB: 0x22C55E)
-        case .lightPearl: return Color(sourcesRGB: 0x15803D)
         default: return MirsaPalette.success
         }
     }
@@ -197,7 +185,7 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
     var toggleTint: Color {
         switch self {
         case .classic: return .green
-        case .obsidianGold, .aurora, .lightPearl: return accent
+        case .obsidianGold, .aurora: return accent
         case .bento, .buildPipeline: return success
         }
     }
@@ -238,12 +226,11 @@ enum ProjectDetailsTheme: String, CaseIterable, Identifiable {
         case .aurora: shape.fill(accentGradient).shadow(color: Color(sourcesRGB: 0x7C5CFF).opacity(0.5), radius: 12, y: 8)
         case .bento: shape.fill(Color(sourcesRGB: 0xE8EDF3))
         case .buildPipeline: shape.fill(accent)
-        case .lightPearl: shape.fill(Color(sourcesRGB: 0x16142B)).shadow(color: Color(sourcesRGB: 0x16142B).opacity(0.35), radius: 15, y: 14)
         }
     }
 }
 
-/// Tabs used by the tabbed themes (Obsidian Gold shows all five; Aurora and Light Pearl fold Files into Versions).
+/// Tabs used by the tabbed themes (Obsidian Gold shows all five; Aurora folds Files into Versions).
 enum ProjectDetailsTab: String, CaseIterable, Identifiable {
     case tweaks, settings, certificate, versions, files
     var id: String { rawValue }
@@ -322,8 +309,6 @@ struct ProjectThemeButtonChrome: ViewModifier {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.stroke))
         case .buildPipeline:
             content.background(Circle().fill(theme.surface)).overlay(Circle().stroke(theme.stroke))
-        case .lightPearl:
-            content.background(Circle().fill(Color.white).shadow(color: .black.opacity(0.06), radius: 4, y: 2))
         }
     }
 }
@@ -348,11 +333,6 @@ struct ProjectSectionChrome: ViewModifier {
             content.padding(.horizontal, 14).padding(.vertical, 12)
                 .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(theme.surface))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(theme.stroke))
-        case .lightPearl:
-            content.padding(14)
-                .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.white)
-                    .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
-                    .shadow(color: Color(sourcesRGB: 0x281E5A).opacity(0.06), radius: 12, y: 8))
         }
     }
 }
@@ -396,9 +376,6 @@ struct ProjectMethodBadge: ViewModifier {
         case .bento:
             content.padding(.horizontal, 7).padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(sourcesRGB: 0x1F2937)))
-        case .lightPearl:
-            content.foregroundStyle(theme.accent).padding(.horizontal, 8).padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(sourcesRGB: 0xEEECFB)))
         case .aurora, .classic:
             content.padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(Color.white.opacity(0.12)))
@@ -425,9 +402,6 @@ struct ProjectTweakRowChrome: ViewModifier {
         case .buildPipeline:
             content.padding(9)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color(sourcesRGB: 0x222222)))
-        case .lightPearl:
-            content.padding(.vertical, 11)
-                .overlay(alignment: .top) { if !first { Rectangle().fill(Color(sourcesRGB: 0xEFEEF5)).frame(height: 1) } }
         }
     }
 }

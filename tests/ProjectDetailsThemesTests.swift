@@ -19,7 +19,7 @@ final class ProjectDetailsThemesTests: XCTestCase {
     func testThemeKeyAndRawValuesAreStable() {
         XCTAssertEqual(ProjectDetailsTheme.key, "mirsa.projectDetailsTheme")
         XCTAssertEqual(ProjectDetailsTheme.allCases.map(\.rawValue),
-                       ["classic", "obsidianGold", "aurora", "bento", "buildPipeline", "lightPearl"])
+                       ["classic", "obsidianGold", "aurora", "bento", "buildPipeline"])
         XCTAssertEqual(ProjectDetailsTab.allCases.map(\.rawValue), ["tweaks", "settings", "certificate", "versions", "files"])
     }
 
@@ -32,7 +32,8 @@ final class ProjectDetailsThemesTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: ProjectDetailsTheme.key)
         XCTAssertEqual(ProjectDetailsTheme.current, .classic)
         UserDefaults.standard.set("lightPearl", forKey: ProjectDetailsTheme.key)
-        XCTAssertEqual(ProjectDetailsTheme.current, .lightPearl)
+        XCTAssertEqual(ProjectDetailsTheme.current, .classic)
+        XCTAssertEqual(ProjectDetailsTheme(stored: "lightPearl"), .classic)
     }
 
     func testEveryThemeAndTabHasALocalizedNameInAllLanguages() {
@@ -53,9 +54,8 @@ final class ProjectDetailsThemesTests: XCTestCase {
         XCTAssertEqual(ProjectDetailsTheme.classic.title, "Klassisch")
     }
 
-    func testOnlyLightPearlIsLightAndClassicStaysLeftToRight() {
-        XCTAssertEqual(ProjectDetailsTheme.allCases.filter(\.isLight), [.lightPearl])
-        XCTAssertEqual(ProjectDetailsTheme.lightPearl.colorScheme, .light)
+    func testNoThemeIsLightAndClassicStaysLeftToRight() {
+        XCTAssertTrue(ProjectDetailsTheme.allCases.filter(\.isLight).isEmpty)
         XCTAssertEqual(ProjectDetailsTheme.bento.colorScheme, .dark)
         for language in AppLanguage.allCases {
             XCTAssertEqual(ProjectDetailsTheme.classic.layoutDirection(for: language), .leftToRight)
@@ -63,7 +63,6 @@ final class ProjectDetailsThemesTests: XCTestCase {
         XCTAssertEqual(ProjectDetailsTheme.aurora.layoutDirection(for: .arabic), .rightToLeft)
         XCTAssertEqual(ProjectDetailsTheme.bento.layoutDirection(for: .sorani), .rightToLeft)
         XCTAssertEqual(ProjectDetailsTheme.obsidianGold.layoutDirection(for: .kurmanji), .leftToRight)
-        XCTAssertEqual(ProjectDetailsTheme.lightPearl.layoutDirection(for: .english), .leftToRight)
         XCTAssertEqual(ProjectDetailsTheme.buildPipeline.layoutDirection(for: .german), .leftToRight)
     }
 
