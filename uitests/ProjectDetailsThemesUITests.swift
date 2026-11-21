@@ -11,7 +11,25 @@ final class ProjectDetailsThemesUITests: XCTestCase {
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
             "-MirsaProjectThemesFixture", "-mirsa.projectDetailsTheme", "obsidianGold",
             "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let interruption = addUIInterruptionMonitor(withDescription: "First-launch notification permission") { alert in
+            // Dismiss only the OS permission alert, never app validation/errors.
+            for label in ["Don’t Allow", "Don't Allow", "عدم السماح"] {
+                let button = alert.buttons[label]
+                if button.exists { button.tap(); return true }
+            }
+            return false
+        }
+        defer { removeUIInterruptionMonitor(interruption) }
         app.launch()
+        if springboard.alerts.firstMatch.waitForExistence(timeout: 5) {
+            let alert = springboard.alerts.firstMatch
+            for label in ["Don’t Allow", "Don't Allow", "عدم السماح"] where alert.buttons[label].exists {
+                alert.buttons[label].tap()
+                break
+            }
+        }
+        XCTAssertFalse(springboard.alerts.firstMatch.exists, "System permission dialog obscures screenshot")
         XCTAssertTrue(app.buttons["mirsa.project.sign"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["mirsa.project.more"].exists)
         XCTAssertFalse(app.buttons["mirsa.project.theme-menu"].exists)
