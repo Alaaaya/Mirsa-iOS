@@ -73,6 +73,7 @@ struct MirsaApp: App {
                 if phase == .active {
                     MirsaInstallActivity.shared.reconcileActivities(foreground: true)
                     OpenInProjectCoordinator.shared.presentNext()
+                    Task { await AppsStore.shared.resumeAfterLocalDevVPN(vm: vm) }
                 }
                 if phase == .active, !MirsaUITestHarness.active { Task { await MirsaNotifications.foreground() } }
                 if phase == .active, !MirsaUITestHarness.active { DispatchQueue.global(qos: .utility).async { MirsaManagedTmp.sweep() } }

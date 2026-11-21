@@ -629,9 +629,21 @@ struct ContentView: View {
     @State private var wallpaperMakerFocused = false
     @State private var toolsStoreActive = false
     @AppStorage(SourcesTheme.key) private var sourceThemeRaw = SourcesTheme.aurora.rawValue
+    private var usesSourcesBackdrop: Bool {
+        vm.selectedTab == .sources || (vm.selectedTab == .pairing && toolsStoreActive)
+    }
     private var lightSourcesDock: Bool {
-        (vm.selectedTab == .sources || (vm.selectedTab == .pairing && toolsStoreActive))
-            && sourceThemeRaw == SourcesTheme.light.rawValue
+        usesSourcesBackdrop && sourceThemeRaw == SourcesTheme.light.rawValue
+    }
+
+    @ViewBuilder private var windowBackdrop: some View {
+        if usesSourcesBackdrop {
+            SourcesThemeBackground(theme: SourcesTheme(rawValue: sourceThemeRaw) ?? .aurora)
+        } else if vm.selectedTab == .encrypted && newStoreStyle {
+            StoreGalleryBackground()
+        } else {
+            AuroraBackground()
+        }
     }
 
     @State private var loadedTabs: Set<AppTab> = []
@@ -645,11 +657,11 @@ struct ContentView: View {
                     // Bound the UIKit navigation/Form host to its offered viewport.
                     // Its intrinsic content must not widen the shared ZStack/dock.
                     .frame(width: viewport.size.width, height: viewport.size.height)
+                    // Clip inactive UIKit stacks, but let the active page draw
+                    // through its actual safe areas, not only its content rect.
+                    .clipShape(RetainedTabClip(active: on, safeArea: viewport.safeAreaInsets))
             }
-                // NavigationStack owns UIKit-backed bars that can escape opacity alone.
-                // Keep the subtree/state alive, but clip inactive tabs to an empty viewport.
                 .frame(width: on ? nil : 0, height: on ? nil : 0)
-                .clipped()
                 .opacity(on ? 1 : 0)
                 .allowsHitTesting(on)
                 .accessibilityHidden(!on)
@@ -684,7 +696,7 @@ struct ContentView: View {
         // One backdrop for the whole window, under the status bar, every tab and the
         // floating dock, so nothing between the pages and the screen edge shows black.
         .modifier(MirsaWindowBackdropHost())
-        .background { AuroraBackground().ignoresSafeArea() }
+        .background { windowBackdrop.ignoresSafeArea() }
         // The dock animates its selection pill, not the retained NavigationStacks.
         // Inheriting its spring shrinks/fades the old stack over the new UIKit bar.
         // Suppress only selection-change animation inside the content host.
@@ -1268,10 +1280,23 @@ struct LiquidTabChrome: ViewModifier {
         } else if liquid {
             content
                 .toolbar(.hidden, for: .tabBar)
-                .padding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
-                .background(AuroraBackground().ignoresSafeArea())
+                // Reserve scroll/resting-control clearance in the safe area, not
+                // external padding that shortens the page and exposes a bottom band.
+                .safeAreaPadding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }
+    }
+}
+
+/// Stable modifier identity keeps each tab's navigation and scroll state alive.
+private struct RetainedTabClip: Shape {
+    let active: Bool
+    let safeArea: EdgeInsets
+    func path(in rect: CGRect) -> Path {
+        guard active else { return Path() }
+        return Path(CGRect(x: rect.minX - safeArea.leading, y: rect.minY - safeArea.top,
+                           width: rect.width + safeArea.leading + safeArea.trailing,
+                           height: rect.height + safeArea.top + safeArea.bottom))
     }
 }

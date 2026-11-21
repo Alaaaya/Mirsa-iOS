@@ -152,6 +152,12 @@ struct SourcesThemeBackground: View {
     let theme: SourcesTheme
     var glowTint: Color? = nil
     var body: some View {
+        MirsaScreenAnchored { _ in
+            mesh
+        }
+    }
+
+    private var mesh: some View {
         ZStack {
             LinearGradient(colors: theme.base, startPoint: .top, endPoint: .bottom)
             RadialGradient(colors: [theme.glow.opacity(theme.isLight ? 1 : 0.9), .clear],

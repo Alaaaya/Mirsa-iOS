@@ -291,6 +291,18 @@ final class AppsStore: ObservableObject {
 
     /// Registered by LocalDevVPN's upstream CFBundleURLSchemes.
     /// https://github.com/jkcoxson/LocalDevVPN/blob/main/LocalDevVPN/Info.plist
+    private final class VPNRetrySource {
+        let directory: URL
+        let app: URL
+        init(source: URL) throws {
+            directory = FileManager.default.temporaryDirectory.appendingPathComponent("vpn-retry-" + UUID().uuidString)
+            app = directory.appendingPathComponent(source.lastPathComponent)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            do { try FileManager.default.copyItem(at: source, to: app) }
+            catch { try? FileManager.default.removeItem(at: directory); throw error }
+        }
+        deinit { try? FileManager.default.removeItem(at: directory) }
+    }
     private var vpnRetry: (() async -> Void)?
     private var awaitingVPNReturn = false
     private var resumingVPN = false
@@ -1021,7 +1033,14 @@ final class AppsStore: ObservableObject {
         }
         guard await realAppNetworkReady(vm, selfUpdate: true) else {
             if errorOffersLocalDevVPN {
-                vpnRetry = { [weak self, weak vm] in await self?.installSelf(vm: vm, from: source, feedback: feedback) }
+                do {
+                    // The updater deletes its extraction when this failed attempt returns.
+                    // Retain an independent copy until the callback retry finishes.
+                    let retained = try source.map { try VPNRetrySource(source: $0) }
+                    vpnRetry = { [weak self, weak vm, retained] in
+                        await self?.installSelf(vm: vm, from: retained?.app, feedback: feedback)
+                    }
+                } catch { self.error = error.localizedDescription }
             }
             return
         }

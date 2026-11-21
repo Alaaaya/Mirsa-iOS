@@ -11,6 +11,11 @@ on:
         type: boolean
         required: false
         default: false
+      full_window_only:
+        description: "Capture all main/source themes, all tabs and both store styles edge-to-edge"
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 jobs:
@@ -50,7 +55,7 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 || true
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult ${{ github.event.inputs.light_only == 'true' && '-only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests/testLightDockRenderedPixels -only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests/testLightDockDoesNotLeakToOtherToolsSections -only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests/testSourcesListAllThemes' || '-only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests' }} test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/StyleUI.xcresult ${{ github.event.inputs.full_window_only == 'true' && '-only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFullWindowBackgroundAllTabsAndThemes -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testFullWindowSourcesBackgroundThemesAndClearance' || github.event.inputs.light_only == 'true' && '-only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests/testLightDockRenderedPixels -only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests/testLightDockDoesNotLeakToOtherToolsSections -only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests/testSourcesListAllThemes' || '-only-testing:MirsaUITests/SourcesToolsStoreScreenshotsUITests' }} test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/style-ui.log
       - name: Export named screenshots
         if: always()
         run: |

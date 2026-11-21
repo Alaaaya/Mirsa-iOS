@@ -302,6 +302,105 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
         }
     }
 
+    /// Real retained six-tab host, not a dock-only design fixture. Both global
+    /// themes and both App Store styles keep page backgrounds behind the dock.
+    func testFullWindowBackgroundAllTabsAndThemes() {
+        continueAfterFailure = false
+        for theme in ["liquid", "classic"] {
+            for style in ["classic", "new"] {
+                let app = launch("tools", lang: "en", extra: [
+                    "-mirsa.theme", theme, "-mirsa.sourceTheme", "aurora",
+                    "-mirsa.store.style", style, "-MirsaStoreFixtureAccount",
+                    "-MirsaChatFixture", "-MirsaChatEmptyFixture"
+                ])
+                let prefix = "fullwindow_\(theme)_\(style)"
+                for id in ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"] {
+                    let button = dockButton(app, id)
+                    XCTAssertTrue(button.waitForExistence(timeout: 10), id)
+                    XCTAssertTrue(button.isHittable, id)
+                    button.tap()
+                    XCTAssertTrue(button.isSelected, id)
+                    let name = id.replacingOccurrences(of: " ", with: "_")
+                    shot(app, prefix + "_" + name + "_top")
+                    if id != "Mirsa AI" {
+                        scrollToBottom(app)
+                        shot(app, prefix + "_" + name + "_bottom")
+                    }
+                }
+                dockButton(app, "Pairing").tap()
+                for section in ["pairing", "device", "wallpapers", "tweaks", "store"] {
+                    let button = app.buttons["tools-section-" + section]
+                    XCTAssertTrue(button.waitForExistence(timeout: 10), section)
+                    XCTAssertTrue(button.isHittable, section)
+                    button.tap()
+                    shot(app, prefix + "_tools_" + section + "_top")
+                    scrollToBottom(app)
+                    shot(app, prefix + "_tools_" + section + "_bottom")
+                }
+                // Leaving and revisiting a retained tab must keep Tools' Store selection.
+                dockButton(app, "Apps").tap()
+                dockButton(app, "Pairing").tap()
+                XCTAssertTrue(app.buttons["tools-section-store"].isSelected)
+                shot(app, prefix + "_tools_store_retained")
+                app.terminate()
+            }
+        }
+    }
+
+    /// Offline catalogue, production ContentView. Captures the four independent
+    /// Sources themes at both scroll ends, and the Tools Store using that palette.
+    func testFullWindowSourcesBackgroundThemesAndClearance() {
+        continueAfterFailure = false
+        for theme in ["liquid", "classic"] {
+            for source in ["aurora", "sunset", "ocean", "light"] {
+                let app = launch("dock-clearance-29", lang: "en", extra: [
+                    "-mirsa.theme", theme, "-mirsa.sourceTheme", source
+                ])
+                let prefix = "fullwindow_\(theme)_\(source)"
+                let dock = app.descendants(matching: .any)["mirsa-tab-dock"].firstMatch
+                XCTAssertTrue(dock.waitForExistence(timeout: 10))
+                XCTAssertEqual(dock.value as? String, source == "light" ? "light" : "dark")
+                shot(app, prefix + "_sources_top")
+                let last = app.staticTexts["Dock Source Last"].firstMatch
+                for _ in 0..<35 {
+                    if last.exists && last.isHittable { break }
+                    app.swipeUp()
+                }
+                XCTAssertTrue(last.waitForExistence(timeout: 10))
+                XCTAssertTrue(last.isHittable)
+                let row = app.cells.containing(.staticText, identifier: "Dock Source Last").firstMatch
+                XCTAssertTrue(row.exists)
+                XCTAssertLessThanOrEqual(row.frame.maxY, dock.frame.minY,
+                                         "Entire last source row must scroll clear of the floating dock")
+                shot(app, prefix + "_sources_bottom")
+                last.tap()
+                shot(app, prefix + "_source_detail_top")
+                let lastApp = app.staticTexts["Alaa Player"].firstMatch
+                for _ in 0..<45 {
+                    if lastApp.exists && lastApp.isHittable { break }
+                    app.swipeUp()
+                }
+                XCTAssertTrue(lastApp.exists && lastApp.isHittable)
+                let appRow = app.cells.containing(.staticText, identifier: "Alaa Player").firstMatch
+                XCTAssertTrue(appRow.exists)
+                XCTAssertLessThanOrEqual(appRow.frame.maxY, dock.frame.minY,
+                                         "Pushed source's final GET row must clear the dock")
+                shot(app, prefix + "_source_detail_bottom")
+                dockButton(app, "Pairing").tap()
+                app.buttons["tools-section-store"].tap()
+                expectation(for: NSPredicate(format: "value == %@", source == "light" ? "light" : "dark"),
+                            evaluatedWith: dock)
+                waitForExpectations(timeout: 8)
+                shot(app, prefix + "_tools_store_top")
+                scrollToBottom(app)
+                shot(app, prefix + "_tools_store_bottom")
+                dockButton(app, "Apps").tap()
+                XCTAssertEqual(dock.value as? String, "dark", "Light Sources theme must not leak to Apps")
+                app.terminate()
+            }
+        }
+    }
+
     /// Alternate icon selection was removed; Settings must not expose it.
     func testAppIconPickerAllIcons() {
         continueAfterFailure = false

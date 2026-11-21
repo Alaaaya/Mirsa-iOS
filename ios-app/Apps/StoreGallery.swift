@@ -99,6 +99,12 @@ enum StoreGalleryText {
 /// Reduce Motion handling and costs no animation while scrolling.
 struct StoreGalleryBackground: View {
     var body: some View {
+        MirsaScreenAnchored { _ in
+            mesh
+        }
+    }
+
+    private var mesh: some View {
         ZStack {
             StoreGallery.ink
             RadialGradient(colors: [StoreGallery.violet.opacity(0.42), StoreGallery.violet.opacity(0.10), .clear],
