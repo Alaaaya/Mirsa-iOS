@@ -361,31 +361,35 @@ final class MirsaStyleScreenshotsUITests: XCTestCase {
                 XCTAssertTrue(dock.waitForExistence(timeout: 10))
                 XCTAssertEqual(dock.value as? String, source == "light" ? "light" : "dark")
                 shot(app, prefix + "_sources_top")
-                let last = app.staticTexts["Dock Source Last"].firstMatch
-                for _ in 0..<35 {
-                    if last.exists && last.isHittable { break }
-                    app.swipeUp()
+                print("CLEARANCE-TOP \(prefix)\n" + app.debugDescription)
+                let row = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "Dock Source Last")).firstMatch
+                let list = app.collectionViews.firstMatch
+                XCTAssertTrue(list.waitForExistence(timeout: 10))
+                for _ in 0..<18 {
+                    if row.exists && row.frame.maxY <= dock.frame.minY && row.isHittable { break }
+                    list.swipeUp()
                 }
-                XCTAssertTrue(last.waitForExistence(timeout: 10))
-                XCTAssertTrue(last.isHittable)
-                let row = app.cells.containing(.staticText, identifier: "Dock Source Last").firstMatch
-                XCTAssertTrue(row.exists)
+                shot(app, prefix + "_sources_bottom")
+                print("CLEARANCE-BOTTOM \(prefix)\n" + app.debugDescription)
+                XCTAssertTrue(row.exists, "Final source cell must exist after list-scoped swipes")
+                XCTAssertTrue(row.isHittable)
+                print("CLEARANCE-FRAMES \(prefix) source=\(row.frame) dock=\(dock.frame)")
                 XCTAssertLessThanOrEqual(row.frame.maxY, dock.frame.minY,
                                          "Entire last source row must scroll clear of the floating dock")
-                shot(app, prefix + "_sources_bottom")
-                last.tap()
+                row.tap()
                 shot(app, prefix + "_source_detail_top")
-                let lastApp = app.staticTexts["Alaa Player"].firstMatch
-                for _ in 0..<45 {
-                    if lastApp.exists && lastApp.isHittable { break }
-                    app.swipeUp()
+                let appRow = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "Alaa Player")).firstMatch
+                let detailList = app.collectionViews.firstMatch
+                for _ in 0..<25 {
+                    if appRow.exists && appRow.frame.maxY <= dock.frame.minY && appRow.isHittable { break }
+                    detailList.swipeUp()
                 }
-                XCTAssertTrue(lastApp.exists && lastApp.isHittable)
-                let appRow = app.cells.containing(.staticText, identifier: "Alaa Player").firstMatch
-                XCTAssertTrue(appRow.exists)
+                shot(app, prefix + "_source_detail_bottom")
+                print("CLEARANCE-DETAIL \(prefix)\n" + app.debugDescription)
+                XCTAssertTrue(appRow.exists && appRow.isHittable)
+                print("CLEARANCE-DETAIL-FRAMES \(prefix) app=\(appRow.frame) dock=\(dock.frame)")
                 XCTAssertLessThanOrEqual(appRow.frame.maxY, dock.frame.minY,
                                          "Pushed source's final GET row must clear the dock")
-                shot(app, prefix + "_source_detail_bottom")
                 dockButton(app, "Pairing").tap()
                 app.buttons["tools-section-store"].tap()
                 expectation(for: NSPredicate(format: "value == %@", source == "light" ? "light" : "dark"),
