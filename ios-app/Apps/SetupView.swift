@@ -73,6 +73,11 @@ struct SetupView: View {
                 .interactiveDismissDisabled()
         }
         .alert(L.t("setup.title"), isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
+            if store.errorOffersLocalDevVPN {
+                Button(tr5("Open LocalDevVPN", "فتح LocalDevVPN", de: "LocalDevVPN öffnen", ckb: "کردنەوەی LocalDevVPN", kmr: "LocalDevVPN veke")) {
+                    AppsStore.openLocalDevVPN(); store.error = nil
+                }
+            }
             if store.errorOffersSettings {
                 Button(tr("Open Settings", "فتح الإعدادات")) { AppsStore.openWiFiSettings(); store.error = nil }
             }

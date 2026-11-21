@@ -252,6 +252,11 @@ struct AppsTab: View {
                 Button(tr("Import IPA again", "استيراد الـIPA من جديد")) { store.error = nil; showPicker = true }
                 Button(tr("Download from link again", "تحميل من الرابط من جديد")) { store.error = nil; showURLImport = true }
             }
+            if store.errorOffersLocalDevVPN {
+                Button(tr5("Open LocalDevVPN", "فتح LocalDevVPN", de: "LocalDevVPN öffnen", ckb: "کردنەوەی LocalDevVPN", kmr: "LocalDevVPN veke")) {
+                    AppsStore.openLocalDevVPN(); store.error = nil
+                }
+            }
             if store.errorOffersSettings {
                 Button(tr("Open Settings", "فتح الإعدادات")) { AppsStore.openWiFiSettings(); store.error = nil }
             }

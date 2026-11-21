@@ -79,9 +79,10 @@ final class AppsStore: ObservableObject {
     @Published var prompt: SideloadPrompt? = nil
     @Published var errorOffersReimport = false
     @Published var errorOffersSettings = false
+    @Published var errorOffersLocalDevVPN = false
     @Published var error: String? = nil {
         didSet {
-            if error == nil { errorOffersSettings = false; errorOffersReimport = false }
+            if error == nil { errorOffersLocalDevVPN = false; errorOffersSettings = false; errorOffersReimport = false }
             if let error {
                 let safe = InstallErrorText.sanitize(error, arabic: L.isArabic)
                 if safe != error { self.error = safe }
@@ -264,7 +265,8 @@ final class AppsStore: ObservableObject {
                       "التحديث بدو LocalDevVPN شغّال وملف اقتران. شغّل LocalDevVPN وجرّب مرة تانية.")
                  : tr("Real app installation needs LocalDevVPN running and a pairing file. Turn LocalDevVPN on and try again.",
                       "التثبيت الحقيقي بدو LocalDevVPN شغّال وملف اقتران. شغّل LocalDevVPN وجرّب مرة تانية."),
-                 offersSettings: true)
+                 offersSettings: false)
+            errorOffersLocalDevVPN = true
             return false
         }
         return true
@@ -284,6 +286,22 @@ final class AppsStore: ObservableObject {
     private func fail(_ message: String, offersSettings: Bool) {
         errorOffersSettings = offersSettings
         error = message
+    }
+
+    /// Registered by LocalDevVPN's upstream CFBundleURLSchemes.
+    /// https://github.com/jkcoxson/LocalDevVPN/blob/main/LocalDevVPN/Info.plist
+    static func openLocalDevVPN() {
+        guard let appURL = URL(string: "localdevvpn://"),
+              let storeURL = URL(string: "https://apps.apple.com/us/app/localdevvpn/id6755608044") else { return }
+        guard UIApplication.shared.canOpenURL(appURL) else {
+            UIApplication.shared.open(storeURL)
+            return
+        }
+        UIApplication.shared.open(appURL, options: [:]) { opened in
+            if !opened {
+                DispatchQueue.main.async { UIApplication.shared.open(storeURL) }
+            }
+        }
     }
 
     static func openWiFiSettings() {
