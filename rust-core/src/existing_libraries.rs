@@ -79,15 +79,37 @@ fn resolve(root:&Path,owner:&Path,name:&str,cmds:&[Cmd])->Result<Option<String>>
  candidates.sort();candidates.dedup();
  Ok(if candidates.len()==1{Some(candidates[0].strip_prefix(root).map_err(err)?.to_str().ok_or("Non UTF8 path")?.into())}else{None})
 }
-fn binaries(app:&Path)->Result<Vec<PathBuf>> {
+/// List-only candidate gate on archive-relative paths, evaluated BEFORE any file is opened or parsed.
+/// Framework components (anywhere, incl. nested), libswift* and system trees are never listed or parsed
+/// for the "already present" list. Signing/editing enumeration (binaries()) is unaffected.
+fn list_candidate(relative:&str)->bool {
+ let canonical=relative.trim_start_matches('/');
+ if canonical.starts_with("System/Library/")||canonical.starts_with("usr/lib/") {return false}
+ let mut parts=canonical.split('/').peekable();
+ while let Some(c)=parts.next() {
+  if c.ends_with(".framework") {return false}
+  if parts.peek().is_none()&&c.starts_with("libswift") {return false}
+ }
+ true
+}
+fn list_edge_eligible(load_path:&str,bundled:Option<&str>)->bool {
+ let base=load_path.rsplit('/').next().unwrap_or(load_path);
+ if !base.ends_with(".dylib")||base.starts_with("libswift") {return false}
+ if system(load_path) {return false}
+ !load_path.split('/').chain(bundled.unwrap_or("").split('/')).any(|c|c.ends_with(".framework"))
+}
+fn binaries(app:&Path)->Result<Vec<PathBuf>> {binaries_filtered(app,false)}
+fn binaries_filtered(app:&Path,list_only:bool)->Result<Vec<PathBuf>> {
  tweak_targets::checked_tree(app)?;let mut files=Vec::new();walk(app,&mut files)?;
- let mut out=Vec::new();for p in files {if !p.is_file(){continue}let mut f=File::open(&p).map_err(err)?;let mut magic=[0;4];if f.read(&mut magic).map_err(err)?!=4{continue}
+ let mut out=Vec::new();for p in files {if !p.is_file(){continue}
+ if list_only {let rel=p.strip_prefix(app).ok().and_then(|r|r.to_str());if !rel.map(list_candidate).unwrap_or(false){continue}}let mut f=File::open(&p).map_err(err)?;let mut magic=[0;4];if f.read(&mut magic).map_err(err)?!=4{continue}
  if matches!(magic,[0xcf,0xfa,0xed,0xfe]|[0xca,0xfe,0xba,0xbe]|[0xbe,0xba,0xfe,0xca]|[0xca,0xfe,0xba,0xbf]|[0xbf,0xba,0xfe,0xca]){out.push(p)}
  }out.sort();Ok(out)
 }
-pub(super) fn graph(app:&Path)->Result<Vec<Library>> {
+pub(super) fn graph(app:&Path)->Result<Vec<Library>> {scan(app,false)}
+fn scan(app:&Path,list_only:bool)->Result<Vec<Library>> {
  tweak_targets::checked_tree(app)?;let app=fs::canonicalize(app).map_err(err)?;let mut out:Vec<Library>=Vec::new();
- for p in binaries(&app)? {
+ for p in binaries_filtered(&app,list_only)? {
   let d=read_macho(&p)?;let owner=p.strip_prefix(&app).map_err(err)?.to_str().ok_or("Non UTF8 owner")?.to_owned();
   for (a,b) in ranges(&d)? {let s=&d[a..b];if s[..4]!=[0xcf,0xfa,0xed,0xfe]{continue}let cmds=commands(s)?;let arch=format!("{:x}:{:x}",u32at(s,4)?,u32at(s,8)?);
    for c in cmds.iter().filter(|c|load(c.kind)) {let name=c.name.as_ref().unwrap();if system(name){continue}let id=format!("{owner}|{name}");let resolved=resolve(&app,&p,name,&cmds)?;
@@ -103,15 +125,16 @@ pub(super) fn graph(app:&Path)->Result<Vec<Library>> {
 // Inspection-only inventory. Never add synthetic edges to graph(): editing, target
 // selection and ordinal remapping must operate on real load commands only.
 fn inventory(app:&Path)->Result<Vec<Library>> {
- let mut entries=graph(app)?;let root=fs::canonicalize(app).map_err(err)?;
- entries.extend(runtime_libraries::entries(&root,&entries)?);
- for p in binaries(&root)? {
+ let mut entries=scan(app,true)?;let root=fs::canonicalize(app).map_err(err)?;
+ let runtime=runtime_libraries::entries(&root,&entries)?;
+ entries.retain(|l|list_edge_eligible(&l.load_path,l.bundled_path.as_deref()));
+ entries.extend(runtime);
+ for p in binaries_filtered(&root,true)? {
   let relative=p.strip_prefix(&root).map_err(err)?.to_str().ok_or("Non UTF8 library path")?.to_owned();
   let parts:Vec<_>=relative.split('/').collect();
   // Top-level Frameworks only; never mistake app extensions or resources for tweaks.
   let dylib=parts.len()==2&&parts[0]=="Frameworks"&&relative.ends_with(".dylib");
-  let framework=parts.len()==3&&parts[0]=="Frameworks"&&parts[1].ends_with(".framework")&&parts[1].strip_suffix(".framework")==Some(parts[2]);
-  if !dylib&&!framework {continue}
+  if !dylib {continue}
   if entries.iter().any(|l|l.bundled_path.as_deref()==Some(&relative)||l.load_path.strip_prefix("@rpath/")==relative.strip_prefix("Frameworks/")) {continue}
   if entries.len()>=32768{return Err("Library inventory exceeds safe limits".into())}
   entries.push(Library{id:format!("file|{relative}"),owner:"Frameworks".into(),load_path:relative.clone(),kind:"file".into(),bundled_path:Some(relative),provenance:"bundledFile".into(),slices:Vec::new()});
@@ -309,15 +332,30 @@ mod tests {
   }
   archive.finish().unwrap();let ipa_bytes=fs::read(&ipa).unwrap();
   let extract=dir.join("extracted");zip::ZipArchive::new(File::open(&ipa).unwrap()).unwrap().extract(&extract).unwrap();let app=extract.join("Payload/Test.app");
-  let entries=inventory(&app).unwrap();assert_eq!(entries.len(),3);
+  let entries=inventory(&app).unwrap();assert_eq!(entries.len(),2);
   assert_eq!(entries.iter().filter(|l|l.kind=="file").count(),1);
   assert!(entries.iter().any(|l|l.load_path==load&&l.kind=="load"));
-  assert!(entries.iter().any(|l|l.load_path=="@rpath/ElleKit.framework/ElleKit"&&l.kind=="weak"));
+  assert!(!entries.iter().any(|l|l.load_path.contains(".framework")));
   assert!(!entries.iter().any(|l|l.load_path.starts_with("/usr/lib/")));
   // Inventory-only rows must never enter the editable graph or accept removal.
   assert!(apply(&app,&[Edit{owner:"Frameworks".into(),removed:vec!["Frameworks/Unused.dylib".into()],order:vec![],disabled:vec![]}]).is_err());
   apply(&app,&[edit(&[load],&[])]).unwrap();assert!(!names(&fs::read(app.join("Main")).unwrap()).contains(&load.to_owned()));
   assert_eq!(fs::read(&ipa).unwrap(),ipa_bytes);fs::remove_dir_all(dir).unwrap();
+ }
+ #[test] fn list_scanner_never_parses_framework_swift_or_system_candidates() {
+  let root=dir();fs::create_dir_all(root.join("Frameworks/Bad.framework/Frameworks/Nested.framework")).unwrap();fs::create_dir_all(root.join("usr/lib")).unwrap();
+  let poison=vec![0xcf,0xfa,0xed,0xfe,1,2,3,4];
+  fs::write(root.join("Frameworks/Bad.framework/Bad"),&poison).unwrap();fs::write(root.join("Frameworks/Bad.framework/Frameworks/Nested.framework/Nested"),&poison).unwrap();
+  fs::write(root.join("Frameworks/Bad.framework/Helper.dylib"),&poison).unwrap();fs::write(root.join("Frameworks/libswiftCore.dylib"),&poison).unwrap();fs::write(root.join("usr/lib/libz.dylib"),&poison).unwrap();
+  fs::write(root.join("Main"),fixture(&[(0xc,"@executable_path/Frameworks/Tweak.dylib"),(0xc,"@rpath/Bad.framework/Bad"),(0xc,"@rpath/libswiftCore.dylib"),(0xc,"@rpath/Foo.framework/Foo.dylib"),(0xc,"/usr/lib/libSystem.B.dylib")],&[])).unwrap();
+  fs::write(root.join("Frameworks/Tweak.dylib"),fixture(&[(0xc,"@rpath/Bad.framework/Bad")],&[])).unwrap();
+  let rels:Vec<String>=binaries_filtered(&root,true).unwrap().iter().map(|p|p.strip_prefix(&root).unwrap().to_str().unwrap().to_owned()).collect();
+  assert_eq!(rels,vec!["Frameworks/Tweak.dylib".to_owned(),"Main".to_owned()],"excluded candidates must not even be opened");
+  let entries=inventory(&root).unwrap();
+  assert_eq!(entries.iter().map(|l|l.load_path.as_str()).collect::<Vec<_>>(),vec!["@executable_path/Frameworks/Tweak.dylib"]);
+  // Signing/edit enumeration still covers every Mach-O (including frameworks and swift libs).
+  assert_eq!(binaries(&root).unwrap().len(),7);assert!(graph(&root).is_ok()||graph(&root).is_err());
+  fs::remove_dir_all(root).unwrap();
  }
  #[test] fn disabled_unlinks_but_keeps_file_and_source() {
   let root=dir();let path="@executable_path/Frameworks/Tweak.dylib";

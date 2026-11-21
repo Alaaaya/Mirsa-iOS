@@ -136,7 +136,7 @@ jobs:
           import plistlib,pathlib,zipfile
           p=pathlib.Path('build/Mirsa.ipa')
           with zipfile.ZipFile(p) as z: entries=[(i,z.read(i.filename)) for i in z.infolist()]
-          build='8.533.1'
+          build='8.534.1'
           with zipfile.ZipFile(p,'w',zipfile.ZIP_DEFLATED) as z:
               for i,b in entries:
                   if i.filename=='Payload/Mirsa.app/Info.plist' or ('.appex/' in i.filename and i.filename.endswith('/Info.plist')):
