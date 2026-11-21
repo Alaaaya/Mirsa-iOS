@@ -193,7 +193,7 @@ impl Bundle {
 
     fn sub_bundles(&self) -> Result<Vec<PathBuf>> {
         let mut bundles = Vec::new();
-        for folder in ["Frameworks", "PlugIns"] {
+        for folder in ["Frameworks", "PlugIns", "Watch", "AppClips"] {
             let dir = self.path.join(folder);
             if !dir.exists() {
                 continue;
@@ -373,10 +373,43 @@ fn collect_own_bundle_files(
     })
 }
 
+fn is_macho_magic(bytes: &[u8]) -> bool {
+    matches!(bytes.get(..4),
+        Some([0xcf,0xfa,0xed,0xfe] | [0xfe,0xed,0xfa,0xcf]
+        | [0xce,0xfa,0xed,0xfe] | [0xfe,0xed,0xfa,0xce]
+        | [0xca,0xfe,0xba,0xbe] | [0xbe,0xba,0xfe,0xca]
+        | [0xca,0xfe,0xba,0xbf] | [0xbf,0xba,0xfe,0xca]))
+}
+#[cfg(test)]
+mod embedded_resource_tests {
+    use super::*;
+    #[test]
+    fn non_macho_library_is_a_resource_not_a_signing_failure() {
+        let dir = std::env::temp_dir().join(format!("mirsa-non-macho-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("metadata.dylib");
+        fs::write(&path, b"not a Mach-O resource").unwrap();
+        let settings = BundleSigningSettings::new("TEAM", Dictionary::new(), None);
+        sign_libraries(&[path.clone()], &settings).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"not a Mach-O resource");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn malformed_macho_is_not_silently_skipped() {
+        assert!(is_macho_magic(&[0xcf,0xfa,0xed,0xfe]));
+        assert!(!is_macho_magic(b""));
+        assert!(!is_macho_magic(b"plist resource"));
+    }
+}
 fn sign_libraries(libraries: &[PathBuf], settings: &BundleSigningSettings<'_>) -> Result<()> {
     libraries
         .par_iter()
         .map(|path| {
+            // A resource may end in .dylib without being executable code. Keep
+            // it hashed as a resource, but never feed it to the Mach-O signer.
+            let bytes = read_file_bytes(path)?;
+            if !is_macho_magic(bytes.as_slice()) { return Ok(()); }
+            drop(bytes);
             let identifier = path
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -439,7 +472,7 @@ fn should_hash_resource(relative: &str, executable: &str) -> bool {
         return false;
     }
 
-    for nested_root in ["Frameworks/", "PlugIns/"] {
+    for nested_root in ["Frameworks/", "PlugIns/", "Watch/", "AppClips/"] {
         if let Some(rest) = relative.strip_prefix(nested_root)
             && rest.contains('/')
         {

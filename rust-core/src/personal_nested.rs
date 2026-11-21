@@ -241,7 +241,6 @@ pub(super) fn constrain_with_groups(request: &Dictionary, allowed: &Dictionary, 
 }
 
 fn be(d: &[u8], at: usize) -> Result<u32> { d.get(at..at+4).and_then(|s| s.try_into().ok()).map(u32::from_be_bytes).ok_or("توقيع Mach-O غير صالح.".into()) }
-fn le(d: &[u8], at: usize) -> Result<u32> { d.get(at..at+4).and_then(|s| s.try_into().ok()).map(u32::from_le_bytes).ok_or("ملف Mach-O غير صالح.".into()) }
 fn signature_entitlements(d: &[u8]) -> Result<Dictionary> {
     if be(d,0)? != 0xfade0cc0 { return Err("صيغة توقيع التطبيق غير مدعومة.".into()); }
     let len = be(d,4)? as usize; let count = be(d,8)? as usize;
@@ -262,35 +261,26 @@ fn signature_entitlements(d: &[u8]) -> Result<Dictionary> {
     if der_only && result.is_none() { return Err("صلاحيات DER فقط غير مدعومة بأمان حالياً.".into()); }
     Ok(result.unwrap_or_default())
 }
+#[path = "signature_ranges.rs"]
+mod signature_ranges;
 pub(super) fn read_entitlements(d: &[u8]) -> Result<Dictionary> {
+    // The read-only inspector validates every slice, including encryption ranges.
+    // Do not use the injection parser here: signing never decrypts/rebases code.
     crate::ipa_editor::encryption_status(d)?;
-    let magic = be(d,0)?;
-    if magic == 0xcafebabe || magic == 0xcafebabf {
-        let stride = if magic == 0xcafebabf {32} else {20}; let count = be(d,4)? as usize;
-        let mut result = None;
-        for i in 0..count {
-            let a = 8+i*stride;
-            let (off,len) = if stride == 20 { (be(d,a+8)? as usize,be(d,a+12)? as usize) }
-                else { (usize::try_from(u64::from_be_bytes(d[a+8..a+16].try_into().unwrap())).map_err(error)?,
-                        usize::try_from(u64::from_be_bytes(d[a+16..a+24].try_into().unwrap())).map_err(error)?) };
-            let ent = read_entitlements(&d[off..off+len])?;
-            if result.as_ref().is_some_and(|r| r != &ent) { return Err("صلاحيات شرائح التطبيق مختلفة.".into()); }
-            result = Some(ent);
+    let mut result = None;
+    for signature in signature_ranges::signatures(d)? {
+        let ent = if signature.is_empty() { Dictionary::new() }
+            else { signature_entitlements(signature)? };
+        if result.as_ref().is_some_and(|r| r != &ent) {
+            return Err("صلاحيات شرائح التطبيق مختلفة.".into());
         }
-        return Ok(result.unwrap_or_default());
+        result = Some(ent);
     }
-    let mut at = 32; let mut found = None;
-    for _ in 0..le(d,16)? {
-        let size = le(d,at+4)? as usize;
-        if le(d,at)? == 0x1d {
-            if size < 16 || found.is_some() { return Err("أمر توقيع غير صالح.".into()); }
-            let off = le(d,at+8)? as usize; let len = le(d,at+12)? as usize;
-            let sig = d.get(off..off.checked_add(len).ok_or("تجاوز حدود التوقيع.")?).ok_or("حدود التوقيع غير صالحة.")?;
-            found = Some(signature_entitlements(sig)?);
-        }
-        at += size;
-    }
-    Ok(found.unwrap_or_default())
+    Ok(result.unwrap_or_default())
+}
+pub(super) fn file_error(root: &Path, path: &Path, reason: impl std::fmt::Display) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
+    format!("MIRSA_SIGN_FILE|{}", serde_json::json!({"path": relative, "reason": reason.to_string()}))
 }
 pub(super) fn check_macho_file(path: &Path) -> Result<()> {
     use std::io::Read;

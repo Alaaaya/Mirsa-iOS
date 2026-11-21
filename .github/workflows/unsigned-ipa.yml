@@ -71,6 +71,15 @@ jobs:
         with:
           workspaces: rust-core
 
+      - name: Encrypted embedded and resource signing tests
+        run: |
+          cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib encrypted_
+          cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib embedded_resource_tests
+          python3 scripts/test_signing_ranges.py
+          python3 scripts/test_watch_signing.py
+      - name: Localized file-error formatter
+        run: swift scripts/test_signing_file_error.swift
+
       - name: Large executable disk-backed edit regressions
         run: cargo test --manifest-path rust-core/Cargo.toml large_binary_tests -- --test-threads=1
 
@@ -120,6 +129,27 @@ jobs:
 
       - name: Verify actual IPA upgrade from live 243
         run: python3 scripts/verify_release_upgrade.py build/Mirsa.ipa
+
+      - name: Stamp combined build number and verify IPA
+        run: |
+          python3 - <<'PY'
+          import plistlib,pathlib,zipfile
+          p=pathlib.Path('build/Mirsa.ipa')
+          with zipfile.ZipFile(p) as z: entries=[(i,z.read(i.filename)) for i in z.infolist()]
+          build='8.532.1'
+          with zipfile.ZipFile(p,'w',zipfile.ZIP_DEFLATED) as z:
+              for i,b in entries:
+                  if i.filename=='Payload/Mirsa.app/Info.plist' or ('.appex/' in i.filename and i.filename.endswith('/Info.plist')):
+                      v=plistlib.loads(b);v['CFBundleVersion']=build;b=plistlib.dumps(v)
+                  z.writestr(i,b)
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              v=plistlib.loads(z.read('Payload/Mirsa.app/Info.plist'))
+              assert v['CFBundleVersion']==build
+              assert z.read('Payload/Mirsa.app/Mirsa')[:4]==bytes.fromhex('cffaedfe')
+          print('Verified combined IPA build',build)
+          PY
+          shasum -a 256 build/Mirsa.ipa
 
       - uses: actions/upload-artifact@v4
         with:

@@ -476,7 +476,7 @@ enum PersonalCertificateSigner {
         let data = Data(String(cString: response).utf8)
         let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard result?["ok"] as? Bool == true else {
-            throw SideloadError.message(result?["error"] as? String ?? "Personal signing failed.")
+            throw SideloadError.message(PersonalSigningFileError.localized(result?["error"] as? String ?? "Personal signing failed.", language: AppLanguageStore.snapshot.rawValue))
         }
         // Export contains the signed app and, unless omitted, its public profile,
         // never P12, password or private key.
