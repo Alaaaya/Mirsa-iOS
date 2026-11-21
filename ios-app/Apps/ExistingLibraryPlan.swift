@@ -112,7 +112,7 @@ enum ExistingLibraryPlan {
 struct ExistingLibrariesCard: View {
     let libraries: [ExistingProjectLibrary]
     @Binding var edits: [ExistingLibraryEdit]
-    @State private var open = true
+    @State private var open = false
     @State private var pendingRemove: ExistingProjectLibrary?
 
     private var owners: [String] {
