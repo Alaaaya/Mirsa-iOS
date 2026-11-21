@@ -15,7 +15,7 @@ fixture = root / "tests/Fixtures"
 editor = (root / "rust-core/src/ipa_editor.rs").read_text()
 encryption = editor[editor.index("pub(crate) fn encryption_status"):editor.index("pub(crate) fn unencrypted")]
 nested = (root / "rust-core/src/personal_nested.rs").read_text()
-entitlements = nested[nested.index("fn be("):nested.index("pub(super) fn check_macho_file")]
+entitlements = nested[nested.index("fn be("):nested.index("pub(super) fn file_error")]
 entitlements = entitlements.replace("pub(super) fn read_entitlements", "pub(crate) fn read_entitlements")
 
 with tempfile.TemporaryDirectory(prefix="lcsign-fixture-") as temporary:
