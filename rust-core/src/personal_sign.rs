@@ -324,8 +324,8 @@ pub(crate) fn sign_with_options(app: &Path, profile_path: &Path, key: &str, cert
     nested::apply_removals(app, opts)?;
     for node in &mut nodes { nested::rewrite(node, &mapping)?; }
     // Explicit deepest-first pass includes Watch/AppClips, which the vendored
-    // library does not discover. Parent envelopes then hash their final bytes.
-    // Frameworks/PlugIns may be signed again recursively with identical maps.
+    // library also discovers. Parent envelopes then hash their final bytes.
+    // Descendants may be signed again recursively with identical entitlement/profile maps.
     nodes.sort_by_key(|n| std::cmp::Reverse(n.path.components().count()));
     crate::signing_progress::report(0, nodes.len())?;
     for (completed, node) in nodes.iter().enumerate() {

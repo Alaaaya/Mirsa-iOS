@@ -25,6 +25,7 @@ jobs:
           cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib encrypted_
           cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib embedded_resource_tests
           python3 scripts/test_signing_ranges.py
+          python3 scripts/test_watch_signing.py
       - name: Localized file-error formatter
         run: swift scripts/test_signing_file_error.swift
       - name: Build device signer
