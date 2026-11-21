@@ -81,6 +81,8 @@ use plist::{Value,Dictionary};
 }
 """
     (work / "src/lib.rs").write_text(harness)
+    # personal_nested declares this module by path, so ship the production file next to lib.rs.
+    (work / "src/signature_ranges.rs").write_text((root / "rust-core/src/signature_ranges.rs").read_text())
     env = dict(os.environ, LCSIGN_FIXTURE_WORK=str(work), LCSIGN_PUBLIC_FIXTURES=str(fixture))
     args = ["cargo", "test", "--manifest-path", str(work / "Cargo.toml")]
     if os.environ.get("MIRSA_OFFLINE") == "1":

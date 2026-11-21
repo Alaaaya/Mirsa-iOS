@@ -31,7 +31,9 @@ serde_json="1"
 sha1="0.11"
 sha2="0.11"
 apple-codesign-quick={path="'''+str(root/"rust-core/vendor/apple-codesign-quick")+'''"}\n''')
-    source = prefix + "mod ipa_editor {use super::*;const ENTRY_LIMIT:usize=100000;const IPA_EXECUTABLE_LIMIT:u64=1500000000;\n" + walk + inspection + "}\n"
+    # signing_encryption reads files through read_macho; the harness only needs a plain byte reader.
+    reader = "fn read_macho(p:&Path)->Result<Vec<u8>>{fs::read(p).map_err(err)}\n"
+    source = prefix + "mod ipa_editor {use super::*;const ENTRY_LIMIT:usize=100000;const IPA_EXECUTABLE_LIMIT:u64=1500000000;\n" + reader + walk + inspection + "}\n"
     source += '#[path="'+str(root/"rust-core/src/personal_nested.rs")+'"] mod nested;\n'
     source += (root/"scripts/watch_signing_fixture.rs").read_text()
     (tmp/"src/lib.rs").write_text(source)
