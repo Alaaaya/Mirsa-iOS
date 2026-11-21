@@ -5,7 +5,7 @@ import plistlib
 root = pathlib.Path(__file__).resolve().parents[1]
 store = (root / "ios-app/Apps/AppsStore.swift").read_text()
 assert "localdevvpn" in plistlib.loads((root / "ios-app/Info.plist").read_bytes())["LSApplicationQueriesSchemes"]
-assert 'URL(string: "localdevvpn://")' in store
+assert 'URL(string: "localdevvpn://enable?scheme=mirsa")' in store
 assert 'https://apps.apple.com/us/app/localdevvpn/id6755608044' in store
 assert "canOpenURL(appURL)" in store and "if !opened" in store
 assert "if error == nil { errorOffersLocalDevVPN = false;" in store
@@ -22,3 +22,15 @@ for name in ["AppsView", "SetupView"]:
     assert 'Button(tr("Open Settings"' in view
 assert 'Button(tr("Copy log"' in (root / "ios-app/Apps/AppsView.swift").read_text()
 print("LocalDevVPN alert routing, 5 languages, fallback and existing actions PASS")
+
+assert 'resumeAfterLocalDevVPN' in (root / 'ios-app/MirsaApp.swift').read_text()
+assert 'for _ in 0..<12' in store
+assert 'awaitingVPNReturn, !resumingVPN' in store
+assert 'await retry?()' in store
+export = (root / 'ios-app/Apps/IPAEditorService.swift').read_text()
+assert 'file.path.hasPrefix(root.path + "/")' in export
+assert '!relative.split(separator: "/").contains("..")' in export
+card = (root / 'ios-app/Apps/ExistingLibraryPlan.swift').read_text()
+assert 'ShareSheet(items: [exportURL])' in card
+assert 'exportExistingLibrary(row.lib, from: sourceIPA)' in card
+print("VPN callback, bounded retry, safe library export PASS")

@@ -361,7 +361,7 @@ struct PersonalProjectDetailView: View {
                 .font(.caption).foregroundStyle(.yellow)
         }
         if !existingLibraries.isEmpty {
-            ExistingLibrariesCard(libraries: existingLibraries, edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
+            ExistingLibrariesCard(libraries: existingLibraries, sourceIPA: library.url(app), edits: Binding(get: { draft.existingLibraryEdits ?? [] }, set: { draft.existingLibraryEdits = $0.isEmpty ? nil : $0 }))
                 .padding(10).background(LCPalette.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         if ids.isEmpty && existingLibraries.isEmpty {

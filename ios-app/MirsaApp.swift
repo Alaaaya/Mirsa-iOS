@@ -51,6 +51,9 @@ struct MirsaApp: App {
             .overlay { MirsaCompletionSparkles() }
             .background { OpenInProjectPresenter().frame(width: 0, height: 0) }
             .onOpenURL { url in
+                if url.scheme?.lowercased() == "mirsa" {
+                    Task { await AppsStore.shared.resumeAfterLocalDevVPN(vm: vm) }
+                }
                 if AppsStore.isSetupMode, OpenInTweak.accepts(url) { OpenInProjectCoordinator.shared.receive([url]) }
             }
             .environmentObject(vm)

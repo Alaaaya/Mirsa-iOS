@@ -111,6 +111,10 @@ enum ExistingLibraryPlan {
 
 struct ExistingLibrariesCard: View {
     let libraries: [ExistingProjectLibrary]
+    var sourceIPA: URL? = nil
+    @State private var exportURL: URL?
+    @State private var exportBusy = false
+    @State private var exportError: String?
     @Binding var edits: [ExistingLibraryEdit]
     @State private var open = false
     @State private var pendingRemove: ExistingProjectLibrary?
@@ -151,6 +155,23 @@ struct ExistingLibrariesCard: View {
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
+                                if row.lib.bundledPath != nil, let sourceIPA {
+                                    Button {
+                                        exportBusy = true
+                                        Task {
+                                            do {
+                                                let file = try await Task.detached(priority: .userInitiated) {
+                                                    try IPAEditorService.exportExistingLibrary(row.lib, from: sourceIPA)
+                                                }.value
+                                                exportURL = file
+                                            } catch { exportError = error.localizedDescription }
+                                            exportBusy = false
+                                        }
+                                    } label: { Image(systemName: "square.and.arrow.up") }
+                                    .disabled(exportBusy)
+                                    .accessibilityLabel(tr5("Export library", "تصدير المكتبة", de: "Bibliothek exportieren", ckb: "هەناردەکردنی کتێبخانە", kmr: "Pirtûkxaneyê derxe"))
+                                }
+
                                 if !row.removed && row.lib.kind != "file" && !ExistingLibraryPlan.isDisabled(row.lib, in: edits) {
                                     Button { edits = ExistingLibraryPlan.move(row.lib, by: -1, libs: libraries, in: edits) } label: { Image(systemName: "arrow.up") }
                                         .disabled(keptIdx == 0)
@@ -195,6 +216,17 @@ struct ExistingLibrariesCard: View {
                 }
             }
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).appsGlass(cornerRadius: 24)
+        .sheet(isPresented: Binding(get: { exportURL != nil }, set: { if !$0 {
+            if let file = exportURL { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+            exportURL = nil
+        } })) {
+            if let exportURL {
+                ShareSheet(items: [exportURL])
+            }
+        }
+        .alert(tr5("Export library", "تصدير المكتبة", de: "Bibliothek exportieren", ckb: "هەناردەکردنی کتێبخانە", kmr: "Pirtûkxaneyê derxe"), isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button(MirsaTr.lit("OK")) { exportError = nil }
+        } message: { Text(exportError ?? "") }
         .confirmationDialog(ExistingLibraryPlan.removeTitle(), isPresented: Binding(get: { pendingRemove != nil }, set: { if !$0 { pendingRemove = nil } }), titleVisibility: .visible, presenting: pendingRemove) { lib in
             Button(tr("Remove", "إزالة", ckb: "لابردن", kmr: "Rakirin"), role: .destructive) { edits = ExistingLibraryPlan.toggleRemoved(lib, in: edits); pendingRemove = nil }
             Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { pendingRemove = nil }

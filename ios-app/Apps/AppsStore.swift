@@ -243,6 +243,7 @@ final class AppsStore: ObservableObject {
     /// This prerequisite belongs only to Apple ID real-app installs/renewals.
     /// Import, editing, library and certificate OTA never call it.
     func realAppNetworkReady(_ vm: AppViewModel?, selfUpdate: Bool = false) async -> Bool {
+        vpnRetry = nil
         let path = await WiFiPathMonitor.shared.resolve()
         switch WiFiPathPolicy.verdict(path: path) {
         case .allow: break
@@ -290,8 +291,33 @@ final class AppsStore: ObservableObject {
 
     /// Registered by LocalDevVPN's upstream CFBundleURLSchemes.
     /// https://github.com/jkcoxson/LocalDevVPN/blob/main/LocalDevVPN/Info.plist
+    private var vpnRetry: (() async -> Void)?
+    private var awaitingVPNReturn = false
+    private var resumingVPN = false
+
+    func resumeAfterLocalDevVPN(vm: AppViewModel) async {
+        guard awaitingVPNReturn, !resumingVPN else { return }
+        resumingVPN = true
+        defer { resumingVPN = false; awaitingVPNReturn = false }
+        for _ in 0..<12 {
+            if Task.isCancelled { return }
+            if networkReady(vm), busy == nil {
+                let retry = vpnRetry
+                vpnRetry = nil
+                error = nil
+                await retry?()
+                return
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        // Keep the recoverable alert and retry action if the VPN or pairing is still unavailable.
+        errorOffersLocalDevVPN = true
+        error = tr5("LocalDevVPN or pairing is still unavailable. Check both and try again.", "لسا LocalDevVPN أو ملف الاقتران مو جاهز. تأكد من الاتنين وجرّب مرة تانية.", de: "LocalDevVPN oder die Kopplung ist noch nicht bereit. Prüfe beides und versuche es erneut.", ckb: "LocalDevVPN یان پەیوەستکردن هێشتا ئامادە نییە. هەردووکیان بپشکنە و دووبارە هەوڵ بدە.", kmr: "LocalDevVPN an cotkirin hîn ne amade ye. Her duyan kontrol bike û dîsa biceribîne.")
+    }
+
     static func openLocalDevVPN() {
-        guard let appURL = URL(string: "localdevvpn://"),
+        shared.awaitingVPNReturn = true
+        guard let appURL = URL(string: "localdevvpn://enable?scheme=mirsa"),
               let storeURL = URL(string: "https://apps.apple.com/us/app/localdevvpn/id6755608044") else { return }
         guard UIApplication.shared.canOpenURL(appURL) else {
             UIApplication.shared.open(storeURL)
@@ -819,7 +845,17 @@ final class AppsStore: ObservableObject {
         }
         let alreadyReal = app.location == .real && apps.contains(where: { $0.id == app.id && $0.location == .real })
         if !alreadyReal && slotsLeft <= 0 { error = L.t("choice.full"); return false }
-        guard await realAppNetworkReady(vm) else { return false }
+        guard await realAppNetworkReady(vm) else {
+            if errorOffersLocalDevVPN {
+                let retryApp = app
+                vpnRetry = { [weak self, weak vm] in
+                    guard let self else { return }
+                    var retry = retryApp
+                    if await self.installAsReal(&retry, vm: vm, feedback: feedback) { self.upsert(retry) }
+                }
+            }
+            return false
+        }
         guard await ensureSession() else { return false }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }
@@ -983,7 +1019,12 @@ final class AppsStore: ObservableObject {
                     outcome: activitySucceeded ? .success : operationOutcome)
             }
         }
-        guard await realAppNetworkReady(vm, selfUpdate: true) else { return }
+        guard await realAppNetworkReady(vm, selfUpdate: true) else {
+            if errorOffersLocalDevVPN {
+                vpnRetry = { [weak self, weak vm] in await self?.installSelf(vm: vm, from: source, feedback: feedback) }
+            }
+            return
+        }
         guard await ensureSession() else { return }
         busy = L.t("busy.installing"); progress = 0
         defer { busy = nil }

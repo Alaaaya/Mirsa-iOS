@@ -136,6 +136,34 @@ enum IPAEditorService {
         return try JSONDecoder().decode([ExistingProjectLibrary].self, from: Data(contentsOf: out))
     }
 
+    /// Export a bundled file from a fresh, unmodified extraction. Never follow paths outside the app.
+    static func exportExistingLibrary(_ library: ExistingProjectLibrary, from ipa: URL) throws -> URL {
+        let fm = FileManager.default
+        guard let relative = library.bundledPath, !relative.isEmpty,
+              !relative.hasPrefix("/"), !relative.split(separator: "/").contains("..") else {
+            throw SideloadError.message(archiveError("Invalid file path."))
+        }
+        let work = fm.temporaryDirectory.appendingPathComponent("library-export-" + UUID().uuidString)
+        let extracted = work.appendingPathComponent("extracted")
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        do {
+            try run("extract", input: ipa, output: extracted)
+            let root = try app(in: extracted).resolvingSymlinksInPath().standardizedFileURL
+            let file = root.appendingPathComponent(relative).resolvingSymlinksInPath().standardizedFileURL
+            guard file.path.hasPrefix(root.path + "/"),
+                  try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                throw SideloadError.message(archiveError("Invalid file path."))
+            }
+            let output = work.appendingPathComponent(file.lastPathComponent)
+            try fm.copyItem(at: file, to: output)
+            try fm.removeItem(at: extracted)
+            return output
+        } catch {
+            try? fm.removeItem(at: work)
+            throw error
+        }
+    }
+
     static func validBundleID(_ value: String) -> Bool {
         value.count <= 255 &&
         value.range(of: #"^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$"#, options: .regularExpression) != nil
