@@ -48,7 +48,7 @@ jobs:
           with zipfile.ZipFile('build/Mirsa.ipa') as z:
               p=plistlib.loads(z.read('Payload/Mirsa.app/Info.plist'))
               assert p['CFBundleShortVersionString']=='2.9.6', p
-              assert p['CFBundleVersion']=='8.535.1', p
+              assert p['CFBundleVersion']=='8.536.1', p
               assert 'localdevvpn' in p['LSApplicationQueriesSchemes']
           PY
       - uses: actions/upload-artifact@v4

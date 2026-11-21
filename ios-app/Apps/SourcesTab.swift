@@ -645,6 +645,8 @@ struct SourcesTab: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // Reserve scrolling space inside the List; the full-window theme stays behind the dock.
+            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
             .environment(\.editMode, $editMode)
             .environment(\.defaultMinListRowHeight, 44)
             .refreshable { await store.refreshAll() }
@@ -920,6 +922,8 @@ struct SourceDetailView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+            // Reserve scrolling space inside the List; the full-window theme stays behind the dock.
+            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
         .background(SourcesThemeBackground(theme: t, glowTint: large ? sourceTint : t.accent[0]))
         .task(id: source.url) { await store.ensureLoaded(source.url) }
         .task(id: "\(source.url)|\(all.count)") { await countNewThisWeek(all) }
