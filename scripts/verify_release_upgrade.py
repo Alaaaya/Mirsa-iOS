@@ -16,7 +16,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     names = [n for n in archive.namelist() if n.startswith("Payload/") and n.count("/") == 2 and n.endswith(".app/Info.plist")]
     assert len(names) == 1
     current = plistlib.loads(archive.read(names[0]))
-    assert current["CFBundleShortVersionString"] == "2.9.4"
+    assert current["CFBundleShortVersionString"] == "2.9.5", "IPA must match approved release 2.9.5"
     for name in archive.namelist():
         if name.endswith(".appex/Info.plist"):
             ext = plistlib.loads(archive.read(name))

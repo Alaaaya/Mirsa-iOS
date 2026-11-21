@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class ReleaseUpgradeVersionTests(unittest.TestCase):
-    def check_candidate(self, version="2.8", extension_version=None, build="6.90.1", mirsa_build="490"):
+    def check_candidate(self, version="2.9.5", extension_version=None, build="7.38.1", mirsa_build="538"):
         with tempfile.TemporaryDirectory() as tmp:
             ipa = pathlib.Path(tmp) / "Mirsa.ipa"
             info = {"CFBundleShortVersionString": version, "CFBundleVersion": build,
@@ -32,7 +32,7 @@ class ReleaseUpgradeVersionTests(unittest.TestCase):
                 script = pathlib.Path(args[1]).read_text()
                 self.assertIn('UpdaterMetadata.isNewer(remote: "' + build + '", installed:', script)
                 self.assertIn('precondition(!UpdaterMetadata.isNewer(remote:', script)
-                self.assertIn('installed: "6.1.1"', script)
+                self.assertIn('installed: "7.1.1"', script)
 
             with mock.patch.object(sys, "argv", ["verify_release_upgrade.py", str(ipa)]), \
                  mock.patch("subprocess.run", side_effect=inspect_native) as native, \
@@ -40,20 +40,20 @@ class ReleaseUpgradeVersionTests(unittest.TestCase):
                 runpy.run_path(str(ROOT / "scripts/verify_release_upgrade.py"), run_name="__main__")
                 native.assert_called_once()
 
-    def test_accepts_release_28_and_keeps_native_comparator(self):
+    def test_accepts_release_295_and_keeps_native_comparator(self):
         self.check_candidate()
 
-    def test_rejects_stale_27(self):
+    def test_rejects_stale_294(self):
         with self.assertRaises(AssertionError):
-            self.check_candidate(version="2.7")
+            self.check_candidate(version="2.9.4")
 
     def test_rejects_future_unapproved_version(self):
         with self.assertRaises(AssertionError):
-            self.check_candidate(version="2.9")
+            self.check_candidate(version="2.9.6")
 
     def test_rejects_extension_version_mismatch(self):
         with self.assertRaises(AssertionError):
-            self.check_candidate(extension_version="2.7")
+            self.check_candidate(extension_version="2.9.4")
 
     def test_rejects_nonadvancing_mirsa_build(self):
         with self.assertRaises(AssertionError):
