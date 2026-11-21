@@ -114,6 +114,11 @@ final class PersonalSigningOperation: ObservableObject {
     init(initialState: State? = nil, control: PersonalSigningControl? = nil) {
         state = initialState; self.control = control
     }
+    #if DEBUG
+    /// Hosted regression seam after real signing/retention, before the next real OTA checkpoint.
+    /// Never supplies events, results, archives, or installer responses.
+    var didRetainArchiveForTesting: (() -> Void)?
+    #endif
     private var backgroundID: UIBackgroundTaskIdentifier = .invalid
     private var control: PersonalSigningControl?
     private var activityID: String?
@@ -154,6 +159,9 @@ final class PersonalSigningOperation: ObservableObject {
                         retainedArchive: { url in
                             guard self.state?.id == id else { return }
                             self.state?.signedArchive = url
+                            #if DEBUG
+                            self.didRetainArchiveForTesting?()
+                            #endif
                         })
                     if let current = self.state {
                         var done = current

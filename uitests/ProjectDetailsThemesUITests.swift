@@ -36,6 +36,9 @@ final class ProjectDetailsThemesUITests: XCTestCase {
         capture("project-\(language)-top")
         let scroll = app.scrollViews["mirsa.project.editor-scroll"]
         for index in 1...2 { scroll.swipeUp(); capture("project-\(language)-scroll-\(index)") }
+        // Two swipes are mid-scroll, not bottom reachability evidence.
+        for _ in 0..<6 { scroll.swipeUp() }
+        capture("project-\(language)-bottom-after-eight-swipes")
         app.terminate()
     }
     func testArabicPage() { verify("ar") }
