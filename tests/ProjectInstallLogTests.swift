@@ -120,6 +120,14 @@ final class ProjectInstallLogTests: XCTestCase {
             XCTAssertFalse(result.installed, "No system installer was invoked")
         case .failure(let error):
             XCTAssertTrue(stop, "Real signing failed before packaging: \(error.localizedDescription)")
+            guard case SideloadError.message(let reason) = error else {
+                return XCTFail("Expected the real cancellation checkpoint, got \(error)")
+            }
+            XCTAssertEqual(reason, "انتهى وقت الخلفية. افتح Mirsa وجرّب التوقيع من جديد.",
+                           "An unrelated signer error must not pass the cooperative-stop test")
+            XCTAssertTrue(control.isCancelled)
+            XCTAssertEqual(operation.state?.stage, .signing, "Cancellation must precede packaging")
+            XCTAssertNil(operation.state?.signedArchive, "Stopped signing must not expose an export")
         }
     }
 
