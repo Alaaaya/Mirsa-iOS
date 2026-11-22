@@ -48,6 +48,93 @@ final class WallpaperSourceUITests: XCTestCase {
             app.swipeUp(velocity: .slow)
             shot(language + "_wallpaper_source_grid_scrolled")
             XCTAssertTrue(app.buttons["wallpaper-source-add-caplayground"].exists)
+
+            // This is Tools Store's real vertical ScrollView, not the horizontal
+            // category bar or a screen-wide gesture that could start on the dock.
+            let scroll = app.scrollViews.containing(.textField, identifier: "wallpaper-source-url").firstMatch
+            XCTAssertTrue(scroll.exists)
+            let dock = app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
+            XCTAssertTrue(dock.exists, "Measure the actual floating dock, never a hardcoded screen inset")
+            let finalName = app.staticTexts["Halo"] // sixth and final fixture entry
+            var previousFrame: CGRect?
+            var reachedEnd = false
+            var endSwipes = 0
+            for _ in 0..<12 {
+                scroll.swipeUp(velocity: .slow)
+                endSwipes += 1
+                // Swipe completion waits for XCTest idleness, including scroll deceleration.
+                guard finalName.exists else { continue }
+                let current = finalName.frame
+                if let previous = previousFrame,
+                   abs(current.minY - previous.minY) < 1,
+                   abs(current.minX - previous.minX) < 1 {
+                    reachedEnd = true
+                    break
+                }
+                previousFrame = current
+            }
+            XCTAssertTrue(reachedEnd, "Final fixture must stop moving at the real scroll end within 12 swipes")
+            XCTAssertTrue(finalName.exists)
+            XCTAssertTrue(finalName.isHittable)
+            XCTAssertTrue(app.staticTexts["Lagoon"].exists, "Both final-row names must remain in the native grid")
+
+            // Fixture order is Solar arc, Night tide, Cinder, Dune, Lagoon, Halo.
+            // LazyVGrid may evict earlier rows; the last ordered install match is
+            // Halo's action. Prove its association geometrically as well, rather
+            // than treating an arbitrary visible install button as the final one.
+            let endActions = app.buttons.matching(identifier: "wallpaper-source-install")
+            XCTAssertGreaterThanOrEqual(endActions.count, 2)
+            let finalAction = endActions.element(boundBy: endActions.count - 1)
+            XCTAssertTrue(finalAction.exists)
+            XCTAssertTrue(finalAction.isEnabled)
+            XCTAssertTrue(finalAction.isHittable)
+            let nameFrame = finalName.frame
+            let actionFrame = finalAction.frame
+            let scrollFrame = scroll.frame
+            let dockFrame = dock.frame
+            let windowFrame = app.windows.firstMatch.frame
+            XCTAssertGreaterThan(nameFrame.width, 0)
+            XCTAssertGreaterThan(nameFrame.height, 0)
+            XCTAssertGreaterThan(actionFrame.width, 0)
+            XCTAssertGreaterThan(actionFrame.height, 0)
+            XCTAssertGreaterThan(dockFrame.height, 0)
+            XCTAssertLessThan(dockFrame.minY, windowFrame.maxY)
+            XCTAssertLessThanOrEqual(abs(nameFrame.midX - actionFrame.midX), actionFrame.width / 2,
+                                     "Last action must occupy Halo's column")
+            XCTAssertGreaterThanOrEqual(actionFrame.minY, nameFrame.maxY,
+                                        "Last action must be below Halo's name")
+            XCTAssertLessThan(actionFrame.minY - nameFrame.maxY, 120,
+                              "Do not associate Halo with another row's action")
+            for frame in [nameFrame, actionFrame] {
+                XCTAssertTrue(windowFrame.contains(frame), "Final name/action must be entirely on screen")
+                XCTAssertTrue(scrollFrame.contains(frame), "Final name/action must be fully inside the clipped scroll viewport")
+                XCTAssertLessThan(frame.maxY, dockFrame.minY,
+                                  "Final name/action must be fully ABOVE the actual dock, not merely hittable")
+            }
+            func geometry(_ frame: CGRect) -> [String: Double] {
+                ["x": Double(frame.minX), "y": Double(frame.minY),
+                 "width": Double(frame.width), "height": Double(frame.height),
+                 "maxY": Double(frame.maxY)]
+            }
+            let proof: [String: Any] = [
+                "language": language, "finalFixture": "Halo", "endSwipes": endSwipes,
+                "reachedStableEnd": reachedEnd, "installMatchCount": endActions.count,
+                "nameHittable": finalName.isHittable, "actionHittable": finalAction.isHittable,
+                "name": geometry(nameFrame), "action": geometry(actionFrame),
+                "scroll": geometry(scrollFrame), "dock": geometry(dockFrame),
+                "window": geometry(windowFrame),
+                "actionDockGap": Double(dockFrame.minY - actionFrame.maxY)
+            ]
+            let proofData = try! JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
+            let geometryAttachment = XCTAttachment(data: proofData, uniformTypeIdentifier: "public.json")
+            geometryAttachment.name = language + "_wallpaper_source_grid_end_geometry"
+            geometryAttachment.lifetime = .keepAlways
+            add(geometryAttachment)
+            let hierarchyAttachment = XCTAttachment(string: app.debugDescription)
+            hierarchyAttachment.name = language + "_wallpaper_source_grid_end_hierarchy"
+            hierarchyAttachment.lifetime = .keepAlways
+            add(hierarchyAttachment)
+            shot(language + "_wallpaper_source_grid_end")
             app.buttons["tools-section-wallpapers"].tap()
             XCTAssertFalse(app.textFields["wallpaper-source-url"].exists)
         }
