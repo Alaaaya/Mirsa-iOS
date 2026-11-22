@@ -222,6 +222,9 @@ struct ToolsStoreView: View {
                         NotificationCenter.default.post(name: Notification.Name("mirsa.wallpaper.imported.open"), object: nil)
                     }
                 }
+                if !showSaved && model.category != .wallpapers {
+                    ReviewedToolsSourcesView(category: model.category)
+                }
                 if showSaved {
                     savedSection(t)
                 } else if !model.isConfigured {
