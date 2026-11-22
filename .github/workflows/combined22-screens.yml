@@ -49,7 +49,7 @@ jobs:
             foreground) TESTS="-only-testing:MirsaUITests/MirsaForegroundUITests" ;;
             maker) TESTS="-only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerPickersStayIndependent -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testWallpaperMakerLayout -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesViewportAndReturn -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesSelectedApplyVisible -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testTendiesReorganizedPage" ;;
             settings-store) TESTS="-only-testing:MirsaUITests/StoreSingleActionUITests -only-testing:MirsaUITests/CertificateParity29UITests" ;;
-            chat) TESTS="-only-testing:MirsaUITests/MirsaReactionBadgeUITests" ;;
+            chat) TESTS="-only-testing:MirsaUITests/MirsaReactionBadgeUITests -only-testing:MirsaUITests/MirsaVoiceUITests" ;;
             pages) TESTS="-only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testArabicPages -only-testing:MirsaUITests/MirsaStyleScreenshotsUITests/testEnglishPages" ;;
           esac
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ForegroundUI.xcresult ${TESTS} test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log

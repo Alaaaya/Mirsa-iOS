@@ -97,7 +97,7 @@ jobs:
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/PersonalUI.xcresult -only-testing:MirsaTests/ForgeChatBuildProgressTests -only-testing:MirsaTests/LocalDevVPNRouteTests -only-testing:MirsaTests/InstallErrorTextTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/PersonalUI.xcresult -only-testing:MirsaTests/ChatVoiceTests -only-testing:MirsaTests/ForgeChatBuildProgressTests -only-testing:MirsaTests/LocalDevVPNRouteTests -only-testing:MirsaTests/InstallErrorTextTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
       - name: Export runtime screenshot attachments
         if: always()
         run: |
