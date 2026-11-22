@@ -656,7 +656,8 @@ struct ContentView: View {
                 content()
                     // Bound the UIKit navigation/Form host to its offered viewport.
                     // Its intrinsic content must not widen the shared ZStack/dock.
-                    .frame(width: viewport.size.width, height: viewport.size.height)
+                    .frame(width: viewport.size.width > 1 ? viewport.size.width : nil,
+                           height: viewport.size.height > 1 ? viewport.size.height : nil)
                     // Clip inactive UIKit stacks, but let the active page draw
                     // through its actual safe areas, not only its content rect.
                     .clipShape(RetainedTabClip(active: on, safeArea: viewport.safeAreaInsets))

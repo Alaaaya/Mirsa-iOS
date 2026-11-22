@@ -213,9 +213,12 @@ struct MirsaWindowBackdropHost: ViewModifier {
             let window = CGRect(x: local.minX - safe.leading, y: local.minY - safe.top,
                                 width: local.width + safe.leading + safe.trailing,
                                 height: local.height + safe.top + safe.bottom)
+            // While the scene is resuming SwiftUI can briefly report a zero/non-finite frame.
+            // Publishing it would collapse every backdrop to nothing (blank dark window).
+            let usable = window.width > 50 && window.height > 50 && window.width.isFinite && window.height.isFinite
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .environment(\.mirsaBackdropFrame, window)
+                .environment(\.mirsaBackdropFrame, usable ? window : nil)
         }
     }
 }
@@ -228,7 +231,7 @@ struct MirsaScreenAnchored<Content: View>: View {
     var body: some View {
         GeometryReader { geo in
             let local = geo.frame(in: .global)
-            let canvas = window ?? local
+            let canvas = (window ?? local).width > 50 && (window ?? local).height > 50 ? (window ?? local) : geo.frame(in: .local)
             content(canvas.size)
                 .frame(width: canvas.width, height: canvas.height)
                 .offset(x: canvas.minX - local.minX, y: canvas.minY - local.minY)
