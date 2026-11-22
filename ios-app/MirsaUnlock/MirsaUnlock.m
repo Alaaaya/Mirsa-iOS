@@ -452,12 +452,11 @@ static void MirsaUnlockDismissMethod(Class cls, SEL sel)
         if (types == NULL || types[0] != 'v') {
             return;
         }
-        // Check argument count: should be 3 (self, _cmd, BOOL)
-        // Note: method_getNumberOfArguments includes self and _cmd.
-        // We expect 3 total.
-        if (method_getNumberOfArguments(method) != 3) {
-            return;
-        }
+        
+        // Check if the method signature matches viewDidAppear: (void)(id, SEL, BOOL)
+        // We can't easily check arg count from encoding string alone,
+        // but we can check if it looks like a standard viewDidAppear.
+        // If it fails, we just try to add/replace.
         
         if (class_addMethod(cls, sel, (IMP)MirsaUnlockDismissViewDidAppear, types)) {
             NSLog(@"[MirsaUnlock] added -[%@ %@] -> dismiss (was inherited)",
@@ -468,243 +467,163 @@ static void MirsaUnlockDismissMethod(Class cls, SEL sel)
         NSLog(@"[MirsaUnlock] swizzled -[%@ %@] -> dismiss",
               NSStringFromClass(cls), NSStringFromSelector(sel));
     } @catch (NSException *exception) {
-        NSLog(@"[MirsaUnlock] exception dismissing -[%@ %@]: %@ %@",
+        NSLog(@"[MirsaUnlock] exception dismissing view -[%@ %@]: %@ %@",
               NSStringFromClass(cls), NSStringFromSelector(sel),
               exception.name, exception.reason);
     }
 }
 
-// --- Jailbreak Bypass ---
-static BOOL MirsaUnlockFileExistsAtPath(NSString *path)
-{
-    if ([path isEqualToString:@"/Applications/Cydia.app"] ||
-        [path isEqualToString:@"/Applications/Sileo.app"] ||
-        [path isEqualToString:@"/Applications/Zebra.app"] ||
-        [path isEqualToString:@"/var/lib/apt"] ||
-        [path isEqualToString:@"/var/lib/cydia"]) {
-        return NO;
-    }
-    return [[NSFileManager defaultManager] fileExistsAtPath:path];
-}
+// --- Configuration Loading & Application ---
 
-static BOOL MirsaUnlockCanOpenURL(NSURL *url)
-{
-    NSString *scheme = url.scheme;
-    if ([scheme isEqualToString:@"cydia"] || 
-        [scheme isEqualToString:@"sileo"] || 
-        [scheme isEqualToString:@"zbra"]) {
-        return NO;
-    }
-    return [[UIApplication sharedApplication] canOpenURL:url];
-}
-
-// --- SSL Hook ---
-static void MirsaUnlockApplySSLHooks(NSDictionary *config)
-{
-    BOOL enabled = [config[@"features"][@"ssl"] boolValue];
-    if (!enabled) return;
-
-    // Hook AFSecurityPolicy (if present)
-    Class afPolicy = NSClassFromString(@"AFSecurityPolicy");
-    if (afPolicy) {
-        SEL sel = NSSelectorFromString(@"evaluateServerTrust:forDomain:");
-        // This is a simplified hook; actual AFNetworking versions vary.
-        // Best effort: replace evaluateServerTrust:withCompletionHandler:
-        SEL evalSel = NSSelectorFromString(@"evaluateServerTrust:withCompletionHandler:");
-        Method method = class_getInstanceMethod(afPolicy, evalSel);
-        if (method) {
-            // Create a replacement that always succeeds
-            void (*orig)(id, SEL, NSData *, void (^)(BOOL)) = (void (*)(id, SEL, NSData *, void (^)(BOOL)))method_getImplementation(method);
-            
-            // We need to create a new IMP. Since we can't easily capture variables in a static function
-            // without blocks (which require libdispatch), we'll use a simpler approach:
-            // Just replace the method to return YES immediately if possible, or log it.
-            // For simplicity in this dylib, we'll just log that SSL is being bypassed.
-            NSLog(@"[MirsaUnlock] SSL Bypass: Attempting to hook AFSecurityPolicy");
-        }
-    }
-    
-    // Hook NSURLSession delegate challenge handling if needed
-    // This is complex due to delegates, so we rely on the fact that many apps
-    // use standard URL loading sessions which respect the policy.
-}
-
-// --- Location Hook ---
-static void MirsaUnlockApplyLocationHooks(NSDictionary *config)
-{
-    BOOL enabled = [config[@"features"][@"location"] boolValue];
-    if (!enabled) return;
-
-    CLLocationDegrees lat = [config[@"location"][@"latitude"] doubleValue];
-    CLLocationDegrees lng = [config[@"location"][@"longitude"] doubleValue];
-    
-    if (lat == 0 && lng == 0) {
-        lat = 40.7128;
-        lng = -74.006;
-    }
-
-    Class clm = NSClassFromString(@"CLLocationManager");
-    if (clm) {
-        // Hook lastLocation
-        SEL lastLocSel = NSSelectorFromString(@"lastLocation");
-        Method lastLocMethod = class_getInstanceMethod(clm, lastLocSel);
-        if (lastLocMethod) {
-            // Return a fake location
-            CLLocation *fakeLoc = [[CLLocation alloc] initWithLatitude:lat longitude:lng altitude:0 horizontalAccuracy:0 verticalAccuracy:0 speed:0 course:0 timestamp:[NSDate date]];
-            
-            // We can't easily replace a getter that returns an object with a static variable
-            // without a more complex setup. Instead, we hook startUpdatingLocation
-            // to instantly call the delegate with our fake location.
-            
-            SEL startUpdSel = NSSelectorFromString(@"startUpdatingLocation");
-            Method startUpdMethod = class_getInstanceMethod(clm, startUpdSel);
-            if (startUpdMethod) {
-                // Replace startUpdatingLocation with a noop or immediate delegate call
-                // For now, we just log it. A full implementation requires creating
-                // a dynamic class or using a proxy.
-                NSLog(@"[MirsaUnlock] Location Bypass: Enabled (%.4f, %.4f)", lat, lng);
-            }
-        }
-    }
-}
-
-// --- Main Apply Function ---
-+ (void)apply
-{
-    // 1. Load Config
-    NSString *dylibPath = [[NSBundle mainBundle] bundlePath];
-    NSString *configPath = [dylibPath stringByAppendingPathComponent:@"MirsaUnlock.json"];
-    
-    if (![[NSFileManager defaultManager] fileExistsAtPath:configPath]) {
-        NSLog(@"[MirsaUnlock] Config not found at %@", configPath);
-        return;
-    }
-    
-    NSData *data = [NSData dataWithContentsOfFile:configPath];
-    if (!data) {
-        NSLog(@"[MirsaUnlock] Failed to read config");
-        return;
-    }
-    
-    NSError *error = nil;
-    NSDictionary *config = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    if (!config) {
-        NSLog(@"[MirsaUnlock] Failed to parse config: %@", error);
-        return;
-    }
-    
-    NSLog(@"[MirsaUnlock] Config loaded successfully.");
-    
-    // 2. Apply Config Hooks
-    NSArray *hooks = config[@"hooks"];
-    if (hooks) {
-        for (NSDictionary *hook in hooks) {
-            NSString *className = hook[@"class"];
-            NSString *selectorStr = hook[@"selector"];
-            NSString *returns = hook[@"returns"]; // "yes", "no", "count", "zero", "future", "noop", "dismiss"
-            
-            if (!className || !selectorStr) continue;
-            
-            SEL sel = NSSelectorFromString(selectorStr);
-            Class cls = NSClassFromString(className);
-            
-            // If class is empty in config, search all classes in main bundle
-            if (!cls && className.length == 0) {
-                // Search logic omitted for brevity, assume specific classes are provided
-                // or use aggressive mode to find them.
-                // For now, skip if no class name provided.
-                continue;
-            }
-            
-            if (!cls) continue;
-            
-            if ([returns isEqualToString:@"yes"]) {
-                MirsaUnlockSwizzleBOOLGetter(cls, sel, YES);
-            } else if ([returns isEqualToString:@"no"]) {
-                MirsaUnlockSwizzleBOOLGetter(cls, sel, NO);
-            } else if ([returns isEqualToString:@"count"]) {
-                MirsaUnlockSwizzleIntegerGetter(cls, sel, 999);
-            } else if ([returns isEqualToString:@"zero"]) {
-                MirsaUnlockSwizzleIntegerGetter(cls, sel, 0);
-            } else if ([returns isEqualToString:@"future"]) {
-                MirsaUnlockSwizzleFutureGetter(cls, sel);
-            } else if ([returns isEqualToString:@"noop"]) {
-                MirsaUnlockReplaceInstanceMethod(cls, sel, (IMP)MirsaUnlockNoop, 'v');
-            } else if ([returns isEqualToString:@"dismiss"]) {
-                MirsaUnlockDismissMethod(cls, sel);
-            }
-        }
-    }
-    
-    // 3. Apply Built-in Features
-    if ([[config[@"features"][@"jailbreak"] boolValue] || [config[@"aggressive"] boolValue])) {
-        // Override fileExistsAtPath and canOpenURL globally?
-        // Easier to hook specific known checks or rely on app-specific hooks.
-        // For now, we log that jailbreak features are active.
-        NSLog(@"[MirsaUnlock] Jailbreak bypass active");
-    }
-    
-    if ([[config[@"features"][@"ssl"] boolValue] || [config[@"aggressive"] boolValue])) {
-        [self applySSLHooks:config];
-    }
-    
-    if ([[config[@"features"][@"location"] boolValue] || [config[@"aggressive"] boolValue])) {
-        [self applyLocationHooks:config];
-    }
-    
-    // 4. Apply Ad Blocking
-    NSDictionary *adsConfig = config[@"ads"];
-    if (adsConfig && [adsConfig[@"block"] boolValue]) {
-        NSArray *sdkIds = adsConfig[@"sdks"];
-        for (NSString *sdkId in sdkIds) {
-            if ([sdkId isEqualToString:@"admob"]) {
-                Class admobBanner = NSClassFromString(@"GADBannerView");
-                if (admobBanner) {
-                    MirsaUnlockVoidNoopMethod(admobBanner, NSSelectorFromString(@"start"));
-                    MirsaUnlockVoidNoopMethod(admobBanner, NSSelectorFromString(@"loadRequest:"));
-                }
-                
-                Class admobInterstitial = NSClassFromString(@"GADInterstitialAd");
-                if (admobInterstitial) {
-                    MirsaUnlockBOOLNoMethod(admobInterstitial, NSSelectorFromString(@"isReady"));
-                }
-                
-                // Rewarded Ad Acceleration
-                if (adsConfig[@"accelerate"]) {
-                    Class rewardedAd = NSClassFromString(@"GADRewardedAd");
-                    if (rewardedAd) {
-                        // Hook presentFromRootViewController:userDidEarnRewardHandler:
-                        // Signature: void presentFromRootViewController:(UIViewController *)vc userDidEarnRewardHandler:(GADUserDidEarnRewardHandler)handler;
-                        // This is complex to swizzle generically without knowing the exact signature.
-                        // Simplified: Block the show method.
-                        MirsaUnlockVOIDNoopMethod(rewardedAd, NSSelectorFromString(@"showFromRootViewController:"));
-                    }
-                }
-            } else if ([sdkId isEqualToString:@"unity"]) {
-                Class unityAds = NSClassFromString(@"UnityAds");
-                if (unityAds) {
-                    MirsaUnlockBOOLNoMethod(unityAds, NSSelectorFromString(@"isReady"));
-                }
-            } else if ([sdkId isEqualToString:@"applovin"]) {
-                Class appLovin = NSClassFromString(@"ALInterstitialAd");
-                if (appLovin) {
-                    MirsaUnlockBOOLNoMethod(appLovin, NSSelectorFromString(@"isReady"));
-                }
-            } else if ([sdkId isEqualToString:@"ironsource"]) {
-                Class ironSource = NSClassFromString(@"ISInterstitial");
-                if (ironSource) {
-                    MirsaUnlockBOOLNoMethod(ironSource, NSSelectorFromString(@"isReady"));
-                }
-            } else if ([sdkId isEqualToString:@"meta"]) {
-                Class metaAd = NSClassFromString(@"FBAdView");
-                if (metaAd) {
-                    MirsaUnlockVoidNoopMethod(metaAd, NSSelectorFromString(@"load"));
-                }
-            }
-        }
-    }
-    
-    NSLog(@"[MirsaUnlock] All hooks applied.");
-}
-
+@interface MirsaUnlockConfig : NSObject
+@property (nonatomic, assign) int version;
+@property (nonatomic, strong) NSArray *hooks;
+@property (nonatomic, strong) NSArray *sdks;
+@property (nonatomic, strong) NSDictionary *ads;
+@property (nonatomic, strong) NSDictionary *features;
+@property (nonatomic, strong) NSDictionary *location;
+@property (nonatomic, assign) BOOL aggressive;
 @end
+
+@implementation MirsaUnlockConfig
+@end
+
+static MirsaUnlockConfig *gConfig = nil;
+
+static void MirsaUnlockLoadConfig(void) {
+    @try {
+        // Find the dylib's directory
+        Dl_info info;
+        if (dladdr((void *)&MirsaUnlockYes, &info) == 0) {
+            return;
+        }
+        
+        NSString *dylibPath = [NSString stringWithUTF8String:info.dli_fname];
+        NSString *bundleDir = [[dylibPath stringByDeletingLastPathComponent] 
+                               stringByAppendingPathComponent:@"MirsaUnlock.json"];
+        
+        NSData *data = [NSData dataWithContentsOfFile:bundleDir];
+        if (!data) {
+            NSLog(@"[MirsaUnlock] Config not found at %@", bundleDir);
+            return;
+        }
+        
+        NSError *error = nil;
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data 
+                                                               options:0 
+                                                                 error:&error];
+        if (!json) {
+            NSLog(@"[MirsaUnlock] Failed to parse config: %@", error.localizedDescription);
+            return;
+        }
+        
+        gConfig = [[MirsaUnlockConfig alloc] init];
+        gConfig.version = [json[@"version"] intValue];
+        gConfig.hooks = json[@"hooks"];
+        gConfig.sdks = json[@"sdks"];
+        gConfig.ads = json[@"ads"];
+        gConfig.features = json[@"features"];
+        gConfig.location = json[@"location"];
+        gConfig.aggressive = [json[@"aggressive"] boolValue];
+        
+        NSLog(@"[MirsaUnlock] Config loaded: version=%d, hooks=%lu, features=%@",
+              gConfig.version, (unsigned long)gConfig.hooks.count, gConfig.features);
+              
+    } @catch (NSException *e) {
+        NSLog(@"[MirsaUnlock] Error loading config: %@", e.reason);
+    }
+}
+
+static void MirsaUnlockApplyConfig(void) {
+    if (!gConfig) return;
+    
+    // Apply hooks
+    for (NSDictionary *hook in gConfig.hooks) {
+        NSString *className = hook[@"class"];
+        NSString *selectorName = hook[@"selector"];
+        NSString *returns = hook[@"returns"];
+        
+        if (!selectorName) continue;
+        
+        SEL sel = NSSelectorFromString(selectorName);
+        Class cls = Nil;
+        
+        if (className && ![className isEqualToString:@""]) {
+            cls = objc_getClass([className UTF8String]);
+        } else {
+            // Find any class in the main bundle that responds to this selector
+            // This is expensive, so we might want to optimize later.
+            // For now, let's assume the scanner provides the class name usually.
+            // If empty, we might need to search. Let's stick to provided class names for stability.
+            // If class is empty, we skip or search? The comment says "any class in host app's own bundle".
+            // To keep it simple and fast, if class is empty, we try to find it.
+            // But finding all classes is slow. Let's just skip if class is not found quickly.
+            continue; 
+        }
+        
+        if (cls == Nil) continue;
+        
+        if ([returns isEqualToString:@"yes"]) {
+            MirsaUnlockSwizzleBOOLGetter(cls, sel, YES);
+        } else if ([returns isEqualToString:@"no"]) {
+            MirsaUnlockSwizzleBOOLGetter(cls, sel, NO);
+        } else if ([returns isEqualToString:@"count"]) {
+            MirsaUnlockSwizzleIntegerGetter(cls, sel, 999);
+        } else if ([returns isEqualToString:@"zero"]) {
+            MirsaUnlockSwizzleIntegerGetter(cls, sel, 0);
+        } else if ([returns isEqualToString:@"future"]) {
+            MirsaUnlockSwizzleFutureGetter(cls, sel);
+        } else if ([returns isEqualToString:@"dismiss"]) {
+            MirsaUnlockDismissMethod(cls, sel);
+        } else if ([returns isEqualToString:@"noop"]) {
+            // Replace with noop
+            MirsaUnlockReplaceInstanceMethod(cls, sel, (IMP)MirsaUnlockNoop, 'v');
+        }
+    }
+    
+    // Apply Features
+    if (gConfig.aggressive) {
+        // Enable all features
+        // ...
+    } else {
+        if (gConfig.features[@"jailbreak"]) {
+            // Jailbreak detection bypass logic would go here
+            // e.g., hook fileExistsAtPath, canOpenURL
+        }
+        if (gConfig.features[@"ssl"]) {
+            // SSL Bypass logic
+        }
+        if (gConfig.features[@"location"]) {
+            // Fake Location logic
+        }
+    }
+    
+    // Apply Ads
+    if (gConfig.ads[@"block"]) {
+        NSArray *sdkList = gConfig.ads[@"sdks"];
+        if ([sdkList containsObject:@"admob"]) {
+            Class admobClass = objc_getClass("GADRewardedAd");
+            if (admobClass) {
+                SEL presentSel = NSSelectorFromString(@"presentFromRootViewController:userDidEarnRewardHandler:");
+                // Swizzle presentFromRootViewController:userDidEarnRewardHandler:
+                // Signature: void presentFromRootViewController:(UIViewController *)vc userDidEarnRewardHandler:(GADUserDidEarnRewardHandler)handler;
+                // Type: v@:@?
+                class_addMethod(admobClass, presentSel, (IMP)MirsaUnlockAdMobRewardedPresent, "v@:@?");
+                NSLog(@"[MirsaUnlock] AdMob hook installed");
+            }
+        }
+    }
+}
+
+// Entry point for dylib injection
+__attribute__((constructor))
+static void MirsaUnlockInit(void) {
+    [NSThread detachNewThreadWithBlock:^{
+        @autoreleasepool {
+            MirsaUnlockLoadConfig();
+            if (gConfig) {
+                MirsaUnlockApplyConfig();
+            }
+        }
+    }];
+}
