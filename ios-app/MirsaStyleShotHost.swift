@@ -60,6 +60,16 @@ struct MirsaStyleShotHost: View {
         case "store-preview-detail": ToolsStorePreviewShotHost(detail: true)
         case "store-preview-card": ToolsStorePreviewShotHost(detail: false)
         case "sources-ts-list": SourcesToolsStoreListHost()
+        case "sources-real":
+            // The REAL ContentView (window backdrop host, dock, retained tabs) with fixture sources.
+            // Standalone hosts above bypass MirsaWindowBackdropHost and cannot show edge bands.
+            ContentView().onAppear {
+                guard MirsaUITestHarness.active else { return }
+                let made = SourcesToolsStoreShotHost.makeStore()
+                SourcesStore.shared.sources = made.1
+                for s in made.1 { SourcesStore.shared.apps[s.url] = made.0.apps[s.url] }
+                vm.selectedTab = .sources
+            }
         case "sources-ts-small": SourcesToolsStoreDetailHost(large: false)
         case "sources-ts-large": SourcesToolsStoreDetailHost(large: true)
         case "source-news-fixture": SourceNewsValidationHost()
