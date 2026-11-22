@@ -1,6 +1,10 @@
 name: Sources edge UITest
 on:
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: 'true = revert the geometry guards (3a4926d MirsaStyle/ContentView) first, to capture the BEFORE baseline'
+        default: 'false'
   push:
     branches: [fix/foreground-22nov]
 permissions:
@@ -10,6 +14,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Baseline (optional, revert guards)
+        if: github.event.inputs.baseline == 'true'
+        run: git checkout 80ac461647009d866a7a1f7f0c7a1a34022adefd -- ios-app/Apps/MirsaStyle.swift ios-app/ContentView.swift
       - name: Select Xcode
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
