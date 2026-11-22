@@ -152,9 +152,10 @@ struct SourcesThemeBackground: View {
     let theme: SourcesTheme
     var glowTint: Color? = nil
     var body: some View {
-        MirsaScreenAnchored { _ in
-            mesh
-        }
+        // This backdrop already belongs to the full-window Sources host.
+        // An anchored, clipped GeometryReader truncates its ignored safe areas,
+        // leaving UIKit's black window visible above and below the page.
+        mesh
     }
 
     private var mesh: some View {
