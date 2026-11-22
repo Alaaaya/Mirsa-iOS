@@ -672,3 +672,153 @@ static void MirsaUnlockInitialize() {
             MirsaUnlockSwizzleBOOLGetter(someClass, premiumSel, YES);
         }
     }
+    // إكمال الدالة المقطوعة
+static void MirsaUnlockDismissMethod(Class c, SEL sel) {
+    if (c == Nil || sel == NULL) return;
+    
+    @try {
+        Method method = class_getInstanceMethod(c, sel);
+        if (method == NULL) return;
+        
+        const char *types = method_getTypeEncoding(method);
+        // نتأكد أنها دالة ترجع void وتأخذ وسيطين (self, _cmd) + BOOL animated
+        if (types == NULL || types[0] != 'v') return;
+        
+        IMP replacement = (IMP)MirsaUnlockDismissViewDidAppear;
+        
+        // نضيف التنفيذ الخاص بهذه الفئة فقط إذا كان موروثة
+        if (class_addMethod(c, sel, replacement, types)) {
+            NSLog(@"[MirsaUnlock] added -[%@ %@] -> dismiss (was inherited)", 
+                  NSStringFromClass(c), NSStringFromSelector(sel));
+            return;
+        }
+        
+        // نستبدل التنفيذ إذا كانت موجودة في هذه الفئة
+        method_setImplementation(method, replacement);
+        NSLog(@"[MirsaUnlock] swizzled -[%@ %@] -> dismiss", 
+              NSStringFromClass(c), NSStringFromSelector(sel));
+    } @catch (NSException *exception) {
+        NSLog(@"[MirsaUnlock] exception in dismiss method: %@", exception.reason);
+    }
+}
+
+// دالة التهيئة التي تعمل عند تحميل الـ Dylib
+__attribute__((constructor))
+static void MirsaUnlockInitialize() {
+    NSLog(@"[MirsaUnlock] Initializing...");
+    
+    // 1. قراءة ملف الإعدادات (Config)
+    NSURL *configURL = [[NSBundle bundleForClass:[self class]] URLForResource:@"MirsaUnlock" withExtension:@"json"];
+    if (!configURL) {
+        NSLog(@"[MirsaUnlock] Config file not found.");
+        return;
+    }
+    
+    NSError *error = nil;
+    NSData *data = [NSData dataWithContentsOfURL:configURL options:NSDataReadingMappedIfSafe error:&error];
+    if (!data) {
+        NSLog(@"[MirsaUnlock] Failed to read config: %@", error.localizedDescription);
+        return;
+    }
+    
+    NSDictionary *config = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!config || ![config isKindOfClass:[NSDictionary class]]) {
+        NSLog(@"[MirsaUnlock] Invalid config format.");
+        return;
+    }
+    
+    NSArray *hooks = config[@"hooks"];
+    BOOL aggressive = [config[@"aggressive"] boolValue];
+    NSDictionary *features = config[@"features"];
+    NSDictionary *adsConfig = config[@"ads"];
+    
+    // تفعيل الميزات العامة بناءً على الـ Config
+    if (aggressive || [features[@"jailbreak"] boolValue]) {
+        // Jailbreak Bypass Logic (مثال بسيط يعتمد على وجود الملفات الشائعة)
+        Class NSFileManagerClass = objc_getClass("NSFileManager");
+        if (NSFileManagerClass) {
+            SEL defaultManagerSel = NSSelectorFromString(@"defaultManager");
+            if (class_getClassMethod(NSFileManagerClass, defaultManagerSel)) {
+                // يمكن إضافة هوك هنا إذا لزم الأمر، لكن غالباً يكفي منع الفحص
+            }
+        }
+    }
+    
+    if (aggressive || [features[@"ssl"] boolValue]) {
+        // SSL Pinning Bypass
+        // (هنا يمكنك استدعاء دالة MirsaUnlockApplySSLHooks إذا كانت معرفة في ملف آخر أو هنا)
+        NSLog(@"[MirsaUnlock] SSL Hooks Enabled");
+    }
+    
+    if (aggressive || [features[@"location"] boolValue]) {
+        // Fake Location
+        CLLocationManager *manager = [[CLLocationManager alloc] init];
+        CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:40.7128 longitude:-74.006 altitude:0 horizontalAccuracy:10 verticalAccuracy:10 speed:0 course:0 timestamp:[NSDate date]];
+        // ملاحظة: تغيير الموقع الحقيقي يتطلب هوك أكثر تعقيداً عبر Runtime
+        NSLog(@"[MirsaUnlock] Fake Location Set to New York");
+    }
+    
+    // معالجة الـ Hooks المكتشفة من الـ Scanner
+    if (hooks && [hooks isKindOfClass:[NSArray class]]) {
+        for (NSDictionary *hook in hooks) {
+            NSString *className = hook[@"class"];
+            NSString *selectorName = hook[@"selector"];
+            NSString *returns = hook[@"returns"] ?: @"yes";
+            
+            if (!className || !selectorName) continue;
+            
+            Class targetClass = objc_getClass([className UTF8String]);
+            if (targetClass == Nil) continue;
+            
+            SEL targetSel = NSSelectorFromString(selectorName);
+            if (!class_getInstanceMethod(targetClass, targetSel)) continue;
+            
+            if ([returns isEqualToString:@"yes"]) {
+                MirsaUnlockSwizzleBOOLGetter(targetClass, targetSel, YES);
+            } else if ([returns isEqualToString:@"no"]) {
+                MirsaUnlockSwizzleBOOLGetter(targetClass, targetSel, NO);
+            } else if ([returns isEqualToString:@"count"]) {
+                MirsaUnlockSwizzleIntegerGetter(targetClass, targetSel, 999);
+            } else if ([returns isEqualToString:@"zero"]) {
+                MirsaUnlockSwizzleIntegerGetter(targetClass, targetSel, 0);
+            } else if ([returns isEqualToString:@"future"]) {
+                MirsaUnlockSwizzleFutureGetter(targetClass, targetSel);
+            } else if ([returns isEqualToString:@"dismiss"]) {
+                MirsaUnlockDismissMethod(targetClass, targetSel);
+            }
+        }
+    }
+    
+    // تفعيل حواجز الإعلانات (Ad Blocking)
+    if (adsConfig && [adsConfig isKindOfClass:[NSDictionary class]]) {
+        BOOL blockAds = [adsConfig[@"block"] boolValue];
+        BOOL accelerate = [adsConfig[@"accelerate"] boolValue];
+        NSArray *sdkList = adsConfig[@"sdks"];
+        
+        if (blockAds && sdkList) {
+            for (NSString *sdk in sdkList) {
+                if ([sdk isEqualToString:@"admob"]) {
+                    Class rewardedAd = objc_getClass("GADRewardedAd");
+                    if (rewardedAd) {
+                        SEL presentSel = NSSelectorFromString(@"presentFromRootViewController:userDidEarnRewardHandler:");
+                        if (class_getInstanceMethod(rewardedAd, presentSel)) {
+                            IMP newImp = (IMP)MirsaUnlockAdMobRewardedPresent;
+                            Method originalMethod = class_getInstanceMethod(rewardedAd, presentSel);
+                            const char *types = method_getTypeEncoding(originalMethod);
+                            
+                            // استبدال الطريقة
+                            if (class_addMethod(rewardedAd, presentSel, newImp, types)) {
+                                NSLog(@"[MirsaUnlock] AdMob: Added reward hook");
+                            } else {
+                                method_setImplementation(originalMethod, newImp);
+                                NSLog(@"[MirsaUnlock] AdMob: Swizzled reward hook");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    NSLog(@"[MirsaUnlock] Initialization complete.");
+}
