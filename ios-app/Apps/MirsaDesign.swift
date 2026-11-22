@@ -313,7 +313,9 @@ enum MirsaChrome {
 
         // Rounded heavy titles like the in-page headers. The bar is transparent at the
         // scroll edge and a solid page colour (no blur) once content scrolls under it.
-        let titleColor = UIColor.white
+        // White on the dark themes; the Light Sources/Tools Store theme switches the window to
+        // light, where a white bar title was invisible on the pale backdrop.
+        let titleColor = UIColor { $0.userInterfaceStyle == .light ? UIColor(red: 0x17 / 255, green: 0x13 / 255, blue: 0x2E / 255, alpha: 1) : .white }
         func rounded(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont {
             let base = UIFont.systemFont(ofSize: size, weight: weight)
             return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
@@ -415,6 +417,7 @@ struct MirsaRoundIcon: View {
 /// Soft solid fade behind the status bar so scrolled content never collides with
 /// the clock and battery on pages without a navigation bar.
 struct MirsaStatusBarScrim: View {
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         // A thin strip below the status bar whose background grows up into the
         // top safe area, so the fade covers exactly the status bar plus 14 pt.
@@ -426,7 +429,8 @@ struct MirsaStatusBarScrim: View {
                 // under the clock instead of meeting a dark band.
                 Rectangle()
                     .fill(.ultraThinMaterial)
-                    .overlay(MirsaPalette.sheet.opacity(0.25))
+                    // Light themes (Sources/Tools Store "Light") get a pale tint, never a dark band.
+                    .overlay(colorScheme == .light ? Color.white.opacity(0.35) : MirsaPalette.sheet.opacity(0.25))
                     .mask(LinearGradient(stops: [
                         .init(color: .black, location: 0),
                         .init(color: .black.opacity(0.85), location: 0.55),
