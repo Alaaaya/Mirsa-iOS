@@ -2,7 +2,7 @@ name: Wallpaper source native validation
 # CI-only. No release, Pages, source upload, signing or server deployment.
 on:
   push:
-    branches: [mirsa/wallpaper-source]
+    branches: [mirsa/wallpaper-source, mirsa/wallpaper-caplayground]
   workflow_dispatch:
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
       - name: Native production decoder and five-language tests
         run: |
           set -o pipefail
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUnit.xcresult -only-testing:MirsaTests/WallpaperSourceTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUnit.xcresult -only-testing:MirsaTests/WallpaperSourceTests -only-testing:MirsaTests/CAPlaygroundSourceTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/unit.log
       - name: Real Tendies navigation and grid screenshots in five languages
         run: |
           set -o pipefail
