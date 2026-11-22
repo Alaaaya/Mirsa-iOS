@@ -32,7 +32,7 @@ final class WallpaperSourceUITests: XCTestCase {
             tendies.tap()
             XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "wallpaper-sources").firstMatch.exists)
             app.buttons["tools-section-store"].tap()
-            let filter = app.buttons["tools-store-filter-wallpapers"]
+            let filter = app.buttons["tools-store-cat-wallpapers"]
             XCTAssertTrue(filter.waitForExistence(timeout: 10))
             filter.tap()
             let field = app.textFields["wallpaper-source-url"]
