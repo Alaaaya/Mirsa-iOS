@@ -82,7 +82,8 @@ struct AppStoreAccountView: View {
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { tr(en, ar, ckb: ckb, kmr: kmr) }
 
-    var body: some View {
+    // Separate opaque view boundaries keep SwiftUI type-checking bounded.
+    private var accountScrollContent: some View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: MirsaSpacing.m) {
@@ -132,6 +133,10 @@ struct AppStoreAccountView: View {
         .background(StoreGalleryPageBackdrop())
         .preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
+    }
+
+    private var accountLifecycleContent: some View {
+        accountScrollContent
         .onChange(of: galleryMode) { _, _ in
             // Discover and Search share this screen: switching faces closes an open app page.
             if selected != nil { withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { selected = nil } }
@@ -194,6 +199,10 @@ struct AppStoreAccountView: View {
         }
         .task { if let id = openAppID, account != nil, results.isEmpty, selected == nil { term = String(id); search() } }
         .onDisappear { preflightTask?.cancel(); password = ""; code = ""; work?.cancel(); cancelMetadata() }
+    }
+
+    private var accountAuthorizationContent: some View {
+        accountLifecycleContent
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
         } message: { Text(notice ?? "") }
@@ -209,6 +218,10 @@ struct AppStoreAccountView: View {
             Button(storeText("Confirm and Get", "أكّد وخدو", de: "Bestätigen und laden", ckb: "پشتڕاستکردنەوە و وەرگرتن", kmr: "Piştrast bike û bigire")) { confirmPurchaseCode(app) }
             Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal"), role: .cancel) { code = "" }
         } message: { _ in Text(t("Enter the 6-digit code from Apple.", "اكتب الرمز من 6 أرقام من Apple.", "کۆدی ٦ ژمارەیی Apple بنووسە.", "Koda 6 hejmarî ya Apple binivîse.")) }
+    }
+
+    var body: some View {
+        accountAuthorizationContent
         .confirmationDialog(t("Refresh free licence and retry?", "تحديث الترخيص المجاني وإعادة التنزيل؟", "مۆڵەتی بێبەرامبەر نوێ بکەوە؟", "Lîsansa belaş nû bike?"),
                             isPresented: Binding(get: { recovery != nil }, set: { if !$0 { recovery = nil } }), titleVisibility: .visible) {
             if let pending = recovery {
