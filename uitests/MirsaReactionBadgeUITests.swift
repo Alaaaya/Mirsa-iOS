@@ -19,6 +19,8 @@ final class MirsaReactionBadgeUITests: XCTestCase {
             let badges = app.descendants(matching: .any).matching(identifier: "chat-mirsa-reaction")
             XCTAssertTrue(badges.firstMatch.waitForExistence(timeout: 10))
             XCTAssertEqual(badges.count, 2)
+            XCTAssertFalse(app.descendants(matching: .any)["chat-waiting"].exists,
+                           "A bot reaction answers the last user message without a text reply")
             let text = app.staticTexts[shortText[language]!]
             XCTAssertTrue(text.exists)
             let badge = badges.element(boundBy: 0)

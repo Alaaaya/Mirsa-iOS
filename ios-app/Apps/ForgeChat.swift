@@ -871,7 +871,7 @@ struct ForgeChatThreadView: View {
                 .id(row.id)
                 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .identity))
             }
-            if !unsent, (!queued.isEmpty || msgs.last?.role == "user") {
+            if !unsent, ForgeChatTimeline.isWaitingForReply(confirmed: msgs, hasPending: !queued.isEmpty) {
                 HStack(spacing: 10) { MirsaBreathingOrbs(); Text(msgs.last?.attachments?.contains(where: { $0.kind == "audio" }) == true ? ChatVoiceText.queued : ForgeChatText.waiting).font(.system(size: 14)).foregroundStyle(chatMuted) }
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(chatCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))

@@ -145,6 +145,14 @@ struct ForgeChatOutgoing: Codable, Identifiable, Equatable {
 /// Reads may lag behind accepted sends or arrive out of order. Only explicit thread deletion
 /// removes history; polling preserves previously visible IDs and updates matching server rows.
 enum ForgeChatTimeline {
+    /// A canonical bot reaction answers that exact turn without a text reply.
+    /// Own reactions and reactions to an older message cannot answer a new turn.
+    static func isWaitingForReply(confirmed: [ForgeChatMessage], hasPending: Bool) -> Bool {
+        if hasPending { return true }
+        guard let latest = confirmed.last, latest.role == "user" else { return false }
+        return latest.botReaction.map { !ForgeChatMutationPolicy.reactions.contains($0) } ?? true
+    }
+
     static func acceptedEcho(_ outgoing: ForgeChatOutgoing) -> ForgeChatOutgoing {
         var echo = outgoing
         echo.imageBase64 = nil // never persist the uploaded image twice
