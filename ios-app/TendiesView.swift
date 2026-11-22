@@ -544,14 +544,14 @@ struct TendieDetailSheet: View {
                 }
 
                 Section(MirsaTr.lit("Information")) {
-                    detailRow(title: "Name", value: item.name)
-                    detailRow(title: "File Name", value: item.fileName)
-                    detailRow(title: "Type", value: item.posterType.displayName)
-                    detailRow(title: "Descriptors", value: "\(item.descriptorCount)")
-                    detailRow(title: "Target Extension", value: item.posterType.extensionBundleId)
-                    detailRow(title: "Format", value: item.isContainer ? "App Container" : "Descriptor Archive")
+                    detailRow(title: MirsaTr.lit("Name"), value: item.name)
+                    detailRow(title: tr5("File name", "اسم الملف", de: "Dateiname", ckb: "ناوی فایل", kmr: "Navê pelê"), value: item.fileName)
+                    detailRow(title: MirsaTr.lit("Type"), value: item.posterType.displayName)
+                    detailRow(title: tr5("Descriptors", "الواصفات", de: "Deskriptoren", ckb: "وەسفکەرەکان", kmr: "Danasîner"), value: "\(item.descriptorCount)")
+                    detailRow(title: tr5("Target extension", "الإضافة المستهدفة", de: "Ziel-Erweiterung", ckb: "پاشکۆی ئامانج", kmr: "Pêveka armanc"), value: item.posterType.extensionBundleId)
+                    detailRow(title: tr5("Format", "الصيغة", de: "Format", ckb: "فۆرمات", kmr: "Format"), value: item.isContainer ? "App Container" : "Descriptor Archive")
                     if item.unsafeContainer {
-                        detailRow(title: "Warning", value: "Contains SQLite database")
+                        detailRow(title: tr5("Warning", "تحذير", de: "Warnung", ckb: "ئاگاداری", kmr: "Hişyarî"), value: tr5("Contains SQLite database", "فيه قاعدة بيانات SQLite", de: "Enthält eine SQLite-Datenbank", ckb: "بنکەدراوەی SQLite تێدایە", kmr: "Danegeheke SQLite tê de heye"))
                     }
                 }
             }.mirsaListBackground()

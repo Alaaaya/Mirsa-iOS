@@ -57,6 +57,8 @@ struct WallpaperMakerSection: View {
     @State private var generationID = UUID()
     @State private var generationTask: Task<Void, Never>?
     @State private var planTask: Task<Void, Never>?
+    @State private var cutoutTask: Task<Void, Never>?
+    @State private var cutoutTaskKey: String?
 
     /// DEBUG + UI-test harness only: plain generated sample photos so screenshots show populated layers.
     private static var fixtureAI: Bool {
@@ -135,11 +137,21 @@ struct WallpaperMakerSection: View {
             .disabled(busy || applyRunning || planBusy)
             Button { showFiles = true } label: { Label(t(.files), systemImage: "folder") }
                 .disabled(busy || applyRunning || planBusy)
+                // On this one row: modifiers on the Group below are copied onto every Form row,
+                // so several presenters competed for the same flag and the picker could fail to open.
+                .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
+                    switch result {
+                    case .failure: break // Cancel is not an error.
+                    case .success(let urls): receiveFiles(urls)
+                    }
+                }
             if !layers.isEmpty {
                 photoControls
             }
             if let video {
-                VideoPlayer(player: AVPlayer(url: video))
+                // One player per chosen file. Building AVPlayer(url:) in body made a new player
+                // (restarting playback) on every keystroke or progress tick.
+                MakerVideoPreview(url: video)
                     .frame(height: 220).accessibilityLabel(t(.preview))
             }
             if WallpaperLayoutAI.enabled || Self.fixtureAI {
@@ -182,6 +194,7 @@ struct WallpaperMakerSection: View {
             if let generated {
                 Text(t(.ready)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button { showShare = true } label: { Label(t(.share), systemImage: "square.and.arrow.up") }
+                    .sheet(isPresented: $showShare) { ShareSheet(items: [generated]) }
                 if let editingItem {
                     Button(t(.saveEdit)) { saveEdit(editingItem, archive: generated) }
                         .buttonStyle(.borderedProminent)
@@ -207,15 +220,6 @@ struct WallpaperMakerSection: View {
             Color.clear.frame(height: MirsaTabBarMetrics.clearance).listRowBackground(Color.clear)
                 .accessibilityHidden(true)
         }
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image, .movie], allowsMultipleSelection: true) { result in
-            switch result {
-            case .failure: break // Cancel is not an error.
-            case .success(let urls): receiveFiles(urls)
-            }
-        }
-        .sheet(isPresented: $showShare) {
-            if let generated { ShareSheet(items: [generated]) }
-        }
         .onAppear {
             #if DEBUG
             if Self.fixtureAI {
@@ -225,10 +229,10 @@ struct WallpaperMakerSection: View {
             }
             #endif
         }
-        .task(id: layers.map { "\($0.id):\($0.role.rawValue):\($0.cutoutEnabled)" }.joined()) {
-            await prepareForegrounds()
-        }
-        .onDisappear { clear() }
+        // Group modifiers run once per Form row. Start at most one cutout run per layer set
+        // (it was one Vision job per visible row), and never wipe the work when a row scrolls
+        // off screen (the old per-row onDisappear cleared every layer while scrolling).
+        .task(id: cutoutKey) { startCutouts() }
         .onChange(of: editRequest?.id) { _, _ in
             if let request = editRequest { apply(request) }
         }
@@ -496,6 +500,7 @@ struct WallpaperMakerSection: View {
     }
     private func clear() {
         generationID = UUID(); cutoutRunID = UUID(); cutoutBusy = false
+        cutoutTask?.cancel(); cutoutTask = nil; cutoutTaskKey = nil
         generationTask?.cancel(); planTask?.cancel()
         generationTask = nil; planTask = nil; busy = false; planBusy = false
         invalidate(); layers = []; autoEffectsApplied = false; editingItem = nil
@@ -544,10 +549,21 @@ struct WallpaperMakerSection: View {
             }
         } catch { message = t(.error) }
     }
-    @MainActor private func prepareForegrounds() async {
+    private var cutoutKey: String {
+        layers.map { "\($0.id):\($0.role.rawValue):\($0.cutoutEnabled)" }.joined()
+    }
+    private func startCutouts() {
+        let key = cutoutKey
+        if cutoutTask != nil && cutoutTaskKey == key { return }
+        guard layers.contains(where: { $0.role == .foreground && $0.cutoutEnabled && $0.cutoutImage == nil && $0.cutoutStatus == .pending }) else { return }
+        cutoutTask?.cancel()
         let runID = UUID(); cutoutRunID = runID
+        cutoutTaskKey = key
+        cutoutTask = Task { @MainActor in await prepareForegrounds(runID: runID) }
+    }
+    @MainActor private func prepareForegrounds(runID: UUID) async {
         cutoutBusy = true
-        defer { if cutoutRunID == runID { cutoutBusy = false } }
+        defer { if cutoutRunID == runID { cutoutBusy = false; cutoutTask = nil; cutoutTaskKey = nil } }
         for layer in layers where layer.role == .foreground && layer.cutoutEnabled && layer.cutoutImage == nil && layer.cutoutStatus == .pending {
             let worker = Task.detached(priority: .userInitiated) { try WallpaperForeground.process(layer.image) }
             do {
@@ -600,6 +616,17 @@ struct WallpaperMakerSection: View {
                 invalidate()
             } catch { if !Task.isCancelled { message = t(.manualFallback) } }
         }
+    }
+}
+
+/// Video preview that keeps one AVPlayer for its file across re-renders.
+private struct MakerVideoPreview: View {
+    let url: URL
+    @State private var player: AVPlayer?
+    var body: some View {
+        VideoPlayer(player: player)
+            .task(id: url) { player = AVPlayer(url: url) }
+            .onDisappear { player?.pause() }
     }
 }
 
