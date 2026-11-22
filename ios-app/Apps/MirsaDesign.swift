@@ -313,10 +313,13 @@ enum MirsaChrome {
             let base = UIFont.systemFont(ofSize: size, weight: weight)
             return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
         }
+        // Scrolled state: thin frosted glass, never an opaque page-coloured slab. An opaque
+        // bar painted a dark band over every theme (Sunset, Ocean, Light) at the top edge.
         let solid = UINavigationBarAppearance()
-        solid.configureWithOpaqueBackground()
-        solid.backgroundColor = UIColor(red: 0.066, green: 0.070, blue: 0.150, alpha: 1)
-        solid.shadowColor = UIColor.white.withAlphaComponent(0.08)
+        solid.configureWithTransparentBackground()
+        solid.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        solid.backgroundColor = UIColor(red: 0.066, green: 0.070, blue: 0.150, alpha: 0.18)
+        solid.shadowColor = UIColor.white.withAlphaComponent(0.06)
         solid.largeTitleTextAttributes = [.font: rounded(32, .heavy), .foregroundColor: titleColor]
         solid.titleTextAttributes = [.font: rounded(17, .bold), .foregroundColor: titleColor]
         let clear = UINavigationBarAppearance()
@@ -332,6 +335,9 @@ enum MirsaChrome {
 
     /// Trait override on every window, so presented sheets, alerts and menus (which
     /// inherit the window's traits) lay out left-to-right too.
+    /// Base colour of the Liquid backdrop (#090A1E), used behind every window.
+    static let windowBase = UIColor(red: 9 / 255, green: 10 / 255, blue: 30 / 255, alpha: 1)
+
     static func forceWindowsLeftToRight() {
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
@@ -339,6 +345,12 @@ enum MirsaChrome {
             for w in ws.windows where !w.traitOverrides.contains(UITraitLayoutDirection.self) {
                 w.traitOverrides.layoutDirection = .leftToRight
                 w.semanticContentAttribute = .forceLeftToRight
+            }
+            // A bare UIWindow is black. Sheet/keyboard transitions and rubber-band
+            // overscroll briefly reveal it, which read as black bars at the top and
+            // bottom edges. Paint it with the backdrop's own base colour instead.
+            for w in ws.windows where w.backgroundColor == nil || w.backgroundColor == .black {
+                w.backgroundColor = windowBase
             }
         }
     }

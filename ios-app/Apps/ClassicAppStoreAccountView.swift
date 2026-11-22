@@ -137,7 +137,7 @@ struct ClassicAppStoreAccountView: View {
                     }.sorted { AppStoreCountry.label($0) < AppStoreCountry.label($1) }, id: \.self) { country in
                         Button(AppStoreCountry.label(country)) { selectCountry(country.lowercased()) }
                     }
-                }
+                }.mirsaListBackground()
                 .searchable(text: $countryQuery)
                 .navigationTitle(t("Search storefront", "متجر البحث", "ستۆری گەڕان", "Stoya lêgerînê"))
                 .toolbar { Button(t("Done", "تمام", "تەواو", "Temam")) { showCountries = false } }

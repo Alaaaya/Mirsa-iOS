@@ -276,7 +276,9 @@ struct TendiesView: View {
                 // input in the reduced viewport instead of aligning to the keyboard edge.
                 withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .center) }
             }
-            .toolbarBackground(.visible, for: .navigationBar)
+            // Transparent at rest, frosted glass once content scrolls under it. A forced
+            // visible bar drew a solid band at the top edge under the Tools picker.
+            .toolbarBackground(.automatic, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showFilePicker, onDismiss: presentPickedInstall) {
@@ -551,7 +553,7 @@ struct TendieDetailSheet: View {
                         detailRow(title: "Warning", value: "Contains SQLite database")
                     }
                 }
-            }
+            }.mirsaListBackground()
             .navigationTitle(item.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

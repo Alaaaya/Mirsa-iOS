@@ -246,7 +246,7 @@ struct MachOView: View {
                     }
                 }
             }
-        }
+        }.mirsaListBackground()
         .environment(\.layoutDirection, .leftToRight)
         .navigationTitle(entry.name)
         .onAppear {
@@ -283,7 +283,7 @@ struct BundleSearchView: View {
                 }
             }
             if hits.count >= FileToolsLimits.maxSearchResults { Text(MirsaTr.ft("Showing the first %d results.", FileToolsLimits.maxSearchResults)).font(.caption) }
-        }
+        }.mirsaListBackground()
         .environment(\.layoutDirection, .leftToRight)
         .searchable(text: $query, prompt: MirsaTr.ft("Search files"))
         .onChange(of: query) { _ in run() }
@@ -329,6 +329,6 @@ struct BinaryFileToolsView: View {
             Section { Text(ByteCountFormatter.string(fromByteCount: Int64(entry.size), countStyle: .file)).foregroundStyle(.secondary) }
             NavigationLink { HexEditorView(manager: manager, entry: entry, onChange: onChange) } label: { Label(MirsaTr.ft("Hex editor"), systemImage: "number") }
             NavigationLink { MachOView(manager: manager, entry: entry) } label: { Label(MirsaTr.ft("Mach-O info"), systemImage: "cpu") }
-        }.navigationTitle(entry.name)
+        }.mirsaListBackground().navigationTitle(entry.name)
     }
 }

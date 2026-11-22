@@ -234,7 +234,7 @@ struct CrashLogsView: View {
                         }
                     }
             }
-        }
+        }.mirsaListBackground()
         .disabled(deleting || m.loading)
         .searchable(text: $query)
         .toolbar {

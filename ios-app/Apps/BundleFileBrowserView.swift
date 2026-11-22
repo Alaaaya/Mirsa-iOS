@@ -32,7 +32,7 @@ struct BundleFileBrowserView: View {
                 ForEach(entries) { e in row(e) }
             }
             if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
-        }
+        }.mirsaListBackground()
         .navigationTitle(directory.isEmpty ? MirsaTr.lit("Files") : BundlePath.lastComponent(directory))
         .toolbar {
             ToolbarItemGroup {

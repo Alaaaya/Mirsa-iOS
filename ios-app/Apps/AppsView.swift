@@ -22,6 +22,13 @@ extension View {
 struct AuroraBackground: View {
     var paused = false
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
+    @Environment(\.mirsaTabActive) private var tabActive
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// The classic mesh only ticks while it can actually be seen.
+    private var meshPaused: Bool {
+        paused || MirsaUITestHarness.active || !tabActive || reduceMotion || scenePhase != .active
+    }
     var body: some View {
         // The UI-test harness freezes the drifting light so XCUITest can reach idle.
         if theme == MirsaTheme.liquid.rawValue { LiquidBackground(paused: paused || MirsaUITestHarness.active) } else { classic }
@@ -33,7 +40,7 @@ struct AuroraBackground: View {
     }
 
     private var classicMesh: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused || MirsaUITestHarness.active)) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: meshPaused)) { ctx in
             let t = Float(ctx.date.timeIntervalSinceReferenceDate)
             let s = sin(t * 0.25) * 0.08
             let c = cos(t * 0.21) * 0.08

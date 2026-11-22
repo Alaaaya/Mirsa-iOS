@@ -661,6 +661,8 @@ struct ContentView: View {
                     // through its actual safe areas, not only its content rect.
                     .clipShape(RetainedTabClip(active: on, safeArea: viewport.safeAreaInsets))
             }
+                // Hidden retained tabs stop their decorative animations (backdrop drift).
+                .environment(\.mirsaTabActive, on)
                 .frame(width: on ? nil : 0, height: on ? nil : 0)
                 .opacity(on ? 1 : 0)
                 .allowsHitTesting(on)
