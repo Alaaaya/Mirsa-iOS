@@ -63,6 +63,15 @@ struct TendiesView: View {
         NavigationStack {
             ScrollViewReader { scroll in
             MirsaForm {
+                Section {
+                    NavigationLink {
+                        WallpaperCatalogView()
+                    } label: {
+                        Label(WallpaperCatalogText.text(.title), systemImage: "rectangle.stack")
+                    }
+                    .accessibilityIdentifier("wallpaper-catalog")
+                }
+
                 // Notice Banners
                 if let err = vm.errorMessage {
                     Section {

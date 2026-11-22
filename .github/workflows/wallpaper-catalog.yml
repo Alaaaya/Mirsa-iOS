@@ -1,0 +1,40 @@
+name: Wallpaper catalog validation only
+on:
+  push:
+    branches: [feature/wallpaper-catalog]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  catalog:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - name: Compile standalone catalog core
+        run: swiftc -parse-as-library -emit-module ios-app/WallpaperCatalog.swift -o /tmp/WallpaperCatalog.swiftmodule
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          mkdir -p Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+      - name: Compile app and run synthetic catalog tests
+        shell: bash -eo pipefail {0}
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcodebuild test -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath /tmp/catalog-dd -resultBundlePath catalog.xcresult -only-testing:MirsaTests/WallpaperCatalogTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee catalog-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wallpaper-catalog-tests
+          path: |
+            catalog-build.log
+            catalog.xcresult
