@@ -52,10 +52,12 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
     var reaction: String? = nil
     var botReaction: String? = nil
     var editedAt: String? = nil
+    /// Additive optional build progress; kept only when requestMessageID == id.
+    var buildProgress: ChatBuildProgress? = nil
     init(id: UUID, threadID: UUID, role: String, text: String?, createdAt: String? = nil, hasImage: Bool? = nil, result: ForgeChatResult? = nil, attachments: [ChatAttachmentMeta]? = nil) {
         self.id = id; self.threadID = threadID; self.role = role; self.text = text; self.createdAt = createdAt; self.hasImage = hasImage; self.result = result; self.attachments = attachments
     }
-    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, botReaction, editedAt }
+    enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, botReaction, editedAt, buildProgress }
     enum QK: String, CodingKey { case replyQuote, replyQuoteText, replyQuoteRole }
     struct Quote: Codable { let text: String?; let role: String? }
     /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
@@ -84,6 +86,7 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
         let bot = try? c.decode(String.self, forKey: .botReaction)
         botReaction = bot.flatMap { ForgeChatMutationPolicy.reactions.contains($0) ? $0 : nil }
         editedAt = try? c.decode(String.self, forKey: .editedAt)
+        buildProgress = (try? c.decode(ChatBuildProgress.self, forKey: .buildProgress)).flatMap { $0.matches(id) ? $0 : nil }
     }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: K.self)
@@ -94,6 +97,7 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
         try c.encodeIfPresent(replyToMessageID, forKey: .replyToMessageID)
         try c.encodeIfPresent(botReaction, forKey: .botReaction)
         try c.encodeIfPresent(reaction, forKey: .reaction); try c.encodeIfPresent(editedAt, forKey: .editedAt)
+        try c.encodeIfPresent(buildProgress, forKey: .buildProgress)
         if replyQuoteText != nil || replyQuoteRole != nil {
             var q = encoder.container(keyedBy: QK.self)
             try q.encode(Quote(text: replyQuoteText, role: replyQuoteRole), forKey: .replyQuote)

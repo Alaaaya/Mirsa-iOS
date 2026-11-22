@@ -118,6 +118,8 @@ enum ForgeChatImage {
     static let shared = ForgeChatStore()
     @Published var threads: [ForgeChatThread] = []
     @Published var messages: [UUID: [ForgeChatMessage]] = [:]
+    /// Real server lifecycle rows per thread (chat-read top-level), for coarse build status.
+    @Published var lifecycle: [UUID: [ChatLifecycleEntry]] = [:]
     @Published var outgoing: [ForgeChatOutgoing] = []
     /// Accepted by the server but not yet returned by chat-read. Shown so a sent message never vanishes and reappears.
     @Published var sentEcho: [ForgeChatOutgoing] = []
@@ -479,6 +481,8 @@ enum ForgeChatImage {
         // One undecodable message must never hide the others (operator replies were not showing).
         let w = (messages: raw.messages.compactMap(\.value), 0)
         if w.messages.count < raw.messages.count { lastDiagnostic = "decode: skipped \(raw.messages.count - w.messages.count) of \(raw.messages.count) messages" }
+        let lc = ChatLifecycleEntry.lossy(d)
+        if lifecycle[id] != lc { lifecycle[id] = lc }
         let merged = ForgeChatTimeline.mergeConfirmed(previous: messages[id] ?? [], incoming: w.messages)
         if messages[id] != merged {
             var all = messages; all[id] = merged; messages = all
@@ -707,12 +711,14 @@ struct ForgeChatComposerFocusKey: PreferenceKey {
 
 struct ForgeChatThreadView: View {
     let threadID: UUID
-    @ObservedObject private var store = ForgeChatStore.shared
+    @ObservedObject private var store: ForgeChatStore
+    init(threadID: UUID, store: ForgeChatStore = .shared) { self.threadID = threadID; self.store = store }
     @Environment(\.dismiss) private var dismiss
     // The rest of Mirsa can force dark appearance. Read the scene's system
     // traits, not that inherited SwiftUI override, until the user chooses.
     @State private var systemDark = false
     @AppStorage("mirsa.chat.appearance") private var chatAppearance = "system"
+    @AppStorage(ChatBuildStyle.key) private var buildStyleRaw = ChatBuildStyle.terminal.rawValue
     private var darkChat: Bool {
         switch chatAppearance {
         case "light": return false
@@ -831,6 +837,9 @@ struct ForgeChatThreadView: View {
                 }
                 // Reserve the part above the bubble, including below quoted replies.
                 .padding(.top, isUser && msgs.first(where: { $0.id == id })?.botReaction != nil ? 16 : 0)
+            if confirmed, let bp = ChatBuildPresentation.card(style: ChatBuildStyle.resolve(buildStyleRaw), message: msgs.first(where: { $0.id == id }), lifecycle: store.lifecycle[threadID] ?? [], messages: msgs) {
+                ChatBuildTerminalCard(progress: bp)
+            }
             if let e = reaction(id) {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
             }
@@ -893,7 +902,12 @@ struct ForgeChatThreadView: View {
     .scrollDismissesKeyboard(.interactively)
     // Reserve room for the floating controls at rest. scrollClipDisabled above
     // lets conversation content draw beneath this transparent inset while scrolling.
-    .safeAreaInset(edge: .top, spacing: 0) { header }
+    .safeAreaInset(edge: .top, spacing: 0) {
+        VStack(spacing: 6) {
+            header
+            if let bp = ChatBuildPresentation.pill(style: ChatBuildStyle.resolve(buildStyleRaw), messages: msgs, lifecycle: store.lifecycle[threadID] ?? []) { ChatBuildPill(progress: bp).transition(.opacity) }
+        }
+    }
     // Inset the actual scrolling viewport, not its flexible outer container.
     // SwiftUI measures the complete lane (multiline input, previews and errors).
     .safeAreaInset(edge: .bottom, spacing: 0) { composerLane }
@@ -1196,6 +1210,14 @@ struct ForgeChatThreadView: View {
     /// Three explicit palettes. Unset preferences continue to follow scene appearance.
     private var blackBackgroundToggle: some View {
         Menu {
+            Section(ChatBuildText.settingTitle) {
+                ForEach(ChatBuildStyle.allCases, id: \.rawValue) { st in
+                    Button { buildStyleRaw = st.rawValue } label: {
+                        let name = st == .terminal ? ChatBuildText.terminalTitle : ChatBuildText.pillTitle
+                        if ChatBuildStyle.resolve(buildStyleRaw) == st { Label(name, systemImage: "checkmark") } else { Text(name) }
+                    }.accessibilityIdentifier("chat-build-style-" + st.rawValue)
+                }
+            }
             ForEach(["light", "dark", "classic"], id: \.self) { choice in
                 Button { chatAppearance = choice } label: {
                     if (chatAppearance == "system" ? (darkChat ? "dark" : "light") : chatAppearance) == choice {
