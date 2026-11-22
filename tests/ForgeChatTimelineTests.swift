@@ -15,6 +15,33 @@ final class ForgeChatTimelineTests: XCTestCase {
         ForgeChatMessage(id: id, threadID: thread, role: "user", text: text)
     }
 
+    func testBotReactionImmediatelyClearsWaitingOnCanonicalRead() {
+        let sent = message()
+        XCTAssertTrue(ForgeChatTimeline.isWaitingForReply(confirmed: [sent], hasPending: false))
+        var answered = sent
+        answered.botReaction = "👍"
+        let merged = ForgeChatTimeline.mergeConfirmed(previous: [sent], incoming: [answered])
+        XCTAssertFalse(ForgeChatTimeline.isWaitingForReply(confirmed: merged, hasPending: false))
+        XCTAssertEqual(merged.count, 1) // No synthetic text reply needed.
+    }
+
+    func testOwnReactionDoesNotAnswerAndOldReactionDoesNotAnswerNewTurn() {
+        var old = message()
+        old.reaction = "❤️"
+        XCTAssertTrue(ForgeChatTimeline.isWaitingForReply(confirmed: [old], hasPending: false))
+        old.botReaction = "❤️"
+        XCTAssertTrue(ForgeChatTimeline.isWaitingForReply(confirmed: [old, message()], hasPending: false))
+        XCTAssertTrue(ForgeChatTimeline.isWaitingForReply(confirmed: [old], hasPending: true))
+        old.botReaction = "invalid"
+        XCTAssertTrue(ForgeChatTimeline.isWaitingForReply(confirmed: [old], hasPending: false))
+    }
+
+    func testEmptyAndTextRepliedThreadsDoNotWait() {
+        XCTAssertFalse(ForgeChatTimeline.isWaitingForReply(confirmed: [], hasPending: false))
+        let reply = ForgeChatMessage(id: UUID(), threadID: thread, role: "kat", text: "Hi")
+        XCTAssertFalse(ForgeChatTimeline.isWaitingForReply(confirmed: [message(), reply], hasPending: false))
+    }
+
     func testAcceptedEchoKeepsIdentityTextThreadButDropsUploadedImage() {
         let sent = outgoing()
         let echo = ForgeChatTimeline.acceptedEcho(sent)
