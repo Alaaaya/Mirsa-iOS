@@ -847,7 +847,8 @@ private struct SourceRow: View {
         .overlay(alignment: .leading) {
             Capsule().fill(tint).frame(width: 3).padding(.vertical, 14)
         }
-        .mirsaAppear()
+        // No fade-in here: List rows are re-created as they scroll back on screen, so the
+        // one-shot appear animation replayed on every row while scrolling (visible pop/stutter).
     }
 }
 

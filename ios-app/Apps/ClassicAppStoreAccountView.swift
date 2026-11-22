@@ -343,7 +343,10 @@ struct ClassicAppStoreAccountView: View {
         if !results.isEmpty {
             Text(t("Results", "النتائج", "ئەنجامەکان", "Encam")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
         }
-        ForEach(results) { app in resultRow(app) }
+        // Lazy like the new store: a long result list no longer builds every row (and its artwork) up front.
+        LazyVStack(alignment: .leading, spacing: MirsaSpacing.m) {
+            ForEach(results) { app in resultRow(app) }
+        }
         }
     }
 
