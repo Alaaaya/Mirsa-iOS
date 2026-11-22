@@ -835,6 +835,8 @@ struct ClassicAppStorePurchasesPage: View {
                     return
                 }
                 self.error = commerceError(diagnostic)
+                // The client already deleted the rejected session; show signed-out state, not a stale account.
+                if diagnostic.requiresReauthentication { model.updateAccount(nil) }
             } else {
                 self.error = tr("Download failed. Try again.", "التنزيل ما كمل. جرّب مرة تانية.", ckb: "داگرتن سەرکەوتوو نەبوو.", kmr: "Daxistin bi ser neket.")
             }
@@ -874,6 +876,11 @@ struct ClassicAppStorePurchasesPage: View {
         } catch is CancellationError {}
         catch {
             guard pending.revision == model.sessionRevision, model.account == account else { return }
+            if let authorization = error as? MirsaStorePurchaseAuthorization {
+                // Session kept. The password confirmation lives on the store app page (Get).
+                self.error = authorization.localizedDescription + "\n" + storeText("Open this app from App Store search and tap Get to confirm.", "افتح التطبيق من بحث متجر أبل ودوس احصل عليه لتأكّد.", de: "Öffne die App über die App-Store-Suche und tippe auf Laden, um zu bestätigen.", ckb: "ئەپەکە لە گەڕانی ستۆر بکەرەوە و وەریبگرە دابگرە بۆ پشتڕاستکردنەوە.", kmr: "Sepanê ji lêgerîna App Store veke û ji bo piştrastkirinê Bigire bitikîne.")
+                return
+            }
             self.error = (error as? StoreProductDiagnostic).map { commerceError($0) }
                 ?? tr("Free licence refresh or retry failed. No further retry was made.", "تحديث الترخيص أو إعادة التنزيل ما كملت، وما عدنا المحاولة.", ckb: "هەوڵەکە سەرکەوتوو نەبوو.", kmr: "Ceribandin bi ser neket.")
         }

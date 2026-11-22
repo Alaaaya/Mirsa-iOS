@@ -453,9 +453,23 @@ actor MirsaStoreClient {
             throw MirsaStoreError.invalidPackage
         }
     }
+    /// buyProduct's "Sign In to the iTunes Store" / 2034 / 2042 reply for a new free licence:
+    /// Apple wants the password re-entered for this acquisition. Download stages are not matched.
+    static func purchaseNeedsPassword(_ diagnostic: StoreProductDiagnostic) -> Bool {
+        guard diagnostic.stage.hasPrefix("licence/") else { return false }
+        if diagnostic.requiresReauthentication { return true }
+        let message = (diagnostic.customerMessage ?? "").lowercased()
+        return message.contains("sign in") || message.contains("password")
+    }
+
     private func safe(_ error: Error) -> Error {
         if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic }
         if let diagnostic = error as? StoreProductDiagnostic {
+            // A first-time free Get (buyProduct, stage "licence/…") answers with Apple's sign-in /
+            // token code when Apple wants the password confirmed for a new acquisition. The session
+            // is still valid (owned apps keep downloading), so it must NOT be deleted: deleting it
+            // was why a signed-in user was sent back to sign in for every app they never owned.
+            if Self.purchaseNeedsPassword(diagnostic) { return MirsaStorePurchaseAuthorization() }
             if diagnostic.requiresReauthentication {
                 // Explicit owner policy: drop only the rejected Apple store session.
                 // Preserve stable machine identity, saved apps, signing accounts and all files.
@@ -465,6 +479,7 @@ actor MirsaStoreClient {
             }
             return diagnostic
         }
+        if let authorization = error as? MirsaStorePurchaseAuthorization { return authorization }
         if let diagnostic = error as? MirsaStoreAuthDiagnostic { return diagnostic }
         if let diagnostic = error as? AuthenticationServiceError { return MirsaStoreAuthDiagnostic(diagnostic) }
         if let error = error as? MirsaStoreError { return error }
