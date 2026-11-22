@@ -161,13 +161,16 @@ final class WallpaperSourceTests: XCTestCase {
 
     func testCatalogCallbackOnlyImportsPreselectsAndReturnsToExistingReadyScreen() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let source = try String(contentsOf: root.appendingPathComponent("ios-app/TendiesView.swift"), encoding: .utf8)
+        let source = try String(contentsOf: root.appendingPathComponent("ios-app/Apps/ToolsStoreView.swift"), encoding: .utf8)
         let start = try XCTUnwrap(source.range(of: "WallpaperSourcesView(busy:"))
-        let end = try XCTUnwrap(source.range(of: ".accessibilityIdentifier(\"wallpaper-sources\")",
+        let end = try XCTUnwrap(source.range(of: "if !showSaved && model.category != .wallpapers",
                                            range: start.upperBound..<source.endIndex))
         let callback = String(source[start.lowerBound..<end.lowerBound])
+        XCTAssertTrue(source.contains("model.category == .wallpapers && !showSaved"))
+        let tendies = try String(contentsOf: root.appendingPathComponent("ios-app/TendiesView.swift"), encoding: .utf8)
+        XCTAssertFalse(tendies.contains("WallpaperSourcesView("))
         for required in ["vm.importTendieFiles(urls: [archive])", "ids.contains(vm.tendieItems[index].id)",
-                         "showWallpaperSources = false", "scrollToImportedWallpapers = true"] {
+                         "mirsa.wallpaper.imported.open"] {
             XCTAssertTrue(callback.contains(required), required)
         }
         for forbidden in ["installSelectedNow(", "flashTendies(", "TendiesEngine.", "PosterBoard",
