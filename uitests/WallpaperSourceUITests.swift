@@ -14,6 +14,7 @@ final class WallpaperSourceUITests: XCTestCase {
 
     func testToolsStoreWallpaperSourcesOnlyInFiveLanguages() {
         for language in ["ar", "en", "de", "kmr", "ckb"] {
+            continueAfterFailure = false
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
                 "-MirsaWallpaperSourceFixture", "-mirsa.appLanguage", language,
@@ -56,43 +57,75 @@ final class WallpaperSourceUITests: XCTestCase {
             let dock = app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
             XCTAssertTrue(dock.exists, "Measure the actual floating dock, never a hardcoded screen inset")
             let finalName = app.staticTexts["Halo"] // sixth and final fixture entry
-            var previousFrame: CGRect?
+            // The source grid is followed by Most Downloaded / Latest content.
+            // Scrolling to the PAGE bottom moves Halo off the TOP, so target the
+            // end of the fixture grid, not the end of the unrelated feed.
             var reachedEnd = false
             var endSwipes = 0
-            for _ in 0..<12 {
-                scroll.swipeUp(velocity: .slow)
-                endSwipes += 1
-                // Swipe completion waits for XCTest idleness, including scroll deceleration.
-                guard finalName.exists else { continue }
-                let current = finalName.frame
-                if let previous = previousFrame,
-                   abs(current.minY - previous.minY) < 1,
-                   abs(current.minX - previous.minX) < 1 {
-                    reachedEnd = true
-                    break
-                }
-                previousFrame = current
-            }
-            XCTAssertTrue(reachedEnd, "Final fixture must stop moving at the real scroll end within 12 swipes")
-            XCTAssertTrue(finalName.exists)
-            XCTAssertTrue(finalName.isHittable)
-            XCTAssertTrue(app.staticTexts["Lagoon"].exists, "Both final-row names must remain in the native grid")
-
-            // Fixture order is Solar arc, Night tide, Cinder, Dune, Lagoon, Halo.
-            // LazyVGrid may evict earlier rows; the last ordered install match is
-            // Halo's action. Prove its association geometrically as well, rather
-            // than treating an arbitrary visible install button as the final one.
             let endActions = app.buttons.matching(identifier: "wallpaper-source-install")
-            XCTAssertGreaterThanOrEqual(endActions.count, 2)
-            let finalAction = endActions.element(boundBy: endActions.count - 1)
-            XCTAssertTrue(finalAction.exists)
-            XCTAssertTrue(finalAction.isEnabled)
-            XCTAssertTrue(finalAction.isHittable)
-            let nameFrame = finalName.frame
-            let actionFrame = finalAction.frame
+            for _ in 0..<24 {
+                if finalName.exists, endActions.count >= 2 {
+                    let name = finalName.frame
+                    let action = endActions.element(boundBy: endActions.count - 1).frame
+                    if scroll.frame.contains(name), scroll.frame.contains(action),
+                       name.maxY < dock.frame.minY, action.maxY < dock.frame.minY,
+                       finalName.isHittable,
+                       endActions.element(boundBy: endActions.count - 1).isHittable {
+                        reachedEnd = true
+                        break
+                    }
+                }
+                // Small, bounded drags cannot skip the final row in a single
+                // page-sized fling. Reverse if the row has moved above viewport.
+                let passedRow = finalName.exists && finalName.frame.minY < scroll.frame.minY
+                let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: passedRow ? 0.40 : 0.70))
+                let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: passedRow ? 0.65 : 0.45))
+                start.press(forDuration: 0.05, thenDragTo: end)
+                endSwipes += 1
+            }
+
+            // Keep all end assertions, but attach actual pixels/geometry BEFORE
+            // them so failures remain diagnosable. Continue through all languages.
+            continueAfterFailure = true
+            let finalAction = endActions.element(boundBy: max(0, endActions.count - 1))
+            let nameFrame = finalName.exists ? finalName.frame : .zero
+            let actionFrame = finalAction.exists ? finalAction.frame : .zero
             let scrollFrame = scroll.frame
             let dockFrame = dock.frame
             let windowFrame = app.windows.firstMatch.frame
+            func geometry(_ frame: CGRect) -> [String: Double] {
+                ["x": Double(frame.minX), "y": Double(frame.minY),
+                 "width": Double(frame.width), "height": Double(frame.height),
+                 "maxY": Double(frame.maxY)]
+            }
+            let proof: [String: Any] = [
+                "language": language, "finalFixture": "Halo", "endSwipes": endSwipes,
+                "reachedFixtureEnd": reachedEnd, "installMatchCount": endActions.count,
+                "nameHittable": finalName.exists && finalName.isHittable,
+                "actionHittable": finalAction.exists && finalAction.isHittable,
+                "name": geometry(nameFrame), "action": geometry(actionFrame),
+                "scroll": geometry(scrollFrame), "dock": geometry(dockFrame),
+                "window": geometry(windowFrame),
+                "actionDockGap": Double(dockFrame.minY - actionFrame.maxY)
+            ]
+            let proofData = try! JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
+            let geometryAttachment = XCTAttachment(data: proofData, uniformTypeIdentifier: "public.json")
+            geometryAttachment.name = language + "_wallpaper_source_grid_end_geometry"
+            geometryAttachment.lifetime = .keepAlways
+            add(geometryAttachment)
+            let hierarchyAttachment = XCTAttachment(string: app.debugDescription)
+            hierarchyAttachment.name = language + "_wallpaper_source_grid_end_hierarchy"
+            hierarchyAttachment.lifetime = .keepAlways
+            add(hierarchyAttachment)
+            shot(language + "_wallpaper_source_grid_end")
+            XCTAssertTrue(reachedEnd, "Final fixture row must be fully visible within 24 bounded drags")
+            XCTAssertTrue(finalName.exists)
+            XCTAssertTrue(finalName.isHittable)
+            XCTAssertTrue(app.staticTexts["Lagoon"].exists, "Both final-row names must remain in the native grid")
+            XCTAssertGreaterThanOrEqual(endActions.count, 2)
+            XCTAssertTrue(finalAction.exists)
+            XCTAssertTrue(finalAction.isEnabled)
+            XCTAssertTrue(finalAction.isHittable)
             XCTAssertGreaterThan(nameFrame.width, 0)
             XCTAssertGreaterThan(nameFrame.height, 0)
             XCTAssertGreaterThan(actionFrame.width, 0)
@@ -111,30 +144,6 @@ final class WallpaperSourceUITests: XCTestCase {
                 XCTAssertLessThan(frame.maxY, dockFrame.minY,
                                   "Final name/action must be fully ABOVE the actual dock, not merely hittable")
             }
-            func geometry(_ frame: CGRect) -> [String: Double] {
-                ["x": Double(frame.minX), "y": Double(frame.minY),
-                 "width": Double(frame.width), "height": Double(frame.height),
-                 "maxY": Double(frame.maxY)]
-            }
-            let proof: [String: Any] = [
-                "language": language, "finalFixture": "Halo", "endSwipes": endSwipes,
-                "reachedStableEnd": reachedEnd, "installMatchCount": endActions.count,
-                "nameHittable": finalName.isHittable, "actionHittable": finalAction.isHittable,
-                "name": geometry(nameFrame), "action": geometry(actionFrame),
-                "scroll": geometry(scrollFrame), "dock": geometry(dockFrame),
-                "window": geometry(windowFrame),
-                "actionDockGap": Double(dockFrame.minY - actionFrame.maxY)
-            ]
-            let proofData = try! JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
-            let geometryAttachment = XCTAttachment(data: proofData, uniformTypeIdentifier: "public.json")
-            geometryAttachment.name = language + "_wallpaper_source_grid_end_geometry"
-            geometryAttachment.lifetime = .keepAlways
-            add(geometryAttachment)
-            let hierarchyAttachment = XCTAttachment(string: app.debugDescription)
-            hierarchyAttachment.name = language + "_wallpaper_source_grid_end_hierarchy"
-            hierarchyAttachment.lifetime = .keepAlways
-            add(hierarchyAttachment)
-            shot(language + "_wallpaper_source_grid_end")
             app.buttons["tools-section-wallpapers"].tap()
             XCTAssertFalse(app.textFields["wallpaper-source-url"].exists)
         }
