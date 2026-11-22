@@ -692,13 +692,17 @@ struct ClassicAppStoreAccountView: View {
         .padding(MirsaSpacing.card).frame(maxWidth: .infinity, alignment: .leading).mirsaCard()
 
         VStack(alignment: .leading, spacing: MirsaSpacing.s) {
-            Button { if inlineActive(app, get: false) { cancelInline() } else { guardedStart(app, acquire: false) } } label: {
+            let showGet = app.price == 0 && ownership[app.id] != .owned
+            Button { if inlineActive(app, get: showGet) { cancelInline() } else { guardedStart(app, acquire: showGet) } } label: {
                 Group {
-                    if inlineActive(app, get: false) { inlineIndicator }
+                    if inlineActive(app, get: showGet) { inlineIndicator }
+                    else if showGet { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")) }
                     else { HStack { Image(systemName: "arrow.down.circle"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) } }
                 }.frame(maxWidth: .infinity)
             }
-            .buttonStyle(.mirsaPrimary).disabled((busy != nil && !inlineActive(app, get: false)) || !canDownload(app))
+            .buttonStyle(.mirsaPrimary)
+            .disabled((busy != nil && !inlineActive(app, get: showGet)) || (showGet ? (otherStore && !accountAvailable.contains(app.id)) : !canDownload(app)))
+            .accessibilityIdentifier(showGet ? "store-detail-get" : "store-detail-download")
             if otherStore && !accountAvailable.contains(app.id) {
                 Text(t("Not available in your account storefront. Download is disabled.", "مو متاح بمتجر حسابك، التنزيل موقف.", "لە ستۆری ئەکاونتەکەت بەردەست نییە.", "Li stoya hesabê te ne berdest e.")).font(MirsaFont.caption).foregroundStyle(MirsaPalette.warning)
             }
@@ -712,13 +716,6 @@ struct ClassicAppStoreAccountView: View {
                    "Divê hesab xwediyê sepanê be. Wekî xwe li Firoşgeha Apple tê tomarkirin."))
                 .font(MirsaFont.caption).foregroundStyle(MirsaPalette.textTertiary)
             Divider().overlay(MirsaPalette.stroke)
-            if app.price == 0 && ownership[app.id] != .owned {
-                Button { if inlineActive(app, get: true) { cancelInline() } else { guardedStart(app, acquire: true) } } label: {
-                    Group { if inlineActive(app, get: true) { inlineIndicator } else { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")) } }.frame(maxWidth: .infinity)
-                }
-                    .buttonStyle(.mirsaSecondary).disabled(app.price != 0 || (busy != nil && !inlineActive(app, get: true)) || (otherStore && !accountAvailable.contains(app.id)))
-                    .accessibilityIdentifier("store-detail-get")
-            }
             if ownership[app.id] == .owned {
                 Text(t("Owned by this account. Tap Download separately for the selected version.", "هالحساب بيملك التطبيق. دوس تنزيل لحاله للنسخة المختارة.", "ئەم ئەکاونتە خاوەنی ئەپەکەیە. داگرتن جیا بکە.", "Ev hesab xwedî ye. Ji bo guhertoya hilbijartî Daxe bitikîne."))
                     .font(MirsaFont.caption).foregroundStyle(MirsaPalette.success)
