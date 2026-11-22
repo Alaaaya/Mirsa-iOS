@@ -6,7 +6,7 @@ on:
         description: 'true = revert the geometry guards (3a4926d MirsaStyle/ContentView) first, to capture the BEFORE baseline'
         default: 'false'
   push:
-    branches: [fix/foreground-22nov]
+    branches: [fix/foreground-22nov, combined/22nov]
 permissions:
   contents: read
 jobs:
