@@ -145,6 +145,12 @@ enum WiFiPathState { case unknown, wifi, notWifi }
     }
     static func friendly(_ error: Error) -> String { error.localizedDescription }
 }
+@MainActor final class InstallTracker {
+    enum Phase { case installing }
+    static let shared = InstallTracker()
+    func begin(key: String, phase: Phase) -> UUID { UUID() }
+    func end(_ token: UUID) {}
+}
 struct AppViewModel {}
 enum L {
     enum Language { case english, arabic, sorani, kurmanji }
