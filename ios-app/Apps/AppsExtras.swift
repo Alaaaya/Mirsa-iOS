@@ -356,7 +356,10 @@ private final class UploadConnection {
         if method == "GET" { return send(200, WebUploadServer.page, type: "text/html; charset=utf-8") }
         guard method == "POST", path.hasPrefix("/upload") else { return send(404, "not found") }
         let len = lines.first(where: { $0.lowercased().hasPrefix("content-length:") })
-            .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+            .flatMap { line in
+                // "Content-Length:" with no value has a single split part; never index past it.
+                line.split(separator: ":", maxSplits: 1).dropFirst().first.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            } ?? 0
         guard len > 0 else { return send(411, "length required") }
         guard let dir = try? MirsaManagedTmp.begin("web-upload") else { return send(500, "disk") }
         work = dir
