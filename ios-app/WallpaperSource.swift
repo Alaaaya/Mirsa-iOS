@@ -37,6 +37,7 @@ struct WallpaperSourceEntry: Codable, Equatable, Identifiable {
     var url: URL
     var size: Int64
     var category: String
+    var sizeIsEstimated: Bool? = nil
 }
 
 enum WallpaperSourceError: LocalizedError {
@@ -81,7 +82,9 @@ enum WallpaperSourceNetwork {
     static func feed(_ url: URL) async throws -> WallpaperSourceFeed {
         let temporary = try await file(url, limit: 2_097_152)
         defer { try? FileManager.default.removeItem(at: temporary) }
-        return try JSONDecoder().decode(WallpaperSourceFeed.self, from: Data(contentsOf: temporary)).validated()
+        let data = try Data(contentsOf: temporary)
+        if url == CAPlaygroundSource.manifest { return try CAPlaygroundSource.decode(data) }
+        return try JSONDecoder().decode(WallpaperSourceFeed.self, from: data).validated()
     }
 
     static func archive(_ entry: WallpaperSourceEntry) async throws -> URL {
@@ -89,7 +92,7 @@ enum WallpaperSourceNetwork {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         do {
             let actual = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize
-            guard Int64(actual ?? -1) == entry.size else { throw WallpaperSourceError.sizeMismatch }
+            guard (actual ?? 0) > 0, (entry.sizeIsEstimated == true || Int64(actual ?? -1) == entry.size) else { throw WallpaperSourceError.sizeMismatch }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             // Filename derives from the full URL, never from untrusted source paths or names.
             let digest = SHA256.hash(data: Data(entry.url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()

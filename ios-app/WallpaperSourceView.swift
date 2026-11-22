@@ -51,6 +51,14 @@ struct WallpaperSourcesView: View {
                 }
                 .padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
 
+                if !store.urls.contains(CAPlaygroundSource.manifest) {
+                    Button {
+                        Task { await store.add(CAPlaygroundSource.manifest.absoluteString) }
+                    } label: {
+                        Label("CAPlayground · GitHub · GPL-3.0", systemImage: "plus.circle")
+                    }.disabled(store.loading)
+                    .accessibilityIdentifier("wallpaper-source-add-caplayground")
+                }
                 if store.loading { ProgressView() }
                 if let error = store.error { Text(error).foregroundStyle(.red).font(.callout) }
                 ForEach(store.urls, id: \.self) { url in
@@ -65,6 +73,9 @@ struct WallpaperSourcesView: View {
                                 Button(role: .destructive) { store.remove(url) } label: { Image(systemName: "minus.circle") }
                                     .accessibilityLabel(WallpaperSourceText.text(.remove))
                             }
+                        }
+                        if url == CAPlaygroundSource.manifest {
+                            Link("CAPlayground · GitHub · GPL-3.0", destination: CAPlaygroundSource.repository)
                         }
                         if let feed = store.feeds[url] {
                             if feed.wallpapers.isEmpty { Text(WallpaperSourceText.text(.empty)).foregroundStyle(.secondary).font(.callout) }
@@ -118,7 +129,7 @@ struct WallpaperSourcesView: View {
                 }
             Text(entry.name).font(.headline).lineLimit(2)
             Text(entry.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            Text(entry.category + " · " + ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
+            Text(entry.category + " · " + (entry.sizeIsEstimated == true ? "≤ " : "") + ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             Button {
                 #if DEBUG
