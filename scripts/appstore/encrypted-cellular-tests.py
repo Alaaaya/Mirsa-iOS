@@ -22,6 +22,15 @@ assert '10_000_000_000' in helper and 'didBecomeActiveNotification' in helper
 assert 'attempt.started >= 10' in helper and 'awaitFirstRequest(timeout: 10)' in helper
 assert '30_000_000_000' not in helper
 assert 'error.localizedDescription' in cellular and 'AppsStore.friendly(error)' not in cellular
+# UI-only changes retain the original OTA/system handoff.
+assert 'confirmUnknown' not in helper and 'UIAlertController' not in helper
+assert 'case .installed: throw Failure.message(replacementWarning)' in helper
+assert 'Failure.pending(unconfirmed)' in helper
+assert 'await UIApplication.shared.open(target)' in helper
+assert 'toast = EncryptedLocalInstall.submitted' in cellular
+assert 'catch EncryptedLocalInstall.Failure.pending(_)' in cellular
+assert 'toast = EncryptedLocalInstall.unconfirmed' in cellular
+assert 'if !(error is CancellationError)' in cellular
 if '--source-only'  in sys.argv:
     print('PASS source contract: no sign/upload, real build metadata, Wi-Fi preserved, cellular never claims installation')
     sys.exit()
@@ -191,13 +200,14 @@ tests = r"""
     do { try await EncryptedLocalInstall.handoff(Fixture.file); fatalError("replacement allowed") } catch {}
     precondition(UIApplication.shared.opens == opened && LocalOTAServer.all.count == servers)
     precondition(CellularConsentFixture.queries.last == "example.owned")
-    CellularConsentFixture.state = -1; CellularConsentFixture.allow = false
-    do { try await EncryptedLocalInstall.handoff(Fixture.file); fatalError("cancel ignored") } catch is CancellationError {} catch { fatalError("wrong cancellation") }
-    precondition(UIApplication.shared.opens == opened && LocalOTAServer.all.count == servers)
-    CellularConsentFixture.allow = true
+    CellularConsentFixture.state = -1
+    let prompts = CellularConsentFixture.prompts
+    try await EncryptedLocalInstall.handoff(Fixture.file)
+    precondition(CellularConsentFixture.prompts == prompts, "unknown presence must not prompt")
+    precondition(UIApplication.shared.opens == opened + 1)
     for lang in [L.Language.english, .arabic, .sorani, .kurmanji] {
         L.lang = lang
-        precondition(!EncryptedLocalInstall.replacementWarning.isEmpty && !EncryptedLocalInstall.unknownWarning.isEmpty)
+        precondition(!EncryptedLocalInstall.replacementWarning.isEmpty && !EncryptedLocalInstall.submitted.isEmpty && !EncryptedLocalInstall.unconfirmed.isEmpty)
     }
     L.lang = .english
     precondition(EncryptedLocalInstall.replacementWarning.contains("local data"))
@@ -244,7 +254,7 @@ tests = r"""
             precondition(SideloadService.calls == nativeBefore && h.entries[0].installedAt == nil && h.saves == 0)
         }
         if state == .notWifi {
-            precondition(AppsStore.shared.gates == gateBefore && h.toast!.contains("could not be confirmed") && h.progress == 0)
+            precondition(AppsStore.shared.gates == gateBefore && h.toast!.contains("Sent to iOS") && h.progress == 0)
         } else { precondition(AppsStore.shared.gates == gateBefore+1) }
     }
     WiFiPathMonitor.shared.state = .notWifi
@@ -257,7 +267,7 @@ tests = r"""
     precondition(LocalOTAServer.all.count == before+1, "double tap started two handoffs")
     precondition((try! Data(contentsOf:Fixture.file)) == original)
     // Fail, cancel, timeout and installed-copy rejection all release the row.
-    for mode in ["installed", "cancel", "failure", "timeout"] {
+    for mode in ["installed", "failure", "timeout"] {
         let holder = EncryptedAppsStore(); let entry = EncryptedIPAEntry(); holder.entries = [entry]
         CellularConsentFixture.state = mode == "installed" ? 1 : -1
         CellularConsentFixture.allow = mode != "cancel"
@@ -269,7 +279,7 @@ tests = r"""
     }
 
     precondition(OTABackgroundBox.ended >= 4)
-    print("PASS actual cellular helper/router: original bytes retained, private metadata not read, correct build version, no upload/sign, bounded failures/cleanup, first GET only, unchanged Wi-Fi tunnel, unknown fails closed, no fake installed flag, double tap serialized; installed blocks pre-handoff, unknown asks and permits fresh/cancel; four app locales + German fallback")
+    print("PASS actual cellular helper/router: original bytes retained, private metadata not read, correct build version, no upload/sign, bounded failures/cleanup, first GET only, unchanged Wi-Fi tunnel, unknown fails closed, no fake installed flag, double tap serialized; installed blocks pre-handoff, unknown proceeds without app prompt; pending is non-modal; four app locales + German fallback")
  }
 }
 """

@@ -316,11 +316,15 @@ final class EncryptedAppsStore: ObservableObject {
                 // Receiving bytes is not installation proof, especially when an
                 // older copy with the same bundle ID already exists.
                 progress = 0
+                toast = EncryptedLocalInstall.submitted
+            } catch EncryptedLocalInstall.Failure.pending(_) {
+                guard installAttemptID == attemptID else { return }
+                // No installer callback is not a definitive failure. Keep the
+                // existing non-modal status surface and allow a later retry.
                 toast = EncryptedLocalInstall.unconfirmed
             } catch {
                 guard installAttemptID == attemptID else { return }
-                if error is CancellationError { toast = EncryptedLocalInstall.unconfirmed }
-                else { self.error = error.localizedDescription }
+                if !(error is CancellationError) { self.error = error.localizedDescription }
             }
             return
         }

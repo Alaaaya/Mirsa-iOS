@@ -16,6 +16,8 @@ jobs:
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
       - name: Swift parse audit
         run: find ios-app uitests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
+      - name: Cellular helper and router compiled regression
+        run: python3 scripts/appstore/encrypted-cellular-tests.py
       - name: Verify LocalDevVPN routing regression
         run: python3 scripts/test_localdevvpn_button.py
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +50,7 @@ jobs:
           with zipfile.ZipFile('build/Mirsa.ipa') as z:
               p=plistlib.loads(z.read('Payload/Mirsa.app/Info.plist'))
               assert p['CFBundleShortVersionString']=='2.9.6', p
-              assert p['CFBundleVersion']=='8.537.1', p
+              assert p['CFBundleVersion']=='8.538.1', p
               assert 'localdevvpn' in p['LSApplicationQueriesSchemes']
           PY
       - uses: actions/upload-artifact@v4

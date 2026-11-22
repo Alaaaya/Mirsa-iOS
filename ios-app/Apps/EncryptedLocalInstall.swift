@@ -9,9 +9,12 @@ enum EncryptedLocalInstall {
     private static var active: LocalOTAServer?
     enum Failure: LocalizedError {
         case message(String)
+        case pending(String)
         var errorDescription: String? {
-            if case .message(let text) = self { return text }
-            return nil
+            switch self {
+            case .message(let text): return text
+            case .pending(let text): return text
+            }
         }
     }
 
@@ -37,13 +40,22 @@ enum EncryptedLocalInstall {
         }
     }
 
+    static var submitted: String {
+        localized(
+            "Sent to iOS for installation. Check the Home Screen for progress.",
+            "انبعت لـiOS للتثبيت. تابع التقدم عالشاشة الرئيسية.",
+            "Zur Installation an iOS übergeben. Prüfe den Fortschritt auf dem Home-Bildschirm.",
+            "بۆ دامەزراندن نێردرا بۆ iOS. پێشکەوتن لە شاشەی سەرەکی ببینە.",
+            "Ji bo sazkirinê ji iOS re hat şandin. Pêşveçûnê li ekrana sereke bibîne.")
+    }
+
     static var unconfirmed: String {
         localized(
-            "Installation could not be confirmed. The install button is available again. Check the Home Screen; if the app is already installed, use Wi-Fi + LocalDevVPN to replace it without deleting its data.",
-            "ما قدرنا نتأكد من التثبيت. زر التثبيت رجع اشتغل. شوف الشاشة الرئيسية؛ إذا التطبيق موجود، استخدم الواي فاي مع LocalDevVPN لتستبدله بدون حذف بياناته.",
-            "Die Installation konnte nicht bestätigt werden. Die Installationstaste ist wieder verfügbar. Prüfe den Home-Bildschirm; nutze bei einer vorhandenen App WLAN + LocalDevVPN, um ihre Daten zu behalten.",
-            "دامەزراندن پشتڕاست نەکرایەوە. دوگمەی دامەزراندن دووبارە بەردەستە. شاشەی سەرەکی بپشکنە؛ بۆ ئەپی هەبوو Wi-Fi + LocalDevVPN بەکاربهێنە بۆ پاراستنی داتا.",
-            "Sazkirin nehat piştrastkirin. Bişkojka sazkirinê dîsa amade ye. Ekrana sereke kontrol bike; ji bo sepana heyî Wi-Fi + LocalDevVPN bikar bîne da dane neyên jêbirin.")
+            "Installation is not confirmed yet. Check the Home Screen before trying again.",
+            "التثبيت لسه مو مؤكّد. شوف الشاشة الرئيسية قبل ما تعيد المحاولة.",
+            "Die Installation ist noch nicht bestätigt. Prüfe vor einem erneuten Versuch den Home-Bildschirm.",
+            "دامەزراندن هێشتا پشتڕاست نەکراوەتەوە. پێش هەوڵدانەوە شاشەی سەرەکی بپشکنە.",
+            "Sazkirin hîn nehat piştrastkirin. Berî dubarekirinê ekrana sereke kontrol bike.")
     }
 
     enum Presence { case installed, unknown }
@@ -66,51 +78,6 @@ enum EncryptedLocalInstall {
             "ئەم شێوازە بە داتای مۆبایل ناتوانێت لێرە جێی کۆپییەکی هەبوو بگرێتەوە. Wi-Fi + LocalDevVPN بەکاربهێنە بۆ جێگرتنەوە بە پاراستنی داتاکانی. یان سەرەتا خۆت ئەپەکە بسڕەوە، بەڵام داتای ناوخۆیی دەسڕێتەوە. Mirsa هیچ شتێک ناسڕێتەوە.",
             "Ev awayê sazkirinê bi daneyên mobîl li vir nikare cihê kopiyeke heyî bigire. Ji bo guherandinê bi parastina daneyan Wi-Fi + LocalDevVPN bikar bîne. An pêşî sepanê bixwe jê bibe, lê ev daneyên wê yên herêmî jê dibe. Mirsa tiştekî jê nabe.")
     }
-
-    static var unknownWarning: String {
-        localized(
-            "Mirsa could not reliably check whether this app is already installed. A fresh install can continue; an existing copy may be rejected by iOS. ",
-            "مرسى ما قدر يتأكد إذا التطبيق مثبت من قبل. فيك تكمّل لتثبيت جديد؛ إذا في نسخة موجودة ممكن iOS يرفض. ",
-            "Mirsa konnte nicht zuverlässig prüfen, ob diese App bereits installiert ist. Eine Neuinstallation kann fortgesetzt werden; eine vorhandene Kopie kann von iOS abgelehnt werden. ",
-            "Mirsa نەیتوانی بە دڵنیایی بزانێت ئەم ئەپە پێشتر دامەزراوە یان نا. دەتوانیت بە دامەزراندنی نوێ بەردەوام بیت؛ iOS لەوانەیە کۆپییەکی هەبوو ڕەت بکاتەوە. ",
-            "Mirsa nikarî bi bawerî kontrol bike ka ev sepan berê hatiye sazkirin. Sazkirineke nû dikare bidome; iOS dibe ku kopiyeke heyî red bike. ") + replacementWarning
-    }
-
-    static func confirmUnknown() async -> Bool {
-        #if canImport(UIKit)
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
-              var controller = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return false }
-        while let presented = controller.presentedViewController { controller = presented }
-        guard !controller.isBeingDismissed, !(controller is UIAlertController) else { return false }
-        let consent = Consent()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                consent.continuation = continuation
-                guard !Task.isCancelled else { consent.finish(false); return }
-                let alert = UIAlertController(title: "Mirsa", message: unknownWarning, preferredStyle: .alert)
-                consent.alert = alert
-                alert.addAction(UIAlertAction(title: localized("Cancel", "إلغاء", "Abbrechen", "پاشگەزبوونەوە", "Betal bike"), style: .cancel) { _ in consent.finish(false) })
-                alert.addAction(UIAlertAction(title: localized("Continue fresh install", "كمّل تثبيت جديد", "Neuinstallation fortsetzen", "بەردەوام بە لە دامەزراندنی نوێ", "Sazkirina nû bidomîne"), style: .default) { _ in consent.finish(true) })
-                controller.present(alert, animated: true)
-            }
-        } onCancel: { Task { @MainActor in consent.finish(false) } }
-        #else
-        return await CellularConsentFixture.confirm()
-        #endif
-    }
-
-    #if canImport(UIKit)
-    @MainActor private final class Consent {
-        var continuation: CheckedContinuation<Bool, Never>?
-        weak var alert: UIAlertController?
-        func finish(_ allow: Bool) {
-            guard let pending = continuation else { return }
-            continuation = nil
-            alert?.dismiss(animated: true)
-            pending.resume(returning: allow)
-        }
-    }
-    #endif
 
     struct Identity: Equatable {
         let bundleID: String
@@ -152,7 +119,7 @@ enum EncryptedLocalInstall {
                 ) { _ in
                     Task { @MainActor in
                         if ProcessInfo.processInfo.systemUptime - attempt.started >= 10 {
-                            attempt.finish(.failure(Failure.message(unconfirmed)))
+                            attempt.finish(.failure(Failure.pending(unconfirmed)))
                         }
                     }
                 }
@@ -166,7 +133,7 @@ enum EncryptedLocalInstall {
                 attempt.timer = Task {
                     do { try await Task.sleep(nanoseconds: 10_000_000_000) }
                     catch { return }
-                    attempt.finish(.failure(Failure.message(unconfirmed)))
+                    attempt.finish(.failure(Failure.pending(unconfirmed)))
                 }
             }
         } onCancel: { Task { @MainActor in attempt.finish(.failure(CancellationError())) } }
@@ -178,7 +145,10 @@ enum EncryptedLocalInstall {
         switch presence(bundleID: info.bundleID) {
         case .installed: throw Failure.message(replacementWarning)
         case .unknown:
-            guard await confirmUnknown() else { throw CancellationError() }
+            // An inconclusive presence query is not a failure or proof of absence.
+            // Submit unchanged bytes to iOS, which retains all system prompts and
+            // signature/license checks. Never delete an existing app or its data.
+            break
         }
         try Task.checkCancellation()
         let size = Int64(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
@@ -210,7 +180,7 @@ enum EncryptedLocalInstall {
             await server.awaitFirstRequest(timeout: 10)
         } onCancel: { server.stop() }
         try Task.checkCancellation()
-        guard requested else { throw Failure.message(unconfirmed) }
+        guard requested else { throw Failure.pending(unconfirmed) }
         active?.stop()
         active = server
         handedOff = true
