@@ -65,4 +65,56 @@ final class MirsaVoiceUITests: XCTestCase {
             shot("voice_idle_\(theme)"); app.terminate()
         }
     }
+    func testBotVoiceRepliesReusePlaybackInAllFiveLanguages() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let playLabels = ["ar": "شغّل رد مرسى الصوتي", "en": "Play Mirsa voice reply",
+            "de": "Mirsa-Sprachantwort abspielen", "kmr": "Bersiva dengî ya Mirsa bilîze",
+            "ckb": "وەڵامی دەنگیی میرسا لێبدە"]
+        let pauseLabels = ["ar": "وقّف رد مرسى الصوتي", "en": "Pause Mirsa voice reply",
+            "de": "Mirsa-Sprachantwort pausieren", "kmr": "Bersiva dengî ya Mirsa rawestîne",
+            "ckb": "وەڵامی دەنگیی میرسا بوەستێنە"]
+        for language in ["ar", "en", "de", "kmr", "ckb"] {
+            let app = launch("-MirsaBotVoiceBubbleFixture", language: language)
+            let play = app.buttons["chat-voice-play"]
+            XCTAssertTrue(play.waitForExistence(timeout: 10))
+            XCTAssertEqual(play.label, playLabels[language]!)
+            XCTAssertEqual(play.value as? String, "0:12")
+            XCTAssertTrue(app.buttons["chat-report"].exists, "Voice-only bot replies retain the assistant controls.")
+            XCTAssertFalse(app.staticTexts["chat-waiting"].exists)
+            shot("bot_voice_idle_\(language)")
+            play.tap()
+            let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", pauseLabels[language]!), object: play)
+            XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed)
+            shot("bot_voice_playing_\(language)")
+            play.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", playLabels[language]!), object: play)], timeout: 5), .completed)
+            play.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", pauseLabels[language]!), object: play)], timeout: 5), .completed)
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", playLabels[language]!), object: play)], timeout: 10), .completed,
+                "Backgrounding must stop bot audio too.")
+            shot("bot_voice_returned_\(language)")
+            app.terminate()
+        }
+    }
+
+    func testUnavailableBotVoiceDoesNotOfferPlayback() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "mirsa-ai-chat",
+            "-MirsaChatFixture", "-MirsaChatAttachmentsFixture", "-MirsaBotVoiceBubbleFixture",
+            "-MirsaBotVoiceExpiredFixture", "-mirsa.chat.reactionsTipDismissed", "YES",
+            "-mirsa.appLanguage", "en"]
+        app.launch()
+        let play = app.buttons["chat-voice-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 25))
+        XCTAssertFalse(play.isEnabled)
+        shot("bot_voice_unavailable_en")
+        app.terminate()
+    }
+
 }

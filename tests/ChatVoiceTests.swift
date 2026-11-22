@@ -63,4 +63,44 @@ final class ChatVoiceTests: XCTestCase {
         XCTAssertEqual(stops, [first, second])
         ChatVoiceSession.release(third)
     }
+    func testBotVoiceProjectionPreservesPrivateAudioMetadataAndExpiry() throws {
+        let thread = UUID()
+        let meta = ChatAttachmentMeta(id: UUID(), kind: "audio", name: "reply.m4a",
+            mime: "audio/mp4", size: 1024, durationMS: 12_000,
+            sha256: String(repeating: "a", count: 64), expiresAt: "2026-11-23T00:00:00.000Z")
+        for role in ["kat", "assistant", "operator"] {
+            let original = ForgeChatMessage(id: UUID(), threadID: thread, role: role,
+                text: nil, attachments: [meta])
+            let decoded = try JSONDecoder().decode(ForgeChatMessage.self, from: JSONEncoder().encode(original))
+            XCTAssertEqual(decoded.role, role)
+            XCTAssertNil(decoded.text)
+            XCTAssertEqual(decoded.attachments, [meta])
+            XCTAssertNil(decoded.attachments?.first?.url, "Playback uses the private attachment ID, not a raw URL.")
+        }
+        XCTAssertFalse(meta.isExpired(now: Date(timeIntervalSince1970: 0)))
+        XCTAssertTrue(meta.isExpired(now: Date.distantFuture))
+        let unavailable = ChatAttachmentMeta(id: UUID(), kind: "audio", name: "reply.m4a", available: false)
+        XCTAssertTrue(unavailable.isExpired())
+    }
+
+    @MainActor func testBotVoicePlaybackAccessibilityInEveryLocale() {
+        let previous = AppLanguageStore.shared.current
+        defer { AppLanguageStore.shared.set(previous) }
+        var playLabels = Set<String>()
+        var pauseLabels = Set<String>()
+        for language in AppLanguage.allCases {
+            AppLanguageStore.shared.set(language)
+            XCTAssertEqual(ChatVoiceText.playbackLabel(isBot: false, playing: false), ChatVoiceText.play)
+            XCTAssertEqual(ChatVoiceText.playbackLabel(isBot: false, playing: true), ChatVoiceText.pause)
+            XCTAssertEqual(ChatVoiceText.playbackLabel(isBot: true, playing: false), ChatVoiceText.playBot)
+            XCTAssertEqual(ChatVoiceText.playbackLabel(isBot: true, playing: true), ChatVoiceText.pauseBot)
+            XCTAssertNotEqual(ChatVoiceText.playBot, ChatVoiceText.play)
+            XCTAssertNotEqual(ChatVoiceText.pauseBot, ChatVoiceText.pause)
+            playLabels.insert(ChatVoiceText.playBot)
+            pauseLabels.insert(ChatVoiceText.pauseBot)
+        }
+        XCTAssertEqual(playLabels.count, 5)
+        XCTAssertEqual(pauseLabels.count, 5)
+    }
+
 }

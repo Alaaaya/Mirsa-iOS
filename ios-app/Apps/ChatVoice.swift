@@ -34,6 +34,11 @@ enum ChatVoiceText {
     static var discard: String { pick("Discard recording", "احذف التسجيل", "Aufnahme verwerfen", "Tomarê jê bibe", "تۆمارەکە بسڕەوە") }
     static var play: String { pick("Play voice message", "شغّل الرسالة الصوتية", "Sprachnachricht abspielen", "Peyama dengî bilîze", "نامەی دەنگی لێبدە") }
     static var pause: String { pick("Pause voice message", "وقّف الصوت", "Wiedergabe pausieren", "Deng rawestîne", "دەنگ بوەستێنە") }
+    static var playBot: String { pick("Play Mirsa voice reply", "شغّل رد مرسى الصوتي", "Mirsa-Sprachantwort abspielen", "Bersiva dengî ya Mirsa bilîze", "وەڵامی دەنگیی میرسا لێبدە") }
+    static var pauseBot: String { pick("Pause Mirsa voice reply", "وقّف رد مرسى الصوتي", "Mirsa-Sprachantwort pausieren", "Bersiva dengî ya Mirsa rawestîne", "وەڵامی دەنگیی میرسا بوەستێنە") }
+    static func playbackLabel(isBot: Bool, playing: Bool) -> String {
+        isBot ? (playing ? pauseBot : playBot) : (playing ? pause : play)
+    }
     static var permission: String { pick("Allow microphone access in Settings to record a voice message.", "اسمح للميكروفون من الإعدادات لتسجّل رسالة صوتية.", "Erlaube den Mikrofonzugriff in den Einstellungen, um eine Sprachnachricht aufzunehmen.", "Di Mîhengan de destûra mîkrofonê bide da ku peyameke dengî tomar bikî.", "لە ڕێکخستنەکان ڕێگە بە مایکرۆفۆن بدە بۆ تۆمارکردنی نامەی دەنگی.") }
     static var failed: String { pick("Couldn't use the recording. Try again.", "ما زبط التسجيل. جرّب مرة تانية.", "Die Aufnahme konnte nicht verwendet werden. Versuche es erneut.", "Tomar nehat bikaranîn. Dîsa biceribîne.", "تۆمارەکە بەکارنەهات. دووبارە هەوڵ بدەرەوە.") }
     static var exclusive: String { pick("Send a voice message on its own, without other attachments or a quoted reply.", "ابعث الصوت لحاله، بلا مرفقات تانية أو اقتباس.", "Sende die Sprachnachricht einzeln, ohne andere Anhänge oder zitierte Antwort.", "Peyama dengî bi tenê bişîne, bê pêvekên din an bersiva vegotî.", "نامەی دەنگی بە تەنها بنێرە، بەبێ هاوپێچی تر یان وەڵامی وەرگیراو.") }
@@ -238,6 +243,7 @@ struct ChatVoiceWaveform: View {
 struct ChatVoiceBubble: View {
     let meta: ChatAttachmentMeta
     let threadID: UUID
+    var isBot = false
     @StateObject private var player = ChatVoicePlayer()
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
@@ -248,7 +254,8 @@ struct ChatVoiceBubble: View {
                         if player.loading { ProgressView() }
                         else { Image(systemName: player.playing ? "pause.fill" : "play.fill") }
                     }.frame(width: 44, height: 44)
-                }.disabled(meta.isExpired()).accessibilityLabel(player.playing ? ChatVoiceText.pause : ChatVoiceText.play)
+                }.disabled(meta.isExpired()).accessibilityLabel(ChatVoiceText.playbackLabel(isBot: isBot, playing: player.playing))
+                    .accessibilityValue(ChatVoiceRules.clock(player.duration > 0 ? player.duration : Double(meta.durationMS ?? 0) / 1000))
                     .accessibilityIdentifier("chat-voice-play")
                 ChatVoiceWaveform(levels: (0..<28).map { CGFloat([0.15, 0.35, 0.7, 0.5, 0.9, 0.4, 0.6][$0 % 7]) })
                 Text(ChatVoiceRules.clock(player.playing ? player.position : player.duration > 0 ? player.duration : Double(meta.durationMS ?? 0) / 1000)).font(.caption.monospacedDigit())

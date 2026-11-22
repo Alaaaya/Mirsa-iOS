@@ -55,9 +55,10 @@ struct ChatAttachmentStrip: View {
     let metas: [ChatAttachmentMeta]
     let threadID: UUID
     var alignment: HorizontalAlignment = .trailing
+    var isBot = false
     var body: some View {
         VStack(alignment: alignment, spacing: 6) {
-            ForEach(metas) { m in ChatAttachmentMetaChip(meta: m, threadID: threadID) }
+            ForEach(metas) { m in ChatAttachmentMetaChip(meta: m, threadID: threadID, isBot: isBot) }
         }
     }
 }
@@ -65,6 +66,7 @@ struct ChatAttachmentStrip: View {
 struct ChatAttachmentMetaChip: View {
     let meta: ChatAttachmentMeta
     let threadID: UUID
+    var isBot = false
     @State private var image: UIImage?
     @State private var text: String?
     @State private var showText = false
@@ -79,7 +81,7 @@ struct ChatAttachmentMetaChip: View {
     var body: some View {
         Group {
             if meta.kind == "audio" {
-                ChatVoiceBubble(meta: meta, threadID: threadID)
+                ChatVoiceBubble(meta: meta, threadID: threadID, isBot: isBot)
             } else if meta.kind == "image", !unavailable, let image {
                 MirsaTappableImage(image: image, maxWidth: 220, maxHeight: 200, cornerRadius: 14)
             } else {

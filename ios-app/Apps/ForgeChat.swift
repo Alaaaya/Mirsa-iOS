@@ -203,6 +203,15 @@ enum ForgeChatImage {
                 message.botReaction = "🔥"
                 messages[t] = [message]
             }
+            if ProcessInfo.processInfo.arguments.contains("-MirsaBotVoiceBubbleFixture"),
+               let file = Bundle.main.url(forResource: "voice-fixture", withExtension: "m4a"),
+               let data = try? Data(contentsOf: file) {
+                let expired = ProcessInfo.processInfo.arguments.contains("-MirsaBotVoiceExpiredFixture")
+                let meta = ChatAttachmentMeta(id: UUID(), kind: "audio", name: "reply.m4a", mime: "audio/mp4",
+                    size: Int64(data.count), durationMS: 12_000, sha256: ChatVoiceFixture.sha(data),
+                    available: !expired)
+                messages[t] = [ForgeChatMessage(id: UUID(), threadID: t, role: "kat", text: nil, attachments: [meta])]
+            }
             #endif
             ackedThreads.insert(t)
             return
@@ -1410,7 +1419,7 @@ struct ForgeChatThreadView: View {
             chrome(id: m.id, text: m.text, isUser: false, confirmed: true) { assistantBlock {
                 VStack(alignment: .leading, spacing: 8) {
                     if m.hasImage == true { ForgeChatImageView(messageID: m.id) }
-                    if let a = m.attachments, !a.isEmpty { ChatAttachmentStrip(metas: a, threadID: m.threadID, alignment: .leading) }
+                    if let a = m.attachments, !a.isEmpty { ChatAttachmentStrip(metas: a, threadID: m.threadID, alignment: .leading, isBot: true) }
                     if let t = m.text, !t.isEmpty { Text(ForgeChatMarkdown.attributed(t)).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading) }
                     if m.role == "result" {
                         if m.result?.artifact == nil { Label(ForgeChatText.resultSaved, systemImage: "checkmark.shield").font(.caption).foregroundStyle(.green) }
