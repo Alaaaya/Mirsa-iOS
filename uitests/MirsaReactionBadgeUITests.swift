@@ -15,6 +15,13 @@ final class MirsaReactionBadgeUITests: XCTestCase {
                 "-mirsa.chat.reactionsTipDismissed", "YES", "-mirsa.chat.appearance", theme,
                 "-mirsa.appLanguage", language, "-AppleLanguages", "(\(language))", "-AppleLocale", language]
             app.launch()
+            let permission = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+            if permission.waitForExistence(timeout: 5) {
+                let deny = permission.buttons.matching(NSPredicate(format: "label IN %@",
+                    ["Don’t Allow", "Don't Allow", "عدم السماح"])).firstMatch
+                if deny.exists { deny.tap() }
+                XCTAssertFalse(permission.exists, "System permission must not obscure visual evidence")
+            }
             XCTAssertTrue(app.buttons["chat-back"].waitForExistence(timeout: 25))
             let badges = app.descendants(matching: .any).matching(identifier: "chat-mirsa-reaction")
             XCTAssertTrue(badges.firstMatch.waitForExistence(timeout: 10))
