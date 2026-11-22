@@ -11,6 +11,10 @@ final class BackgroundIPADownloads: NSObject, URLSessionDownloadDelegate {
     var backgroundCompletion: (() -> Void)?
     private var continuation: CheckedContinuation<URL, Error>?
     private var progress: ((Int64, Int64) -> Void)?
+    /// didWriteData arrives per network chunk (hundreds per second on fast links); each
+    /// callback publishes several ObservableObjects. Forward at most ~10 Hz or per 1 %.
+    private var lastProgressEmit: TimeInterval = 0
+    private var lastProgressFraction: Double = -1
     private var activeID: Int?
     private var destinations: [Int: URL] = [:]
     private var cancelled = Set<Int>()
@@ -31,6 +35,8 @@ final class BackgroundIPADownloads: NSObject, URLSessionDownloadDelegate {
         task.taskDescription = MirsaInstallActivity.shared.operationID
         activeID = task.taskIdentifier
         self.progress = progress
+        lastProgressEmit = 0
+        lastProgressFraction = -1
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
@@ -63,6 +69,12 @@ final class BackgroundIPADownloads: NSObject, URLSessionDownloadDelegate {
             MirsaInstallActivity.shared.updateBytes(received: totalBytesWritten,
                 expected: totalBytesExpectedToWrite, operationID: downloadTask.taskDescription)
             guard self.activeID == downloadTask.taskIdentifier else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            let fraction = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : -1
+            let finished = totalBytesExpectedToWrite > 0 && totalBytesWritten >= totalBytesExpectedToWrite
+            guard finished || now - self.lastProgressEmit >= 0.1 || abs(fraction - self.lastProgressFraction) >= 0.01 else { return }
+            self.lastProgressEmit = now
+            self.lastProgressFraction = fraction
             self.progress?(totalBytesWritten, totalBytesExpectedToWrite)
         }
     }

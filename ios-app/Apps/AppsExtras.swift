@@ -48,7 +48,7 @@ extension AppsStore {
                 guard let self, self.downloadID == id, self.isDownloading else { return }
                 MirsaOperationProgress.shared.update(operation, phase: .downloading,
                     fraction: expected > 0 ? Double(received) / Double(expected) : nil)
-                self.downloadHasKnownSize = expected > 0
+                if self.downloadHasKnownSize != (expected > 0) { self.downloadHasKnownSize = expected > 0 }
                 InstallTracker.shared.set(self.installToken, phase: .downloading, fraction: expected > 0 ? Double(received) / Double(expected) : nil)
                 self.progress = expected > 0 ? min(1, max(0, Double(received) / Double(expected))) : 0
             }

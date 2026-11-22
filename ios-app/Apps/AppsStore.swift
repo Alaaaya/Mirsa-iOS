@@ -881,7 +881,8 @@ final class AppsStore: ObservableObject {
                         MirsaOperationProgress.shared.update(operation,
                             phase: stage == "Installing" || stage == "Done" ? .installing : .signing,
                             fraction: nil)
-                        AppsStore.shared.progress = f
+                        // Publish only visible steps: AppsStore is observed by most screens.
+                        if f <= 0 || f >= 1 || abs(AppsStore.shared.progress - f) >= 0.005 { AppsStore.shared.progress = f }
                         if stage == "Installing", f == 0.5 { MirsaInstallActivity.shared.setPhase(.installing) }
                         MirsaInstallActivity.shared.updateProgress(f)
                     }
@@ -1099,7 +1100,8 @@ final class AppsStore: ObservableObject {
                         MirsaOperationProgress.shared.update(operation,
                             phase: stage == "Installing" || stage == "Done" ? .installing : .signing,
                             fraction: nil)
-                        AppsStore.shared.progress = f
+                        // Publish only visible steps: AppsStore is observed by most screens.
+                        if f <= 0 || f >= 1 || abs(AppsStore.shared.progress - f) >= 0.005 { AppsStore.shared.progress = f }
                         if stage == "Installing", f == 0.5 { MirsaInstallActivity.shared.setPhase(.installing) }
                         MirsaInstallActivity.shared.updateProgress(f)
                     }

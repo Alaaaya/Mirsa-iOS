@@ -811,7 +811,11 @@ struct ForgeChatThreadView: View {
 
     // Separate inference boundaries keep the native SwiftUI type checker bounded.
     private var messageTimeline: some View {
-        LazyVStack(alignment: .leading, spacing: 22) {
+        // Build the merged timeline once per render (it was rebuilt for the ForEach and
+        // again for the animation value on every composer keystroke).
+        let rows = self.rows
+        let rowIDs = rows.map(\.id)
+        return LazyVStack(alignment: .leading, spacing: 22) {
             assistantBlock { Text(ForgeChatText.welcome).font(.system(size: 16)).lineSpacing(5).multilineTextAlignment(.leading).accessibilityIdentifier("chat-welcome") }
             ForEach(rows) { row in
                 Group {
@@ -840,7 +844,7 @@ struct ForgeChatThreadView: View {
             }
             Color.clear.frame(height: 1).id("bottom")
         }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 12)
-        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rows.map(\.id))
+        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: rowIDs)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.outgoing.count)
     }
 

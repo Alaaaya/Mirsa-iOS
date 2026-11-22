@@ -43,6 +43,13 @@ final class MirsaOperationProgress: ObservableObject {
         value.stageLabel = stageLabel
         value.fraction = fraction.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
         if phase != .downloading { cancellations[id] = nil; value.canCancel = false }
+        // Every assignment publishes and re-renders every tile/badge observing progress.
+        // Skip identical states (repeated milestone callbacks) and sub-0.5 % steps.
+        if let old = entries[id] {
+            if old == value { return }
+            if old.phase == value.phase, old.stageLabel == value.stageLabel, old.canCancel == value.canCancel,
+               let a = old.fraction, let b = value.fraction, b < 1, abs(b - a) < 0.005 { return }
+        }
         entries[id] = value
     }
 
