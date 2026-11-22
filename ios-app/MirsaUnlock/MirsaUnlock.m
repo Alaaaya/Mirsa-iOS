@@ -627,3 +627,48 @@ static void MirsaUnlockInit(void) {
         }
     }];
 }
+// إكمال الدالة المقطوعة
+static void MirsaUnlockDismissMethod(Class cls, SEL sel) {
+    if (cls == Nil || sel == NULL) return;
+    
+    @try {
+        Method method = class_getInstanceMethod(cls, sel);
+        if (method == NULL) return;
+        
+        const char *types = method_getTypeEncoding(method);
+        // نتأكد أن الطريقة ترجع void وتأخذ وسيطين على الأقل (self, _cmd, BOOL)
+        if (types == NULL || types[0] != 'v') return;
+        
+        IMP replacement = (IMP)MirsaUnlockDismissViewDidAppear;
+        
+        // نضيف التنفيذ الخاص بهذه الفئة فقط إذا كان موروثة
+        if (class_addMethod(cls, sel, replacement, types)) {
+            NSLog(@"[MirsaUnlock] added -[%@ %@] -> dismiss (was inherited)", 
+                  NSStringFromClass(cls), NSStringFromSelector(sel));
+            return;
+        }
+        
+        // نستبدل التنفيذ إذا كانت موجودة في هذه الفئة
+        method_setImplementation(method, replacement);
+        NSLog(@"[MirsaUnlock] swizzled -[%@ %@] -> dismiss", 
+              NSStringFromClass(cls), NSStringFromSelector(sel));
+    } @catch (NSException *exception) {
+        NSLog(@"[MirsaUnlock] exception in dismiss method: %@", exception.reason);
+    }
+}
+
+// دالة التهيئة الأساسية التي تعمل عند تحميل الـ Dylib
+__attribute__((constructor))
+static void MirsaUnlockInitialize() {
+    NSLog(@"[MirsaUnlock] Initializing...");
+    
+    // هنا يمكنك استدعاء الدوال التي تقوم بفحص الإعدادات وتطبيق الهوكس
+    // مثال بسيط لتفعيل ميزة "Jailbreak" إذا كانت مفعلة
+    /*
+    Class someClass = NSClassFromString(@"SomePremiumClass");
+    if (someClass) {
+        SEL premiumSel = NSSelectorFromString(@"isPremium");
+        if (class_getInstanceMethod(someClass, premiumSel)) {
+            MirsaUnlockSwizzleBOOLGetter(someClass, premiumSel, YES);
+        }
+    }
