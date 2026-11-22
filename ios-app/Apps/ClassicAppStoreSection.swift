@@ -725,9 +725,7 @@ struct ClassicAppStorePurchasesPage: View {
                 }
                 // History has no reliable size field. Do not invent one or fetch a package here.
             }
-            AsyncImage(url: artwork[item.id].flatMap { URL(string: $0) }) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            MirsaRemoteImage(url: artwork[item.id].flatMap { URL(string: $0) }, maxPixel: 156) {
                 Image(systemName: "app.dashed").font(.title2).foregroundStyle(MirsaPalette.textTertiary)
             }
             .frame(width: 52, height: 52).background(MirsaPalette.cardRaised)

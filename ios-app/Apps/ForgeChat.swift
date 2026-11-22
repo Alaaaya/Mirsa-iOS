@@ -1032,7 +1032,8 @@ struct ForgeChatThreadView: View {
                 }.transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if attachmentsUI && editingID == nil { attachmentTray }
-            if let jpeg, let img = UIImage(data: jpeg) {
+            // Cached thumbnail: the composer re-renders on every keystroke.
+            if let jpeg, let img = MirsaThumbnailCache.image(jpeg, key: "chat-composer", maxPixel: 168) {
                 HStack { Image(uiImage: img).resizable().scaledToFill().frame(width: 56, height: 56).clipped().cornerRadius(12)
                     Button(ForgeChatText.removeImage) { self.jpeg = nil; photo = nil }.font(.caption).foregroundStyle(chatMuted); Spacer() }.padding(.horizontal, 18).padding(.top, 8)
             }

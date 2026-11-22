@@ -129,7 +129,7 @@ struct ForgeChatInjectAppPicker: View {
                     Button { choose(app) } label: {
                         HStack(spacing: 12) {
                             Group {
-                                if let icon = UIImage(contentsOfFile: AppsStore.iconURL(app.id).path) { Image(uiImage: icon).resizable().scaledToFill() }
+                                if let icon = MirsaIconCache.image(id: app.id, path: AppsStore.iconURL(app.id).path) { Image(uiImage: icon).resizable().scaledToFill() }
                                 else { Image(systemName: "app.dashed").resizable().scaledToFit().padding(10) }
                             }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 11))
                             VStack(alignment: .leading, spacing: 3) {

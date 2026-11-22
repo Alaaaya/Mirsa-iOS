@@ -112,7 +112,7 @@ struct DownloadsList: View {
         let installed = store.apps.first { $0.id == i.bundleID }
         return HStack(spacing: 12) {
             Group {
-                if let img = UIImage(contentsOfFile: DownloadsLibrary.iconURL(i).path) {
+                if let img = MirsaIconCache.image(id: "download|" + i.id, path: DownloadsLibrary.iconURL(i).path) {
                     Image(uiImage: img).resizable()
                 } else {
                     Image(systemName: "app.dashed").resizable().scaledToFit().padding(10).foregroundStyle(.white.opacity(0.6))

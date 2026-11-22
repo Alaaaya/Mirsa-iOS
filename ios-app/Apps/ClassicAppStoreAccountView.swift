@@ -600,7 +600,7 @@ struct ClassicAppStoreAccountView: View {
     // MARK: result row, detail page, progress (UI only; same actions as before)
 
     private func artwork(_ app: MirsaStoreApp, size: CGFloat) -> some View {
-        AsyncImage(url: URL(string: app.artworkURL)) { $0.resizable().scaledToFill() } placeholder: {
+        MirsaRemoteImage(url: URL(string: app.artworkURL), maxPixel: size * 3) {
             ZStack { MirsaPalette.cardRaised; Image(systemName: "app.dashed").font(.system(size: size * 0.35)).foregroundStyle(MirsaPalette.textTertiary) }
         }
         .frame(width: size, height: size)

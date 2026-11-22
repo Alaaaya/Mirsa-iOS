@@ -446,7 +446,8 @@ struct TendieRowView: View {
             Toggle("", isOn: $item.isSelected)
                 .labelsHidden()
 
-            if let imgData = item.previewImageData, let uiImg = UIImage(data: imgData) {
+            // Downsampled once to the 44×60 row size instead of a full decode per render.
+            if let imgData = item.previewImageData, let uiImg = MirsaThumbnailCache.image(imgData, key: "tendie|\(item.id)", maxPixel: 180) {
                 Image(uiImage: uiImg)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -531,7 +532,7 @@ struct TendieDetailSheet: View {
         NavigationStack {
             List {
                 Section {
-                    if let imgData = item.previewImageData, let uiImg = UIImage(data: imgData) {
+                    if let imgData = item.previewImageData, let uiImg = MirsaThumbnailCache.image(imgData, key: "tendie-detail|\(item.id)", maxPixel: 1400) {
                         Image(uiImage: uiImg)
                             .resizable()
                             .aspectRatio(contentMode: .fit)

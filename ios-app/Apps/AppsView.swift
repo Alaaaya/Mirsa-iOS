@@ -665,7 +665,9 @@ struct AppTile: View {
     let app: ManagedApp
     @AppStorage(MirsaTheme.key) private var theme = MirsaTheme.liquid.rawValue
     private var liquid: Bool { theme == MirsaTheme.liquid.rawValue }
-    private var icon: UIImage? { UIImage(contentsOfFile: AppsStore.iconURL(app.id).path) }
+    // Cached decode (revalidated by file date): the grid re-renders on every progress tick,
+    // and reading + decoding the PNG from disk in body made scrolling stutter.
+    private var icon: UIImage? { MirsaIconCache.image(id: app.id, path: AppsStore.iconURL(app.id).path) }
     @ObservedObject private var progress = MirsaOperationProgress.shared
     private var iconSize: CGFloat { liquid ? 60 : 68 }
     private var iconRadius: CGFloat { iconSize * 0.225 }

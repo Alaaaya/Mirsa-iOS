@@ -265,7 +265,8 @@ final class EncryptedAppsStore: ObservableObject {
     }
 
     func icon(_ entry: EncryptedIPAEntry) -> UIImage? {
-        UIImage(contentsOfFile: Self.iconURL(entry.id).path)
+        // Cached decode, revalidated by file date; rows call this on every render.
+        MirsaIconCache.image(id: "encrypted|" + entry.id.uuidString, path: Self.iconURL(entry.id).path)
     }
 
     /// Keeps the existing Wi-Fi tunnel path; cellular serves the same IPA locally, without signing or upload.
