@@ -1,0 +1,78 @@
+name: Blank normal-root candidate verification
+on:
+  workflow_dispatch:
+  push:
+    branches: [mirsa/blank-regression22]
+permissions:
+  contents: read
+jobs:
+  simulator:
+    timeout-minutes: 65
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Overlay immutable uncommitted test candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'CHECK'
+          import urllib.request,json,base64,hashlib,pathlib,os
+          url='https://api.github.com/repos/Alaaaya/Mirsa-iOS/git/blobs/dfab67601914c1ef10f32ee03b7e05d4ec9e0ad4'
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(req,timeout=60) as response:
+              data=base64.b64decode(json.load(response)['content'])
+          assert hashlib.sha256(data).hexdigest()=='5f236b4cd2b8256a7fb820e527124f3d388d6c2a12c77b82d3032953276bd203'
+          p=pathlib.Path('uitests/MirsaBlankRegressionUITests.swift')
+          assert not p.exists(), 'Candidate must not replace committed tests'
+          p.write_bytes(data)
+          pathlib.Path('build').mkdir(exist_ok=True)
+          pathlib.Path('build/blank-candidate-proof.json').write_text(json.dumps({'head':os.environ['GITHUB_SHA'],'base':'55241d8c3a93f39ad8c72cc3ffe69bfbacd0a48c','blob':'dfab67601914c1ef10f32ee03b7e05d4ec9e0ad4','sha256':'5f236b4cd2b8256a7fb820e527124f3d388d6c2a12c77b82d3032953276bd203','runtimeModified':False},indent=2))
+          CHECK
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build real simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run app screenshots tests
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/compile.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ForegroundUI.xcresult -only-testing:MirsaUITests/MirsaForegroundUITests -only-testing:MirsaUITests/MirsaBlankRegressionUITests test-without-building CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
+      - name: Export runtime screenshot attachments
+        if: always()
+        run: |
+          if [ -d build/ForegroundUI.xcresult ]; then
+            mkdir -p build/screenshots
+            xcrun xcresulttool export attachments --path build/ForegroundUI.xcresult --output-path build/screenshots
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Mirsa-blank-normal-root-proof
+          path: |
+            build/blank-candidate-proof.json
+            build/compile.log
+            build/screenshots
+            build/ForegroundUI.xcresult
+            build/simulator-validation.log
+          if-no-files-found: warn
