@@ -36,8 +36,8 @@ struct WallpaperSourcesView: View {
     let install: (URL) async -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 22) {
+                Text(WallpaperSourceText.text(.title)).font(.title3.bold())
                 HStack {
                     TextField(WallpaperSourceText.text(.url), text: $sourceURL)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -87,9 +87,7 @@ struct WallpaperSourcesView: View {
                         }
                     }
                 }
-            }.padding()
-        }
-        .navigationTitle(WallpaperSourceText.text(.title))
+        }.padding()
         .task { await store.refresh() }
         .refreshable { await store.refresh() }
         .sheet(item: $video) { entry in

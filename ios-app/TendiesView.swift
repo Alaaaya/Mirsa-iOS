@@ -35,8 +35,6 @@ struct TendiesView: View {
     @State private var makerDescriptionFocused = false
     @State private var editRequest: TendieEditRequest?
     @State private var scrollToMaker = false
-    @State private var showWallpaperSources = false
-    @State private var scrollToImportedWallpapers = false
 
     private var videoApplyRunning: Bool {
         if case .running = vm.tendiesFlashPhase { return true }
@@ -160,26 +158,6 @@ struct TendiesView: View {
                     } else if case .done(ok: true) = vm.tendiesFlashPhase, !vm.tendiesInstalledNew {
                         Text(TendiesPageText.text(.nothingNew))
                     }
-                }
-
-                Section {
-                    NavigationLink(isActive: $showWallpaperSources) {
-                        WallpaperSourcesView(busy: videoApplyRunning) { archive in
-                            guard !videoApplyRunning else { return }
-                            let ids = await vm.importTendieFiles(urls: [archive])
-                            guard !ids.isEmpty else { return }
-                            for index in vm.tendieItems.indices {
-                                vm.tendieItems[index].isSelected = ids.contains(vm.tendieItems[index].id)
-                            }
-                            // Source actions only import and select. System installation stays
-                            // behind the existing separate Tendies screen action.
-                            showWallpaperSources = false
-                            scrollToImportedWallpapers = true
-                        }
-                    } label: {
-                        Label(WallpaperSourceText.text(.title), systemImage: "square.grid.2x2")
-                    }
-                    .accessibilityIdentifier("wallpaper-sources")
                 }
 
                 MirsaWallpaperManagementSection(
@@ -353,10 +331,10 @@ struct TendiesView: View {
                                  })
                 }
             }
-            .onChange(of: scrollToImportedWallpapers) { _, go in
-                guard go else { return }
-                scrollToImportedWallpapers = false
-                withAnimation { scroll.scrollTo("wallpaper-imported-section", anchor: .top) }
+            .onAppear {
+                if vm.tendieItems.contains(where: { $0.isSelected }) {
+                    scroll.scrollTo("wallpaper-imported-section", anchor: .top)
+                }
             }
             .onChange(of: scrollToMaker) { _, go in
                 guard go else { return }

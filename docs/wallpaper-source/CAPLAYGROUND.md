@@ -24,3 +24,5 @@ Content-Length 989594, image/gif.
 The successor preserves the base's existing safe import/preselect/return-to-Tendies CTA unchanged. It adds only opt-in source selection in the existing UI and attribution link. No direct installation, automatic installation, engine changes, Drift integration, system writes, release or publication.
 
 Tests contain only invented metadata with reserved hosts and do not download upstream artwork. Full app/simulator compilation remains required; Swift parse alone is not a compile or runtime pass.
+
+Owner placement correction: both catalog sources appear ONLY in Tools Store with Wallpapers category selected (not Saved); no catalog entry in Tendies or main Sources. CTA imports and selects then switches existing Tools section to Tendies; its ready list scrolls selected imports into view. No automatic install.

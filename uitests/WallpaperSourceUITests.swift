@@ -1,6 +1,6 @@
 import XCTest
 
-/// Navigate the real retained Tools tab and Tendies NavigationLink. Only catalog
+/// Navigate the real Tools Store wallpaper category. Only catalog
 /// data/art is local; no substitute screen and no import action, video network or respring is triggered.
 final class WallpaperSourceUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
@@ -12,11 +12,7 @@ final class WallpaperSourceUITests: XCTestCase {
         add(attachment)
     }
 
-    func testTendiesSourceNavigationAndActualGridInFiveLanguages() {
-        let titles = [
-            "ar": "مصادر الخلفيات", "en": "Wallpaper sources", "de": "Hintergrundquellen",
-            "kmr": "Çavkaniyên wêneyan", "ckb": "سەرچاوەی وێنەکان"
-        ]
+    func testToolsStoreWallpaperSourcesOnlyInFiveLanguages() {
         for language in ["ar", "en", "de", "kmr", "ckb"] {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
@@ -34,17 +30,13 @@ final class WallpaperSourceUITests: XCTestCase {
             let tendies = app.buttons["tools-section-wallpapers"]
             XCTAssertTrue(tendies.waitForExistence(timeout: 15))
             tendies.tap()
-            let source = app.descendants(matching: .any).matching(identifier: "wallpaper-sources").firstMatch
-            for _ in 0..<12 {
-                if source.exists && source.isHittable { break }
-                app.swipeUp(velocity: .slow)
-            }
-            XCTAssertTrue(source.exists && source.isHittable, "Tendies source link must be reachable")
-            shot(language + "_tendies_source_entry")
-            source.tap()
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "wallpaper-sources").firstMatch.exists)
+            app.buttons["tools-section-store"].tap()
+            let filter = app.buttons["tools-store-filter-wallpapers"]
+            XCTAssertTrue(filter.waitForExistence(timeout: 10))
+            filter.tap()
             let field = app.textFields["wallpaper-source-url"]
             XCTAssertTrue(field.waitForExistence(timeout: 10))
-            XCTAssertTrue(app.navigationBars[titles[language]!].exists)
             XCTAssertTrue(app.staticTexts["Mirsa Originals"].waitForExistence(timeout: 10))
             XCTAssertTrue(app.staticTexts["Solar arc"].exists, "Screenshot must contain actual catalog entries")
             let imports = app.buttons.matching(identifier: "wallpaper-source-install")
@@ -55,12 +47,9 @@ final class WallpaperSourceUITests: XCTestCase {
             shot(language + "_wallpaper_source_grid_top")
             app.swipeUp(velocity: .slow)
             shot(language + "_wallpaper_source_grid_scrolled")
-            // The back action returns to the actual Tendies page, not the IPA Sources tab.
-            let back = app.navigationBars.buttons.element(boundBy: 0)
-            XCTAssertTrue(back.isHittable)
-            back.tap()
-            XCTAssertTrue(source.waitForExistence(timeout: 5))
-            shot(language + "_wallpaper_source_return")
+            XCTAssertTrue(app.buttons["wallpaper-source-add-caplayground"].exists)
+            app.buttons["tools-section-wallpapers"].tap()
+            XCTAssertFalse(app.textFields["wallpaper-source-url"].exists)
         }
     }
 }
