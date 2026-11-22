@@ -237,6 +237,7 @@ struct ToolsStoreView: View {
             .padding(.top, 4)
             .padding(.bottom, 40)
         }
+        .padding(.bottom, MirsaTabBarMetrics.clearance)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { model.reload() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
