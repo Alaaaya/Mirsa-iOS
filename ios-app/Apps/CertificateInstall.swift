@@ -141,7 +141,7 @@ struct CertificateInstallSheet: View {
                 }
                 .padding(20)
             }
-            .background(AuroraBackground())
+            .background(AuroraBackground().ignoresSafeArea())
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(personalText("Close", "إغلاق")) { dismiss() }.disabled(working) } }
         }
         .environment(\.layoutDirection, .leftToRight)
@@ -152,9 +152,13 @@ struct CertificateInstallSheet: View {
     }
 
     private func reload() {
-        do { identities = try PersonalIdentityVault.savedIdentities(); message = nil }
-        catch { identities = []; message = error.localizedDescription }
-        loaded = true
+        Task {
+            do {
+                identities = try await PersonalIdentityVault.offMain { try PersonalIdentityVault.savedIdentities() }
+                message = nil
+            } catch { identities = []; message = error.localizedDescription }
+            loaded = true
+        }
     }
 
     private func install(_ identity: PersonalIdentityVault.SavedIdentity) {

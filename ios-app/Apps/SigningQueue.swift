@@ -120,11 +120,17 @@ struct SigningQueueView: View {
     @State private var message: String?
     @State private var pending: [PendingClone] = []
     @State private var sharing: SharedFile?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(sgText("Signing queue", "طابور التوقيع", "ڕیزی واژووکردن", "Rêzika îmzekirinê")).font(MirsaFont.sheetTitle)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(sgText("Signing queue", "طابور التوقيع", "ڕیزی واژووکردن", "Rêzika îmzekirinê")).font(MirsaFont.sheetTitle)
+                    Spacer()
+                    // Presented as a bare sheet: give it a visible way out besides swiping down.
+                    Button(L.t("settings.done")) { dismiss() }.font(.body.weight(.semibold))
+                }
                 Toggle(sgText("Clone with a new bundle ID", "نسخة بمعرّف جديد", "کلۆن بە ناسنامەی نوێ", "Klon bi nasnameya nû"), isOn: $clone)
                 Toggle(sgText("Remove device restrictions (copy only)", "إزالة قيود الجهاز (على النسخة فقط)", "لابردنی سنووردارییەکانی ئامێر (تەنها کۆپی)", "Sînorên cîhazê rake (tenê kopî)"), isOn: $stripRestrictions)
                 Button(sgText("Add IPAs", "إضافة IPA", "زیادکردنی IPA", "IPA lê zêde bike")) { picking = true }
@@ -159,7 +165,10 @@ struct SigningQueueView: View {
         }
         .mirsaScreen()
         .environment(\.layoutDirection, .leftToRight)
-        .task { identities = (try? PersonalIdentityVault.savedIdentities()) ?? []; await CertificateRevocationMonitor.shared.checkAll() }
+        .task {
+            identities = (try? await PersonalIdentityVault.offMain { try PersonalIdentityVault.savedIdentities() }) ?? []
+            await CertificateRevocationMonitor.shared.checkAll()
+        }
         .sheet(isPresented: $picking) { MultiIPAPicker { urls in picking = false; add(urls) } }
         .sheet(item: $sharing) { PersonalSignedShare(url: $0.url) }
     }

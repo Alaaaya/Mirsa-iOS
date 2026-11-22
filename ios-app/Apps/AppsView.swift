@@ -1175,6 +1175,7 @@ struct AppsSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var adminCode = ""
     @State private var adminNote: String?
+    @State private var showCertificates = false
     private func claim() async {
         do { _ = try await ForgeClient.json(["action": "admin-claim", "code": adminCode]); NotificationCenter.default.post(name: .mirsaDiagnosticIdentityChanged, object: nil); adminCode = ""; adminNote = tr("Admin access enabled on this device.", "تفعّلت صلاحية المشرف.", ckb: "چالاک کرا.", kmr: "Çalak bû.") }
         catch { adminNote = tr("Invalid or expired code.", "الكود غلط أو منتهي.", ckb: "کۆدەکە هەڵەیە یان بەسەرچووە.", kmr: "Kod çewt an qediyaye.") }
@@ -1207,8 +1208,14 @@ struct AppsSettingsSheet: View {
                     }
                     if installMode == "certificate" {
                         OwnCertificateDeviceSetup()
-                        NavigationLink { PersonalCertificateManagerView() } label: {
-                            Label(tr("Certificates", "الشهادات"), systemImage: "signature")
+                        // The manager owns a NavigationStack (it is also a sheet elsewhere); pushing it
+                        // nested a second stack with a duplicate bar and back button.
+                        Button { showCertificates = true } label: {
+                            HStack {
+                                Label(tr("Certificates", "الشهادات"), systemImage: "signature").foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                            }.contentShape(Rectangle())
                         }
                         Text(tr("Self-install and updates use your certificate and a private HTTPS link valid for 15 minutes, OTA installation does not use VPN, after a one-time real device read in Settings. Signing and installation use only the device-bound secure cache. Only the signed IPA and public profile are uploaded, never your P12, password or private key. The profile must cover Mirsa and this device. Keychain data may reset; certificate revocation stops the app. Other Apple ID operations still require VPN.", "تثبيت مرسى وتحديثاته بشهادتك ورابط HTTPS خاص لمدة 15 دقيقة، التثبيت OTA ما بيحتاج VPN، بعد قراءة الجهاز مرة واحدة بالإعدادات. التوقيع والتثبيت بيستخدموا النسخة الآمنة المرتبطة بهالجهاز بدون VPN. بينرفع ملف IPA الموقّع والبروفايل العام فقط، مو ملف P12 ولا كلمة السر ولا المفتاح الخاص. لازم البروفايل يدعم مرسى وجهازك. ممكن بيانات سلسلة المفاتيح تنمسح، وإلغاء الشهادة بيوقف التطبيق. عمليات Apple ID التانية بعدها بحاجة VPN."))
                             .font(.caption).foregroundStyle(.secondary)
@@ -1313,6 +1320,7 @@ struct AppsSettingsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button(L.t("settings.done")) { dismiss() } }
             }
+            .sheet(isPresented: $showCertificates) { PersonalCertificateManagerView() }
         }
     }
 }
