@@ -11,20 +11,18 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Overlay immutable candidates before native compile
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify exact committed source bytes before native compile
         run: |
           python3 - <<'CHECK'
-          import json, pathlib, urllib.request, base64, hashlib, os
+          import json, pathlib, hashlib, os, subprocess
           manifest = [{'path': 'ios-app/Apps/MirsaDesign.swift', 'sha256': 'c77ae35203a99da6dcc8ee9f31f2d6872c3df41b520d6e7183bbf5027050c2cf', 'blob': '39e57870a257a63ab6854d9faede059336cdbd39'}, {'path': 'ios-app/Apps/SourcesTab.swift', 'sha256': '47e81ca55ee7328dabd32e331d387bbb24e58fa97a9a4606e6cea9fc7bf0d1b3', 'blob': '675203946b7fd67c512c31934eee2909a13da469'}, {'path': 'tests/MirsaTextDirectionTests.swift', 'sha256': '68dd95db3901681fe3475756dd442eeccfeaeb317a7afc2284bfe1b06388e07a', 'blob': 'ef362ee776a7d6bdcd3e976ace8364f70bea73a1'}, {'path': 'uitests/MirsaKeyboardReturn22UITests.swift', 'sha256': 'e9e1ae1a3a981cc78977708bf7b94b3ef6c1351b85797e7d04d5db488a767f4f', 'blob': 'a38c60c21503f33ae655f8174f702b0d7165dac4'}, {'path': 'ios-app/SourcesToolsStoreShotHost.swift', 'sha256': '4375489e32ec7fbdc26061ba0440ffab3659ac736d826685fc9d2ccf7679be27', 'blob': '78841806ccef44e368e22445c2c4a56616cc5d1b'}, {'path': 'uitests/MirsaArabicFeed22UITests.swift', 'sha256': '73281b234d93a70091e48cf7eeda368e70d294e5c1e20e0d403edea4d888c810', 'blob': '3fe5680b8c275654641acd7951e066454dd00f5e'}, {'path': 'uitests/CertificateParity29UITests.swift', 'sha256': 'c7d831e07fe0d5bdc7e6a580bdce224c82d372fe4397e6a5b6dc5ebf612287a1', 'blob': 'b0156b379e5129934f4b93f5b66f9c42dd349ab9'}]
           for f in manifest:
-              req = urllib.request.Request('https://api.github.com/repos/Alaaaya/Mirsa-iOS/git/blobs/'+f['blob'], headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-              with urllib.request.urlopen(req,timeout=90) as response: data=base64.b64decode(json.load(response)['content'])
+              data = pathlib.Path(f['path']).read_bytes()
               assert hashlib.sha256(data).hexdigest()==f['sha256']
-              p=pathlib.Path(f['path']); p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+              assert subprocess.check_output(['git','rev-parse','HEAD:'+f['path']],text=True).strip()==f['blob']
+          assert subprocess.check_output(['git','status','--porcelain'],text=True).strip()==''
           pathlib.Path('build').mkdir(exist_ok=True)
-          pathlib.Path('build/source-proof.json').write_text(json.dumps({'head':os.environ['GITHUB_SHA'],'committedSource':False,'files':manifest},indent=2))
+          pathlib.Path('build/source-proof.json').write_text(json.dumps({'head':os.environ['GITHUB_SHA'],'committedSource':True,'files':manifest},indent=2))
           CHECK
       - name: Select Xcode
         run: |

@@ -110,23 +110,39 @@ final class CertificateParity29UITests: XCTestCase {
         let app = launchDock(lang)
         let dock = app.otherElements["mirsa-tab-dock"]
         let source = app.staticTexts["Dock Source Last"]
+        let sourceRow = app.cells.containing(.staticText, identifier: "Dock Source Last").firstMatch
         for _ in 0..<35 {
-            if source.exists && source.isHittable { break }
+            if source.exists && source.isHittable && sourceRow.exists
+                && sourceRow.frame.maxY <= dock.frame.minY { break }
             app.swipeUp()
         }
+        // Reach the physical end, not merely the first hittable text pixel.
+        app.swipeUp()
+        app.swipeUp()
+        screenshot("dock29-\(lang)-fully-scrolled-source-before-assert")
         XCTAssertTrue(source.exists && source.isHittable)
-        let sourceRow = app.cells.containing(.staticText, identifier: "Dock Source Last").firstMatch
         XCTAssertTrue(sourceRow.exists)
         XCTAssertLessThanOrEqual(sourceRow.frame.maxY, dock.frame.minY, "Last source must clear dock")
         screenshot("dock29-\(lang)-last-source")
         source.tap()
         let last = app.staticTexts["Alaa Player"]
+        let row = app.cells.containing(.staticText, identifier: "Alaa Player").firstMatch
         for _ in 0..<45 {
-            if last.exists && last.isHittable { break }
+            if last.exists && last.isHittable && row.exists
+                && row.frame.maxY <= dock.frame.minY { break }
             app.swipeUp()
         }
+        // Keep the original full-row assertion. Extra bottom swipes expose
+        // genuine inset failures instead of stopping at a hittable label.
+        app.swipeUp()
+        app.swipeUp()
+        screenshot("dock29-\(lang)-fully-scrolled-pushed-before-assert")
+        let geometry = XCTAttachment(string: app.debugDescription)
+        geometry.name = "dock29-\(lang)-fully-scrolled-AX"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        print("DOCK29 \(lang) row=\(row.frame) dock=\(dock.frame)")
         XCTAssertTrue(last.exists && last.isHittable)
-        let row = app.cells.containing(.staticText, identifier: "Alaa Player").firstMatch
         XCTAssertTrue(row.exists)
         XCTAssertLessThanOrEqual(row.frame.maxY, dock.frame.minY,
                                  "The entire pushed destination row, including GET, must clear the dock")

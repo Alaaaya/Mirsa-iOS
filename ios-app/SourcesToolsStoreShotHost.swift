@@ -31,6 +31,19 @@ enum SourcesToolsStoreShotHost {
         })
         let small = RepoSource(url: "https://example.org/small.json", name: "Small Source")
         let large = RepoSource(url: "https://example.org/large.json", name: "Large Source")
+        // Explicit opt-in, DEBUG-only feed text fixture. Default fixtures and tests stay unchanged.
+        if ProcessInfo.processInfo.arguments.contains("-MirsaArabicFeedFixture22") {
+            let arabic = RepoSource(url: small.url, name: "مكتبة مرسى العربية")
+            var app = RepoApp(name: "يوتيوب بلس", bundleID: "com.example.rtl22",
+                              developer: "مطور عربي", subtitle: "فيديو وموسيقى بلا حدود",
+                              description: "هذا وصف عربي لاختبار ترتيب الكلمات وعلامات الترقيم.\nيدعم الإصدار 2.0 عرض النص العربي مع English داخل الفقرة.",
+                              version: "2.0", iconURL: nil, downloadURL: URL(string: "https://example.org/rtl22.ipa")!,
+                              size: 12_000_000, date: "2026-11-22", category: "وسائط")
+            app.versionNotes = "تحسين عرض النص العربي مع الإصدار 2.0."
+            store.sources = [arabic]
+            store.apps[arabic.url] = [app]
+            return (store, [arabic])
+        }
         store.sources = [small, large]
         store.apps[small.url] = fixtureApps(5, prefix: "Small")
         store.apps[large.url] = fixtureApps(45, prefix: "Large")

@@ -664,6 +664,7 @@ struct SourcesTab: View {
                         ForEach(store.hiddenSources) { source in
                             HStack {
                                 Text(source.name).foregroundStyle(t.text)
+                                    .mirsaNaturalDirection(source.name)
                                 Spacer()
                                 Button {
                                     store.hiddenIDs.remove(source.id)
@@ -682,6 +683,7 @@ struct SourcesTab: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .mirsaHidesScrollEdgeEffect()
             // Bound the UIKit List viewport above the floating dock. Scroll-content
             // margins alone still let visible/hittable rows sit behind its overlay.
             // The backdrop below is deliberately outside this padding, so it
@@ -819,6 +821,7 @@ private struct SourceRow: View {
                 HStack(spacing: 6) {
                     Text(source.name).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text)
                         .lineLimit(1)
+                        .mirsaNaturalDirection(source.name)
                     if SourcesDates.isRecent(source.updated) {
                         Text(SourcesText.newBadge)
                             .font(.system(size: 9, weight: .bold))
@@ -968,6 +971,7 @@ struct SourceDetailView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+            .mirsaHidesScrollEdgeEffect()
             // Bound the UIKit List viewport above the floating dock. Scroll-content
             // margins alone still let visible/hittable rows sit behind its overlay.
             // The backdrop below is deliberately outside this padding, so it
@@ -1043,8 +1047,10 @@ struct SourceDetailView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(currentSource.name).font(.system(size: 24, weight: .bold)).foregroundStyle(t.text)
                             .lineLimit(2).minimumScaleFactor(0.8)
+                            .mirsaNaturalDirection(currentSource.name)
                         if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
                             Text(subtitle).font(.system(size: 12.5)).foregroundStyle(t.secondary).lineLimit(2)
+                                .mirsaNaturalDirection(subtitle)
                         }
                         websiteLink(metadata?.website, t: t, compact: true)
                     }
@@ -1053,6 +1059,7 @@ struct SourceDetailView: View {
                 if let description = metadata?.description, !description.isEmpty {
                     Text(description).font(.system(size: 12.5)).foregroundStyle(t.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .mirsaNaturalParagraph(description)
                         .padding(.top, 10)
                 }
                 HStack(spacing: 8) {
@@ -1072,14 +1079,17 @@ struct SourceDetailView: View {
                     .padding(.top, 8)
                 Text(currentSource.name).font(.system(size: 30, weight: .bold)).foregroundStyle(t.text)
                     .multilineTextAlignment(.center)
+                    .mirsaNaturalDirection(currentSource.name)
                     .padding(.top, 10)
                 if let subtitle = metadata?.subtitle, !subtitle.isEmpty {
                     Text(subtitle).font(.system(size: 12.5)).foregroundStyle(t.secondary)
                         .multilineTextAlignment(.center)
+                        .mirsaNaturalDirection(subtitle)
                 }
                 if let description = metadata?.description, !description.isEmpty {
                     Text(description).font(.system(size: 13)).foregroundStyle(t.text.opacity(0.85))
                         .multilineTextAlignment(.center)
+                        .mirsaNaturalDirection(description)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 8).padding(.horizontal, 10)
                 }
@@ -1247,13 +1257,16 @@ struct RepoAppRow: View {
             RemoteIcon(url: app.iconURL, size: 52, corner: MirsaRadius.icon)
             VStack(alignment: .leading, spacing: 2) {
                 Text(app.name).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
+                    .mirsaNaturalDirection(app.name)
                 let meta = [app.developer, app.version.isEmpty ? nil : "v" + app.version]
                     .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
                 if !meta.isEmpty {
                     Text(meta).font(.caption).foregroundStyle(theme.secondary).lineLimit(1)
+                        .mirsaNaturalDirection(meta)
                 }
                 if !app.subtitle.isEmpty {
                     Text(app.subtitle).font(.caption2).foregroundStyle(theme.secondary).lineLimit(1)
+                        .mirsaNaturalDirection(app.subtitle)
                 }
             }
             Spacer(minLength: 8)
@@ -1265,12 +1278,14 @@ struct RepoAppRow: View {
         VStack(spacing: 6) {
             RemoteIcon(url: app.iconURL, size: 62, corner: 15)
             Text(app.name).font(.system(size: 14.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
+                .mirsaNaturalDirection(app.name)
             let meta = [app.version.isEmpty ? nil : "v" + app.version,
                         app.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }]
                 .compactMap { $0 }.joined(separator: " · ")
             Text(meta.isEmpty ? " " : meta).font(.system(size: 11)).foregroundStyle(theme.secondary).lineLimit(1)
             if let category = app.category?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
                 Text(category.capitalized).font(.system(size: 9.5, weight: .semibold))
+                    .mirsaNaturalDirection(category)
                     .foregroundStyle(theme.isLight ? Color(sourcesRGB: 0xB45309) : Color(sourcesRGB: 0xFCD34D))
                     .lineLimit(1)
                     .padding(.horizontal, 7).padding(.vertical, 1)
@@ -1385,11 +1400,14 @@ private struct SourceAppDetailSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(app.name).font(.system(size: 24, weight: .bold)).foregroundStyle(t.text)
                             .lineLimit(2).minimumScaleFactor(0.8)
+                            .mirsaNaturalDirection(app.name)
                         if !app.subtitle.isEmpty {
                             Text(app.subtitle).font(.system(size: 12.5)).foregroundStyle(t.secondary).lineLimit(2)
+                                .mirsaNaturalDirection(app.subtitle)
                         }
                         if !app.developer.isEmpty {
                             Text(app.developer).font(.system(size: 12.5)).foregroundStyle(t.secondary).lineLimit(1)
+                                .mirsaNaturalDirection(app.developer)
                         }
                     }
                     Spacer(minLength: 0)
@@ -1410,6 +1428,7 @@ private struct SourceAppDetailSheet: View {
                                 Text(item.label).font(.system(size: 10)).foregroundStyle(t.secondary).lineLimit(1)
                                 Text(item.value).font(.system(size: 15, weight: .bold)).foregroundStyle(t.text)
                                     .lineLimit(1).minimumScaleFactor(0.6)
+                                    .mirsaNaturalDirection(item.value)
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -1476,6 +1495,7 @@ private struct SourceAppDetailSheet: View {
                             }
                         }
                         Text(notes).font(.system(size: 13)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                            .mirsaNaturalParagraph(notes)
                     }
                     .foregroundStyle(t.text.opacity(0.9))
                     .padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -1487,11 +1507,13 @@ private struct SourceAppDetailSheet: View {
                     Text(SourcesText.about).font(.system(size: 18, weight: .bold)).foregroundStyle(t.text).padding(.top, 20)
                     Text(app.description).font(.system(size: 14)).foregroundStyle(t.text.opacity(0.88))
                         .fixedSize(horizontal: false, vertical: true)
+                        .mirsaNaturalParagraph(app.description)
                         .padding(.top, 8)
                 }
             }
             .padding(.horizontal, 18).padding(.top, 24).padding(.bottom, 30)
         }
+        .mirsaHidesScrollEdgeEffect()
         .background(LinearGradient(colors: t.sheetBase, startPoint: .top, endPoint: .bottom).ignoresSafeArea())
         .tint(t.accent[0])
         .environment(\.colorScheme, t.colorScheme)

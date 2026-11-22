@@ -345,6 +345,14 @@ enum MirsaChrome {
     /// Base colour of the Liquid backdrop (#090A1E), used behind every window.
     static let windowBase = UIColor(red: 9 / 255, green: 10 / 255, blue: 30 / 255, alpha: 1)
 
+    /// True only for normal-level app windows. System overlay windows (keyboard,
+    /// text effects / edit menu, remote keyboard) must stay transparent.
+    static func paintsBackdrop(windowLevel: UIWindow.Level, className: String) -> Bool {
+        guard windowLevel == .normal else { return false }
+        let name = className.lowercased()
+        return !name.contains("keyboard") && !name.contains("texteffects")
+    }
+
     static func forceWindowsLeftToRight() {
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
@@ -356,7 +364,13 @@ enum MirsaChrome {
             // A bare UIWindow is black. Sheet/keyboard transitions and rubber-band
             // overscroll briefly reveal it, which read as black bars at the top and
             // bottom edges. Paint it with the backdrop's own base colour instead.
-            for w in ws.windows where w.backgroundColor == nil || w.backgroundColor == .black {
+            // Only the app's own content windows: the system keyboard/text-effects
+            // windows also live in `ws.windows`, sit full screen ABOVE the app with a
+            // clear (nil) background and stay alive after the keyboard hides. Painting
+            // one opaque covered the whole app with a flat dark screen that never went
+            // away (after a chat, on return from background, after an update).
+            for w in ws.windows where paintsBackdrop(windowLevel: w.windowLevel, className: String(describing: type(of: w)))
+                && (w.backgroundColor == nil || w.backgroundColor == .black) {
                 w.backgroundColor = windowBase
             }
         }
@@ -370,6 +384,85 @@ extension View {
             .onAppear { MirsaChrome.forceWindowsLeftToRight() }
             .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { _ in MirsaChrome.forceWindowsLeftToRight() }
             .onReceive(NotificationCenter.default.publisher(for: UIScene.didActivateNotification)) { _ in MirsaChrome.forceWindowsLeftToRight() }
+    }
+}
+
+// MARK: - Edge-to-edge scrolling
+
+extension View {
+    /// iOS 26 draws a "scroll edge effect" on every List/ScrollView: a dark soft fade
+    /// under the status bar and above the bottom safe area (the floating dock's
+    /// clearance). Over the Sources themes and the app detail sheet it read as black
+    /// bars at the top and bottom, as if the page did not reach the screen edges.
+    /// Mirsa already draws its own status-bar scrim / glass bars, so hide the system
+    /// fade on those pages. No-op on iOS 18 and older SDKs.
+    @ViewBuilder
+    func mirsaHidesScrollEdgeEffect() -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectHidden(true, for: [.top, .bottom])
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+// MARK: - Natural text direction (content text inside the LTR UI)
+
+/// The UI is always laid out left to right, but SwiftUI also takes a Text's base
+/// writing direction from `layoutDirection`. Feed-supplied Arabic/Hebrew names and
+/// descriptions were therefore laid out as LTR paragraphs: digits, Latin words and
+/// punctuation jumped to the wrong end and the words looked reversed. These helpers
+/// give each content Text the direction of its own first strong character
+/// (Unicode bidi rule P2/P3), without mirroring any layout around it.
+enum MirsaTextDirection {
+    static func isStrongRTL(_ v: UInt32) -> Bool {
+        switch v {
+        case 0x0590...0x08FF,      // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic, Arabic Ext-A/B
+             0xFB1D...0xFDFF,      // Hebrew + Arabic presentation forms A
+             0xFE70...0xFEFF,      // Arabic presentation forms B
+             0x10800...0x10FFF,    // historic RTL scripts
+             0x1E800...0x1EFFF:    // Mende Kikakui, Adlam, Arabic math symbols
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Direction of the first strong character; `.leftToRight` when there is none
+    /// (digits, emoji, punctuation only) so such text keeps the UI's direction.
+    static func of(_ text: String) -> LayoutDirection {
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x200F, 0x061C, 0x202B, 0x202E, 0x2067: return .rightToLeft   // RLM, ALM, RLE, RLO, RLI
+            case 0x200E, 0x202A, 0x202D, 0x2066: return .leftToRight           // LRM, LRE, LRO, LRI
+            default: break
+            }
+            // Letters only: Arabic-Indic digits, punctuation and marks are weak/neutral.
+            guard scalar.properties.isAlphabetic else { continue }
+            return isStrongRTL(scalar.value) ? .rightToLeft : .leftToRight
+        }
+        return .leftToRight
+    }
+}
+
+extension View {
+    /// Single-line or label text from a source feed: correct character/word order
+    /// and truncation side for its own script; its position in the row is unchanged.
+    func mirsaNaturalDirection(_ text: String) -> some View {
+        environment(\.layoutDirection, MirsaTextDirection.of(text))
+    }
+
+    /// Multi-line paragraph from a source feed: correct order and the paragraph
+    /// aligns to its own start (right for Arabic, left for English) across the full
+    /// width it already occupies.
+    func mirsaNaturalParagraph(_ text: String) -> some View {
+        multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .environment(\.layoutDirection, MirsaTextDirection.of(text))
     }
 }
 
