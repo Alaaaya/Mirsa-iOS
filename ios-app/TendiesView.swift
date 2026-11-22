@@ -35,6 +35,8 @@ struct TendiesView: View {
     @State private var makerDescriptionFocused = false
     @State private var editRequest: TendieEditRequest?
     @State private var scrollToMaker = false
+    @State private var showWallpaperSources = false
+    @State private var scrollToImportedWallpapers = false
 
     private var videoApplyRunning: Bool {
         if case .running = vm.tendiesFlashPhase { return true }
@@ -160,6 +162,26 @@ struct TendiesView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink(isActive: $showWallpaperSources) {
+                        WallpaperSourcesView(busy: videoApplyRunning) { archive in
+                            guard !videoApplyRunning else { return }
+                            let ids = await vm.importTendieFiles(urls: [archive])
+                            guard !ids.isEmpty else { return }
+                            for index in vm.tendieItems.indices {
+                                vm.tendieItems[index].isSelected = ids.contains(vm.tendieItems[index].id)
+                            }
+                            // Source actions only import and select. System installation stays
+                            // behind the existing separate Tendies screen action.
+                            showWallpaperSources = false
+                            scrollToImportedWallpapers = true
+                        }
+                    } label: {
+                        Label(WallpaperSourceText.text(.title), systemImage: "square.grid.2x2")
+                    }
+                    .accessibilityIdentifier("wallpaper-sources")
+                }
+
                 MirsaWallpaperManagementSection(
                     externalBusy: videoApplyRunning,
                     log: { vm.tendiesFlashLog.append($0) },
@@ -167,6 +189,7 @@ struct TendiesView: View {
                     mainContent: {
                 // Imported files waiting to be installed (selection for the install button).
                 Section {
+                Color.clear.frame(height: 1).id("wallpaper-imported-section")
                 if !vm.tendieItems.isEmpty {
                         HStack {
                             Text(MirsaTr.p("wallpapersImported", vm.tendieItems.count))
@@ -329,6 +352,11 @@ struct TendiesView: View {
                                      respringArmed = false
                                  })
                 }
+            }
+            .onChange(of: scrollToImportedWallpapers) { _, go in
+                guard go else { return }
+                scrollToImportedWallpapers = false
+                withAnimation { scroll.scrollTo("wallpaper-imported-section", anchor: .top) }
             }
             .onChange(of: scrollToMaker) { _, go in
                 guard go else { return }
