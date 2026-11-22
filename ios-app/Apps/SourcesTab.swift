@@ -1620,7 +1620,7 @@ struct MirsaRemoteImage<Placeholder: View>: View {
     let maxPixel: CGFloat
     var contentMode: ContentMode = .fill
     @ViewBuilder var placeholder: () -> Placeholder
-    @State private var loaded: (url: URL, image: UIImage)?
+    @State private var loaded: (url: URL, image: UIImage)? = nil
 
     private var image: UIImage? {
         guard let url else { return nil }
