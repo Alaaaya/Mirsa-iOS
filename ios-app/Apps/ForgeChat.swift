@@ -181,6 +181,17 @@ enum ForgeChatImage {
             }
             #endif
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MirsaReactionBadgeFixture") {
+                let samples = [
+                    tr5("Like this", "هيك", de: "So", ckb: "بەم شێوەیە", kmr: "Wisa"),
+                    tr5("Keep the reaction on the corner of this longer message too.", "خلي التفاعل عزاوية هالرسالة الطويلة كمان.", de: "Die Reaktion bleibt auch bei dieser längeren Nachricht an der Ecke.", ckb: "کاردانەوەکە لە گۆشەی ئەم نامە درێژەش بمێنێتەوە.", kmr: "Bila reaksiyon li goşeya vê peyama dirêj jî bimîne.")
+                ]
+                messages[t] = samples.enumerated().map { index, text in
+                    var message = ForgeChatMessage(id: UUID(), threadID: t, role: "user", text: text)
+                    message.botReaction = index == 0 ? "❤️" : "👍"
+                    return message
+                }
+            }
             if ProcessInfo.processInfo.arguments.contains("-MirsaVoiceBubbleFixture"),
                let file = Bundle.main.url(forResource: "voice-fixture", withExtension: "m4a"),
                let data = try? Data(contentsOf: file) {
@@ -679,6 +690,15 @@ private enum ForgeChatDisplayRow: Identifiable, Equatable {
     }
 }
 
+/// The visible bubble is narrower than its 300-point layout frame. Anchor the
+/// badge to its painted edge, not to the transparent space beside short text.
+private struct ForgeChatBubbleBoundsKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 /// Scoped to the active chat so only its typing mode collapses competing chrome.
 struct ForgeChatComposerFocusKey: PreferenceKey {
     static var defaultValue = false
@@ -784,7 +804,7 @@ struct ForgeChatThreadView: View {
         guard let m = msgs.first(where: { $0.id == id }), let target = m.replyToMessageID else { return nil }
         return ForgeChatReplyRef(messageID: target, snippet: ForgeChatLocal.snippet(m.replyQuoteText), fromUser: m.replyQuoteRole == "user")
     }
-    /// Quote above, reaction below, swipe right to reply, long press for the menu.
+    /// Quote above, Mirsa badge overlapping the bubble, swipe right to reply.
     @ViewBuilder private func chrome<C: View>(id: UUID, text: String?, isUser: Bool, confirmed: Bool, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
             if let ref = quote(id, confirmed: confirmed) {
@@ -792,10 +812,25 @@ struct ForgeChatThreadView: View {
             }
             content()
                 .modifier(ForgeChatHoldToMenu { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) })
-            if isUser, let e = msgs.first(where: { $0.id == id })?.botReaction {
-                HStack(spacing: 4) { ForgeChatReactionChip(emoji: e); Text(ForgeChatText.title).font(.caption2).foregroundStyle(chatMuted) }
-                    .accessibilityIdentifier("chat-mirsa-reaction")
-            }
+                .overlayPreferenceValue(ForgeChatBubbleBoundsKey.self) { anchor in
+                    if isUser, let emoji = msgs.first(where: { $0.id == id })?.botReaction {
+                        GeometryReader { proxy in
+                            let bounds = anchor.map { proxy[$0] } ?? CGRect(origin: .zero, size: proxy.size)
+                            Text(emoji)
+                                .font(.system(size: 18))
+                                .frame(width: 32, height: 32)
+                                .background(Color(white: 0.12), in: Circle())
+                                .overlay(Circle().stroke(chatCanvas, lineWidth: 2))
+                                .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+                                .accessibilityLabel(Text(emoji))
+                                .accessibilityIdentifier("chat-mirsa-reaction")
+                                .position(x: bounds.minX + 12, y: bounds.minY)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+                // Reserve the part above the bubble, including below quoted replies.
+                .padding(.top, isUser && msgs.first(where: { $0.id == id })?.botReaction != nil ? 16 : 0)
             if let e = reaction(id) {
                 ForgeChatReactionChip(emoji: e).onTapGesture { openMenu(id: id, text: text ?? "", isUser: isUser, confirmed: confirmed) }
             }
@@ -1305,7 +1340,9 @@ struct ForgeChatThreadView: View {
     }
 
     private func classicUserBubble(_ t: String) -> some View {
-        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 11).background(MirsaPalette.accentGradient).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)).shadow(color: MirsaPalette.accent.opacity(0.25), radius: 8, y: 3).frame(maxWidth: 300, alignment: .trailing)
+        Text(t).font(.system(size: 17)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 11).background(MirsaPalette.accentGradient).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)).shadow(color: MirsaPalette.accent.opacity(0.25), radius: 8, y: 3)
+            .anchorPreference(key: ForgeChatBubbleBoundsKey.self, value: .bounds) { $0 }
+            .frame(maxWidth: 300, alignment: .trailing)
     }
 
     @ViewBuilder private func classicAssistantBlock<C: View>(@ViewBuilder _ content: () -> C) -> some View {
@@ -1322,6 +1359,7 @@ struct ForgeChatThreadView: View {
         Text(t).font(.system(size: 16)).foregroundStyle(.white)
             .padding(.horizontal, 18).padding(.vertical, 13)
             .background(Color(white: darkChat ? 0.18 : 0.10), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+            .anchorPreference(key: ForgeChatBubbleBoundsKey.self, value: .bounds) { $0 }
             .frame(maxWidth: 300, alignment: .trailing)
     }
 
