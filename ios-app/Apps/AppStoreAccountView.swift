@@ -934,40 +934,30 @@ struct AppStoreAccountView: View {
             .font(MirsaFont.secondary).foregroundStyle(Color.white.opacity(0.7))
             .contextMenu { appMenu(app) }
 
-            // Main actions on one line: wishlist (paid apps), Download, and Get beside it only when it applies.
+            // Single main action: free apps not yet owned show Get (licence + download in one go), everything else Download.
+            let showGet = app.price == 0 && ownership[app.id] != .owned
             HStack(spacing: MirsaSpacing.s) {
                 if (app.price ?? 0) > 0 { wishButton(app, size: 52) }
                 Button {
-                    if inlineTransferAppID == app.id && busy != nil && !inlineIsGet { cancelInlineTransfer() }
-                    else { StoreHaptics.get(); guardedStart(app, acquire: false) }
+                    if inlineTransferAppID == app.id && busy != nil { cancelInlineTransfer() }
+                    else { StoreHaptics.get(); guardedStart(app, acquire: showGet) }
                 } label: {
                     Group {
-                        if transferring && !inlineIsGet {
+                        if inlineTransferAppID == app.id && busy != nil {
                             storeInlineIndicator
+                        } else if showGet {
+                            Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire"))
                         } else {
                             HStack(spacing: 8) { Image(systemName: "arrow.down.to.line"); Text(t("Download", "تنزيل", "داگرتن", "Daxe")) }
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .galleryPill(transferring && !inlineIsGet ? .dark : .light, height: 52)
+                    .galleryPill(transferring ? .dark : .light, height: 52)
                 }
-                .buttonStyle(.mirsaPress).disabled((busy != nil && inlineTransferAppID != app.id) || !canDownload(app))
-                .opacity((busy != nil && inlineTransferAppID != app.id) || !canDownload(app) ? 0.5 : 1)
-                if app.price == 0 && ownership[app.id] != .owned {
-                    Button {
-                        if inlineTransferAppID == app.id && busy != nil && inlineIsGet { cancelInlineTransfer() }
-                        else { StoreHaptics.get(); guardedStart(app, acquire: true) }
-                    } label: {
-                        Group {
-                            if inlineTransferAppID == app.id && busy != nil && inlineIsGet { storeInlineIndicator }
-                            else { Text(t("Get", "احصل عليه", "وەریبگرە", "Bigire")) }
-                        }
-                        .galleryPill(.dark, height: 52)
-                    }
-                    .buttonStyle(.mirsaPress)
-                    .disabled(app.price != 0 || (busy != nil && !(inlineTransferAppID == app.id && inlineIsGet)) || (otherStore && !accountAvailable.contains(app.id)))
-                    .accessibilityIdentifier("store-detail-get")
-                }
+                .buttonStyle(.mirsaPress)
+                .disabled((busy != nil && inlineTransferAppID != app.id) || (showGet ? (otherStore && !accountAvailable.contains(app.id)) : !canDownload(app)))
+                .opacity((busy != nil && inlineTransferAppID != app.id) || (showGet ? (otherStore && !accountAvailable.contains(app.id)) : !canDownload(app)) ? 0.5 : 1)
+                .accessibilityIdentifier(showGet ? "store-detail-get" : "store-detail-download")
             }
             .padding(.top, 6)
             if otherStore && !accountAvailable.contains(app.id) {

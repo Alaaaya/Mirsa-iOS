@@ -16,7 +16,7 @@ final class MirsaDesignReviewUITests: XCTestCase {
             let alert = springboard.alerts.firstMatch
             if alert.exists { alert.buttons.firstMatch.tap() }
             XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "store-gallery-capsule").firstMatch.waitForExistence(timeout: 15))
-            if page == "details" { XCTAssertTrue(app.buttons["store-detail-get"].exists) }
+            if page == "details" { XCTAssertTrue(app.buttons["store-detail-get"].exists || app.buttons["store-detail-download"].exists) }
             Thread.sleep(forTimeInterval: 2)
             let name = "concept1_ar_dark_" + page
             let hierarchy = XCTAttachment(string: app.debugDescription)
