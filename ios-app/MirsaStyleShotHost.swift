@@ -6,8 +6,14 @@ import UIKit
 /// capture every page on a simulator. Never reachable in a normal launch.
 enum MirsaStyleShots {
     static var page: String? {
-        guard MirsaUITestHarness.active else { return nil }
         let args = ProcessInfo.processInfo.arguments
+        #if DEBUG
+        // -MirsaLiveStyle selects a style page WITHOUT the freezing UI-test harness, so real animations run.
+        let live = args.contains("-MirsaLiveStyle")
+        #else
+        let live = false
+        #endif
+        guard MirsaUITestHarness.active || live else { return nil }
         guard let i = args.firstIndex(of: "-MirsaStylePage"), i + 1 < args.count else { return nil }
         return args[i + 1]
     }
@@ -64,7 +70,7 @@ struct MirsaStyleShotHost: View {
             // The REAL ContentView (window backdrop host, dock, retained tabs) with fixture sources.
             // Standalone hosts above bypass MirsaWindowBackdropHost and cannot show edge bands.
             ContentView().onAppear {
-                guard MirsaUITestHarness.active else { return }
+                guard MirsaStyleShots.page != nil else { return }
                 let made = SourcesToolsStoreShotHost.makeStore()
                 SourcesStore.shared.sources = made.1
                 for s in made.1 { SourcesStore.shared.apps[s.url] = made.0.apps[s.url] }
