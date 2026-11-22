@@ -134,16 +134,21 @@ struct MirsaSolidCard<S: InsettableShape>: ViewModifier {
         #endif
     }
 
-    /// iOS 18 / older SDK: frosted material with a light rim, so the background still shows through.
+    /// iOS 18 / older SDK: translucent pre-tinted glass with a light rim, so the background
+    /// still shows through. A live `.ultraThinMaterial` per card made every scrolling list
+    /// re-blur each card on every frame; the backdrop behind cards is a soft gradient, so a
+    /// tinted fill (the same approach as `StoreGlass`) looks the same and scrolls smoothly.
     private func material(_ content: Content) -> some View {
         content
             .background {
                 ZStack {
-                    shape.fill(.ultraThinMaterial)
+                    shape.fill(LinearGradient(colors: [StoreLuxe.glassTop, StoreLuxe.glassBottom],
+                                              startPoint: .top, endPoint: .bottom))
                     shape.fill(Color.white.opacity(0.04))
                     if let tint { shape.fill(tint.opacity(0.18)) }
                 }
-                .shadow(color: .black.opacity(0.18 * elevation), radius: 12 * elevation, y: 6 * elevation)
+                // Only raised cards keep a soft shadow; small chips and buttons stay flat.
+                .shadow(color: .black.opacity(elevation >= 1 ? 0.18 * elevation : 0), radius: 12 * elevation, y: 6 * elevation)
             }
             .overlay {
                 shape.strokeBorder(LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.06)],
@@ -308,15 +313,20 @@ enum MirsaChrome {
 
         // Rounded heavy titles like the in-page headers. The bar is transparent at the
         // scroll edge and a solid page colour (no blur) once content scrolls under it.
-        let titleColor = UIColor.white
+        // White on the dark themes; the Light Sources/Tools Store theme switches the window to
+        // light, where a white bar title was invisible on the pale backdrop.
+        let titleColor = UIColor { $0.userInterfaceStyle == .light ? UIColor(red: 0x17 / 255, green: 0x13 / 255, blue: 0x2E / 255, alpha: 1) : .white }
         func rounded(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont {
             let base = UIFont.systemFont(ofSize: size, weight: weight)
             return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
         }
+        // Scrolled state: thin frosted glass, never an opaque page-coloured slab. An opaque
+        // bar painted a dark band over every theme (Sunset, Ocean, Light) at the top edge.
         let solid = UINavigationBarAppearance()
-        solid.configureWithOpaqueBackground()
-        solid.backgroundColor = UIColor(red: 0.066, green: 0.070, blue: 0.150, alpha: 1)
-        solid.shadowColor = UIColor.white.withAlphaComponent(0.08)
+        solid.configureWithTransparentBackground()
+        solid.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        solid.backgroundColor = UIColor(red: 0.066, green: 0.070, blue: 0.150, alpha: 0.18)
+        solid.shadowColor = UIColor.white.withAlphaComponent(0.06)
         solid.largeTitleTextAttributes = [.font: rounded(32, .heavy), .foregroundColor: titleColor]
         solid.titleTextAttributes = [.font: rounded(17, .bold), .foregroundColor: titleColor]
         let clear = UINavigationBarAppearance()
@@ -332,6 +342,9 @@ enum MirsaChrome {
 
     /// Trait override on every window, so presented sheets, alerts and menus (which
     /// inherit the window's traits) lay out left-to-right too.
+    /// Base colour of the Liquid backdrop (#090A1E), used behind every window.
+    static let windowBase = UIColor(red: 9 / 255, green: 10 / 255, blue: 30 / 255, alpha: 1)
+
     static func forceWindowsLeftToRight() {
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
@@ -339,6 +352,12 @@ enum MirsaChrome {
             for w in ws.windows where !w.traitOverrides.contains(UITraitLayoutDirection.self) {
                 w.traitOverrides.layoutDirection = .leftToRight
                 w.semanticContentAttribute = .forceLeftToRight
+            }
+            // A bare UIWindow is black. Sheet/keyboard transitions and rubber-band
+            // overscroll briefly reveal it, which read as black bars at the top and
+            // bottom edges. Paint it with the backdrop's own base colour instead.
+            for w in ws.windows where w.backgroundColor == nil || w.backgroundColor == .black {
+                w.backgroundColor = windowBase
             }
         }
     }
@@ -398,6 +417,7 @@ struct MirsaRoundIcon: View {
 /// Soft solid fade behind the status bar so scrolled content never collides with
 /// the clock and battery on pages without a navigation bar.
 struct MirsaStatusBarScrim: View {
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         // A thin strip below the status bar whose background grows up into the
         // top safe area, so the fade covers exactly the status bar plus 14 pt.
@@ -409,7 +429,8 @@ struct MirsaStatusBarScrim: View {
                 // under the clock instead of meeting a dark band.
                 Rectangle()
                     .fill(.ultraThinMaterial)
-                    .overlay(MirsaPalette.sheet.opacity(0.25))
+                    // Light themes (Sources/Tools Store "Light") get a pale tint, never a dark band.
+                    .overlay(colorScheme == .light ? Color.white.opacity(0.35) : MirsaPalette.sheet.opacity(0.25))
                     .mask(LinearGradient(stops: [
                         .init(color: .black, location: 0),
                         .init(color: .black.opacity(0.85), location: 0.55),

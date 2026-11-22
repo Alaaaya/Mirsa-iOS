@@ -70,7 +70,7 @@ struct StoreLibraryToolsView: View {
                     Text(T.autoCleanNote).font(.footnote).foregroundStyle(.secondary)
                 }
                 if let message = message ?? model.error { Section { Text(message).foregroundStyle(.orange) } }
-            }
+            }.mirsaListBackground()
             .navigationTitle(T.tools)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("OK") { dismiss() } } }

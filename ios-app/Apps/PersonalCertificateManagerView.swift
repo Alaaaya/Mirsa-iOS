@@ -11,7 +11,7 @@ struct PersonalCertificateManagerView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                AuroraBackground().ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         Text(personalText("Signing certificates", "شهادات التوقيع")).font(MirsaFont.sheetTitle)
@@ -75,10 +75,15 @@ struct PersonalCertificateManagerView: View {
         .task { reload() }
     }
     private func reload() {
-        do {
-            identities = try PersonalIdentityVault.savedIdentities()
-            selectedID = try PersonalIdentityVault.selectedID()
-        } catch { message = error.localizedDescription }
+        Task {
+            do {
+                let (all, id) = try await PersonalIdentityVault.offMain {
+                    (try PersonalIdentityVault.savedIdentities(), try PersonalIdentityVault.selectedID())
+                }
+                identities = all
+                selectedID = id
+            } catch { message = error.localizedDescription }
+        }
     }
     private func choose(_ item: PersonalIdentityVault.SavedIdentity) {
         do { try PersonalIdentityVault.select(item.id); selectedID = item.id }

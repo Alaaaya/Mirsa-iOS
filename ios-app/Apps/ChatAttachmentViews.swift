@@ -24,7 +24,7 @@ struct ChatDraftAttachmentChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if case .image(let jpeg, _) = item.payload, let img = UIImage(data: jpeg) {
+            if case .image(let jpeg, _) = item.payload, let img = MirsaThumbnailCache.image(jpeg, key: "chat-chip", maxPixel: 66) {
                 Image(uiImage: img).resizable().scaledToFill().frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             } else {
                 Image(systemName: icon).font(.system(size: 12, weight: .semibold))

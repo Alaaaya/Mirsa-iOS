@@ -91,7 +91,7 @@ struct ProjectInstallLogView: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(LCPalette.pill)
                     Capsule().fill(state.stage == .failed ? LCPalette.red : LCPalette.mint)
-                        .frame(width: geo.size.width * state.overallFraction)
+                        .frame(width: max(0, geo.size.width * min(1, max(0, state.overallFraction))))
                 }
             }.frame(height: 3)
             logList(state)
@@ -161,6 +161,8 @@ struct ProjectInstallLogView: View {
             .onChange(of: state.log.count) { _ in
                 if let last = state.log.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
+            // Reopening the log from the background starts at the newest line, not the top.
+            .onAppear { if let last = state.log.last { proxy.scrollTo(last.id, anchor: .bottom) } }
         }
     }
 }

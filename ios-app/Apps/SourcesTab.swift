@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 
 // MARK: - Model (AltStore / SideStore / Feather source format)
 
@@ -102,8 +103,8 @@ final class SourcesStore: ObservableObject {
     static let shared = SourcesStore()
     private let key = "mirsa.sources.v1"
 
-    @Published var sources: [RepoSource] = [] { didSet { save() } }
-    @Published var apps: [String: [RepoApp]] = [:]   // by source url
+    @Published var sources: [RepoSource] = [] { didSet { save(); catalogueRevision &+= 1 } }
+    @Published var apps: [String: [RepoApp]] = [:] { didSet { catalogueRevision &+= 1 } }   // by source url
     @Published var presentation: [String: DecodedSource] = [:]
     @Published var loading: Set<String> = []
     @Published private(set) var loadErrors: [String: String] = [:]
@@ -113,7 +114,31 @@ final class SourcesStore: ObservableObject {
     @Published var error: String?
     @Published var updatingAll = false
     @Published var hiddenIDs: Set<String> = [] {
-        didSet { defaults.set(Array(hiddenIDs), forKey: "mirsa.sources.hiddenIDs") }
+        didSet { defaults.set(Array(hiddenIDs), forKey: "mirsa.sources.hiddenIDs"); catalogueRevision &+= 1 }
+    }
+
+    // MARK: Render memo
+    //
+    // Source screens re-render on every AppsStore publish (download progress ticks several
+    // times a second) and on every keystroke. Filtering/sorting a 10,000-app catalogue and
+    // scanning every catalogue per installed app in `body` stalled scrolling. Results are
+    // memoised per catalogue revision; nothing here is published, so reads stay side-effect free.
+    private var catalogueRevision = 0
+    private var memoRevision = -1
+    private var memo: [String: Any] = [:]
+    private func memoized<T>(_ key: String, _ compute: () -> T) -> T {
+        if memoRevision != catalogueRevision || memo.count > 96 {
+            memo.removeAll(keepingCapacity: true)
+            memoRevision = catalogueRevision
+        }
+        if let hit = memo[key] as? T { return hit }
+        let value = compute()
+        memo[key] = value
+        return value
+    }
+    /// Memoised derived value of one catalogue (category chips, grid pairs).
+    func derived<T>(_ kind: String, url: String, query: String = "", _ compute: () -> T) -> T {
+        memoized(kind + "\u{1F}" + url + "\u{1F}" + query, compute)
     }
     /// Delete awaiting confirmation. Nothing is removed until `confirmDelete()`.
     @Published var pendingDelete: RepoSource?
@@ -143,8 +168,17 @@ final class SourcesStore: ObservableObject {
 
     /// One candidate per installed app, visible source order breaks equal-version ties.
     func availableUpdates() -> [(RepoApp, AppLocation)] {
-        AppsStore.shared.apps.compactMap { installed in
-            let candidates = visibleSources.flatMap { apps[$0.url] ?? [] }.filter {
+        // Bundle-ID index over the visible catalogues, in visible source order, built once per
+        // revision instead of flattening every catalogue for every installed app on each render.
+        let index: [String: [RepoApp]] = memoized("updates-index") {
+            var index: [String: [RepoApp]] = [:]
+            for source in visibleSources {
+                for app in apps[source.url] ?? [] { index[app.bundleID, default: []].append(app) }
+            }
+            return index
+        }
+        return AppsStore.shared.apps.compactMap { installed in
+            let candidates = (index[installed.id] ?? []).filter {
                 $0.bundleID == installed.id && !$0.version.isEmpty &&
                 $0.version.compare(installed.version, options: .numeric) == .orderedDescending
             }
@@ -285,8 +319,11 @@ final class SourcesStore: ObservableObject {
     func listing(for url: String, query: String = "") -> [RepoApp] {
         let all = apps[url] ?? []
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return term.isEmpty ? all : all.filter {
-            $0.name.localizedCaseInsensitiveContains(term) || $0.developer.localizedCaseInsensitiveContains(term)
+        guard !term.isEmpty else { return all }
+        return derived("listing", url: url, query: term) {
+            all.filter {
+                $0.name.localizedCaseInsensitiveContains(term) || $0.developer.localizedCaseInsensitiveContains(term)
+            }
         }
     }
 
@@ -810,7 +847,8 @@ private struct SourceRow: View {
         .overlay(alignment: .leading) {
             Capsule().fill(tint).frame(width: 3).padding(.vertical, 14)
         }
-        .mirsaAppear()
+        // No fade-in here: List rows are re-created as they scroll back on screen, so the
+        // one-shot appear animation replayed on every row while scrolling (visible pop/stutter).
     }
 }
 
@@ -856,10 +894,15 @@ struct SourceDetailView: View {
     var body: some View {
         let t = theme
         let all = store.listing(for: source.url)
-        let categories = Self.categories(all)
+        let categories = store.derived("categories", url: source.url) { Self.categories(all) }
         let activeCategory = category.flatMap { categories.contains($0) ? $0 : nil }
         let searched = store.listing(for: source.url, query: query)
-        let shown = activeCategory.map { c in searched.filter { $0.category?.trimmingCharacters(in: .whitespacesAndNewlines) == c } } ?? searched
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shown = activeCategory.map { c in
+            store.derived("category:" + c, url: source.url, query: trimmed) {
+                searched.filter { $0.category?.trimmingCharacters(in: .whitespacesAndNewlines) == c }
+            }
+        } ?? searched
         let large = all.count >= Self.largeCatalogue
         let grid = gridOverride ?? large
         List {
@@ -875,7 +918,7 @@ struct SourceDetailView: View {
             .listRowInsets(EdgeInsets(top: 6, leading: MirsaSpacing.page, bottom: 6, trailing: MirsaSpacing.page))
 
             if grid {
-                ForEach(Self.pairs(shown)) { pair in
+                ForEach(store.derived("pairs:" + (activeCategory ?? ""), url: source.url, query: trimmed) { Self.pairs(shown) }) { pair in
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(pair.apps) { app in
                             RepoAppRow(app: app, installed: apps.apps.first { $0.id == app.bundleID }, onSelectIPA: onSelectIPA,
@@ -1134,9 +1177,8 @@ struct SourceDetailView: View {
     }
 
     private func sourceImage(_ url: URL, height: CGFloat) -> some View {
-        AsyncImage(url: url) { phase in
-            if let image = phase.image { image.resizable().scaledToFill() }
-            else { Rectangle().fill(sourceTint.opacity(0.12)).overlay { Image(systemName: "photo").foregroundStyle(.secondary) } }
+        MirsaRemoteImage(url: url, maxPixel: 1200) {
+            Rectangle().fill(sourceTint.opacity(0.12)).overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
         }
         .frame(height: height).frame(maxWidth: .infinity)
         .clipped().clipShape(RoundedRectangle(cornerRadius: 14))
@@ -1477,8 +1519,7 @@ struct RemoteIcon: View {
     let size: CGFloat
     let corner: CGFloat
     var body: some View {
-        AsyncImage(url: url) { img in img.resizable().scaledToFill() }
-            placeholder: { Image(systemName: "app.dashed").font(.system(size: size * 0.45)).foregroundStyle(.secondary) }
+        MirsaRemoteImage(url: url, maxPixel: size * 3) { Image(systemName: "app.dashed").font(.system(size: size * 0.45)).foregroundStyle(.secondary) }
             .frame(width: size, height: size)
             .background(MirsaPalette.cardRaised)
             .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
@@ -1486,6 +1527,123 @@ struct RemoteIcon: View {
     }
 }
 
+
+/// Downsampled thumbnails of in-memory image bytes (wallpaper previews, chat photo chips).
+/// List rows used to run `UIImage(data:)` on full-resolution images in `body`, so every
+/// re-render (a toggle, a keystroke in the composer) decoded megabytes on the main thread.
+/// Thread-safe (NSCache); decodes at most once per key, at the size the row draws.
+enum MirsaThumbnailCache {
+    private static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 300
+        c.totalCostLimit = 64 * 1024 * 1024
+        return c
+    }()
+
+    /// `key` identifies the owner (an item id); byte count and hash guard against edits.
+    static func image(_ data: Data, key: String, maxPixel: CGFloat) -> UIImage? {
+        guard !data.isEmpty else { return nil }
+        let cacheKey = "\(key)|\(data.count)|\(data.hashValue)|\(Int(maxPixel))" as NSString
+        if let hit = cache.object(forKey: cacheKey) { return hit }
+        let image = downsample(data, maxPixel: maxPixel) ?? UIImage(data: data)
+        if let image, let cg = image.cgImage {
+            cache.setObject(image, forKey: cacheKey, cost: cg.bytesPerRow * cg.height)
+        }
+        return image
+    }
+
+    /// ImageIO thumbnail decode at `maxPixel` (longest side). Safe off the main thread.
+    static func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
+        ] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+}
+
+/// Memory-cached, downsampled remote images for list rows. `AsyncImage` keeps no decoded
+/// cache, so in a 10,000-app catalogue every icon was fetched and decoded again each time
+/// its row scrolled back on screen (flicker + main-thread decode while scrolling).
+final class MirsaRemoteImageCache: @unchecked Sendable {
+    static let shared = MirsaRemoteImageCache()
+    private let memory: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 800
+        c.totalCostLimit = 96 * 1024 * 1024
+        return c
+    }()
+    private let session: URLSession = {
+        let c = URLSessionConfiguration.default
+        c.urlCache = URLCache(memoryCapacity: 8 * 1024 * 1024, diskCapacity: 128 * 1024 * 1024)
+        c.requestCachePolicy = .returnCacheDataElseLoad
+        c.timeoutIntervalForRequest = 30
+        c.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: c)
+    }()
+    /// Same ceiling the screenshot loader uses for a single image.
+    private let maxBytes = 20 * 1024 * 1024
+
+    private func key(_ url: URL, _ maxPixel: CGFloat) -> NSString { "\(Int(maxPixel))|\(url.absoluteString)" as NSString }
+
+    func cached(_ url: URL, maxPixel: CGFloat) -> UIImage? { memory.object(forKey: key(url, maxPixel)) }
+
+    func load(_ url: URL, maxPixel: CGFloat) async -> UIImage? {
+        if let hit = cached(url, maxPixel: maxPixel) { return hit }
+        guard let scheme = url.scheme?.lowercased(), ["https", "http", "file"].contains(scheme) else { return nil }
+        let data: Data
+        do {
+            let (bytes, response) = try await session.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+            data = bytes
+        } catch { return nil }
+        guard !data.isEmpty, data.count <= maxBytes, !Task.isCancelled else { return nil }
+        let image = await Task.detached(priority: .utility) {
+            MirsaThumbnailCache.downsample(data, maxPixel: maxPixel) ?? UIImage(data: data)?.preparingForDisplay()
+        }.value
+        if let image, let cg = image.cgImage {
+            memory.setObject(image, forKey: key(url, maxPixel), cost: cg.bytesPerRow * cg.height)
+        }
+        return image
+    }
+}
+
+/// Drop-in for `AsyncImage` in rows: shows a cached image synchronously, loads off-main otherwise.
+struct MirsaRemoteImage<Placeholder: View>: View {
+    let url: URL?
+    /// Longest side in pixels to decode at (about 3× the point size drawn).
+    let maxPixel: CGFloat
+    var contentMode: ContentMode = .fill
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var loaded: (url: URL, image: UIImage)? = nil
+
+    private var image: UIImage? {
+        guard let url else { return nil }
+        if let loaded, loaded.url == url { return loaded.image }
+        return MirsaRemoteImageCache.shared.cached(url, maxPixel: maxPixel)
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            guard let url, image == nil else { return }
+            if let fetched = await MirsaRemoteImageCache.shared.load(url, maxPixel: maxPixel), !Task.isCancelled {
+                loaded = (url, fetched)
+            }
+        }
+    }
+}
 
 /// Inline transfer control. Unknown length stays indeterminate, never a made-up percent.
 struct SourceDownloadIndicator: View {

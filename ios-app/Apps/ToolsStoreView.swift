@@ -442,9 +442,8 @@ private struct ToolsStorePreview: View {
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(.white)
             if let url = item.cardStill {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() } else { Color.clear }
-                }
+                // Cached + downsampled (rows re-render while scrolling; AsyncImage refetched each time).
+                MirsaRemoteImage(url: url, maxPixel: size * 3) { Color.clear }
             } else if let first = item.gallery.first, first.isVideo, let v = first.mediaURL {
                 ToolsStoreLoopingVideo(url: v).frame(width: size, height: size).allowsHitTesting(false)
             }

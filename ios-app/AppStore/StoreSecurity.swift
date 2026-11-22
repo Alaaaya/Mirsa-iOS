@@ -27,6 +27,20 @@ enum MirsaStoreError: Error, Equatable, LocalizedError {
     }
 }
 
+/// Apple's buyProduct (free licence) replied with its "sign in" / password-token answer.
+/// For a first-time Get this is Apple asking to confirm the account password (the same
+/// prompt the App Store shows), not a dead session: owned apps still download with it.
+/// The saved session is therefore kept and the user only re-enters the password.
+struct MirsaStorePurchaseAuthorization: Error, Equatable, LocalizedError {
+    var errorDescription: String? {
+        storeText("Apple asks you to confirm your Apple Account password before getting this app for the first time. You stay signed in and nothing is bought.",
+                  "أبل بدها تتأكد من كلمة سر حساب Apple قبل ما تاخد هالتطبيق لأول مرة. بتضل مسجّل دخول وما في شي بينشرى.",
+                  de: "Apple möchte das Passwort deines Apple Accounts bestätigen, bevor du diese App zum ersten Mal lädst. Du bleibst angemeldet und es wird nichts gekauft.",
+                  ckb: "ئەپڵ دەیەوێت وشەی نهێنی ئەکاونتی Apple پشتڕاست بکەیتەوە پێش وەرگرتنی ئەم ئەپە بۆ یەکەمجار. لە ژوورەوە دەمێنیتەوە و هیچ شتێک ناکڕدرێت.",
+                  kmr: "Apple dixwaze şîfreya hesabê te yê Apple piştrast bike berî ku tu vê sepanê cara yekem bigirî. Tu têketî dimînî û tiştek nayê kirîn.")
+    }
+}
+
 protocol MirsaStoreVault {
     func read(_ key: String) throws -> Data?
     func write(_ data: Data, key: String) throws

@@ -184,7 +184,10 @@ struct SourcesGlass<S: InsettableShape>: ViewModifier {
                     if theme.isLight {
                         shape.fill(Color.white)
                     } else {
-                        shape.fill(.ultraThinMaterial.opacity(0.6))
+                        // Flat translucent fill instead of a live blur per row: Sources lists
+                        // scroll many of these cards over a smooth gradient, where a blur
+                        // adds per-frame cost but no visible detail.
+                        shape.fill(Color(sourcesRGB: 0x1A1538).opacity(0.38))
                         shape.fill(theme.card)
                     }
                 }

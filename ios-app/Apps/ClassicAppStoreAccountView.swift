@@ -62,6 +62,9 @@ struct ClassicAppStoreAccountView: View {
     @State private var busy: String?
     @State private var work: Task<Void, Never>?
     @State private var recovery: StoreFreeLicenseRecovery?
+    /// Get paused because Apple asked to confirm the password (session kept).
+    @State private var authorizeApp: MirsaStoreApp?
+    @State private var authorizeCodeApp: MirsaStoreApp?
     @State private var notice: String?
     @State private var showSteps = false
     @State private var confirmSignOut = false
@@ -137,7 +140,7 @@ struct ClassicAppStoreAccountView: View {
                     }.sorted { AppStoreCountry.label($0) < AppStoreCountry.label($1) }, id: \.self) { country in
                         Button(AppStoreCountry.label(country)) { selectCountry(country.lowercased()) }
                     }
-                }
+                }.mirsaListBackground()
                 .searchable(text: $countryQuery)
                 .navigationTitle(t("Search storefront", "متجر البحث", "ستۆری گەڕان", "Stoya lêgerînê"))
                 .toolbar { Button(t("Done", "تمام", "تەواو", "Temam")) { showCountries = false } }
@@ -169,6 +172,18 @@ struct ClassicAppStoreAccountView: View {
         .alert(t("Notice", "تنبيه", "ئاگاداری", "Agahdarî"), isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button(t("OK", "تمام", "باشە", "Baş e")) { notice = nil }
         } message: { Text(notice ?? "") }
+        .alert(storeText("Confirm your Apple Account", "أكّد حساب Apple", de: "Apple Account bestätigen", ckb: "ئەکاونتی Apple پشتڕاست بکەرەوە", kmr: "Hesabê Apple piştrast bike"),
+               isPresented: Binding(get: { authorizeApp != nil }, set: { if !$0 { authorizeApp = nil } }), presenting: authorizeApp) { app in
+            SecureField(storeText("Password", "كلمة السر", de: "Passwort", ckb: "وشەی نهێنی", kmr: "Şîfre"), text: $password)
+            Button(storeText("Confirm and Get", "أكّد وخدو", de: "Bestätigen und laden", ckb: "پشتڕاستکردنەوە و وەرگرتن", kmr: "Piştrast bike û bigire")) { confirmPurchase(app) }
+            Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal"), role: .cancel) { password = "" }
+        } message: { _ in Text(MirsaStorePurchaseAuthorization().localizedDescription + (account.map { "\n" + $0.email } ?? "")) }
+        .alert(storeText("Verification code", "رمز التحقق", de: "Bestätigungscode", ckb: "کۆدی پشتڕاستکردنەوە", kmr: "Koda piştrastkirinê"),
+               isPresented: Binding(get: { authorizeCodeApp != nil }, set: { if !$0 { authorizeCodeApp = nil } }), presenting: authorizeCodeApp) { app in
+            TextField("000000", text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode)
+            Button(storeText("Confirm and Get", "أكّد وخدو", de: "Bestätigen und laden", ckb: "پشتڕاستکردنەوە و وەرگرتن", kmr: "Piştrast bike û bigire")) { confirmPurchaseCode(app) }
+            Button(t("Cancel", "إلغاء", "هەڵوەشاندنەوە", "Betal"), role: .cancel) { code = "" }
+        } message: { _ in Text(t("Enter the 6-digit code from Apple.", "اكتب الرمز من 6 أرقام من Apple.", "کۆدی ٦ ژمارەیی Apple بنووسە.", "Koda 6 hejmarî ya Apple binivîse.")) }
         .confirmationDialog(t("Refresh free licence and retry?", "تحديث الترخيص المجاني وإعادة التنزيل؟", "مۆڵەتی بێبەرامبەر نوێ بکەوە؟", "Lîsansa belaş nû bike?"),
                             isPresented: Binding(get: { recovery != nil }, set: { if !$0 { recovery = nil } }), titleVisibility: .visible) {
             if let pending = recovery {
@@ -343,7 +358,10 @@ struct ClassicAppStoreAccountView: View {
         if !results.isEmpty {
             Text(t("Results", "النتائج", "ئەنجامەکان", "Encam")).font(MirsaFont.sectionTitle).foregroundStyle(.white)
         }
-        ForEach(results) { app in resultRow(app) }
+        // Lazy like the new store: a long result list no longer builds every row (and its artwork) up front.
+        LazyVStack(alignment: .leading, spacing: MirsaSpacing.m) {
+            ForEach(results) { app in resultRow(app) }
+        }
         }
     }
 
@@ -600,7 +618,7 @@ struct ClassicAppStoreAccountView: View {
     // MARK: result row, detail page, progress (UI only; same actions as before)
 
     private func artwork(_ app: MirsaStoreApp, size: CGFloat) -> some View {
-        AsyncImage(url: URL(string: app.artworkURL)) { $0.resizable().scaledToFill() } placeholder: {
+        MirsaRemoteImage(url: URL(string: app.artworkURL), maxPixel: size * 3) {
             ZStack { MirsaPalette.cardRaised; Image(systemName: "app.dashed").font(.system(size: size * 0.35)).foregroundStyle(MirsaPalette.textTertiary) }
         }
         .frame(width: size, height: size)
@@ -992,23 +1010,68 @@ struct ClassicAppStoreAccountView: View {
         guard app.price == 0, (!otherStore || accountAvailable.contains(app.id)) else { return }
         let version = effectiveVersion(app)
         run(t("Getting free license and downloading…", "عم نجيب الترخيص المجاني وننزّل…", "مۆڵەتی بێبەرامبەر وەردەگیرێت و دادەگیرێت…", "Lîsansa belaş tê girtin û tê daxistin…")) {
-            inlineAppID = app.id; inlineIsGet = true
-            transfer = StoreDownloadProgress()
-            let generation = operationGeneration
-            let selectedID = try await client.selectedAccountID()
-            try Task.checkCancellation()
-            guard generation == operationGeneration else { throw CancellationError() }
-            let url = try await client.acquireFreeAppAndDownload(app, externalVersionID: version, expectedAccountID: selectedID)
-            ownership[app.id] = .owned
-            defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
-            try Task.checkCancellation()
-            guard generation == operationGeneration else { throw CancellationError() }
-            transfer?.apply(.init(phase: .saving))
-            try await onDownloaded(url)
-            try Task.checkCancellation()
-            transfer?.apply(.init(phase: .saved))
-            notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
-                       "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
+            try await getOperation(app, version: version)
+        }
+    }
+
+    /// Get = free licence + download in one serial operation. Also resumed after Apple asks
+    /// to confirm the account password for a first-time acquisition.
+    private func getOperation(_ app: MirsaStoreApp, version: String?) async throws {
+        inlineAppID = app.id; inlineIsGet = true
+        transfer = StoreDownloadProgress()
+        let generation = operationGeneration
+        let selectedID = try await client.selectedAccountID()
+        try Task.checkCancellation()
+        guard generation == operationGeneration else { throw CancellationError() }
+        let url: URL
+        do { url = try await client.acquireFreeAppAndDownload(app, externalVersionID: version, expectedAccountID: selectedID) }
+        catch is MirsaStorePurchaseAuthorization {
+            // Session kept: ask only for the password, then resume this same Get.
+            authorizeApp = app
+            throw CancellationError()
+        }
+        ownership[app.id] = .owned
+        defer { MirsaManagedTmp.end(url.deletingLastPathComponent()) }
+        try Task.checkCancellation()
+        guard generation == operationGeneration else { throw CancellationError() }
+        transfer?.apply(.init(phase: .saving))
+        try await onDownloaded(url)
+        try Task.checkCancellation()
+        transfer?.apply(.init(phase: .saved))
+        notice = t("Saved to your App Store tab, unchanged.", "انحفظ بتبويب متجر أبل متل ما هو.",
+                   "وەک خۆی لە بەشی فرۆشگای ئەپڵ هەڵگیرا.", "Wekî xwe li Firoşgeha Apple hat tomarkirin.")
+    }
+
+    /// Re-authenticates the SAME selected account (fresh password token, same device GUID and
+    /// account slot) and resumes the Get. A wrong password leaves the saved session untouched.
+    private func confirmPurchase(_ app: MirsaStoreApp) {
+        authorizeApp = nil
+        let secret = password
+        password = ""
+        guard let mail = account?.email, !secret.isEmpty else { return }
+        run(storeText("Confirming with Apple…", "عم نتأكد مع أبل…", de: "Bestätigung bei Apple…", ckb: "پشتڕاستکردنەوە لەگەڵ Apple…", kmr: "Bi Apple re tê piştrastkirin…")) {
+            switch try await client.signIn(email: mail, password: secret) {
+            case .signedIn(let a):
+                if account != a { account = a }
+                try await getOperation(app, version: effectiveVersion(app))
+            case .verificationRequired:
+                authorizeCodeApp = app
+            }
+        }
+    }
+
+    private func confirmPurchaseCode(_ app: MirsaStoreApp) {
+        authorizeCodeApp = nil
+        let c = code
+        code = ""
+        run(t("Verifying…", "عم نتحقق…", "پشتڕاستکردنەوە…", "Piştrastkirin…")) {
+            switch try await client.verify(code: c) {
+            case .signedIn(let a):
+                if account != a { account = a }
+                try await getOperation(app, version: effectiveVersion(app))
+            case .verificationRequired:
+                notice = t("The code was not accepted. Try again.", "الرمز ما انقبل. جرّب مرة ثانية.", "کۆدەکە وەرنەگیرا. دووبارە هەوڵ بدەرەوە.", "Kod nehat pejirandin. Dîsa biceribîne.")
+            }
         }
     }
 
@@ -1072,7 +1135,12 @@ struct ClassicAppStoreAccountView: View {
             transfer = StoreDownloadProgress()
             let url = try await StoreFreeLicenseRecovery.retryOnce(consent: true, acquire: {
                 guard pending.revision == session.sessionRevision else { throw CancellationError() }
-                try await client.acquireFreeApp(pending.app)
+                do { try await client.acquireFreeApp(pending.app) }
+                catch is MirsaStorePurchaseAuthorization {
+                    // Apple wants the password for this licence: ask, keep the session, resume as Get.
+                    authorizeApp = pending.app
+                    throw CancellationError()
+                }
             }, download: {
                 guard pending.revision == session.sessionRevision else { throw CancellationError() }
                 return try await client.downloadOwnedApp(pending.app, externalVersionID: pending.externalVersionID)
@@ -1175,13 +1243,17 @@ struct ClassicAppStoreAccountView: View {
     private func codeReset() { code = "" }
 
     private func describe(_ error: Error) -> String {
+        if let authorization = error as? MirsaStorePurchaseAuthorization { return authorization.localizedDescription }
         if let diagnostic = error as? StorefrontMetadataMissing { return diagnostic.localizedDescription }
         if let diagnostic = error as? StoreProductDiagnostic {
             if diagnostic.requiresReauthentication {
-                return t("Apple rejected this store session. Sign out from the Account tab, then sign in again and retry. Your saved apps are unchanged.",
-                         "Apple رفضت جلسة المتجر. من تبويب الحساب، سجّل خروج وبعدين دخول من جديد وجرّب. تطبيقاتك المحفوظة ما تغيّرت.",
-                         "Apple دانیشتنی ستۆری ڕەتکردەوە. لە بەشی ئەکاونت بچۆ دەرەوە و دووبارە بچۆ ژوورەوە، پاشان هەوڵ بدە. ئەپە هەڵگیراوەکانت نەگۆڕدراون.",
-                         "Apple danişîna firoşgehê red kir. Ji beşa Hesabê derkeve, dîsa têkeve û biceribîne. Sepanên te yên tomarkirî neguherîn.") + "\n\n" + diagnostic.localizedDescription
+                // The client already removed the rejected session; reflect it so the sign-in card shows.
+                account = nil; needsCode = false
+                return storeText("Apple ended this store session (its sign-in token expired). Sign in again and retry. Your saved apps are unchanged.",
+                                 "أبل أنهت جلسة المتجر (انتهت صلاحية الدخول). سجّل دخول من جديد وجرّب. تطبيقاتك المحفوظة ما تغيّرت.",
+                                 de: "Apple hat diese Store-Sitzung beendet (die Anmeldung ist abgelaufen). Melde dich erneut an und versuche es noch einmal. Deine gespeicherten Apps bleiben unverändert.",
+                                 ckb: "Apple ئەم دانیشتنەی ستۆری کۆتایی پێهێنا (چوونەژوورەوە بەسەرچوو). دووبارە بچۆ ژوورەوە و هەوڵ بدەرەوە. ئەپە هەڵگیراوەکانت نەگۆڕدراون.",
+                                 kmr: "Apple ev danişîna firoşgehê qedand (têketin qediya). Dîsa têkeve û biceribîne. Sepanên te yên tomarkirî neguherîn.") + "\n\n" + diagnostic.localizedDescription
             }
             let explanation = diagnostic.requiresLicense
                 ? t("Apple says this account needs the app's license. For a free app, tap Get to acquire its free license and download in one action.", "Apple بتقول الحساب بحاجة لترخيص التطبيق. إذا مجاني، دوس احصل عليه لنجيب الترخيص المجاني وننزّل بضغطة وحدة.", "مۆڵەتی ئەپ پێویستە. وەریبگرە پاشان دایبگرە.", "Lîsans pêwîst e. Bigire, paşê Daxe bitikîne.")

@@ -122,7 +122,7 @@ struct WallpaperRequestView: View {
                     }
                     if let error = draft.error { Text(error).foregroundStyle(.red).font(.caption) }
                 }
-            }
+            }.mirsaListBackground()
             .navigationTitle(WallpaperRequestText.title)
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(draft.busy || loadingPhotos)

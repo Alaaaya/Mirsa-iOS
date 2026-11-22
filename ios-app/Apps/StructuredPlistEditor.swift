@@ -280,7 +280,7 @@ private struct PlistValueSheet: View {
                     if type == "date" { Text("ISO 8601 · 2026-11-07T12:00:00Z").font(.caption).foregroundStyle(.secondary) }
                 }
                 if let error { Text(error).foregroundStyle(.orange) }
-            }.listRowBackground(MirsaPalette.row) }
+            }.listRowBackground(MirsaPalette.row) }.mirsaListBackground()
             .navigationTitle(MirsaTr.lit(item.adding ? "Add value" : "Edit"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button(MirsaTr.lit("Cancel")) { dismiss() } }

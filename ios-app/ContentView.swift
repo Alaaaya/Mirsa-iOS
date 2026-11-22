@@ -661,6 +661,8 @@ struct ContentView: View {
                     // through its actual safe areas, not only its content rect.
                     .clipShape(RetainedTabClip(active: on, safeArea: viewport.safeAreaInsets))
             }
+                // Hidden retained tabs stop their decorative animations (backdrop drift).
+                .environment(\.mirsaTabActive, on)
                 .frame(width: on ? nil : 0, height: on ? nil : 0)
                 .opacity(on ? 1 : 0)
                 .allowsHitTesting(on)
@@ -1283,6 +1285,8 @@ struct LiquidTabChrome: ViewModifier {
                 // Reserve scroll/resting-control clearance in the safe area, not
                 // external padding that shortens the page and exposes a bottom band.
                 .safeAreaPadding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+                // UIKit-hosted Forms/Lists inside the tab read this (mirsaDockClearance()).
+                .environment(\.mirsaDockClearance, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }

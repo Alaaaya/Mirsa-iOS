@@ -59,6 +59,7 @@ struct DeviceToolsView: View {
             }.listRowBackground(MirsaPalette.row) }
             .navigationTitle(tr("Device", "الجهاز"))
             .mirsaScreen()
+            .mirsaDockClearance()
         }
     }
 }
@@ -81,6 +82,7 @@ struct BatteryView: View {
         .refreshable { await load() }
         .toolAlert(m)
         .mirsaScreen()
+        .mirsaDockClearance()
     }
 
     private func load() async {
@@ -134,6 +136,7 @@ struct StorageView: View {
         .refreshable { await load() }
         .toolAlert(m)
         .mirsaScreen()
+        .mirsaDockClearance()
     }
 
     private func load() async {
@@ -187,6 +190,7 @@ struct ProfilesView: View {
         .refreshable { await load() }
         .toolAlert(m)
         .mirsaScreen()
+        .mirsaDockClearance()
     }
 
     private func expiryText(_ d: Date?) -> String {
@@ -259,6 +263,7 @@ struct CrashLogsView: View {
         }
         .toolAlert(m)
         .mirsaScreen()
+        .mirsaDockClearance()
     }
 
     @MainActor
@@ -337,6 +342,7 @@ struct MediaFilesView: View {
         }
         .toolAlert(m)
         .mirsaScreen()
+        .mirsaDockClearance()
     }
 
     private func load() async {

@@ -208,6 +208,15 @@ enum PersonalIdentityVault {
         _ = key; _ = cert
         return result!
     }
+    /// Runs keychain + P12 importer work off the main thread. Listing certificates decodes
+    /// every saved P12 through the importer, which froze the screens that opened the list.
+    static func offMain<T>(_ work: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { continuation.resume(returning: try work()) } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
     static func identity(_ material: Material) throws -> (Data, Data) {
         let result = try importResult(material)
         guard let keyText = result["key"] as? String, let key = Data(base64Encoded: keyText),
@@ -387,7 +396,10 @@ enum PersonalCertificateSigner {
         defer { MirsaManagedTmp.end(stage) }
         try fm.createDirectory(at: stage, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.complete])
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options)
-        try IPAEditorService.run("validate", input: app.appendingPathComponent(info["CFBundleExecutable"] as! String))
+        guard let executable = info["CFBundleExecutable"] as? String, !executable.isEmpty else {
+            throw SideloadError.message(PersonalSigningFileError.localized("Personal signing failed.", language: AppLanguageStore.snapshot.rawValue))
+        }
+        try IPAEditorService.run("validate", input: app.appendingPathComponent(executable))
         return try pack(root: root, options: options, suffix: "-unsigned")
     }
     private static func pack(root: URL, options: PersonalProjectOptions, suffix: String = "") throws -> URL {
@@ -627,7 +639,7 @@ struct PersonalCertificateView: View {
             Label(personalText("Selected certificate", "الشهادة المحددة") + (count > 1 ? " (\(count))" : ""), systemImage: "lock.shield.fill")
                 .font(.subheadline.weight(.semibold)).foregroundStyle(item.verification.isVerified ? Color.green : Color.orange)
             Text(item.name).font(.headline).lineLimit(2)
-            Text("تطابق الجهاز لسا مو مفحوص. بينفحص وقت التوقيع عبر الاتصال بالجهاز.").font(.caption).foregroundStyle(.secondary)
+            Text(tr5("Device match is not checked yet. It is checked when signing, through the device connection.", "تطابق الجهاز لسا مو مفحوص. بينفحص وقت التوقيع عبر الاتصال بالجهاز.", de: "Die Geräteübereinstimmung ist noch nicht geprüft. Sie wird beim Signieren über die Geräteverbindung geprüft.", ckb: "گونجانی ئامێر هێشتا نەپشکنراوە. لە کاتی واژۆکردن لە ڕێگەی پەیوەندی ئامێرەوە دەپشکنرێت.", kmr: "Lihevhatina cîhazê hê nehatiye kontrolkirin. Dema îmzekirinê bi girêdana cîhazê tê kontrolkirin.")).font(.caption).foregroundStyle(.secondary)
             if !item.verification.isVerified {
                 Label(item.verification.warningText, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -643,12 +655,15 @@ struct PersonalCertificateView: View {
             .background((item.verification.isVerified ? Color.green : Color.orange).opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
     private func reloadSaved() {
-        do {
-            let all = try PersonalIdentityVault.savedIdentities()
-            let id = try PersonalIdentityVault.selectedID()
-            count = all.count
-            latest = all.first { $0.id == id } ?? all.first
-        } catch { message = error.localizedDescription }
+        Task {
+            do {
+                let (all, id) = try await PersonalIdentityVault.offMain {
+                    (try PersonalIdentityVault.savedIdentities(), try PersonalIdentityVault.selectedID())
+                }
+                count = all.count
+                latest = all.first { $0.id == id } ?? all.first
+            } catch { message = error.localizedDescription }
+        }
     }
     private func receive(_ url: URL, kind: ImportKind) {
         let access = url.startAccessingSecurityScopedResource()

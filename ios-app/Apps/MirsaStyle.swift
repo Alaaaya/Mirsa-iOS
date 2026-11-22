@@ -20,6 +20,14 @@ struct MirsaScroll<Content: View>: View {
 }
 
 extension View {
+    /// For plain Lists/Forms in sheets and pushed screens: hides the system grouped
+    /// background (pure black in dark mode) and draws the page backdrop edge to edge.
+    func mirsaListBackground() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(AuroraBackground().ignoresSafeArea())
+    }
+
     func mirsaScreen() -> some View {
         self
             .scrollContentBackground(.hidden)
@@ -101,6 +109,15 @@ struct LiquidBackground: View {
 private struct LiquidBackdrop: View {
     let size: CGSize
     let paused: Bool
+    @Environment(\.mirsaTabActive) private var tabActive
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// Drift phases. Driven by Core Animation (repeat-forever springs on offsets), not a
+    /// per-frame TimelineView: the old 15 fps timeline rebuilt and re-blurred both orbs on
+    /// the main thread in every retained tab copy, which stuttered scrolling app-wide.
+    @State private var drift = false
+    private var animating: Bool { !paused && tabActive && !reduceMotion && scenePhase == .active }
+
     var body: some View {
         let w = size.width, h = size.height
         ZStack {
@@ -111,28 +128,35 @@ private struct LiquidBackdrop: View {
                            center: UnitPoint(x: 0, y: 0.46), startRadius: 0, endRadius: 280)
             RadialGradient(colors: [Color(red: 236 / 255, green: 72 / 255, blue: 153 / 255).opacity(0.42), .clear],
                            center: UnitPoint(x: 1, y: 0.88), startRadius: 0, endRadius: 310)
-            TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: paused)) { ctx in
-                let t = ctx.date.timeIntervalSinceReferenceDate
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255),
-                                                      Color(red: 34 / 255, green: 211 / 255, blue: 238 / 255)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 190, height: 190)
-                        .opacity(0.55).blur(radius: 6)
-                        .position(x: w - 65 + sin(t * 0.20) * 14, y: 245 + cos(t * 0.17) * 18)
-                    Circle()
-                        .fill(LinearGradient(colors: [Color(red: 129 / 255, green: 140 / 255, blue: 248 / 255),
-                                                      Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 120, height: 120)
-                        .opacity(0.5).blur(radius: 4)
-                        .position(x: 100 + cos(t * 0.15) * 16, y: min(h * 0.58, 490) + sin(t * 0.22) * 20)
-                }
-                .frame(width: w, height: h)
-            }
+            Circle()
+                .fill(LinearGradient(colors: [Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255),
+                                              Color(red: 34 / 255, green: 211 / 255, blue: 238 / 255)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 190, height: 190)
+                .opacity(0.55).blur(radius: 6)
+                .position(x: w - 65, y: 245)
+                .offset(x: drift ? 14 : -14)
+                .animation(animating ? .easeInOut(duration: 15.7).repeatForever(autoreverses: true) : .default, value: drift)
+                .offset(y: drift ? -18 : 18)
+                .animation(animating ? .easeInOut(duration: 18.5).repeatForever(autoreverses: true) : .default, value: drift)
+            Circle()
+                .fill(LinearGradient(colors: [Color(red: 129 / 255, green: 140 / 255, blue: 248 / 255),
+                                              Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 120, height: 120)
+                .opacity(0.5).blur(radius: 4)
+                .position(x: 100, y: min(h * 0.58, 490))
+                .offset(x: drift ? -16 : 16)
+                .animation(animating ? .easeInOut(duration: 20.9).repeatForever(autoreverses: true) : .default, value: drift)
+                .offset(y: drift ? 20 : -20)
+                .animation(animating ? .easeInOut(duration: 14.3).repeatForever(autoreverses: true) : .default, value: drift)
         }
         .frame(width: w, height: h)
+        .onAppear { if animating { drift = true } }
+        .onChange(of: animating) { _, on in
+            // Stopping settles the orbs in place (a short default animation), restarting resumes the drift.
+            drift = on
+        }
     }
 }
 
@@ -146,6 +170,40 @@ extension EnvironmentValues {
         get { self[MirsaBackdropFrameKey.self] }
         set { self[MirsaBackdropFrameKey.self] = newValue }
     }
+}
+/// False inside a retained but hidden tab of ContentView's custom tab host, so its
+/// decorative animations (backdrop drift) stop instead of running off screen.
+private struct MirsaTabActiveKey: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+extension EnvironmentValues {
+    var mirsaTabActive: Bool {
+        get { self[MirsaTabActiveKey.self] }
+        set { self[MirsaTabActiveKey.self] = newValue }
+    }
+}
+/// Bottom room the floating dock needs, published by LiquidTabChrome to its tab.
+/// SwiftUI `safeAreaPadding` does not reach scroll views hosted inside a UIKit
+/// NavigationStack/NavigationView (Form/List), so their last rows slid under the dock.
+private struct MirsaDockClearanceKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+extension EnvironmentValues {
+    var mirsaDockClearance: CGFloat {
+        get { self[MirsaDockClearanceKey.self] }
+        set { self[MirsaDockClearanceKey.self] = newValue }
+    }
+}
+struct MirsaDockClearance: ViewModifier {
+    @Environment(\.mirsaDockClearance) private var clearance
+    func body(content: Content) -> some View {
+        content.contentMargins(.bottom, clearance, for: .scrollContent)
+    }
+}
+extension View {
+    /// Apply to a Form/List/ScrollView inside a tab's NavigationStack so its last rows
+    /// can scroll above the floating dock (no-op outside the tab host).
+    func mirsaDockClearance() -> some View { modifier(MirsaDockClearance()) }
 }
 struct MirsaWindowBackdropHost: ViewModifier {
     func body(content: Content) -> some View {

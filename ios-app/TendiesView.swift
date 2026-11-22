@@ -276,7 +276,9 @@ struct TendiesView: View {
                 // input in the reduced viewport instead of aligning to the keyboard edge.
                 withAnimation { scroll.scrollTo("wallpaper-description-row", anchor: .center) }
             }
-            .toolbarBackground(.visible, for: .navigationBar)
+            // Transparent at rest, frosted glass once content scrolls under it. A forced
+            // visible bar drew a solid band at the top edge under the Tools picker.
+            .toolbarBackground(.automatic, for: .navigationBar)
             .navigationTitle(TendiesSection.name)
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showFilePicker, onDismiss: presentPickedInstall) {
@@ -444,7 +446,8 @@ struct TendieRowView: View {
             Toggle("", isOn: $item.isSelected)
                 .labelsHidden()
 
-            if let imgData = item.previewImageData, let uiImg = UIImage(data: imgData) {
+            // Downsampled once to the 44×60 row size instead of a full decode per render.
+            if let imgData = item.previewImageData, let uiImg = MirsaThumbnailCache.image(imgData, key: "tendie|\(item.id)", maxPixel: 180) {
                 Image(uiImage: uiImg)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -529,7 +532,7 @@ struct TendieDetailSheet: View {
         NavigationStack {
             List {
                 Section {
-                    if let imgData = item.previewImageData, let uiImg = UIImage(data: imgData) {
+                    if let imgData = item.previewImageData, let uiImg = MirsaThumbnailCache.image(imgData, key: "tendie-detail|\(item.id)", maxPixel: 1400) {
                         Image(uiImage: uiImg)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -541,17 +544,17 @@ struct TendieDetailSheet: View {
                 }
 
                 Section(MirsaTr.lit("Information")) {
-                    detailRow(title: "Name", value: item.name)
-                    detailRow(title: "File Name", value: item.fileName)
-                    detailRow(title: "Type", value: item.posterType.displayName)
-                    detailRow(title: "Descriptors", value: "\(item.descriptorCount)")
-                    detailRow(title: "Target Extension", value: item.posterType.extensionBundleId)
-                    detailRow(title: "Format", value: item.isContainer ? "App Container" : "Descriptor Archive")
+                    detailRow(title: MirsaTr.lit("Name"), value: item.name)
+                    detailRow(title: tr5("File name", "اسم الملف", de: "Dateiname", ckb: "ناوی فایل", kmr: "Navê pelê"), value: item.fileName)
+                    detailRow(title: MirsaTr.lit("Type"), value: item.posterType.displayName)
+                    detailRow(title: tr5("Descriptors", "الواصفات", de: "Deskriptoren", ckb: "وەسفکەرەکان", kmr: "Danasîner"), value: "\(item.descriptorCount)")
+                    detailRow(title: tr5("Target extension", "الإضافة المستهدفة", de: "Ziel-Erweiterung", ckb: "پاشکۆی ئامانج", kmr: "Pêveka armanc"), value: item.posterType.extensionBundleId)
+                    detailRow(title: tr5("Format", "الصيغة", de: "Format", ckb: "فۆرمات", kmr: "Format"), value: item.isContainer ? "App Container" : "Descriptor Archive")
                     if item.unsafeContainer {
-                        detailRow(title: "Warning", value: "Contains SQLite database")
+                        detailRow(title: tr5("Warning", "تحذير", de: "Warnung", ckb: "ئاگاداری", kmr: "Hişyarî"), value: tr5("Contains SQLite database", "فيه قاعدة بيانات SQLite", de: "Enthält eine SQLite-Datenbank", ckb: "بنکەدراوەی SQLite تێدایە", kmr: "Danegeheke SQLite tê de heye"))
                     }
                 }
-            }
+            }.mirsaListBackground()
             .navigationTitle(item.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
