@@ -682,8 +682,11 @@ struct SourcesTab: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            // Reserve scrolling space inside the List; the full-window theme stays behind the dock.
-            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
+            // Bound the UIKit List viewport above the floating dock. Scroll-content
+            // margins alone still let visible/hittable rows sit behind its overlay.
+            // The backdrop below is deliberately outside this padding, so it
+            // continues to the window edge instead of exposing a bottom band.
+            .padding(.bottom, MirsaTabBarMetrics.clearance)
             .environment(\.editMode, $editMode)
             .environment(\.defaultMinListRowHeight, 44)
             .refreshable { await store.refreshAll() }
@@ -965,8 +968,11 @@ struct SourceDetailView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-            // Reserve scrolling space inside the List; the full-window theme stays behind the dock.
-            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
+            // Bound the UIKit List viewport above the floating dock. Scroll-content
+            // margins alone still let visible/hittable rows sit behind its overlay.
+            // The backdrop below is deliberately outside this padding, so it
+            // continues to the window edge instead of exposing a bottom band.
+            .padding(.bottom, MirsaTabBarMetrics.clearance)
         .background(SourcesThemeBackground(theme: t, glowTint: large ? sourceTint : t.accent[0]))
         .task(id: source.url) { await store.ensureLoaded(source.url) }
         .task(id: "\(source.url)|\(all.count)") { await countNewThisWeek(all) }
