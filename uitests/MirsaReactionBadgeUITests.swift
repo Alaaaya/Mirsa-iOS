@@ -26,7 +26,8 @@ final class MirsaReactionBadgeUITests: XCTestCase {
             let badge = badges.element(boundBy: 0)
             XCTAssertEqual(badge.label, "❤️")
             XCTAssertEqual(badge.frame.width, badge.frame.height, accuracy: 1)
-            XCTAssertEqual(badge.frame.width, 32, accuracy: 2)
+            // Accessibility frame includes the one-point border on each side.
+            XCTAssertEqual(badge.frame.width, 34, accuracy: 0.5)
             // It must overlap the top-left of the actual short bubble, not its
             // invisible 300-point wrapper, in RTL and LTR alike.
             XCTAssertLessThan(badge.frame.midY, text.frame.midY)
