@@ -1285,6 +1285,8 @@ struct LiquidTabChrome: ViewModifier {
                 // Reserve scroll/resting-control clearance in the safe area, not
                 // external padding that shortens the page and exposes a bottom band.
                 .safeAreaPadding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+                // UIKit-hosted Forms/Lists inside the tab read this (mirsaDockClearance()).
+                .environment(\.mirsaDockClearance, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }

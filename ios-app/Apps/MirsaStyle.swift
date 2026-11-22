@@ -182,6 +182,29 @@ extension EnvironmentValues {
         set { self[MirsaTabActiveKey.self] = newValue }
     }
 }
+/// Bottom room the floating dock needs, published by LiquidTabChrome to its tab.
+/// SwiftUI `safeAreaPadding` does not reach scroll views hosted inside a UIKit
+/// NavigationStack/NavigationView (Form/List), so their last rows slid under the dock.
+private struct MirsaDockClearanceKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+extension EnvironmentValues {
+    var mirsaDockClearance: CGFloat {
+        get { self[MirsaDockClearanceKey.self] }
+        set { self[MirsaDockClearanceKey.self] = newValue }
+    }
+}
+struct MirsaDockClearance: ViewModifier {
+    @Environment(\.mirsaDockClearance) private var clearance
+    func body(content: Content) -> some View {
+        content.contentMargins(.bottom, clearance, for: .scrollContent)
+    }
+}
+extension View {
+    /// Apply to a Form/List/ScrollView inside a tab's NavigationStack so its last rows
+    /// can scroll above the floating dock (no-op outside the tab host).
+    func mirsaDockClearance() -> some View { modifier(MirsaDockClearance()) }
+}
 struct MirsaWindowBackdropHost: ViewModifier {
     func body(content: Content) -> some View {
         GeometryReader { geo in

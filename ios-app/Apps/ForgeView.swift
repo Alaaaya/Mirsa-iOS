@@ -93,6 +93,8 @@ struct ForgeView: View {
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
             }.padding(MirsaSpacing.page).frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Hosted in a NavigationView: keep the last card clear of the floating dock.
+        .mirsaDockClearance()
         .overlay { if let b = store.busy { ProgressView(b).padding().appsGlass(cornerRadius: MirsaRadius.m) } }
         .navigationBarTitleDisplayMode(.inline).mirsaScreen()
         .fileImporter(isPresented: $picking, allowedContentTypes: IPAPick.types) { r in
