@@ -147,7 +147,8 @@ extension EnvironmentValues {
         set { self[MirsaBackdropFrameKey.self] = newValue }
     }
 }
-struct MirsaWindowBackdropHost: ViewModifier {
+struct MirsaWindowBackdropHost<Backdrop: View>: ViewModifier {
+    @ViewBuilder var backdrop: () -> Backdrop
     func body(content: Content) -> some View {
         GeometryReader { geo in
             let local = geo.frame(in: .global)
@@ -157,6 +158,15 @@ struct MirsaWindowBackdropHost: ViewModifier {
                                 height: local.height + safe.top + safe.bottom)
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Paint a full-window sibling, not a background on the safe-area
+                // GeometryReader wrapper. In particular, ScreenAnchored's clip
+                // must receive window bounds, not the inset content rectangle.
+                .background(alignment: .topLeading) {
+                    backdrop()
+                        .frame(width: window.width, height: window.height)
+                        .offset(x: -safe.leading, y: -safe.top)
+                        .allowsHitTesting(false)
+                }
                 .environment(\.mirsaBackdropFrame, window)
         }
     }

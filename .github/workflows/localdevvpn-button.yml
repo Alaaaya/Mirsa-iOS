@@ -2,7 +2,7 @@ name: LocalDevVPN button unsigned validation
 on:
   workflow_dispatch:
   push:
-    branches: [mirsa/open-localdevvpn]
+    branches: [mirsa/edge297]
 permissions:
   contents: read
 jobs:
@@ -47,11 +47,11 @@ jobs:
           import plistlib, zipfile
           with zipfile.ZipFile('build/Mirsa.ipa') as z:
               p=plistlib.loads(z.read('Payload/Mirsa.app/Info.plist'))
-              assert p['CFBundleShortVersionString']=='2.9.6', p
-              assert p['CFBundleVersion']=='8.536.1', p
+              assert p['CFBundleShortVersionString']=='2.9.7', p
+              assert p['CFBundleVersion']=='8.537.1', p
               assert 'localdevvpn' in p['LSApplicationQueriesSchemes']
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Mirsa-localdevvpn-2.9.6
+          name: Mirsa-localdevvpn-2.9.7
           path: build/Mirsa.ipa
