@@ -3,6 +3,25 @@ import Foundation
 /// One presentation boundary for install, renewal and signing diagnostics.
 /// Keep the useful stage/OS reason, not Rust source locations or sandbox paths.
 enum InstallErrorText {
+    /// InstallationProxy uses this precise reason when an installed copy has a
+    /// different application-identifier entitlement. Do not auto-delete user apps.
+    static func identifierConflictMessage(languageCode: String) -> String {
+        switch languageCode {
+        case "ar": return "احذف النسخة القديمة أولاً، وبعدين جرّب تثبّت التطبيق من جديد."
+        case "de": return "Lösche zuerst die alte Version der App und versuche die Installation erneut."
+        case "kmr": return "Pêşî guhertoya kevn jê bibe, paşê dîsa appê saz bike."
+        case "ckb": return "سەرەتا وەشانی کۆن بسڕەوە، پاشان دووبارە ئەپەکە دابمەزرێنە."
+        default: return "Delete the old version of the app first, then try installing again."
+        }
+    }
+
+    private static func isIdentifierConflict(_ raw: String) -> Bool {
+        raw.localizedCaseInsensitiveContains("MismatchedApplicationIdentifierEntitlement") ||
+            ["ar", "en", "de", "kmr", "ckb"].contains {
+                raw == identifierConflictMessage(languageCode: $0)
+            }
+    }
+
     /// A terminated process is not an installation-proxy failure. In particular,
     /// replacing Mirsa itself ends the process before Swift defer blocks execute.
     static func completedSelfUpdate(expected: String?, previous: String?, current: String) -> Bool {
@@ -16,7 +35,10 @@ enum InstallErrorText {
             : "Mirsa closed during installation; no failure reason was recorded. If you were updating Mirsa, check its version in Settings first; the update may have completed. Retry only if the requested app is not installed."
     }
 
-    static func nextStep(for raw: String, arabic: Bool) -> String {
+    static func nextStep(for raw: String, arabic: Bool, languageCode: String? = nil) -> String {
+        if isIdentifierConflict(raw) {
+            return identifierConflictMessage(languageCode: languageCode ?? (arabic ? "ar" : "en"))
+        }
         let text = raw.lowercased()
         if text.contains("1100") || text.contains("session expired") || text.contains("not signed in") {
             return arabic ? "سجّل خروج من Apple ID داخل مرسى وسجّل دخول من جديد، وبعدين جرّب." : "Sign out of Apple ID in Mirsa, sign in again, then retry."
@@ -36,7 +58,10 @@ enum InstallErrorText {
         return arabic ? "انسخ السجل من هالتنبيه وابعتو مع وصف اللي صار قبل ما تعيد المحاولة." : "Copy the log from this alert and send it with what happened before retrying."
     }
 
-    static func sanitize(_ raw: String, arabic: Bool) -> String {
+    static func sanitize(_ raw: String, arabic: Bool, languageCode: String? = nil) -> String {
+        if isIdentifierConflict(raw) {
+            return identifierConflictMessage(languageCode: languageCode ?? (arabic ? "ar" : "en"))
+        }
         if raw == "MIRSA_SOURCE_IPA_MISSING" {
             return arabic ? "ملف التثبيت الأصلي مو موجود. استورد ملف الـIPA أو حمّله من الرابط من جديد." : "The original IPA is missing. Import the IPA again or download it from its link."
         }

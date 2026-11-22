@@ -84,7 +84,7 @@ final class AppsStore: ObservableObject {
         didSet {
             if error == nil { errorOffersLocalDevVPN = false; errorOffersSettings = false; errorOffersReimport = false }
             if let error {
-                let safe = InstallErrorText.sanitize(error, arabic: L.isArabic)
+                let safe = InstallErrorText.sanitize(error, arabic: L.isArabic, languageCode: L.lang.rawValue)
                 if safe != error { self.error = safe }
             }
         }
@@ -280,7 +280,7 @@ final class AppsStore: ObservableObject {
 
     /// Apple ID install failures end with what to do next, in the app language.
     static func withNextStep(_ message: String) -> String {
-        let step = InstallErrorText.nextStep(for: message, arabic: L.isArabic)
+        let step = InstallErrorText.nextStep(for: message, arabic: L.isArabic, languageCode: L.lang.rawValue)
         return message.contains(step) ? message : message + "\n\n" + step
     }
 
@@ -329,8 +329,11 @@ final class AppsStore: ObservableObject {
 
     static func openLocalDevVPN() {
         shared.awaitingVPNReturn = true
-        guard let appURL = URL(string: "localdevvpn://enable?scheme=mirsa"),
-              let storeURL = URL(string: "https://apps.apple.com/us/app/localdevvpn/id6755608044") else { return }
+        // Never send a main-app retry to the shared legacy scheme: iOS may
+        // launch Setup instead, losing the in-memory pending update closure.
+        let appURL = LocalDevVPNRoute.enableURL(isSetup: isSetupMode,
+            mainInstalled: isSetupMode && UIApplication.shared.canOpenURL(LocalDevVPNRoute.mainURL))
+        guard let storeURL = URL(string: "https://apps.apple.com/us/app/localdevvpn/id6755608044") else { return }
         guard UIApplication.shared.canOpenURL(appURL) else {
             UIApplication.shared.open(storeURL)
             return
@@ -1062,6 +1065,8 @@ final class AppsStore: ObservableObject {
                 info["CFBundleDisplayName"] = "Mirsa"
                 info["CFBundleName"] = "Mirsa"
                 info.removeObject(forKey: "MirsaSetupMode")
+                info["CFBundleURLTypes"] = LocalDevVPNRoute.mainURLTypes(
+                    info["CFBundleURLTypes"] as? [[String: Any]] ?? [])
                 if source != nil, let bg = Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") {
                     info["BGTaskSchedulerPermittedIdentifiers"] = bg
                 }
@@ -1122,9 +1127,9 @@ final class AppsStore: ObservableObject {
             return L.t("err.device") + "\n\n" + tr(failure.message(arabic: false), failure.message(arabic: true))
         }
         if raw.contains("Device connection failed") || raw.contains("RemoteXPC") || raw.contains("timed out") {
-            return L.t("err.device") + "\n\n" + InstallErrorText.sanitize(raw, arabic: L.isArabic)
+            return L.t("err.device") + "\n\n" + InstallErrorText.sanitize(raw, arabic: L.isArabic, languageCode: L.lang.rawValue)
         }
-        return InstallErrorText.sanitize(raw, arabic: L.isArabic)
+        return InstallErrorText.sanitize(raw, arabic: L.isArabic, languageCode: L.lang.rawValue)
     }
 
     // MARK: Launch

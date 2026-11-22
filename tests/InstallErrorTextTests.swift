@@ -2,6 +2,22 @@ import XCTest
 @testable import Mirsa
 
 final class InstallErrorTextTests: XCTestCase {
+    func testIdentifierConflictExplainsRemovalInAllFiveLanguagesWithoutGenericLogAdvice() {
+        let raw = "Install failed: MismatchedApplicationIdentifierEntitlement: installed app has a different application-identifier"
+        let words = ["ar": "احذف النسخة القديمة أولاً", "en": "Delete the old version", "de": "Lösche zuerst", "kmr": "Pêşî", "ckb": "سەرەتا"]
+        for (language, expected) in words {
+            let safe = InstallErrorText.sanitize(raw, arabic: language == "ar", languageCode: language)
+            XCTAssertTrue(safe.contains(expected))
+            XCTAssertFalse(safe.contains("MismatchedApplicationIdentifierEntitlement"))
+            XCTAssertEqual(InstallErrorText.sanitize(safe, arabic: language == "ar", languageCode: language), safe)
+            XCTAssertEqual(InstallErrorText.nextStep(for: raw, arabic: language == "ar", languageCode: language), safe)
+            XCTAssertEqual(InstallErrorText.nextStep(for: safe, arabic: language == "ar", languageCode: language), safe)
+        }
+        XCTAssertTrue(InstallErrorText.sanitize(raw.lowercased(), arabic: true).contains("احذف النسخة القديمة أولاً"))
+        XCTAssertEqual(InstallErrorText.sanitize("Install failed: unrelated entitlement failure", arabic: false),
+                       "Install failed: unrelated entitlement failure")
+    }
+
     func testOnlyExactChangedSelfBuildSuppressesInterruptedAlert() {
         XCTAssertTrue(InstallErrorText.completedSelfUpdate(expected: "476", previous: "472", current: "476"))
         XCTAssertFalse(InstallErrorText.completedSelfUpdate(expected: "476", previous: "476", current: "476"))

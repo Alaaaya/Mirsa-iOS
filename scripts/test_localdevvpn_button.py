@@ -5,7 +5,9 @@ import plistlib
 root = pathlib.Path(__file__).resolve().parents[1]
 store = (root / "ios-app/Apps/AppsStore.swift").read_text()
 assert "localdevvpn" in plistlib.loads((root / "ios-app/Info.plist").read_bytes())["LSApplicationQueriesSchemes"]
-assert 'URL(string: "localdevvpn://enable?scheme=mirsa")' in store
+assert 'LocalDevVPNRoute.enableURL(isSetup: isSetupMode' in store
+assert 'UIApplication.shared.canOpenURL(LocalDevVPNRoute.mainURL)' in store
+assert "mirsa-container" in plistlib.loads((root / "ios-app/Info.plist").read_bytes())["LSApplicationQueriesSchemes"]
 assert 'https://apps.apple.com/us/app/localdevvpn/id6755608044' in store
 assert "canOpenURL(appURL)" in store and "if !opened" in store
 assert "if error == nil { errorOffersLocalDevVPN = false;" in store

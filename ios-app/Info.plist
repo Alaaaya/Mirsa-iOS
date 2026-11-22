@@ -21,6 +21,7 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>localdevvpn</string>
+		<string>mirsa-container</string>
 		<string>prefs</string>
 		<string>app-prefs</string>
 		<string>App-prefs</string>
