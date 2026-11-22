@@ -1,0 +1,61 @@
+name: Combined 22nov private verification
+on:
+  workflow_dispatch:
+  push:
+    branches: [combined/22nov]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+      - name: Swift parse audit
+        run: find ios-app uitests tests -name "*.swift" -print0 | xargs -0 xcrun swiftc -frontend -parse
+      - name: Cellular helper and router compiled regression
+        run: python3 scripts/appstore/encrypted-cellular-tests.py
+      - name: Verify LocalDevVPN routing regression
+        run: python3 scripts/test_localdevvpn_button.py
+      - name: Compiled VPN return and retained update runtime regression
+        run: python3 scripts/test_vpn_routing_runtime.py
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Rebuild current device FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Prepare SDK and project
+        run: |
+          bash scripts/prepare-privatekits-sdk.sh iphoneos
+          brew install xcodegen
+          xcodegen generate
+          mkdir -p Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+      - name: Compile and package without publishing
+        run: env -u GITHUB_RUN_NUMBER bash build-ipa.sh
+      - name: Verify delivered version and scheme
+        run: |
+          python3 - <<'PY'
+          import plistlib, zipfile
+          with zipfile.ZipFile('build/Mirsa.ipa') as z:
+              p=plistlib.loads(z.read('Payload/Mirsa.app/Info.plist'))
+              assert p['CFBundleShortVersionString']=='2.9.6', p
+              assert p['CFBundleVersion']=='8.539.1', p
+              assert 'localdevvpn' in p['LSApplicationQueriesSchemes']
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-combined-22nov
+          path: build/Mirsa.ipa
