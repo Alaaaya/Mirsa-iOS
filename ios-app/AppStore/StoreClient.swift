@@ -257,7 +257,16 @@ actor MirsaStoreClient {
             try check(run)
             // Retain refreshed buy-response cookies even when downloading later fails.
             try persist(owner)
-            let output = try await engine.manifest(account: &owner, app: fresh, version: version)
+            let output: DownloadOutput
+            do { output = try await engine.manifest(account: &owner, app: fresh, version: version) }
+            catch {
+                // A licence granted a moment ago can take a second to reach the download
+                // service (9610). Retry the manifest once instead of reporting "not owned".
+                guard Self.licenceMissing(error) else { throw error }
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                try check(run)
+                output = try await engine.manifest(account: &owner, app: fresh, version: version)
+            }
             try check(run)
             try validate(output: output, app: app, version: version)
             try persist(owner)
@@ -455,6 +464,12 @@ actor MirsaStoreClient {
     }
     /// buyProduct's "Sign In to the iTunes Store" / 2034 / 2042 reply for a new free licence:
     /// Apple wants the password re-entered for this acquisition. Download stages are not matched.
+    static func licenceMissing(_ error: Error) -> Bool {
+        if let diagnostic = error as? StoreProductDiagnostic { return diagnostic.requiresLicense }
+        if case ApplePackageError.licenseRequired = error { return true }
+        return false
+    }
+
     static func purchaseNeedsPassword(_ diagnostic: StoreProductDiagnostic) -> Bool {
         guard diagnostic.stage.hasPrefix("licence/") else { return false }
         if diagnostic.requiresReauthentication { return true }
