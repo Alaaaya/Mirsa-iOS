@@ -226,7 +226,18 @@ final class WallpaperSourceUITests: XCTestCase {
             let wide = app.buttons["wallpaper-preview-original-1"]
             XCTAssertTrue(wide.waitForExistence(timeout: 10))
             let scroll = app.scrollViews.containing(.textField, identifier: "wallpaper-source-url").firstMatch
-            for _ in 0..<5 { if wide.isHittable { break }; scroll.swipeUp() }
+            // Hittable includes partially visible cards. Reveal the entire card
+            // before checking its bounds, including single-column localized layouts.
+            for _ in 0..<8 {
+                let frame = wide.frame
+                let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
+                if viewport.contains(frame) { break }
+                let startY: CGFloat = frame.maxY > viewport.maxY ? 0.75 : 0.35
+                let endY: CGFloat = frame.maxY > viewport.maxY ? 0.35 : 0.75
+                scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+                    .press(forDuration: 0.05, thenDragTo:
+                        scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY)))
+            }
             let normal = app.buttons["wallpaper-preview-original-0"]
             XCTAssertEqual(wide.frame.width, normal.frame.width, accuracy: 1)
             XCTAssertTrue(app.windows.firstMatch.frame.contains(wide.frame))
