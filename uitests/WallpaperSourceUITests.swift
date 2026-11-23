@@ -156,6 +156,58 @@ final class WallpaperSourceUITests: XCTestCase {
             XCTAssertFalse(app.textFields["wallpaper-source-url"].exists)
         }
     }
+    func testFullscreenImageVideoAndWideThumbnail() {
+        for language in ["ar", "en", "de", "kmr", "ckb"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
+                "-MirsaWallpaperSourceFixture", "-mirsa.appLanguage", language]
+            app.launch()
+            let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+            if alert.waitForExistence(timeout: 2) { alert.buttons.firstMatch.tap() }
+            XCTAssertTrue(app.buttons["tools-section-store"].waitForExistence(timeout: 15))
+            app.buttons["tools-section-store"].tap()
+            app.buttons["tools-store-cat-wallpapers"].tap()
+            let wide = app.buttons["wallpaper-preview-original-1"]
+            XCTAssertTrue(wide.waitForExistence(timeout: 10))
+            let scroll = app.scrollViews.containing(.textField, identifier: "wallpaper-source-url").firstMatch
+            for _ in 0..<5 { if wide.isHittable { break }; scroll.swipeUp() }
+            let normal = app.buttons["wallpaper-preview-original-0"]
+            XCTAssertEqual(wide.frame.width, normal.frame.width, accuracy: 1)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(wide.frame))
+            XCTAssertGreaterThanOrEqual(normal.frame.minX, 0)
+            shot(language + "_wide_thumbnail_bounded")
+            let multi = app.buttons["wallpaper-preview-original-2"]
+            // Oversized multi-frame UIImage must never enlarge a neighbouring column.
+            if multi.exists {
+                XCTAssertEqual(multi.frame.width, wide.frame.width, accuracy: 1)
+                XCTAssertGreaterThanOrEqual(multi.frame.minX, 0)
+                XCTAssertLessThanOrEqual(multi.frame.maxX, app.windows.firstMatch.frame.maxX)
+            }
+            wide.tap()
+            let close = app.buttons["wallpaper-preview-close"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            let install = app.buttons["wallpaper-preview-install"]
+            XCTAssertTrue(install.exists && install.isEnabled)
+            XCTAssertLessThan(close.frame.midX, app.windows.firstMatch.frame.midX)
+            XCTAssertTrue(app.staticTexts["Night tide"].exists)
+            shot(language + "_fullscreen_static_image")
+            close.tap()
+            normal.tap()
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.descendants(matching: .any)["wallpaper-preview-video"].waitForExistence(timeout: 10))
+            shot(language + "_fullscreen_video_frame_a")
+            // Wait for actual playback frames, not a replacement still-image fixture.
+            let moving = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (app.descendants(matching: .any)["wallpaper-preview-video"].value as? String) == "playing-muted"
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [moving], timeout: 15), .completed)
+            shot(language + "_fullscreen_video_frame_b")
+            close.tap()
+            XCTAssertFalse(app.buttons["wallpaper-preview-install"].exists)
+            app.terminate()
+        }
+    }
+
     func testLiveDefaultCAPlaygroundCatalog() {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",

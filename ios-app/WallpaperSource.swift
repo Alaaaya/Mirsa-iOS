@@ -15,6 +15,7 @@ struct WallpaperSourceFeed: Codable, Equatable {
         for entry in wallpapers {
             guard !entry.id.isEmpty, entry.id.count <= 160, !entry.name.isEmpty, entry.name.count <= 160,
                   entry.author.count <= 160, entry.category.count <= 100,
+                  (entry.description?.count ?? 0) <= 4000,
                   entry.size > 0, entry.size <= 536_870_912,
                   Self.allowed(entry.url), entry.url.pathExtension.lowercased() == "tendies",
                   Self.allowed(entry.previewImage),
@@ -37,6 +38,7 @@ struct WallpaperSourceEntry: Codable, Equatable, Identifiable {
     var url: URL
     var size: Int64
     var category: String
+    var description: String? = nil
     var sizeIsEstimated: Bool? = nil
 }
 

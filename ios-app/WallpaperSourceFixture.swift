@@ -16,10 +16,10 @@ enum WallpaperSourceFixture {
                     name: ["Solar arc", "Night tide", "Cinder", "Dune", "Lagoon", "Halo"][index],
                     author: "Mirsa",
                     previewImage: URL(string: "https://wallpaper-fixture.invalid/\(index).png")!,
-                    previewVideo: index == 0 ? URL(string: "https://wallpaper-fixture.invalid/preview.mp4")! : nil,
+                    previewVideo: index == 0 ? Bundle.main.url(forResource: "WallpaperPreviewTest", withExtension: "mp4")! : nil,
                     url: URL(string: "https://wallpaper-fixture.invalid/\(index).tendies")!,
                     size: Int64(1_048_576 + index * 65_536),
-                    category: "Original procedural art")
+                    category: "Original procedural art", description: "Original wallpaper preview test artwork.")
             })
     }
 
@@ -35,9 +35,17 @@ enum WallpaperSourceFixture {
             (.init(red: 0.08, green: 0.07, blue: 0.2, alpha: 1), .init(red: 0.65, green: 0.72, blue: 1, alpha: 1))
         ]
         let palette = palettes[index]
+        if index == 2 {
+            let frames = [UIColor.red, UIColor.orange, UIColor.yellow].map { color in
+                UIGraphicsImageRenderer(size: CGSize(width: 2400, height: 360)).image { context in
+                    color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2400, height: 360))
+                }
+            }
+            return UIImage.animatedImage(with: frames, duration: 1)
+        }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        return UIGraphicsImageRenderer(size: CGSize(width: 420, height: 720), format: format).image { context in
+        return UIGraphicsImageRenderer(size: CGSize(width: index == 1 ? 2100 : 420, height: 720), format: format).image { context in
             palette.0.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 420, height: 720))
             for ring in stride(from: 14, through: 0, by: -1) {

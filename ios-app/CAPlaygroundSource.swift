@@ -13,8 +13,9 @@ enum CAPlaygroundSource {
         let creator: String?
         let file: String
         let preview: String
+        let description: String?
 
-        private enum CodingKeys: String, CodingKey { case name, id, creator, file, preview }
+        private enum CodingKeys: String, CodingKey { case name, id, creator, file, preview, description }
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             name = try values.decode(String.self, forKey: .name)
@@ -27,6 +28,7 @@ enum CAPlaygroundSource {
             }
             creator = try values.decodeIfPresent(String.self, forKey: .creator)
             file = try values.decode(String.self, forKey: .file)
+            description = try values.decodeIfPresent(String.self, forKey: .description)
             preview = try values.decode(String.self, forKey: .preview)
         }
     }
@@ -49,7 +51,7 @@ enum CAPlaygroundSource {
         guard upstream.wallpapers.count <= 1000 else { throw WallpaperSourceError.invalid }
         let entries = try upstream.wallpapers.map { item -> WallpaperSourceEntry in
             let previewExtension = (item.preview as NSString).pathExtension.lowercased()
-            guard ["gif", "png", "jpg", "jpeg", "webp"].contains(previewExtension) else {
+            guard ["gif", "png", "jpg", "jpeg", "webp", "mp4", "mov", "m4v"].contains(previewExtension) else {
                 throw WallpaperSourceError.invalid
             }
             var entry = WallpaperSourceEntry(
@@ -58,6 +60,8 @@ enum CAPlaygroundSource {
                 url: try asset(item.file, prefix: "wallpapers/", extension: "tendies"),
                 size: limit, category: "CAPlayground"
             )
+            entry.description = item.description
+            if ["mp4", "mov", "m4v"].contains(previewExtension) { entry.previewVideo = entry.previewImage }
             // Upstream has no byte sizes. This is a bounded cap, never a fabricated exact size.
             entry.sizeIsEstimated = true
             return entry
