@@ -166,23 +166,30 @@ final class WallpaperSourceTests: XCTestCase {
         let end = try XCTUnwrap(source.range(of: "if showSaved {",
                                            range: start.upperBound..<source.endIndex))
         let callback = String(source[start.lowerBound..<end.lowerBound])
+        XCTAssertTrue(callback.contains("throw NSError"))
+        XCTAssertTrue(callback.contains("vm.errorMessage = nil"))
+        XCTAssertTrue(callback.contains("vm.saveTendieItems()"))
         // Store hiding changed the following sibling, not this import callback.
         // Keep the same required/forbidden contract and strengthen operation ordering.
         XCTAssertEqual(source.components(separatedBy: "WallpaperSourcesView(busy:").count - 1, 1)
-        let busyGuard = try XCTUnwrap(callback.range(of: "guard !wallpaperSourceBusy else { return }"))
+        let busyGuard = try XCTUnwrap(callback.range(of: "guard !wallpaperSourceBusy else {"))
         let importCall = try XCTUnwrap(callback.range(of: "vm.importTendieFiles(urls: [archive])"))
-        let nonemptyGuard = try XCTUnwrap(callback.range(of: "guard !ids.isEmpty else { return }"))
+        let nonemptyGuard = try XCTUnwrap(callback.range(of: "guard !ids.isEmpty else {"))
         let selection = try XCTUnwrap(callback.range(of: "ids.contains(vm.tendieItems[index].id)"))
-        let notification = try XCTUnwrap(callback.range(of: "mirsa.wallpaper.imported.open"))
+        let persisted = try XCTUnwrap(callback.range(of: "vm.saveTendieItems()"))
         XCTAssertLessThan(busyGuard.lowerBound, importCall.lowerBound)
         XCTAssertLessThan(importCall.lowerBound, nonemptyGuard.lowerBound)
         XCTAssertLessThan(nonemptyGuard.lowerBound, selection.lowerBound)
-        XCTAssertLessThan(selection.lowerBound, notification.lowerBound)
+        XCTAssertLessThan(selection.lowerBound, persisted.lowerBound)
         XCTAssertTrue(source.contains("model.category == .wallpapers && !showSaved"))
+        let view = try String(contentsOf: root.appendingPathComponent("ios-app/WallpaperSourceView.swift"), encoding: .utf8)
+        XCTAssertTrue(view.contains("mirsa.wallpaper.imported.open"))
+        XCTAssertTrue(view.contains("onDismiss:"))
+        XCTAssertTrue(view.contains("openImportedAfterDismiss = true"))
         let tendies = try String(contentsOf: root.appendingPathComponent("ios-app/TendiesView.swift"), encoding: .utf8)
         XCTAssertFalse(tendies.contains("WallpaperSourcesView("))
         for required in ["vm.importTendieFiles(urls: [archive])", "ids.contains(vm.tendieItems[index].id)",
-                         "mirsa.wallpaper.imported.open"] {
+                         "vm.saveTendieItems()"] {
             XCTAssertTrue(callback.contains(required), required)
         }
         for forbidden in ["installSelectedNow(", "flashTendies(", "TendiesEngine.", "PosterBoard",
@@ -266,6 +273,24 @@ extension WallpaperSourceTests {
 /// Intentional network gate, selected by the private wallpaper-load verification workflow.
 /// Uses the shipping bounded transport and decoder, never a fixture or duplicate parser.
 final class WallpaperSourceLiveTests: XCTestCase {
+    @MainActor
+    func testRealCAPlaygroundArchiveUsesProductionDownloadAndImporter() async throws {
+        let feed = try await WallpaperSourceNetwork.feed(CAPlaygroundSource.manifest)
+        let entry = try XCTUnwrap(feed.wallpapers.first(where: { $0.name == "11037 Case 1" }))
+        let archive = try await WallpaperSourceNetwork.archive(entry)
+        defer { try? FileManager.default.removeItem(at: archive.deletingLastPathComponent()) }
+        let model = AppViewModel()
+        let oldIDs = Set(model.tendieItems.map(\.id))
+        let ids = await model.importTendieFiles(urls: [archive])
+        XCTAssertFalse(ids.isEmpty, model.errorMessage ?? "No imported IDs returned")
+        guard let imported = model.tendieItems.first(where: { ids.contains($0.id) }) else { return XCTFail("Imported row missing") }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: imported.fileURL.path))
+        XCTAssertGreaterThan(imported.descriptorCount, 0)
+        let proof = XCTAttachment(string: "Production transport+Tendies importer accepted \(entry.url.absoluteString), descriptors=\(imported.descriptorCount). No App Group, system write, flash or respring requested.")
+        proof.name = "Live CAPlayground download and native import proof"; proof.lifetime = .keepAlways; add(proof)
+        if !oldIDs.contains(imported.id) { model.deleteTendie(item: imported) }
+    }
+
     func testBothApprovedLiveSourcesUseProductionTransportAndDecoder() async throws {
         let official = try await WallpaperSourceNetwork.feed(WallpaperSourceStore.official)
         XCTAssertEqual(official.name, "Mirsa Wallpapers")

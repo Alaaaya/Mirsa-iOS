@@ -3,7 +3,7 @@ import AVKit
 import WebKit
 
 enum WallpaperSourceText {
-    enum Key { case title, add, empty, failed, install, preview, remove, url, working, close }
+    enum Key { case title, add, empty, failed, install, preview, remove, url, working, close, importing, downloadFailed, importFailed }
     static func text(_ key: Key, language: AppLanguage = AppLanguageStore.snapshot) -> String {
         let values: [Key: [String]] = [
             .title: ["Wallpaper sources", "مصادر الخلفيات", "Hintergrundquellen", "Çavkaniyên wêneyan", "سەرچاوەی وێنەکان"],
@@ -15,6 +15,9 @@ enum WallpaperSourceText {
             .close: ["Close", "سكّر", "Schließen", "Bigire", "دابخە"],
             .remove: ["Remove source", "احذف المصدر", "Quelle entfernen", "Çavkaniyê jê bibe", "سەرچاوە بسڕەوە"],
             .url: ["HTTPS source URL", "رابط مصدر HTTPS", "HTTPS-Quellenadresse", "Girêdana çavkaniya HTTPS", "بەستەری سەرچاوەی HTTPS"],
+            .importing: ["Importing…", "عم نجهّز الخلفية…", "Wird importiert…", "Tê anîn…", "هاوردە دەکرێت…"],
+            .downloadFailed: ["Wallpaper download failed. Check your connection and try again.", "ما قدرنا ننزّل الخلفية. تأكد من الإنترنت وجرب كمان مرة.", "Download fehlgeschlagen. Prüfe die Verbindung und versuche es erneut.", "Wênesazî nehat daxistin. Girêdana xwe kontrol bike û dîsa biceribîne.", "داگرتنی وێنەزەمینەکە سەرکەوتوو نەبوو. پەیوەندییەکەت بپشکنە و دووبارە هەوڵ بدە."],
+            .importFailed: ["This file could not be imported as a wallpaper. Try another wallpaper.", "ما قدرنا نستورد هالملف كخلفية. جرّب خلفية تانية.", "Diese Datei konnte nicht als Hintergrund importiert werden. Versuche einen anderen Hintergrund.", "Ev pel wekî wênesazî nehat anîn. Wênesaziyeke din biceribîne.", "ئەم فایلە وەک وێنەزەمینە هاوردە نەکرا. وێنەزەمینەیەکی تر تاقی بکەرەوە."],
             .working: ["Downloading…", "عم ننزّل…", "Wird geladen…", "Tê daxistin…", "دادەبەزێت…"]
         ]
         let index: Int
@@ -33,9 +36,12 @@ struct WallpaperSourcesView: View {
     @StateObject private var store = WallpaperSourceStore()
     @State private var sourceURL = ""
     @State private var downloading: String?
+    @State private var transferProgress: Double?
+    @State private var importing = false
     @State private var preview: WallpaperPreviewSelection?
+    @State private var openImportedAfterDismiss = false
     let busy: Bool
-    let install: (URL) async -> Void
+    let install: (URL, String) async throws -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -92,9 +98,19 @@ struct WallpaperSourcesView: View {
         }.padding()
         .task { await store.refresh() }
         .refreshable { await store.refresh() }
-        .fullScreenCover(item: $preview) { selection in
+        .alert(WallpaperSourceText.text(.install), isPresented: Binding(
+            get: { store.error != nil && preview == nil },
+            set: { if !$0 { store.error = nil } })) {
+            Button(MirsaTr.lit("OK")) { store.error = nil }
+        } message: { Text(store.error ?? "") }
+        .fullScreenCover(item: $preview, onDismiss: {
+            if openImportedAfterDismiss {
+                openImportedAfterDismiss = false
+                openImported()
+            }
+        }) { selection in
             WallpaperSourcePreview(entry: selection.entry, busy: busy || downloading != nil,
-                                   downloading: downloading == selection.id) {
+                                   downloading: downloading == selection.id, progress: transferProgress, importing: importing, error: $store.error) {
                 download(selection.entry, source: selection.source)
             }
         }
@@ -150,7 +166,8 @@ struct WallpaperSourcesView: View {
             } label: {
                 HStack {
                     if downloading == source.absoluteString + entry.id { ProgressView().controlSize(.small) }
-                    Text(WallpaperSourceText.text(downloading == source.absoluteString + entry.id ? .working : .install))
+                    Text(WallpaperSourceText.text(downloading == source.absoluteString + entry.id ? (importing ? .importing : .working) : .install))
+                    if downloading == source.absoluteString + entry.id, !importing, let transferProgress { Text(transferProgress, format: .percent.precision(.fractionLength(0))) }
                 }.frame(maxWidth: .infinity, minHeight: 42)
             }
             .buttonStyle(.borderedProminent)
@@ -159,21 +176,52 @@ struct WallpaperSourcesView: View {
         }
     }
 
+    private func openImported() {
+        NotificationCenter.default.post(name: Notification.Name("mirsa.wallpaper.imported.open"), object: nil)
+    }
+
+    private func fetchArchive(_ entry: WallpaperSourceEntry) async throws -> URL {
+        #if DEBUG
+        if WallpaperSourceFixture.active {
+            if ProcessInfo.processInfo.environment["mirsa_wallpaper_source_download_error"] == "1" {
+                throw WallpaperSourceError.response
+            }
+            return try WallpaperSourceFixture.archive(for: entry)
+        }
+        #endif
+        return try await WallpaperSourceNetwork.archive(entry) { received, total in
+            await MainActor.run {
+                transferProgress = total.flatMap { $0 > 0 ? min(1, Double(received) / Double($0)) : nil }
+            }
+        }
+    }
+
     private func download(_ entry: WallpaperSourceEntry, source: URL) {
         guard !busy, downloading == nil else { return }
-                #if DEBUG
-                guard !WallpaperSourceFixture.active else { return }
-                #endif
-                downloading = source.absoluteString + entry.id
-                Task {
-                    defer { downloading = nil }
-                    do {
-                        let archive = try await WallpaperSourceNetwork.archive(entry)
-                        defer { try? FileManager.default.removeItem(at: archive.deletingLastPathComponent()) }
-                        preview = nil
-                        await install(archive)
-                    } catch { store.error = WallpaperSourceText.text(.failed) }
+        store.error = nil
+        transferProgress = nil
+        importing = false
+        downloading = source.absoluteString + entry.id
+        Task {
+            defer { downloading = nil; transferProgress = nil; importing = false }
+            do {
+                let archive = try await fetchArchive(entry)
+                defer { try? FileManager.default.removeItem(at: archive.deletingLastPathComponent()) }
+                importing = true
+                try await install(archive, entry.name)
+                if preview != nil {
+                    openImportedAfterDismiss = true
+                    preview = nil
+                } else {
+                    openImported()
                 }
+            } catch {
+                MirsaWallpaperEvidence.record("SOURCE IMPORT FAILED " + error.localizedDescription)
+                let raw = error.localizedDescription
+                let localized = MirsaWallpaperActionStrings.localizedError(raw)
+                store.error = localized != raw ? localized : WallpaperSourceText.text(importing ? .importFailed : .downloadFailed)
+            }
+        }
     }
 }
 
@@ -187,6 +235,9 @@ private struct WallpaperSourcePreview: View {
     let entry: WallpaperSourceEntry
     let busy: Bool
     let downloading: Bool
+    let progress: Double?
+    let importing: Bool
+    @Binding var error: String?
     let install: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -234,13 +285,18 @@ private struct WallpaperSourcePreview: View {
                 HStack {
                     if downloading { ProgressView().tint(.white) }
                     else { Image(systemName: "arrow.down.circle.fill") }
-                    Text(WallpaperSourceText.text(downloading ? .working : .install)).fontWeight(.semibold)
+                    Text(WallpaperSourceText.text(downloading ? (importing ? .importing : .working) : .install)).fontWeight(.semibold)
+                    if downloading, !importing, let progress { Text(progress, format: .percent.precision(.fractionLength(0))) }
                 }.frame(maxWidth: .infinity, minHeight: 54)
             }.buttonStyle(.plain).foregroundStyle(.white)
                 .background(.blue, in: Capsule()).disabled(busy)
                 .accessibilityIdentifier("wallpaper-preview-install")
                 .padding(.horizontal, 20).padding(.vertical, 12)
         }
+        .alert(WallpaperSourceText.text(.install), isPresented: Binding(
+            get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button(MirsaTr.lit("OK")) { error = nil }
+        } message: { Text(error ?? "") }
         .background(.black).foregroundStyle(.white).preferredColorScheme(.dark)
         .environment(\.layoutDirection, .leftToRight)
     }

@@ -212,14 +212,21 @@ struct ToolsStoreView: View {
                     .onSubmit { model.reload() }
                 categoryBar(t)
                 if model.category == .wallpapers && !showSaved {
-                    WallpaperSourcesView(busy: wallpaperSourceBusy) { archive in
-                        guard !wallpaperSourceBusy else { return }
+                    WallpaperSourcesView(busy: wallpaperSourceBusy) { archive, name in
+                        guard !wallpaperSourceBusy else {
+                            throw NSError(domain: "MirsaWallpaper", code: 1, userInfo: [NSLocalizedDescriptionKey: MirsaWallpaperActionStrings.text(.busy)])
+                        }
                         let ids = await vm.importTendieFiles(urls: [archive])
-                        guard !ids.isEmpty else { return }
+                        guard !ids.isEmpty else {
+                            let reason = vm.errorMessage ?? WallpaperSourceText.text(.importFailed)
+                            vm.errorMessage = nil
+                            throw NSError(domain: "MirsaWallpaper", code: 2, userInfo: [NSLocalizedDescriptionKey: reason])
+                        }
                         for index in vm.tendieItems.indices {
                             vm.tendieItems[index].isSelected = ids.contains(vm.tendieItems[index].id)
+                            if ids.contains(vm.tendieItems[index].id) { vm.tendieItems[index].name = name }
                         }
-                        NotificationCenter.default.post(name: Notification.Name("mirsa.wallpaper.imported.open"), object: nil)
+                        vm.saveTendieItems()
                     }
                 }
                 // External directory placeholders stay retained in code/data, not in the store UI.

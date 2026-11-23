@@ -49,7 +49,7 @@ enum WallpaperSourceError: LocalizedError {
 
 /// Bounded streaming, including chunked responses. Never buffers an untrusted archive in RAM.
 enum WallpaperSourceNetwork {
-    static func file(_ url: URL, limit: Int64) async throws -> URL {
+    static func file(_ url: URL, limit: Int64, progress: (@Sendable (Int64, Int64?) async -> Void)? = nil) async throws -> URL {
         guard WallpaperSourceFeed.allowed(url) else { throw WallpaperSourceError.invalid }
         var request = URLRequest(url: url, timeoutInterval: 45)
         request.setValue("Mirsa", forHTTPHeaderField: "User-Agent")
@@ -73,10 +73,14 @@ enum WallpaperSourceNetwork {
             count += 1
             guard count <= limit else { throw WallpaperSourceError.tooLarge }
             buffer.append(byte)
-            if buffer.count == 65536 { try handle.write(contentsOf: buffer); buffer.removeAll(keepingCapacity: true) }
+            if buffer.count == 65536 {
+                try handle.write(contentsOf: buffer); buffer.removeAll(keepingCapacity: true)
+                await progress?(count, response.expectedContentLength > 0 ? response.expectedContentLength : nil)
+            }
         }
         if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
         try handle.synchronize()
+        await progress?(count, count)
         completed = true
         return target
     }
@@ -89,8 +93,8 @@ enum WallpaperSourceNetwork {
         return try JSONDecoder().decode(WallpaperSourceFeed.self, from: data).validated()
     }
 
-    static func archive(_ entry: WallpaperSourceEntry) async throws -> URL {
-        let temporary = try await file(entry.url, limit: entry.size)
+    static func archive(_ entry: WallpaperSourceEntry, progress: (@Sendable (Int64, Int64?) async -> Void)? = nil) async throws -> URL {
+        let temporary = try await file(entry.url, limit: entry.size, progress: progress)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         do {
             let actual = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize

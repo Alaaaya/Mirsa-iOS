@@ -1,5 +1,6 @@
 #if DEBUG
 import UIKit
+import ZIPFoundation
 
 /// Original procedural art, confined to an explicitly launched UI-test harness.
 /// Nothing here is a downloadable archive or third-party wallpaper.
@@ -21,6 +22,21 @@ enum WallpaperSourceFixture {
                     size: Int64(1_048_576 + index * 65_536),
                     category: "Original procedural art", description: "Original wallpaper preview test artwork.")
             })
+    }
+
+    /// Original tiny archive only for UI testing the real import/preselect path.
+    /// It is never applied to PosterBoard and is excluded from release builds.
+    static func archive(for entry: WallpaperSourceEntry) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(UUID().uuidString + ".tendies")
+        let archive = try Archive(url: url, accessMode: .create)
+        let data = Data("Mirsa original UI fixture, not a system wallpaper".utf8)
+        try archive.addEntry(with: "descriptors/MIRSA-UI-FIXTURE/versions/1/fixture.txt", type: .file,
+                             uncompressedSize: Int64(data.count)) { position, size in
+            data.subdata(in: Int(position)..<(Int(position) + size))
+        }
+        return url
     }
 
     static func image(for entry: WallpaperSourceEntry) -> UIImage? {

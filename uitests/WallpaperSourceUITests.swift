@@ -1,7 +1,7 @@
 import XCTest
 
 /// Navigate the real Tools Store wallpaper category. Only catalog
-/// data/art is local; no substitute screen and no import action, video network or respring is triggered.
+/// data/art is local. Store actions use the real importer with an original test archive; no system apply or respring.
 final class WallpaperSourceUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
@@ -10,6 +10,62 @@ final class WallpaperSourceUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func launch(_ language: String, downloadError: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
+            "-MirsaWallpaperSourceFixture", "-mirsa.appLanguage", language]
+        if downloadError { app.launchEnvironment["mirsa_wallpaper_source_download_error"] = "1" }
+        app.launch()
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if alert.waitForExistence(timeout: 2) { alert.buttons.firstMatch.tap() }
+        XCTAssertTrue(app.buttons["tools-section-store"].waitForExistence(timeout: 15))
+        app.buttons["tools-section-store"].tap()
+        app.buttons["tools-store-cat-wallpapers"].tap()
+        return app
+    }
+
+    private func reveal(_ element: XCUIElement, app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 10))
+        let scroll = app.scrollViews.containing(.textField, identifier: "wallpaper-source-url").firstMatch
+        for _ in 0..<8 { if element.isHittable { break }; scroll.swipeUp() }
+        XCTAssertTrue(element.isHittable)
+    }
+
+    func testGridInstallImportsSelectsAndOpensTendies() {
+        let app = launch("ar")
+        let install = app.buttons.matching(identifier: "wallpaper-source-install").firstMatch
+        reveal(install, app: app)
+        install.tap()
+        let selected = app.buttons["wallpaper-install-selected"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 15), "Store CTA must navigate to ready selected wallpaper")
+        XCTAssertTrue(app.staticTexts["Solar arc"].exists)
+        shot("Wallpaper-Store-Imported-Selected-AR")
+    }
+
+    func testPreviewInstallDismissesThenOpensImportedWallpaper() {
+        let app = launch("en")
+        let card = app.buttons["wallpaper-preview-original-1"]
+        reveal(card, app: app)
+        card.tap()
+        let install = app.buttons["wallpaper-preview-install"]
+        XCTAssertTrue(install.waitForExistence(timeout: 5))
+        install.tap()
+        XCTAssertTrue(app.buttons["wallpaper-install-selected"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["wallpaper-preview-close"].exists)
+        XCTAssertTrue(app.staticTexts["Night tide"].exists)
+        shot("Wallpaper-Preview-Imported-Selected-EN")
+    }
+
+    func testPreviewDownloadFailureIsVisibleInsidePreview() {
+        let app = launch("ar", downloadError: true)
+        let card = app.buttons["wallpaper-preview-original-1"]
+        reveal(card, app: app); card.tap()
+        let install = app.buttons["wallpaper-preview-install"]
+        XCTAssertTrue(install.waitForExistence(timeout: 5)); install.tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
+        shot("Wallpaper-Preview-Download-Error-AR")
     }
 
     func testToolsStoreWallpaperSourcesOnlyInFiveLanguages() {
