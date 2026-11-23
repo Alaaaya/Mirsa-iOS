@@ -279,7 +279,8 @@ private struct WallpaperSourcePreview: View {
                                  .background(LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom))
                             }
                             .clipShape(RoundedRectangle(cornerRadius: 32))
-                            .accessibilityIdentifier("wallpaper-preview-media")
+                            // Do not assign an ancestor identifier here: SwiftUI propagates
+                            // it into VideoPlayer and overwrites its playback identifier.
                         Text(entry.description?.isEmpty == false ? entry.description! : entry.category)
                             .font(.subheadline).foregroundStyle(.gray)
                             .frame(maxWidth: .infinity, alignment: .leading)
