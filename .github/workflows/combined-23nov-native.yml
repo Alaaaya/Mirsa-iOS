@@ -1,0 +1,94 @@
+name: Combined 23nov native proof
+on:
+  workflow_dispatch:
+  push:
+    branches: [mirsa/combined-23nov]
+permissions:
+  contents: read
+jobs:
+  simulator:
+    timeout-minutes: 85
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact committed source bytes before native compile
+        run: |
+          python3 - <<'CHECK'
+          import json, pathlib, hashlib, os, subprocess
+          manifest = [{'path': 'ios-app/Apps/MirsaDesign.swift', 'sha256': 'c77ae35203a99da6dcc8ee9f31f2d6872c3df41b520d6e7183bbf5027050c2cf', 'blob': '39e57870a257a63ab6854d9faede059336cdbd39'}, {'path': 'ios-app/Apps/SourcesTab.swift', 'sha256': '47e81ca55ee7328dabd32e331d387bbb24e58fa97a9a4606e6cea9fc7bf0d1b3', 'blob': '675203946b7fd67c512c31934eee2909a13da469'}, {'path': 'tests/MirsaTextDirectionTests.swift', 'sha256': '68dd95db3901681fe3475756dd442eeccfeaeb317a7afc2284bfe1b06388e07a', 'blob': 'ef362ee776a7d6bdcd3e976ace8364f70bea73a1'}, {'path': 'uitests/MirsaKeyboardReturn22UITests.swift', 'sha256': 'e9e1ae1a3a981cc78977708bf7b94b3ef6c1351b85797e7d04d5db488a767f4f', 'blob': 'a38c60c21503f33ae655f8174f702b0d7165dac4'}, {'path': 'ios-app/SourcesToolsStoreShotHost.swift', 'sha256': '4375489e32ec7fbdc26061ba0440ffab3659ac736d826685fc9d2ccf7679be27', 'blob': '78841806ccef44e368e22445c2c4a56616cc5d1b'}, {'path': 'uitests/MirsaArabicFeed22UITests.swift', 'sha256': '73281b234d93a70091e48cf7eeda368e70d294e5c1e20e0d403edea4d888c810', 'blob': '3fe5680b8c275654641acd7951e066454dd00f5e'}, {'path': 'uitests/CertificateParity29UITests.swift', 'sha256': 'c7d831e07fe0d5bdc7e6a580bdce224c82d372fe4397e6a5b6dc5ebf612287a1', 'blob': 'b0156b379e5129934f4b93f5b66f9c42dd349ab9'}]
+          for f in manifest:
+              data = pathlib.Path(f['path']).read_bytes()
+              assert hashlib.sha256(data).hexdigest()==f['sha256']
+              assert subprocess.check_output(['git','rev-parse','HEAD:'+f['path']],text=True).strip()==f['blob']
+          assert subprocess.check_output(['git','status','--porcelain'],text=True).strip()==''
+          pathlib.Path('build').mkdir(exist_ok=True)
+          pathlib.Path('build/source-proof.json').write_text(json.dumps({'head':os.environ['GITHUB_SHA'],'committedSource':True,'files':manifest},indent=2))
+          CHECK
+      - name: Standalone store package tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build real simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Run app screenshots tests
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
+          xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
+          mkdir -p build
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DirectionUnit.xcresult -only-testing:MirsaTests/MirsaTextDirectionTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/unit-validation.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ForegroundUI.xcresult -only-testing:MirsaUITests/MirsaArabicFeed22UITests -only-testing:MirsaUITests/MirsaForegroundUITests -only-testing:MirsaUITests/MirsaSourcesEdgeUITests -only-testing:MirsaUITests/MirsaKeyboardReturn22UITests -only-testing:MirsaUITests/CertificateParity29UITests/testArabicPushedSourceLastRowClearsDock -only-testing:MirsaUITests/CertificateParity29UITests/testEnglishPushedSourceLastRowClearsDock test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUnit.xcresult -only-testing:MirsaTests/WallpaperSourceTests -only-testing:MirsaTests/CAPlaygroundSourceTests -only-testing:MirsaTests/ReviewedToolsSourcesTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUI.xcresult -only-testing:MirsaUITests/WallpaperSourceUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-ui.log
+      - name: Export runtime screenshot attachments
+        if: always()
+        run: |
+          if [ -d build/ForegroundUI.xcresult ]; then
+            mkdir -p build/screenshots
+            xcrun xcresulttool export attachments --path build/ForegroundUI.xcresult --output-path build/screenshots
+          fi
+          if [ -d build/WallpaperSourceUI.xcresult ]; then
+            mkdir -p build/wallpaper-screenshots
+            xcrun xcresulttool export attachments --path build/WallpaperSourceUI.xcresult --output-path build/wallpaper-screenshots
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Mirsa-combined-23nov-native-proof
+          path: |
+            build/source-proof.json
+            build/unit-validation.log
+            build/DirectionUnit.xcresult
+            build/screenshots
+            build/ForegroundUI.xcresult
+            build/simulator-validation.log
+            build/package-tests.log
+            build/wallpaper-unit.log
+            build/wallpaper-ui.log
+            build/WallpaperSourceUnit.xcresult
+            build/WallpaperSourceUI.xcresult
+            build/wallpaper-screenshots
+          if-no-files-found: warn

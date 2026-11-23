@@ -167,6 +167,7 @@ struct TendiesView: View {
                     mainContent: {
                 // Imported files waiting to be installed (selection for the install button).
                 Section {
+                Color.clear.frame(height: 1).id("wallpaper-imported-section")
                 if !vm.tendieItems.isEmpty {
                         HStack {
                             Text(MirsaTr.p("wallpapersImported", vm.tendieItems.count))
@@ -328,6 +329,11 @@ struct TendiesView: View {
                                      vm.tendiesFlashLog.append("REFRESH declined by user; no restart requested.")
                                      respringArmed = false
                                  })
+                }
+            }
+            .onAppear {
+                if vm.tendieItems.contains(where: { $0.isSelected }) {
+                    scroll.scrollTo("wallpaper-imported-section", anchor: .top)
                 }
             }
             .onChange(of: scrollToMaker) { _, go in

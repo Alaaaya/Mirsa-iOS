@@ -30,6 +30,7 @@ export MIRSA_SOURCE_FIXTURES="$WORK/source-fixtures"
 cat > "$WORK/Sources/MirsaStoreKit/TestLocalization.swift" <<'SWIFT'
 func tr(_ en: String, _ ar: String, ckb: String, kmr: String) -> String { en }
 func personalText(_ en: String, _ ar: String) -> String { en }
+func storeText(_ en: String, _ ar: String, de: String, ckb: String, kmr: String) -> String { en }
 SWIFT
 cat > "$WORK/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.2

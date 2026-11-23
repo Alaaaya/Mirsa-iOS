@@ -197,6 +197,10 @@ struct ToolsStoreView: View {
     @State private var loadedOnce = false
     @AppStorage(SourcesTheme.key) private var themeRaw = SourcesTheme.aurora.rawValue
     private var theme: SourcesTheme { SourcesTheme(rawValue: themeRaw) ?? .aurora }
+    private var wallpaperSourceBusy: Bool {
+        if case .running = vm.tendiesFlashPhase { return true }
+        return false
+    }
 
     var body: some View {
         let t = theme
@@ -207,6 +211,20 @@ struct ToolsStoreView: View {
                 SourcesSearchField(placeholder: ToolsStoreText.search, theme: t, text: $model.query, identifier: "tools-store-search")
                     .onSubmit { model.reload() }
                 categoryBar(t)
+                if model.category == .wallpapers && !showSaved {
+                    WallpaperSourcesView(busy: wallpaperSourceBusy) { archive in
+                        guard !wallpaperSourceBusy else { return }
+                        let ids = await vm.importTendieFiles(urls: [archive])
+                        guard !ids.isEmpty else { return }
+                        for index in vm.tendieItems.indices {
+                            vm.tendieItems[index].isSelected = ids.contains(vm.tendieItems[index].id)
+                        }
+                        NotificationCenter.default.post(name: Notification.Name("mirsa.wallpaper.imported.open"), object: nil)
+                    }
+                }
+                if !showSaved && model.category != .wallpapers {
+                    ReviewedToolsSourcesView(category: model.category)
+                }
                 if showSaved {
                     savedSection(t)
                 } else if !model.isConfigured {
@@ -219,6 +237,7 @@ struct ToolsStoreView: View {
             .padding(.top, 4)
             .padding(.bottom, 40)
         }
+        .padding(.bottom, MirsaTabBarMetrics.clearance)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { model.reload() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -310,6 +329,7 @@ struct ToolsStoreView: View {
                                 else { Capsule().fill(t.card).overlay(Capsule().stroke(t.stroke)) }
                             }
                     }
+                    .accessibilityIdentifier("tools-store-filter-" + c.rawValue)
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                     .accessibilityIdentifier("tools-store-cat-" + c.rawValue)

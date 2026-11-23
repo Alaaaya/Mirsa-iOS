@@ -63,6 +63,9 @@ struct ToolsTab: View {
         }
         .preferredColorScheme(section == .store ? storeTheme.colorScheme : .dark)
         .preference(key: ToolsStoreActiveKey.self, value: section == .store)
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.wallpaper.imported.open"))) { _ in
+            section = .wallpapers
+        }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
     }
 
