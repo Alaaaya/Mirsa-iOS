@@ -163,9 +163,21 @@ final class WallpaperSourceTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("ios-app/Apps/ToolsStoreView.swift"), encoding: .utf8)
         let start = try XCTUnwrap(source.range(of: "WallpaperSourcesView(busy:"))
-        let end = try XCTUnwrap(source.range(of: "if !showSaved && model.category != .wallpapers",
+        let end = try XCTUnwrap(source.range(of: "if showSaved {",
                                            range: start.upperBound..<source.endIndex))
         let callback = String(source[start.lowerBound..<end.lowerBound])
+        // Store hiding changed the following sibling, not this import callback.
+        // Keep the same required/forbidden contract and strengthen operation ordering.
+        XCTAssertEqual(source.components(separatedBy: "WallpaperSourcesView(busy:").count - 1, 1)
+        let busyGuard = try XCTUnwrap(callback.range(of: "guard !wallpaperSourceBusy else { return }"))
+        let importCall = try XCTUnwrap(callback.range(of: "vm.importTendieFiles(urls: [archive])"))
+        let nonemptyGuard = try XCTUnwrap(callback.range(of: "guard !ids.isEmpty else { return }"))
+        let selection = try XCTUnwrap(callback.range(of: "ids.contains(vm.tendieItems[index].id)"))
+        let notification = try XCTUnwrap(callback.range(of: "mirsa.wallpaper.imported.open"))
+        XCTAssertLessThan(busyGuard.lowerBound, importCall.lowerBound)
+        XCTAssertLessThan(importCall.lowerBound, nonemptyGuard.lowerBound)
+        XCTAssertLessThan(nonemptyGuard.lowerBound, selection.lowerBound)
+        XCTAssertLessThan(selection.lowerBound, notification.lowerBound)
         XCTAssertTrue(source.contains("model.category == .wallpapers && !showSaved"))
         let tendies = try String(contentsOf: root.appendingPathComponent("ios-app/TendiesView.swift"), encoding: .utf8)
         XCTAssertFalse(tendies.contains("WallpaperSourcesView("))
