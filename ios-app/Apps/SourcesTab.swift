@@ -686,7 +686,7 @@ struct SourcesTab: View {
             .mirsaHidesScrollEdgeEffect()
             // Inset the content, not the viewport: cards scroll behind the dock
             // while the complete last row can still rest above it.
-            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
+            .mirsaDockClearance()
             .ignoresSafeArea(.container, edges: .bottom)
             .environment(\.editMode, $editMode)
             .environment(\.defaultMinListRowHeight, 44)
@@ -973,7 +973,7 @@ struct SourceDetailView: View {
             .mirsaHidesScrollEdgeEffect()
             // Inset the content, not the viewport: cards scroll behind the dock
             // while the complete last row can still rest above it.
-            .contentMargins(.bottom, MirsaTabBarMetrics.clearance, for: .scrollContent)
+            .mirsaDockClearance()
             .ignoresSafeArea(.container, edges: .bottom)
         .background(SourcesThemeBackground(theme: t, glowTint: large ? sourceTint : t.accent[0]))
         .task(id: source.url) { await store.ensureLoaded(source.url) }

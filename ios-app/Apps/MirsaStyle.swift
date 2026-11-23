@@ -185,10 +185,18 @@ extension EnvironmentValues {
 /// Bottom room the floating dock needs, published by LiquidTabChrome to its tab.
 /// Apply inside UIKit navigation hosts too, so Forms/Lists keep last-row
 /// clearance without shrinking their scrollable viewport.
+/// Read before any tab expands its viewport under the home indicator.
+private struct MirsaDockBottomSafeAreaKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
 private struct MirsaDockClearanceKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
 extension EnvironmentValues {
+    var mirsaDockBottomSafeArea: CGFloat {
+        get { self[MirsaDockBottomSafeAreaKey.self] }
+        set { self[MirsaDockBottomSafeAreaKey.self] = newValue }
+    }
     var mirsaDockClearance: CGFloat {
         get { self[MirsaDockClearanceKey.self] }
         set { self[MirsaDockClearanceKey.self] = newValue }
