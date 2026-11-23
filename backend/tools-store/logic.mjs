@@ -6,7 +6,7 @@ export const EXTENSIONS = {
   app_tweaks: ["dylib", "deb", "zip"],
   wallpapers: ["tendies"],
   sounds: ["m4r", "m4a", "mp3", "caf", "wav"],
-  fonts: ["ttf", "otf", "ttc"],
+  fonts: ["dylib"],
 };
 export const MAX_BYTES = 150 * 1024 * 1024;
 export const MAX_PENDING_PER_USER = 5;

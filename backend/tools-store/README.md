@@ -5,7 +5,7 @@ Supabase Edge Function for the in-app **Tools Store** (Tools tab › Store): deb
 - Auth: same as discovery-search / tweak-forge. The app signs in anonymously (Supabase Auth) and sends its per-install user JWT; verified in code. No secret ships in the app.
 - Nothing is published automatically. `upload_begin` creates the row as `uploading` and returns a signed upload URL; `upload_commit` verifies the stored object (exists, size matches) and moves the row to `pending_review`. Only `admin_review` with `decision: "approve"` makes it visible. Rejected files are deleted from storage.
 - Files live in the private bucket `mirsa-tools` (created by schema.sql) and are only served through 10-minute signed URLs.
-- Allowed types (also enforced by the app): tweaks/app_tweaks `.dylib .deb .zip`, wallpapers `.tendies`, sounds `.m4r .m4a .mp3 .caf .wav`, fonts `.ttf .otf .ttc`. Max 150 MB. Max 5 uploads waiting for review per user.
+- Allowed types (also enforced by the app): tweaks/app_tweaks `.dylib .deb .zip`, wallpapers `.tendies`, sounds `.m4r .m4a .mp3 .caf .wav`, fonts `.dylib` (font tweaks only; legacy font-file metadata is retained). Max 150 MB. Max 5 uploads waiting for review per user.
 - Downloads are counted once per user and item (`mirsa_tools_downloads`), ratings once per user and item (1–5, upsert).
 - Rate limits per user (Postgres, durable): upload_begin 10/day, rate 60/hour, download 120/hour.
 

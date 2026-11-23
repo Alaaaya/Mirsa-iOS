@@ -9,10 +9,26 @@ enum CAPlaygroundSource {
     private struct Feed: Decodable { let wallpapers: [Item] }
     private struct Item: Decodable {
         let name: String
-        let id: Int
+        let id: String
         let creator: String?
         let file: String
         let preview: String
+
+        private enum CodingKeys: String, CodingKey { case name, id, creator, file, preview }
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            name = try values.decode(String.self, forKey: .name)
+            // Upstream mixes numeric IDs with zero-prefixed string IDs. Preserve
+            // textual IDs exactly, rather than discarding the whole catalog.
+            if let text = try? values.decode(String.self, forKey: .id) {
+                id = text
+            } else {
+                id = String(try values.decode(Int.self, forKey: .id))
+            }
+            creator = try values.decodeIfPresent(String.self, forKey: .creator)
+            file = try values.decode(String.self, forKey: .file)
+            preview = try values.decode(String.self, forKey: .preview)
+        }
     }
 
     static func asset(_ path: String, prefix: String, extension suffix: String) throws -> URL {
@@ -37,7 +53,7 @@ enum CAPlaygroundSource {
                 throw WallpaperSourceError.invalid
             }
             var entry = WallpaperSourceEntry(
-                id: String(item.id), name: item.name, author: item.creator ?? "CAPlayground",
+                id: item.id, name: item.name, author: item.creator ?? "CAPlayground",
                 previewImage: try asset(item.preview, prefix: "previews/", extension: previewExtension),
                 url: try asset(item.file, prefix: "wallpapers/", extension: "tendies"),
                 size: limit, category: "CAPlayground"

@@ -7,8 +7,16 @@ const base = { category: "tweaks", title: "Dark mode", file_name: "Dark.dylib", 
 test("upload accepts allowed types per category", () => {
   assert.ok(validateUpload(base).value);
   assert.equal(validateUpload({ ...base, category: "wallpapers", file_name: "a.tendies" }).value.file_ext, "tendies");
-  assert.equal(validateUpload({ ...base, category: "fonts", file_name: "x.ttf" }).value.category, "fonts");
+  assert.equal(validateUpload({ ...base, category: "fonts", file_name: "x.dylib" }).value.category, "fonts");
   assert.equal(validateUpload({ ...base, category: "sounds", file_name: "r.m4r" }).value.file_ext, "m4r");
+});
+
+test("fonts accept dylib tweaks only while legacy metadata remains readable", () => {
+  assert.equal(validateUpload({ ...base, category: "fonts", file_name: "Font.DYLIB" }).value.file_ext, "dylib");
+  for (const ext of ["ttf", "otf", "ttc", "deb", "zip", "ipa"]) {
+    assert.equal(validateUpload({ ...base, category: "fonts", file_name: "Font." + ext }).error, "bad_extension");
+  }
+  assert.equal(publicItem({ id: "legacy", category: "fonts", file_name: "old.ttf" }).file_name, "old.ttf");
 });
 
 test("upload rejects wrong extension, size, category and missing target", () => {

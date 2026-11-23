@@ -48,7 +48,7 @@ final class WallpaperSourceUITests: XCTestCase {
             shot(language + "_wallpaper_source_grid_top")
             app.swipeUp(velocity: .slow)
             shot(language + "_wallpaper_source_grid_scrolled")
-            XCTAssertTrue(app.buttons["wallpaper-source-add-caplayground"].exists)
+            XCTAssertFalse(app.buttons["wallpaper-source-add-caplayground"].exists, "Community source is already enabled by default")
 
             // This is Tools Store's real vertical ScrollView, not the horizontal
             // category bar or a screen-wide gesture that could start on the dock.
@@ -56,6 +56,14 @@ final class WallpaperSourceUITests: XCTestCase {
             XCTAssertTrue(scroll.exists)
             let dock = app.descendants(matching: .any).matching(identifier: "mirsa-tab-dock").firstMatch
             XCTAssertTrue(dock.exists, "Measure the actual floating dock, never a hardcoded screen inset")
+            // Regression for the dead band above the dock: the scroll surface
+            // must cover the dock AND extend to the screen bottom. Final item
+            // clearance is separately verified below, not by shrinking this frame.
+            shot(language + "_wallpaper_scroll_viewport")
+            XCTAssertGreaterThan(scroll.frame.maxY, dock.frame.maxY,
+                                 "Scroll content must continue behind the whole floating dock")
+            XCTAssertEqual(scroll.frame.maxY, app.windows.firstMatch.frame.maxY, accuracy: 2,
+                           "No dead band may remain between the scroll viewport and screen bottom")
             let finalName = app.staticTexts["Halo"] // sixth and final fixture entry
             // The source grid is followed by Most Downloaded / Latest content.
             // Scrolling to the PAGE bottom moves Halo off the TOP, so target the
@@ -148,4 +156,54 @@ final class WallpaperSourceUITests: XCTestCase {
             XCTAssertFalse(app.textFields["wallpaper-source-url"].exists)
         }
     }
+    func testLiveDefaultCAPlaygroundCatalog() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
+            "-mirsa.appLanguage", "ar", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        if alert.waitForExistence(timeout: 2) { alert.buttons.firstMatch.tap() }
+        XCTAssertTrue(app.buttons["tools-section-store"].waitForExistence(timeout: 15))
+        app.buttons["tools-section-store"].tap()
+        XCTAssertTrue(app.buttons["tools-store-cat-wallpapers"].waitForExistence(timeout: 10))
+        app.buttons["tools-store-cat-wallpapers"].tap()
+        XCTAssertTrue(app.textFields["wallpaper-source-url"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["wallpaper-source-add-caplayground"].exists)
+        XCTAssertFalse(app.buttons["tools-store-cat-tweaks"].exists, "Hide placeholder deb/dylib category, retain underlying data")
+        XCTAssertFalse(app.buttons["tools-store-cat-sounds"].exists, "Sounds always hidden regardless of inventory")
+        shot("ar_tools_store_categories_placeholder_hidden")
+        // Real HTTPS feeds and production adapter, deliberately NO fixture flag.
+        let first = app.staticTexts["11037 Case 1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 100), "Live CA catalog must load without adding a source")
+        let scroll = app.scrollViews.containing(.textField, identifier: "wallpaper-source-url").firstMatch
+        for _ in 0..<8 {
+            if first.isHittable { break }
+            scroll.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(first.isHittable)
+        XCTAssertTrue(app.staticTexts["MakotoNaeg"].exists, "Original creator attribution must remain")
+        shot("ar_wallpaper_caplayground_live_default")
+        let storeScroll = app.scrollViews["tools-store-root"]
+        XCTAssertTrue(storeScroll.exists)
+        for category in ["wallpapers", "tweaks", "app_tweaks", "sounds", "fonts"] {
+            let chip = app.buttons["tools-store-cat-" + category]
+            if !chip.exists { continue }
+            // Return to the category strip without changing the app's tab order.
+            for _ in 0..<12 {
+                if chip.isHittable { break }
+                storeScroll.swipeDown(velocity: .fast)
+            }
+            XCTAssertTrue(chip.isHittable)
+            chip.tap()
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "reviewed-tools-sources").firstMatch.exists)
+            XCTAssertFalse(app.staticTexts["Cylinder Reborn"].exists)
+            XCTAssertFalse(app.staticTexts["Return YouTube Dislike"].exists)
+            XCTAssertFalse(app.staticTexts["Google Fonts · Noto"].exists)
+            XCTAssertFalse(app.staticTexts["Kenney"].exists)
+            shot("ar_tools_store_remaining_category_" + category)
+        }
+    }
+
 }

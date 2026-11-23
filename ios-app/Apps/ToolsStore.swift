@@ -13,6 +13,8 @@ enum ToolsStoreCategory: String, CaseIterable, Identifiable, Codable, Sendable {
     case appTweaks = "app_tweaks"   // ready-made tweaks for popular apps (YouTube, Instagram, TikTok)
     case sounds          // ringtones and sounds
     case fonts
+    // Keep the category and its data, but hide the placeholder directory until usable tweaks exist.
+    static var visibleCases: [Self] { allCases.filter { $0 != .tweaks && $0 != .sounds } }
     var id: String { rawValue }
 
     var title: String {
@@ -41,11 +43,11 @@ enum ToolsStoreCategory: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tweaks, .appTweaks: return ["dylib", "deb", "zip"]
         case .wallpapers: return ["tendies"]
         case .sounds: return ["m4r", "m4a", "mp3", "caf", "wav"]
-        case .fonts: return ["ttf", "otf", "ttc"]
+        case .fonts: return ["dylib"]
         }
     }
 
-    var isTweak: Bool { self == .tweaks || self == .appTweaks }
+    var isTweak: Bool { self == .tweaks || self == .appTweaks || self == .fonts }
 }
 
 /// Popular apps a ready-made tweak can target. "other" keeps a free-form bundle ID.
@@ -277,7 +279,34 @@ enum ToolsStoreClient {
                                    "limit": max(1, min(limit, 100)), "offset": max(0, offset)]
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty { body["q"] = String(q.prefix(80)) }
-        return try decodeItems(try await call(body))
+        guard category == .fonts else { return try decodeItems(try await call(body)) }
+        return try await fontItems(limit: limit, offset: offset) { pageSize, pageOffset in
+            var page = body
+            page["limit"] = pageSize
+            page["offset"] = pageOffset
+            return try decodeItems(try await call(page))
+        }
+    }
+
+    /// Scan raw pages, not filtered counts. Legacy font files stay stored but
+    /// cannot hide later dylib tweaks. Match the server's 10,000 offset cap.
+    static func fontItems(limit: Int, offset: Int,
+                          fetchPage: (Int, Int) async throws -> [ToolsStoreItem]) async throws -> [ToolsStoreItem] {
+        let wanted = max(1, min(limit, 100))
+        let pageSize = 100
+        var pageOffset = max(0, min(offset, 10_000))
+        var matching: [ToolsStoreItem] = []
+        var seen = Set<String>()
+        while pageOffset <= 10_000 {
+            try Task.checkCancellation()
+            let items = try await fetchPage(pageSize, pageOffset)
+            matching += items.filter {
+                $0.kind == .fonts && $0.fileExtension == "dylib" && seen.insert($0.id).inserted
+            }
+            if matching.count >= wanted || items.count < pageSize { break }
+            pageOffset += pageSize
+        }
+        return Array(matching.prefix(wanted))
     }
 
     static func myUploads() async throws -> [ToolsStoreItem] {
@@ -450,7 +479,8 @@ final class ToolsStoreSaved: ObservableObject {
 @MainActor
 final class ToolsStoreModel: ObservableObject {
     enum Phase: Equatable { case idle, loading, loaded, failed(String) }
-    @Published var category: ToolsStoreCategory = .tweaks
+    @Published private(set) var availableCategories: [ToolsStoreCategory] = [.wallpapers]
+    @Published var category: ToolsStoreCategory = .wallpapers
     @Published private(set) var top: [ToolsStoreItem] = []
     @Published private(set) var newest: [ToolsStoreItem] = []
     @Published private(set) var phase: Phase = .idle
@@ -465,6 +495,20 @@ final class ToolsStoreModel: ObservableObject {
         return (top + newest).filter { $0.ratingCount > 0 && seen.insert($0.id).inserted }
             .sorted { ($0.ratingAvg, $0.ratingCount) > ($1.ratingAvg, $1.ratingCount) }
             .prefix(10).map { $0 }
+    }
+
+    /// Directory landing pages never qualify as installable inventory.
+    func refreshAvailableCategories() async {
+        var available: [ToolsStoreCategory] = [.wallpapers]
+        if isConfigured {
+            for candidate in ToolsStoreCategory.allCases where candidate != .wallpapers && candidate != .sounds {
+                guard !Task.isCancelled else { return }
+                if let items = try? await ToolsStoreClient.list(category: candidate, sort: .newest, limit: 100),
+                   !items.isEmpty { available.append(candidate) }
+            }
+        }
+        availableCategories = ToolsStoreCategory.allCases.filter { available.contains($0) }
+        if !availableCategories.contains(category) { category = .wallpapers }
     }
 
     func reload() {

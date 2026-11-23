@@ -16,6 +16,7 @@ jobs:
           python3 - <<'CHECK'
           import json, pathlib, hashlib, os, subprocess
           manifest = [{'path': 'ios-app/Apps/MirsaDesign.swift', 'sha256': 'c77ae35203a99da6dcc8ee9f31f2d6872c3df41b520d6e7183bbf5027050c2cf', 'blob': '39e57870a257a63ab6854d9faede059336cdbd39'}, {'path': 'ios-app/Apps/SourcesTab.swift', 'sha256': '47e81ca55ee7328dabd32e331d387bbb24e58fa97a9a4606e6cea9fc7bf0d1b3', 'blob': '675203946b7fd67c512c31934eee2909a13da469'}, {'path': 'tests/MirsaTextDirectionTests.swift', 'sha256': '68dd95db3901681fe3475756dd442eeccfeaeb317a7afc2284bfe1b06388e07a', 'blob': 'ef362ee776a7d6bdcd3e976ace8364f70bea73a1'}, {'path': 'uitests/MirsaKeyboardReturn22UITests.swift', 'sha256': 'e9e1ae1a3a981cc78977708bf7b94b3ef6c1351b85797e7d04d5db488a767f4f', 'blob': 'a38c60c21503f33ae655f8174f702b0d7165dac4'}, {'path': 'ios-app/SourcesToolsStoreShotHost.swift', 'sha256': '4375489e32ec7fbdc26061ba0440ffab3659ac736d826685fc9d2ccf7679be27', 'blob': '78841806ccef44e368e22445c2c4a56616cc5d1b'}, {'path': 'uitests/MirsaArabicFeed22UITests.swift', 'sha256': '73281b234d93a70091e48cf7eeda368e70d294e5c1e20e0d403edea4d888c810', 'blob': '3fe5680b8c275654641acd7951e066454dd00f5e'}, {'path': 'uitests/CertificateParity29UITests.swift', 'sha256': 'c7d831e07fe0d5bdc7e6a580bdce224c82d372fe4397e6a5b6dc5ebf612287a1', 'blob': 'b0156b379e5129934f4b93f5b66f9c42dd349ab9'}]
+          manifest += [{'path': 'ios-app/CAPlaygroundSource.swift', 'sha256': '7eb15f1f99b1ba5deba311dac3b02f274f9688e5821e184787ff5a566f7f2cfe', 'blob': '69548bbd4e9f53123c4d51458539b7805b791f10'}, {'path': 'tests/CAPlaygroundSourceTests.swift', 'sha256': '58781d7599d2bf8e16578333f17f455844943ea9ecd583cb42715c065c053f36', 'blob': '9e33cb2939e919e690333c1ba5bc4b27b4f8bdc2'}, {'path': 'ios-app/Apps/ToolsStore.swift', 'sha256': 'a1fbf187880f7ba3d313a73e57117eb23e3ffd646c18b24bb61029f8d7be383d', 'blob': '66802ec61ceaba3206afa762dc8daa955cc2ed9b'}, {'path': 'ios-app/Apps/ToolsStoreView.swift', 'sha256': '6b5c9edc06f964a52b9f3a7f23e0470c3a4070aeea9c323f99cb38ba2833c53d', 'blob': '4b9dc10009a132b2ef6dc31d375bb5927f64a6c8'}, {'path': 'uitests/WallpaperSourceUITests.swift', 'sha256': 'dce890e24ff42b16e130e443d42db48bd60c05457fc8cc4025c414f7699269a6', 'blob': '5e53aba03f74036b570d52f0dc12eaaf9741b04f'}, {'path': 'backend/tools-store/logic.mjs', 'sha256': 'de244a3d3ade2e005c417f9e6c828fcdb6bec752141acc72fcbba15dc23c5c35', 'blob': 'c5eb0c935d28cb3fb5e35bb759989adf607563e0'}, {'path': 'backend/tools-store/logic.test.mjs', 'sha256': '3fc61514f0be0c2d4e6e7a18d170de9982bd93627579fbbaa19a0a1f00c5be78', 'blob': '39851bdd58d9fddbefee3717da1c5e6f306ac2f4'}, {'path': 'backend/tools-store/README.md', 'sha256': 'd36e20b873c181da9e7f726ca76480fa77939bf4a283026cab2f7780302a8236', 'blob': '7685f487b6c9564cd4aac5df657c089a06ba25e6'}]
           for f in manifest:
               data = pathlib.Path(f['path']).read_bytes()
               assert hashlib.sha256(data).hexdigest()==f['sha256']
@@ -29,6 +30,8 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Tools Store dylib font contract regression
+        run: node --test backend/tools-store/logic.test.mjs
       - name: Standalone store package tests
         run: |
           set -o pipefail

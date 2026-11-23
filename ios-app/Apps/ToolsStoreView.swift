@@ -51,7 +51,7 @@ final class ToolsStoreActions: ObservableObject {
             let file = try await ToolsStoreClient.fetchFile(item)
             let folder = file.deletingLastPathComponent()
             switch kind {
-            case .tweaks, .appTweaks:
+            case .tweaks, .appTweaks, .fonts:
                 defer { MirsaManagedTmp.end(folder) }
                 // Same import as Mirsa AI's inject path (no multi-pick prompt here: a package with several
                 // code files reports the library's own "selection required" message instead).
@@ -62,7 +62,7 @@ final class ToolsStoreActions: ObservableObject {
                 guard let model = self.model else { throw ToolsStoreError.unavailable }
                 let ids = await model.importTendieFiles(urls: [file])
                 if !ids.isEmpty { self.message = ToolsStoreText.addedToWallpapers }
-            case .sounds, .fonts:
+            case .sounds:
                 self.shareFile = ToolsStoreFile(url: file)   // folder ends when the share sheet closes
             }
         }
@@ -222,9 +222,7 @@ struct ToolsStoreView: View {
                         NotificationCenter.default.post(name: Notification.Name("mirsa.wallpaper.imported.open"), object: nil)
                     }
                 }
-                if !showSaved && model.category != .wallpapers {
-                    ReviewedToolsSourcesView(category: model.category)
-                }
+                // External directory placeholders stay retained in code/data, not in the store UI.
                 if showSaved {
                     savedSection(t)
                 } else if !model.isConfigured {
@@ -235,11 +233,16 @@ struct ToolsStoreView: View {
             }
             .padding(.horizontal, MirsaSpacing.page)
             .padding(.top, 4)
-            .padding(.bottom, 40)
+            // Reserve space for the final card INSIDE the scrollable content.
+            // Padding the ScrollView itself cuts its viewport above the dock.
+            .padding(.bottom, 40 + MirsaTabBarMetrics.clearance)
         }
-        .padding(.bottom, MirsaTabBarMetrics.clearance)
+        // The Tools tab already receives the dock safe-area reservation. Let
+        // this scrolling surface draw through it, all the way to the window edge.
+        .ignoresSafeArea(.container, edges: .bottom)
+        .mirsaHidesScrollEdgeEffect()
         .scrollDismissesKeyboard(.interactively)
-        .refreshable { model.reload() }
+        .refreshable { model.reload(); await model.refreshAvailableCategories() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Preview URLs are private and expire (about 10 minutes): refetch for fresh ones.
             if model.isConfigured { model.reload() }
@@ -258,6 +261,7 @@ struct ToolsStoreView: View {
             actions.vm = vm
             if !loadedOnce { loadedOnce = true; model.reload() }
         }
+        .task { await model.refreshAvailableCategories() }
         .onChange(of: model.category) { _, _ in model.reload() }
         .onChange(of: model.query) { _, q in if q.isEmpty { model.reload() } }
         .accessibilityIdentifier("tools-store-root")
@@ -314,7 +318,7 @@ struct ToolsStoreView: View {
     private func categoryBar(_ t: SourcesTheme) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) {
-                ForEach(ToolsStoreCategory.allCases) { c in
+                ForEach(model.availableCategories) { c in
                     let selected = !showSaved && model.category == c
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) { showSaved = false; model.category = c }
@@ -378,7 +382,7 @@ struct ToolsStoreView: View {
         } else {
             sectionTitle(ToolsStoreText.saved, icon: "bookmark.fill", t: t)
             LazyVStack(spacing: 10) {
-                ForEach(saved.items) { item in
+                ForEach(saved.items.filter { $0.kind != .sounds && ($0.kind != .fonts || $0.fileExtension == "dylib") }) { item in
                     ToolsStoreItemRow(item: item, actions: actions, theme: t) { selected = item }
                 }
             }
@@ -852,7 +856,7 @@ private struct ToolsStoreUploadSheet: View {
                 }
                 Section {
                     Picker(ToolsStoreText.category, selection: $category) {
-                        ForEach(ToolsStoreCategory.allCases) { c in Label(c.title, systemImage: c.icon).tag(c) }
+                        ForEach(ToolsStoreCategory.visibleCases) { c in Label(c.title, systemImage: c.icon).tag(c) }
                     }
                     TextField(ToolsStoreText.itemTitle, text: $title)
                     TextField(ToolsStoreText.itemDescription, text: $details, axis: .vertical).lineLimit(3...8)
