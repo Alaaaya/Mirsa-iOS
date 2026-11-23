@@ -174,7 +174,7 @@ struct AppsTab: View {
             fab
                 .padding(.trailing, MirsaSpacing.page)
                 // Clear gap above the floating dock (the tab already reserves the dock's own room).
-                .padding(.bottom, MirsaSpacing.xl)
+                .padding(.bottom, MirsaSpacing.xl + MirsaTabBarMetrics.clearance)
 
             }
 

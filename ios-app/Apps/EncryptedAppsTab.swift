@@ -57,10 +57,11 @@ struct EncryptedAppsTab: View {
                                     onLeave: { tab in withAnimation(MirsaMotion.select) { vm.selectedTab = tab } })
             }
         }
-        // The gallery capsule floats directly above Mirsa's dock (drawn by ContentView, which stays
-        // visible on this tab). The inset reserves both, so every page scrolls under them and its
-        // last rows still scroll clear of them.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Both glass bars overlay a full-height scroll surface. Reserve their
+        // combined height in scroll content, never by shortening page viewports.
+        .contentMargins(.bottom, StoreGallery.capsuleHeight + StoreGallery.capsuleTopGap + MirsaTabBarMetrics.clearance, for: .scrollContent)
+        .ignoresSafeArea(.container, edges: .bottom)
+        .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
                 StoreGalleryCapsuleBar(selection: $section, downloadsBadge: downloadsBadge,
                                        onReselect: { item in if item == .discover || item == .search { galleryReset += 1 } })

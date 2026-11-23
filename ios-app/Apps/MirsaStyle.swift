@@ -183,8 +183,8 @@ extension EnvironmentValues {
     }
 }
 /// Bottom room the floating dock needs, published by LiquidTabChrome to its tab.
-/// SwiftUI `safeAreaPadding` does not reach scroll views hosted inside a UIKit
-/// NavigationStack/NavigationView (Form/List), so their last rows slid under the dock.
+/// Apply inside UIKit navigation hosts too, so Forms/Lists keep last-row
+/// clearance without shrinking their scrollable viewport.
 private struct MirsaDockClearanceKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }

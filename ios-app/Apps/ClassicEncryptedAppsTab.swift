@@ -44,7 +44,12 @@ struct ClassicEncryptedAppsTab: View {
                                     onSignedOut: { storeViewID = UUID() })
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { ClassicAppStoreSectionBar(selection: $section) }
+        .contentMargins(.bottom, 56 + MirsaSpacing.xs + MirsaTabBarMetrics.clearance, for: .scrollContent)
+        .ignoresSafeArea(.container, edges: .bottom)
+        .overlay(alignment: .bottom) {
+            ClassicAppStoreSectionBar(selection: $section)
+                .padding(.bottom, MirsaTabBarMetrics.clearance)
+        }
         .task {
             storeLoginAvailable = false
             storeLoginAvailable = true

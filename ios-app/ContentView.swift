@@ -658,9 +658,8 @@ struct ContentView: View {
                     // Its intrinsic content must not widen the shared ZStack/dock.
                     .frame(width: viewport.size.width > 1 ? viewport.size.width : nil,
                            height: viewport.size.height > 1 ? viewport.size.height : nil)
-                    // Clip inactive UIKit stacks, but let the active page draw
-                    // through its actual safe areas, not only its content rect.
-                    .clipShape(RetainedTabClip(active: on, safeArea: viewport.safeAreaInsets))
+                    // Inactive stacks are hidden below; never mask the active
+                    // scroll surface at the dock or at its safe-area boundary.
             }
                 // Hidden retained tabs stop their decorative animations (backdrop drift).
                 .environment(\.mirsaTabActive, on)
@@ -1280,12 +1279,14 @@ struct LiquidTabChrome: ViewModifier {
     func body(content: Content) -> some View {
         if ownsBottomBar {
             content.toolbar(.hidden, for: .tabBar)
+                .ignoresSafeArea(.container, edges: .bottom)
         } else if liquid {
             content
                 .toolbar(.hidden, for: .tabBar)
-                // Reserve scroll/resting-control clearance in the safe area, not
-                // external padding that shortens the page and exposes a bottom band.
-                .safeAreaPadding(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
+                // Keep the viewport full-height. Only scroll content gets dock
+                // clearance, so rows travel behind the translucent overlay.
+                .ignoresSafeArea(.container, edges: .bottom)
+                .contentMargins(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance, for: .scrollContent)
                 // UIKit-hosted Forms/Lists inside the tab read this (mirsaDockClearance()).
                 .environment(\.mirsaDockClearance, chatEditing ? 0 : MirsaTabBarMetrics.clearance)
         } else {
@@ -1294,14 +1295,3 @@ struct LiquidTabChrome: ViewModifier {
     }
 }
 
-/// Stable modifier identity keeps each tab's navigation and scroll state alive.
-private struct RetainedTabClip: Shape {
-    let active: Bool
-    let safeArea: EdgeInsets
-    func path(in rect: CGRect) -> Path {
-        guard active else { return Path() }
-        return Path(CGRect(x: rect.minX - safeArea.leading, y: rect.minY - safeArea.top,
-                           width: rect.width + safeArea.leading + safeArea.trailing,
-                           height: rect.height + safeArea.top + safeArea.bottom))
-    }
-}

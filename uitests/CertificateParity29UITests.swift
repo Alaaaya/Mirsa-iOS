@@ -153,7 +153,7 @@ final class CertificateParity29UITests: XCTestCase {
     func testEnglishPushedSourceLastRowClearsDock() { verifySourcesDock("en") }
     func testArabicPushedSourceLastRowClearsDock() { verifySourcesDock("ar") }
 
-    func testAllSixRealTabsScrollBoundsClearDock() {
+    func testAllSixRealTabsScrollUnderDock() {
         let app = launchDock("en")
         let dock = app.otherElements["mirsa-tab-dock"]
         for tab in ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"] {
@@ -173,9 +173,12 @@ final class CertificateParity29UITests: XCTestCase {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             } while Date() < deadline
             XCTAssertFalse(visible.isEmpty, "Must inspect a real scroll container for \(tab)")
-            for container in visible {
-                XCTAssertLessThanOrEqual(container.frame.maxY, dock.frame.minY + 1,
-                                         "Real \(tab) scroll viewport must end above dock")
+            // Owner changed the requirement: viewport extends UNDER glass,
+            // while the separate last-row tests still enforce content clearance.
+            let viewport = visible.max { $0.frame.height < $1.frame.height }
+            if let viewport {
+                XCTAssertGreaterThanOrEqual(viewport.frame.maxY, dock.frame.maxY - 1,
+                                            "Real \(tab) viewport must extend behind the entire dock")
             }
             app.swipeUp()
             screenshot("dock29-real-tab-" + tab)
