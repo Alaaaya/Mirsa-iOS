@@ -169,3 +169,33 @@ final class ForgeChatBuildProgressTests: XCTestCase {
         }
     }
 }
+
+extension ForgeChatBuildProgressTests {
+    func testRealLifecycleStagesKeepTimestampAndNeverInventPercent() throws {
+        let id = UUID(), request = UUID()
+        let data = Data("""
+        {"lifecycle":[{"id":"\(id)","sourceMessageID":"\(request)","state":"working","stages":[
+        {"stage":"queued","at":"2026-11-23T11:30:00Z","attempt":1},
+        {"stage":"compiling","at":"2026-11-23T11:30:02.123Z","attempt":1},
+        {"stage":"invented","at":"2026-11-23T11:30:03Z","attempt":1},
+        {"stage":"uploading","at":"not-a-date","attempt":1}]}]}
+        """.utf8)
+        let rows = ChatLifecycleEntry.lossy(data)
+        XCTAssertEqual(rows.first?.stages.count, 2)
+        let p = try XCTUnwrap(ChatBuildPresentation.resolve(message: user(request), lifecycle: rows, messages: []))
+        XCTAssertEqual(p.events.count, 2)
+        XCTAssertEqual(p.events.last?.at, "2026-11-23T11:30:02.123Z")
+        XCTAssertNil(p.fraction)
+        XCTAssertEqual(p.phase, .building)
+        XCTAssertFalse(p.failed)
+        XCTAssertNotNil(ChatLifecycleStage.stamp(p.events.last?.at))
+        XCTAssertNil(ChatBuildPresentation.resolve(message: user(), lifecycle: rows, messages: []))
+    }
+    func testReadyStageCannotForgeDelivery() {
+        let id = UUID(), request = UUID()
+        let data = Data("""
+        {"lifecycle":[{"id":"\(id)","sourceMessageID":"\(request)","state":"working","stages":[{"stage":"ready","at":"2026-11-23T11:30:00Z","attempt":1}]}]}
+        """.utf8)
+        XCTAssertNil(ChatBuildPresentation.resolve(message: user(request), lifecycle: ChatLifecycleEntry.lossy(data), messages: []))
+    }
+}

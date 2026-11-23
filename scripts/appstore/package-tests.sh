@@ -18,7 +18,8 @@ python3 - "$ROOT/ios-app/Apps/ForgeChatBuildProgress.swift" "$WORK/Sources/Mirsa
 import sys
 from pathlib import Path
 source = Path(sys.argv[1]).read_text()
-models = source.split('/// Top-level chat-read "lifecycle" row', 1)[0]
+models = source.split('/// Structured lifecycle facts only.', 1)[0]
+# Lifecycle localization/rendering stays in the app target.
 assert 'struct ChatBuildProgress: Codable, Equatable' in models
 assert 'import SwiftUI' in models
 Path(sys.argv[2]).write_text(models.replace('import SwiftUI', 'import Foundation', 1))

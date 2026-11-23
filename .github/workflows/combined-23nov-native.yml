@@ -62,8 +62,8 @@ jobs:
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DirectionUnit.xcresult -only-testing:MirsaTests/MirsaTextDirectionTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/unit-validation.log
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ForegroundUI.xcresult -only-testing:MirsaUITests/MirsaArabicFeed22UITests -only-testing:MirsaUITests/MirsaForegroundUITests -only-testing:MirsaUITests/MirsaSourcesEdgeUITests -only-testing:MirsaUITests/MirsaKeyboardReturn22UITests -only-testing:MirsaUITests/CertificateParity29UITests/testArabicPushedSourceLastRowClearsDock -only-testing:MirsaUITests/CertificateParity29UITests/testEnglishPushedSourceLastRowClearsDock test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DirectionUnit.xcresult -only-testing:MirsaTests/MirsaTextDirectionTests -only-testing:MirsaTests/ForgeChatBuildProgressTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/unit-validation.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ForegroundUI.xcresult -only-testing:MirsaUITests/TerminalStages23UITests -only-testing:MirsaUITests/MirsaArabicFeed22UITests -only-testing:MirsaUITests/MirsaForegroundUITests -only-testing:MirsaUITests/MirsaSourcesEdgeUITests -only-testing:MirsaUITests/MirsaKeyboardReturn22UITests -only-testing:MirsaUITests/CertificateParity29UITests/testArabicPushedSourceLastRowClearsDock -only-testing:MirsaUITests/CertificateParity29UITests/testEnglishPushedSourceLastRowClearsDock test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
           xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUnit.xcresult -only-testing:MirsaTests/WallpaperSourceTests -only-testing:MirsaTests/WallpaperSourceLiveTests -only-testing:MirsaTests/CAPlaygroundSourceTests -only-testing:MirsaTests/ReviewedToolsSourcesTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-unit.log
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUI.xcresult -only-testing:MirsaUITests/WallpaperSourceUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-ui.log
       - name: Export runtime screenshot attachments
@@ -95,3 +95,57 @@ jobs:
             build/WallpaperSourceUI.xcresult
             build/wallpaper-screenshots
           if-no-files-found: warn
+
+  device:
+    needs: simulator
+    timeout-minutes: 70
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: terminal-stages-device
+      - name: Build device FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Prepare private SDK and project
+        run: |
+          bash scripts/prepare-privatekits-sdk.sh iphoneos
+          brew install xcodegen
+          xcodegen generate
+          mkdir -p Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+      - name: Build one private device IPA, no publish
+        run: bash build-ipa.sh
+      - name: Verify and record exact device artifact
+        run: |
+          python3 - <<'VERIFY'
+          import zipfile,pathlib,hashlib,json,os,plistlib,shutil
+          p=pathlib.Path('build/Mirsa.ipa')
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              info=plistlib.loads(z.read('Payload/Mirsa.app/Info.plist'))
+              assert 'iPhoneOS' in info.get('CFBundleSupportedPlatforms',[])
+              assert z.getinfo('Payload/Mirsa.app/Mirsa').file_size>0
+          pathlib.Path('build/device-proof.json').write_text(json.dumps({'head':os.environ['GITHUB_SHA'],'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'bytes':p.stat().st_size,'unsigned':True,'published':False},indent=2))
+          VERIFY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-terminal-wallpaper-private-device
+          path: |
+            build/Mirsa.ipa
+            build/device-proof.json
+          if-no-files-found: error
