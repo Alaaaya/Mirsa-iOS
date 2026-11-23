@@ -24,16 +24,16 @@ jobs:
           pathlib.Path('build').mkdir(exist_ok=True)
           pathlib.Path('build/source-proof.json').write_text(json.dumps({'head':os.environ['GITHUB_SHA'],'committedSource':True,'files':manifest},indent=2))
           CHECK
-      - name: Standalone store package tests
-        run: |
-          set -o pipefail
-          mkdir -p build
-          bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
       - name: Select Xcode
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Standalone store package tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/appstore/package-tests.sh 2>&1 | tee build/package-tests.log
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim
