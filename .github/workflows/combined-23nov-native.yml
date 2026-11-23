@@ -1,8 +1,8 @@
-name: Combined 23nov native proof
+name: Wallpaper load23 native live proof
 on:
   workflow_dispatch:
   push:
-    branches: [mirsa/combined-23nov]
+    branches: [mirsa/wallpaper-load23]
 permissions:
   contents: read
 jobs:
@@ -61,7 +61,7 @@ jobs:
           mkdir -p build
           xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/DirectionUnit.xcresult -only-testing:MirsaTests/MirsaTextDirectionTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/unit-validation.log
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/ForegroundUI.xcresult -only-testing:MirsaUITests/MirsaArabicFeed22UITests -only-testing:MirsaUITests/MirsaForegroundUITests -only-testing:MirsaUITests/MirsaSourcesEdgeUITests -only-testing:MirsaUITests/MirsaKeyboardReturn22UITests -only-testing:MirsaUITests/CertificateParity29UITests/testArabicPushedSourceLastRowClearsDock -only-testing:MirsaUITests/CertificateParity29UITests/testEnglishPushedSourceLastRowClearsDock test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUnit.xcresult -only-testing:MirsaTests/WallpaperSourceTests -only-testing:MirsaTests/CAPlaygroundSourceTests -only-testing:MirsaTests/ReviewedToolsSourcesTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-unit.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUnit.xcresult -only-testing:MirsaTests/WallpaperSourceTests -only-testing:MirsaTests/WallpaperSourceLiveTests -only-testing:MirsaTests/CAPlaygroundSourceTests -only-testing:MirsaTests/ReviewedToolsSourcesTests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-unit.log
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/WallpaperSourceUI.xcresult -only-testing:MirsaUITests/WallpaperSourceUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/wallpaper-ui.log
       - name: Export runtime screenshot attachments
         if: always()
@@ -77,7 +77,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Mirsa-combined-23nov-native-proof
+          name: Mirsa-wallpaper-load23-native-proof
           path: |
             build/source-proof.json
             build/unit-validation.log

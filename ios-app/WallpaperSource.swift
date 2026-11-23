@@ -110,6 +110,8 @@ enum WallpaperSourceNetwork {
 @MainActor
 final class WallpaperSourceStore: ObservableObject {
     static let official = URL(string: "https://mirsa-source.mooo.com/wallpapers.json")!
+    private static let sourcesKey = "mirsa.wallpaper.sources.v1"
+    private static let communityMigrationKey = "mirsa.wallpaper.sources.caplayground.default.v1"
     @Published private(set) var urls: [URL]
     @Published private(set) var feeds: [URL: WallpaperSourceFeed] = [:]
     @Published private(set) var loading = false
@@ -117,10 +119,17 @@ final class WallpaperSourceStore: ObservableObject {
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let saved = defaults.stringArray(forKey: "mirsa.wallpaper.sources.v1") ?? []
+        var saved = defaults.stringArray(forKey: Self.sourcesKey) ?? []
+        // Apply the newly approved default once, not on every launch. Later removals stay removed.
+        let needsCommunityMigration = !defaults.bool(forKey: Self.communityMigrationKey)
+        if needsCommunityMigration { saved.append(CAPlaygroundSource.manifest.absoluteString) }
         var seen = Set<URL>()
         urls = ([Self.official] + saved.compactMap(URL.init(string:))).filter {
             WallpaperSourceFeed.allowed($0) && seen.insert($0).inserted
+        }
+        if needsCommunityMigration {
+            persist()
+            defaults.set(true, forKey: Self.communityMigrationKey)
         }
     }
     func refresh() async {
@@ -155,5 +164,5 @@ final class WallpaperSourceStore: ObservableObject {
         guard url != Self.official else { return }
         urls.removeAll { $0 == url }; feeds[url] = nil; persist()
     }
-    private func persist() { defaults.set(urls.map(\.absoluteString), forKey: "mirsa.wallpaper.sources.v1") }
+    private func persist() { defaults.set(urls.map(\.absoluteString), forKey: Self.sourcesKey) }
 }

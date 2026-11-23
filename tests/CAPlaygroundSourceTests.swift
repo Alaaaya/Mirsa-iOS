@@ -19,10 +19,12 @@ final class CAPlaygroundSourceTests: XCTestCase {
             XCTAssertThrowsError(try CAPlaygroundSource.asset(path, prefix: "wallpapers/", extension: "tendies"))
         }
     }
-    @MainActor func testNotEnabledByDefault() {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    @MainActor func testEnabledByDefault() {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
         let store = WallpaperSourceStore(defaults: defaults)
-        XCTAssertFalse(store.urls.contains(CAPlaygroundSource.manifest))
+        XCTAssertEqual(store.urls, [WallpaperSourceStore.official, CAPlaygroundSource.manifest])
     }
     func testMalformedAndOversized() {
         XCTAssertThrowsError(try CAPlaygroundSource.decode(Data("{}".utf8)))

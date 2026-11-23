@@ -207,12 +207,67 @@ final class WallpaperSourceTests: XCTestCase {
         defaults.set([official.absoluteString, custom.absoluteString, custom.absoluteString,
                       "http://insecure.example.com/feed.json"], forKey: "mirsa.wallpaper.sources.v1")
         let store = WallpaperSourceStore(defaults: defaults)
-        XCTAssertEqual(store.urls, [official, custom])
+        XCTAssertEqual(store.urls, [official, custom, CAPlaygroundSource.manifest])
         store.remove(official)
-        XCTAssertEqual(store.urls, [official, custom])
+        XCTAssertEqual(store.urls, [official, custom, CAPlaygroundSource.manifest])
         store.remove(custom)
-        XCTAssertEqual(store.urls, [official])
-        XCTAssertEqual(WallpaperSourceStore(defaults: defaults).urls, [official])
+        XCTAssertEqual(store.urls, [official, CAPlaygroundSource.manifest])
+        XCTAssertEqual(WallpaperSourceStore(defaults: defaults).urls, [official, CAPlaygroundSource.manifest])
         XCTAssertEqual(official.absoluteString, "https://mirsa-source.mooo.com/wallpapers.json")
+    }
+}
+
+extension WallpaperSourceTests {
+    @MainActor
+    func testCommunityDefaultMigratesOnceAndExplicitRemovalSurvivesRelaunch() throws {
+        let suite = "WallpaperSourceMigration." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let custom = URL(string: "https://example.com/custom.json")!
+        let official = WallpaperSourceStore.official
+        let community = CAPlaygroundSource.manifest
+        defaults.set([custom.absoluteString, community.absoluteString, community.absoluteString],
+                     forKey: "mirsa.wallpaper.sources.v1")
+        let migrated = WallpaperSourceStore(defaults: defaults)
+        XCTAssertEqual(migrated.urls, [official, custom, community])
+        XCTAssertTrue(defaults.bool(forKey: "mirsa.wallpaper.sources.caplayground.default.v1"))
+        XCTAssertEqual(defaults.stringArray(forKey: "mirsa.wallpaper.sources.v1"),
+                       [official, custom, community].map(\.absoluteString))
+        migrated.remove(community)
+        XCTAssertEqual(WallpaperSourceStore(defaults: defaults).urls, [official, custom])
+        migrated.remove(custom)
+        XCTAssertEqual(WallpaperSourceStore(defaults: defaults).urls, [official])
+    }
+
+    @MainActor
+    func testLegacyOfficialOnlyStoreReceivesCommunityDefault() throws {
+        let suite = "WallpaperSourceLegacy." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set([WallpaperSourceStore.official.absoluteString], forKey: "mirsa.wallpaper.sources.v1")
+        let store = WallpaperSourceStore(defaults: defaults)
+        XCTAssertEqual(store.urls, [WallpaperSourceStore.official, CAPlaygroundSource.manifest])
+        XCTAssertEqual(WallpaperSourceStore(defaults: defaults).urls, store.urls)
+    }
+}
+
+/// Intentional network gate, selected by the private wallpaper-load verification workflow.
+/// Uses the shipping bounded transport and decoder, never a fixture or duplicate parser.
+final class WallpaperSourceLiveTests: XCTestCase {
+    func testBothApprovedLiveSourcesUseProductionTransportAndDecoder() async throws {
+        let official = try await WallpaperSourceNetwork.feed(WallpaperSourceStore.official)
+        XCTAssertEqual(official.name, "Mirsa Wallpapers")
+        XCTAssertEqual(official.author, "Mirsa")
+        XCTAssertTrue(official.wallpapers.isEmpty, "Official catalog is intentionally empty, community is separate")
+        let community = try await WallpaperSourceNetwork.feed(CAPlaygroundSource.manifest)
+        XCTAssertEqual(community.name, "CAPlayground")
+        XCTAssertFalse(community.wallpapers.isEmpty)
+        XCTAssertEqual(Set(community.wallpapers.map(\.id)).count, community.wallpapers.count)
+        XCTAssertTrue(community.wallpapers.allSatisfy { $0.category == "CAPlayground" })
+        let attachment = XCTAttachment(string: "Production HTTPS decode succeeded. Official entries \(official.wallpapers.count), CAPlayground entries \(community.wallpapers.count).")
+        attachment.name = "Live source production decoder proof"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("MIRSA_LIVE_SOURCE_PROOF official=\(official.wallpapers.count) caplayground=\(community.wallpapers.count)")
     }
 }
