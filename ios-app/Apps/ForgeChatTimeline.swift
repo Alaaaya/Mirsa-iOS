@@ -60,7 +60,7 @@ struct ForgeChatMessage: Codable, Identifiable, Equatable {
     enum K: String, CodingKey { case id, threadID, role, text, createdAt, hasImage, result, attachments, replyToMessageID, reaction, botReaction, editedAt, buildProgress }
     enum QK: String, CodingKey { case replyQuote, replyQuoteText, replyQuoteRole }
     struct Quote: Codable { let text: String?; let role: String? }
-    /// Tolerant on purpose: unknown roles (kat, operator...), missing threadID, odd optional types must never drop a reply.
+    /// Tolerant on purpose: unknown server roles, missing threadID, odd optional types must never drop a reply.
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         id = try c.decode(UUID.self, forKey: .id)

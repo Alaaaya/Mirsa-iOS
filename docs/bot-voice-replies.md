@@ -7,7 +7,7 @@ localized playback accessibility labels and exposes duration as the button value
 
 ## Existing backend contract, unchanged
 
-A voice-only reply has a non-user role (normally kat), optional nil/empty text and
+A voice-only reply has a non-user server role, optional nil/empty text and
 attachments containing id, kind audio, name, mime audio/mp4, size, durationMS,
 sha256, available and optional expiresAt. Audio must be real M4A/MP4 bytes.
 Limits remain 5 MiB and 300 seconds. No url, object path or signed URL is required.

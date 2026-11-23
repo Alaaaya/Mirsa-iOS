@@ -1,6 +1,6 @@
 Incoming IPA private confirmation sheet
 
-Base 86e1de1, isolated branch kat/incoming-sheet. No ContentView or AppsView changes; caller wiring required and contract supplied alongside.
+Base 86e1de1, isolated branch the dedicated development branch. No ContentView or AppsView changes; caller wiring required and contract supplied alongside.
 
 All four owner screenshots IMG_1286/1287/1288/1289 inspected. Gold/violet Mirsa Aurora + glass cards, physical LTR, real extracted icon/name/ID/version/file metadata. Signature badge states presence only, never trust/eligibility. Original MachO entitlements and embedded profile separated from chosen saved signing profile. Exact declared keys only, copy action, show all count. Profile ID deliberately shortened, no device-list/private-key fields exposed. Project-edit hint, explicit cancel/project/sign actions. No direct-install button unless caller supplies a separately validated existing path; default nil.
 

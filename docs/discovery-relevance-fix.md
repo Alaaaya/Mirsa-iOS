@@ -1,6 +1,6 @@
 # Discovery relevance and actual-IPA-only results
 
-Base 6e8d82bd94cdd50cf1bbdb06674c6f62ef3aec6e. Isolated branch kat/discovery-relevance. No backend deployment, production push, feed change, or release.
+Base 6e8d82bd94cdd50cf1bbdb06674c6f62ef3aec6e. Isolated branch the dedicated development branch. No backend deployment, production push, feed change, or release.
 
 ## Root causes
 App Store URL parsing accepted an unanchored id substring, including query strings. Engine's ID-query path appended backend hits without relevance ranking. Backend only rejected Android and unsafe URL shapes, not unrelated titles or social/wiki/decrypt hosts. A .ipa suffix alone made a hit downloadable. Apple reference cards were appended and page-only hits displayed.
