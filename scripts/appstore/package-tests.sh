@@ -13,6 +13,16 @@ cp "$ROOT/tests/StoreServerClientTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/ios-app/Apps/RealAppDeletion.swift" "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/RealAppDeletionTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/ios-app/Apps/ForgeChatTimeline.swift" "$WORK/Sources/MirsaStoreKit/"
+# Use the real progress Codable models without the SwiftUI presentation layer.
+python3 - "$ROOT/ios-app/Apps/ForgeChatBuildProgress.swift" "$WORK/Sources/MirsaStoreKit/ChatBuildProgress.swift" <<'PROGRESS'
+import sys
+from pathlib import Path
+source = Path(sys.argv[1]).read_text()
+models = source.split('/// Top-level chat-read "lifecycle" row', 1)[0]
+assert 'struct ChatBuildProgress: Codable, Equatable' in models
+assert 'import SwiftUI' in models
+Path(sys.argv[2]).write_text(models.replace('import SwiftUI', 'import Foundation', 1))
+PROGRESS
 cp "$ROOT/tests/ForgeChatTimelineTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
 cp "$ROOT/ios-app/Apps/UpdateNetworkPath.swift" "$WORK/Sources/MirsaStoreKit/"
 cp "$ROOT/tests/UpdateNetworkPathTests.swift" "$WORK/Tests/MirsaStoreKitTests/"
