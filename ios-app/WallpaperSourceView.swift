@@ -282,7 +282,14 @@ private struct WallpaperSourceVideoView: View {
             .task {
                 let queue = AVQueuePlayer()
                 queue.isMuted = true
-                looper = AVPlayerLooper(player: queue, templateItem: AVPlayerItem(url: url))
+                var playbackURL = url
+                #if DEBUG
+                if WallpaperSourceFixture.active, url.host == "wallpaper-fixture.invalid",
+                   let fixture = Bundle.main.url(forResource: "WallpaperPreviewTest", withExtension: "mp4") {
+                    playbackURL = fixture
+                }
+                #endif
+                looper = AVPlayerLooper(player: queue, templateItem: AVPlayerItem(url: playbackURL))
                 player = queue
                 observer = queue.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { time in
                     if time.seconds > 0.4 { played = true }

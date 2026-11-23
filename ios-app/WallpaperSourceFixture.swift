@@ -16,7 +16,7 @@ enum WallpaperSourceFixture {
                     name: ["Solar arc", "Night tide", "Cinder", "Dune", "Lagoon", "Halo"][index],
                     author: "Mirsa",
                     previewImage: URL(string: "https://wallpaper-fixture.invalid/\(index).png")!,
-                    previewVideo: index == 0 ? Bundle.main.url(forResource: "WallpaperPreviewTest", withExtension: "mp4")! : nil,
+                    previewVideo: index == 0 ? URL(string: "https://wallpaper-fixture.invalid/preview.mp4")! : nil,
                     url: URL(string: "https://wallpaper-fixture.invalid/\(index).tendies")!,
                     size: Int64(1_048_576 + index * 65_536),
                     category: "Original procedural art", description: "Original wallpaper preview test artwork.")
