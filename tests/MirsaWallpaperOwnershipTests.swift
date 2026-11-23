@@ -7,6 +7,18 @@ import UIKit
 /// These fixtures call production package/path helpers on private temporary files.
 /// They never acquire a lease, discover containers, delete system files or respring.
 final class MirsaWallpaperOwnershipTests: XCTestCase {
+    func testOwnGroupErrorsAreLocalizedWithoutHidingOtherDiagnostics() {
+        let languages: [AppLanguage] = [.english, .arabic, .german, .kurmanji, .sorani]
+        for language in languages {
+            let expected = MirsaWallpaperActionStrings.text(.errOwnGroup, language: language)
+            XCTAssertFalse(expected.isEmpty)
+            XCTAssertEqual(MirsaWallpaperActionStrings.localizedError("placard-style needs one usable own app group", language: language), expected)
+            XCTAssertEqual(MirsaWallpaperActionStrings.localizedError("Lease: no usable own signed app group", language: language), expected)
+            XCTAssertEqual(MirsaWallpaperActionStrings.localizedError("Unrelated app group diagnostic", language: language), "Unrelated app group diagnostic")
+        }
+        XCTAssertEqual(Set(languages.map { MirsaWallpaperActionStrings.text(.errOwnGroup, language: $0) }).count, 5)
+    }
+
     private let provider = "com.apple.WallpaperKit.CollectionsPoster"
     private func record() -> MirsaWallpaperJournal.Record {
         let id = UUID().uuidString

@@ -9,7 +9,7 @@ enum MirsaWallpaperActionStrings {
         case deleteItem, deleteTitle, deleteBody, deleteConfirm, deleting
         case cleanup, cleanupTitle, cleanupBody, cleanupConfirm
         case deleteDone, cleanupDone, failedPrefix, busy, importRemoveHint
-        case journalTitle, journalFooter, journalEmpty, reconcile, reconcileTitle, reconcileBody, reconcileConfirm, reconcileClearedDone, reconcilePresentTitle, reconcilePresentBody, keepIt, journalPending, journalCopied, errJournalExists, errTimeBudget, errIncomplete, errBusy
+        case journalTitle, journalFooter, journalEmpty, reconcile, reconcileTitle, reconcileBody, reconcileConfirm, reconcileClearedDone, reconcilePresentTitle, reconcilePresentBody, keepIt, journalPending, journalCopied, errOwnGroup, errJournalExists, errTimeBudget, errIncomplete, errBusy
     }
     static func text(_ key: Key, language: AppLanguage = AppLanguageStore.snapshot) -> String {
         let column: Int
@@ -78,6 +78,7 @@ enum MirsaWallpaperActionStrings {
         .keepIt: ["Keep", "خليها", "Behalten", "Bihêle", "بیهێڵەرەوە"],
         .journalPending: ["Install not completed", "التثبيت ما خلص", "Installation unvollständig", "Sazkirin neqediya", "دامەزراندن تەواو نەبوو"],
         .journalCopied: ["Installed", "مثبّتة", "Installiert", "Hate sazkirin", "دامەزرا"],
+        .errOwnGroup: ["Wallpaper access is unavailable. Re-sign Mirsa with an App Group enabled in its provisioning profile.", "صلاحية الوصول للخلفيات مو متاحة. أعد توقيع مرسى ببروفايل مفعّل فيه App Group.", "Kein Zugriff auf Hintergründe. Signiere Mirsa erneut mit einem Provisionierungsprofil mit aktivierter App Group.", "Gihîştina wênesaziyan tune ye. Mirsa bi profîlekê ku App Group tê de çalak e ji nû ve îmze bike.", "دەستگەیشتن بە وێنەزەمینەکان بەردەست نییە. مرسی بە پرۆفایلێک کە App Group تێیدا چالاکە دووبارە واژۆ بکە."],
         .errJournalExists: ["This wallpaper already has an old Mirsa install record. Open “Old install records” below and reconcile or clear it first.", "هالخلفية إلها سجل تثبيت قديم من مرسى. افتح «سجلات التثبيت القديمة» تحت وطابقه أو امسحه أول.", "Für diesen Hintergrund gibt es schon einen alten Mirsa-Installationseintrag. Öffne unten „Alte Installationseinträge“ und gleiche ihn ab oder lösche ihn zuerst.", "Ji bo vê wênesaziyê tomarek sazkirinê ya kevn a Mirsa heye. Li jêr «Tomarên sazkirinê yên kevn» veke û pêşî lihev bîne an paqij bike.", "ئەم وێنەزەمینەیە تۆمارێکی دامەزراندنی کۆنی مرسی هەیە. «تۆمارە کۆنەکانی دامەزراندن» لە خوارەوە بکەرەوە و سەرەتا ڕێکی بخە یان بیسڕەوە."],
         .errTimeBudget: ["Listing the gallery took too long. Your old install records below still work. Try Refresh again.", "قراءة المعرض أخدت وقت كتير. سجلات التثبيت القديمة تحت لساتها شغالة. جرّب تحديث كمان مرة.", "Das Auslesen der Galerie hat zu lange gedauert. Die alten Installationseinträge unten funktionieren weiterhin. Versuche erneut zu aktualisieren.", "Xwendina galeriyê pir dirêj kişand. Tomarên sazkirinê yên kevn li jêr hê dixebitin. Dîsa nûve bike.", "خوێندنەوەی گالەری زۆر خایاند. تۆمارە کۆنەکانی دامەزراندن لە خوارەوە هێشتا کار دەکەن. دووبارە نوێ بکەرەوە."],
         .errIncomplete: ["An incomplete Mirsa install exists. Review it under “Old install records” before installing again.", "في تثبيت مرسى ناقص. راجعه تحت «سجلات التثبيت القديمة» قبل ما تثبّت من جديد.", "Eine unvollständige Mirsa-Installation existiert. Prüfe sie unter „Alte Installationseinträge“, bevor du neu installierst.", "Sazkirinek Mirsa ya neqediyayî heye. Berî sazkirina nû, li «Tomarên sazkirinê yên kevn» binere.", "دامەزراندنێکی ناتەواوی مرسی هەیە. پێش دامەزراندنی نوێ لە «تۆمارە کۆنەکانی دامەزراندن» بیپشکنە."],
@@ -87,6 +88,7 @@ enum MirsaWallpaperActionStrings {
     /// Maps known backend English failures to localized text; unknown messages pass through unchanged.
     static func localizedError(_ message: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
         let m = message.lowercased()
+        if m.contains("needs one usable own app group") || m.contains("no usable own signed app group") { return text(.errOwnGroup, language: language) }
         if m.contains("installation journal") { return text(.errJournalExists, language: language) }
         if m.contains("time budget") { return text(.errTimeBudget, language: language) }
         if m.contains("incomplete mirsa installation") { return text(.errIncomplete, language: language) }
