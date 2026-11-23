@@ -148,6 +148,10 @@ struct WallpaperSourcesView: View {
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 18))
+                    // Clipping alone does not constrain SwiftUI hit testing or
+                    // accessibility bounds of a scaled-to-fill landscape image.
+                    // The button supplies the accessible name, not its artwork.
+                    .accessibilityHidden(true)
                     .overlay(alignment: .bottomTrailing) {
                         if entry.previewVideo != nil || entry.previewImage.pathExtension.lowercased() == "gif" {
                             Image(systemName: "play.circle.fill").font(.title).padding(8)
@@ -155,6 +159,7 @@ struct WallpaperSourcesView: View {
                     }
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .accessibilityLabel(entry.name)
             .accessibilityIdentifier("wallpaper-preview-" + entry.id)
             Text(entry.name).font(.headline).lineLimit(2)
