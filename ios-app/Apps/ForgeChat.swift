@@ -345,7 +345,7 @@ enum ForgeChatImage {
                 body["attachmentIDs"] = ChatAttachmentRules.sendIDs(ids).map { $0.uuidString.lowercased() } // same IDs on every retry
             } else if let b = o.imageBase64 { body["image"] = ["mime": "image/jpeg", "base64": b] }
             if ForgeChatFeatures.serverReplyAndReactions, let ref = ForgeChatLocal.shared.replies[o.id] {
-                body["replyToMessageID"] = ref.messageID.uuidString.lowercased() // PROPOSED field, off until Kat confirms
+                body["replyToMessageID"] = ref.messageID.uuidString.lowercased() // PROPOSED field, off until Mirsa confirms
             }
             do {
                 let sent = try await call(body)
@@ -383,7 +383,7 @@ enum ForgeChatImage {
         await refreshThreads()
     }
 
-    /// Kat, 2026-11-10: chat-send answers {message:{...}} with message.attachments, same shape as chat-read
+    /// Mirsa, 2026-11-10: chat-send answers {message:{...}} with message.attachments, same shape as chat-read
     /// (expired ones come back available:false with no bytes). Publish it right away; the next read confirms it.
     private func applySentAttachments(_ data: Data, threadID: UUID) {
         struct W: Decodable { let message: ForgeChatMessage }
@@ -412,7 +412,7 @@ enum ForgeChatImage {
         error = nil
     }
 
-    /// Mirsa 2.1 «بلّغ عن مشكلة» (Kat's contract, 2026-11-10): POST {action:"chat-report", threadID, messageID, note}
+    /// Mirsa 2.1 «بلّغ عن مشكلة» (Mirsa's contract, 2026-11-10): POST {action:"chat-report", threadID, messageID, note}
     /// to the chat-send endpoint with the same headers. messageID is the Mirsa AI reply under which the button was tapped.
     /// 200 ok (a repeat report also answers 200) · 401 refresh session, retry once · 403 rebind device, retry once
     /// · 404 thread/message gone · 422 bad UUID or note > 500 · 503 unavailable.

@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// Manual-queue receipt: the server saved the Create request for Kat; nothing was built.
+/// Manual-queue receipt: the server saved the Create request for Mirsa; nothing was built.
 struct ForgeQueuedReceipt: Equatable {
     let threadID: String
     let originalID: String

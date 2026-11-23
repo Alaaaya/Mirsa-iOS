@@ -7,7 +7,7 @@ import UIKit
 enum MirsaFeatures {
     /// Owner-approved production attachments, verified against the live contract.
     static let chatAttachments21 = true
-    /// .zip / .deb / .dylib chat attachments (5 MiB each). OFF until Kat confirms the server rollout.
+    /// .zip / .deb / .dylib chat attachments (5 MiB each). OFF until Mirsa confirms the server rollout.
     static let binaryAttachmentsEnabled = true
     /// Sends the optional device_udid field (read from lockdown) next to the existing device ID. OFF until the server is ready.
     static let stableDeviceLink = false

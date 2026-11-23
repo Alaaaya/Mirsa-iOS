@@ -1,6 +1,6 @@
 # Personal project signing (review branch only)
 
-Based on production 7c50e6e, branch kat/cert-bundle-rewrite. No publishing or source-feed changes authorized.
+Based on production 7c50e6e, branch the dedicated development branch. No publishing or source-feed changes authorized.
 
 ## Identifier resolution
 

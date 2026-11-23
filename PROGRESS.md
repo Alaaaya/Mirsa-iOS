@@ -14,7 +14,7 @@ Solefinisher ddeaac32; no duplicate dispatch.
 
 Nov13 primary followup: 00a1b9c all 3 failed. Logs read in full locally /tmp/video-{132112743107,132112757522,14071785093}.log. Syntax TendiesView143 Text closing parenthesis fixed; SourceDeletionTests UUID suite per invocation avoids shared persistent-domain interference. No production SourcesStore changes. New head 1ceca81fb0c1c670c163c08e8e8447bbeff998f3 pushed. Local wallpaper regression functions 3 PASS, no Swift on Linux, actual compilation pending CI. Exact new runs unsigned43494358295 smoke43494362658 forge43494366836 queued. All dispatched ONCE no duplicates. Sole successor 8e385314 handles all three and delivery, no IPA until passed. User notified actual failure once. Logs Azure redirect must not carry Authorization; no-redirect getLocation then GET location without auth.
 - 1ceca81 runs: IPA 43494358295 smoke 43494362658 forge-val 43494366836 + cleanup19-tests dispatched once (SourceDeletion)
-- 1ceca81 also sources-libraries-validation 43494520905 (SourceDeletion); cleanup19 only triggers on kat/cleanup19
+- 1ceca81 also sources-libraries-validation 43494520905 (SourceDeletion); cleanup19 only triggers on the dedicated development branch
 - Fri Nov 13 14:21:12 PST 2026 new finisher took over head 13540a6; runs identity 43510021262 smoke 43510023002 IPA 43510020328 forge 43510026323 sources 43510029794 running. TODO: chat black/gradient toggle, download-resume merge, license row/FlekDeck, first-search identity wait. no dup dispatch.
 
 ## Isolated tendies maker, 2026-11-14

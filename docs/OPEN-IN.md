@@ -11,5 +11,5 @@ No new Share Extension, App ID, entitlement or signing target. Document interact
 Manual acceptance on iPhone
 Open a small IPA from Files while Mirsa is closed, then while running. Check all three choices, login enforcement and real-app slots. Library must save without installation/login. Cancel then import another file. Open a second file while chooser is visible, verify original remains. Invalid, empty, oversized and unavailable-provider files must fail without leaving a pending import. Original provider file must remain intact. Check Arabic physically LTR. Telegram/Safari/AirDrop visibility must be tested, not assumed.
 
-Integration with kat/cert-bundle-rewrite
+Integration with the dedicated development branch
 Only AppsView's existing InstallChoiceSheet call and one optional onPersonal closure/card are modified in the shared UI. PersonalAppsHub, project/certificate/home files are untouched. Resolve the small AppsView hunk explicitly when integrating; keep that branch's downloader and UI.
