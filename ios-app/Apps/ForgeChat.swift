@@ -914,7 +914,7 @@ struct ForgeChatThreadView: View {
     .safeAreaInset(edge: .top, spacing: 0) {
         VStack(spacing: 6) {
             header
-            if let bp = ChatBuildPresentation.pill(style: ChatBuildStyle.resolve(buildStyleRaw), messages: msgs, lifecycle: store.lifecycle[threadID] ?? []) { ChatBuildPill(progress: bp).transition(.opacity) }
+            if let bp = ChatBuildPresentation.pill(style: ChatBuildStyle.resolve(buildStyleRaw), threadID: threadID, messages: msgs, lifecycle: store.lifecycle[threadID] ?? []) { ChatBuildPill(progress: bp).transition(.opacity) }
         }
     }
     // Inset the actual scrolling viewport, not its flexible outer container.

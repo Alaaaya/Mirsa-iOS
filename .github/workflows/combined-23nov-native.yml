@@ -25,6 +25,7 @@ jobs:
           manifest += [{'path': 'ios-app/Apps/EncryptedAppsTab.swift', 'sha256': '34034c9faafc74848b10872ab818aaf70e65fded842ef6d85ad65621ecd34afb', 'blob': '64e8d2d7467d76b518dfa5267de81c6c2e9a0f51'}]
           manifest += [{'path': 'ios-app/Apps/ClassicEncryptedAppsTab.swift', 'sha256': '6a52d3049453ccf0d1f2143d1ac619176658c5fe5e111893c770b87e3f109eca', 'blob': '17618891feda97c869de6c0d3f344cd7ad9a8705'}]
           manifest += [{'path': 'uitests/UnderDock23UITests.swift', 'sha256': '1bb6e9bb413f5850386178519f3a5b17a95dbd494e9ab9c65f26ea3f3023aba2', 'blob': '86729585f5001378a889122d87f1395bf7e14ed6'}]
+          manifest += [{'path': 'ios-app/Apps/ForgeChatBuildProgress.swift', 'sha256': '53a05ceee1e26f61efc9e252dde8c7d49e51816cf67cd5a8455531eda5581e29', 'blob': 'f07923d12765844f10df79cc5e94b3ca6580ec9f'}, {'path': 'ios-app/Apps/ForgeChat.swift', 'sha256': 'cd8fefc2e212c18f70074ee8c15cd74de1e4e191b8802b9b6271e608e2b07928', 'blob': '12718ff4e4562596eada58ac2afd40099c5e0c97'}, {'path': 'tests/ForgeChatBuildProgressTests.swift', 'sha256': '24a583c4a4bce94daf533d81ce96e6413bca8e25a7f621121193acfa3f8dafa9', 'blob': '77c394ef36428c992980a741073bda5b3365751b'}]
           for f in manifest:
               data = pathlib.Path(f['path']).read_bytes()
               assert hashlib.sha256(data).hexdigest()==f['sha256']

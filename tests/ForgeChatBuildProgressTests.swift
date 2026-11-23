@@ -79,11 +79,14 @@ final class ForgeChatBuildProgressTests: XCTestCase {
         let id = UUID(); var m = user(id)
         m.buildProgress = ChatBuildProgress(requestMessageID: id, phase: .building)
         XCTAssertNotNil(ChatBuildPresentation.card(style: .terminal, message: m, lifecycle: [], messages: [m]))
-        XCTAssertNil(ChatBuildPresentation.pill(style: .terminal, messages: [m], lifecycle: []))
+        XCTAssertNil(ChatBuildPresentation.pill(style: .terminal, threadID: m.threadID, messages: [m], lifecycle: []))
         XCTAssertNil(ChatBuildPresentation.card(style: .pill, message: m, lifecycle: [], messages: [m]))
-        XCTAssertNotNil(ChatBuildPresentation.pill(style: .pill, messages: [m], lifecycle: []))
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: []))
+        let live = ChatLifecycleEntry(id: UUID(), sourceMessageID: id, state: "working",
+            activeBuildJob: ChatActiveBuildJob(id: UUID(), status: "building", threadID: m.threadID))
+        XCTAssertNotNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [live]))
         m.buildProgress = ChatBuildProgress(requestMessageID: id, phase: .ready)
-        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, messages: [m], lifecycle: []))
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: []))
     }
     func testStyleDefaultsToTerminalAndPersists() {
         let d = UserDefaults.standard
@@ -155,7 +158,7 @@ final class ForgeChatBuildProgressTests: XCTestCase {
                 let tid = UUID(), mid = UUID()
                 store.threads = [ForgeChatThread(id: tid, title: "SYNTHETIC TEST", status: "open", createdAt: nil, updatedAt: nil)]
                 store.messages[tid] = [ForgeChatMessage(id: mid, threadID: tid, role: "user", text: "SYNTHETIC TEST request")]
-                store.lifecycle[tid] = [ChatLifecycleEntry(id: UUID(), sourceMessageID: mid, state: "working")]
+                store.lifecycle[tid] = [ChatLifecycleEntry(id: UUID(), sourceMessageID: mid, state: "working", activeBuildJob: ChatActiveBuildJob(id: UUID(), status: "building", threadID: tid))]
                 let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
                 window.rootViewController = UIHostingController(rootView: ForgeChatThreadView(threadID: tid, store: store))
                 window.makeKeyAndVisible()
@@ -197,5 +200,57 @@ extension ForgeChatBuildProgressTests {
         {"lifecycle":[{"id":"\(id)","sourceMessageID":"\(request)","state":"working","stages":[{"stage":"ready","at":"2026-11-23T11:30:00Z","attempt":1}]}]}
         """.utf8)
         XCTAssertNil(ChatBuildPresentation.resolve(message: user(request), lifecycle: ChatLifecycleEntry.lossy(data), messages: []))
+    }
+}
+
+
+extension ForgeChatBuildProgressTests {
+    func testPillRejectsStaleSnapshotsTextAndUnadmittedLifecycle() {
+        var m = ForgeChatMessage(id: UUID(), threadID: UUID(), role: "user", text: "تمام، بلّشت البناء")
+        m.buildProgress = ChatBuildProgress(requestMessageID: m.id, phase: .building)
+        let stale = ChatLifecycleEntry(id: UUID(), sourceMessageID: m.id, state: "working")
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: []))
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [stale]))
+    }
+    func testPillDisappearsForEveryTerminalStateAndMissingJob() {
+        var m = user()
+        m.buildProgress = ChatBuildProgress(requestMessageID: m.id, phase: .building)
+        for state in ["ready", "failed", "cancelled", "canceled", "unknown", "clarification"] {
+            let entry = ChatLifecycleEntry(id: UUID(), sourceMessageID: m.id, state: state,
+                activeBuildJob: ChatActiveBuildJob(id: UUID(), status: "building", threadID: m.threadID))
+            XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [entry]), state)
+        }
+        for status in ["ready", "failed", "cancelled", "canceled", "unknown"] {
+            let entry = ChatLifecycleEntry(id: UUID(), sourceMessageID: m.id, state: "working",
+                activeBuildJob: ChatActiveBuildJob(id: UUID(), status: status, threadID: m.threadID))
+            XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [entry]), status)
+        }
+    }
+    func testPillRequiresExactThreadAndSourceAndUsesLiveJobNotSnapshot() {
+        var m = user()
+        m.buildProgress = ChatBuildProgress(requestMessageID: m.id, phase: .building, title: "STALE")
+        let job = ChatActiveBuildJob(id: UUID(), status: "queued", threadID: m.threadID)
+        let live = ChatLifecycleEntry(id: UUID(), sourceMessageID: m.id, state: "queued", activeBuildJob: job)
+        let progress = ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [live])
+        XCTAssertEqual(progress?.phase, .queued)
+        XCTAssertEqual(progress?.buildID, job.id.uuidString)
+        XCTAssertNotEqual(progress?.title, "STALE")
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: UUID(), messages: [m], lifecycle: [live]))
+        let otherSource = ChatLifecycleEntry(id: UUID(), sourceMessageID: UUID(), state: "queued", activeBuildJob: job)
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [otherSource]))
+        let otherJob = ChatLifecycleEntry(id: UUID(), sourceMessageID: m.id, state: "working",
+            activeBuildJob: ChatActiveBuildJob(id: UUID(), status: "building", threadID: UUID()))
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [otherJob]))
+        let terminal = ChatLifecycleEntry(id: live.id, sourceMessageID: m.id, state: "ready")
+        XCTAssertNil(ChatBuildPresentation.pill(style: .pill, threadID: m.threadID, messages: [m], lifecycle: [live, terminal]))
+    }
+    func testActiveJobProofDecodesTolerantly() throws {
+        let id = UUID(), source = UUID(), job = UUID(), thread = UUID()
+        let data = Data("""
+        {"lifecycle":[{"id":"\(id)","sourceMessageID":"\(source)","state":"queued","activeBuildJob":{"id":"\(job)","status":"queued","threadID":"\(thread)"}}]}
+        """.utf8)
+        let entry = try XCTUnwrap(ChatLifecycleEntry.lossy(data).first)
+        XCTAssertEqual(entry.activeBuildJob?.id, job)
+        XCTAssertEqual(entry.activeBuildJob?.threadID, thread)
     }
 }

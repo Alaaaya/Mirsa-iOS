@@ -108,12 +108,20 @@ struct ChatLifecycleStage: Decodable, Equatable {
 }
 
 /// Top-level chat-read "lifecycle" row (additive, tolerant). Only exact sourceMessageID binds to a bubble.
+struct ChatActiveBuildJob: Decodable, Equatable {
+    let id: UUID
+    let status: String
+    let threadID: UUID
+    var isRunning: Bool { ["queued", "building", "working"].contains(status) }
+}
+
 struct ChatLifecycleEntry: Decodable, Equatable {
     let id: UUID; let sourceMessageID: UUID?; let kind: String?; let state: String; let version: Int?; let artifactID: UUID?
     let stages: [ChatLifecycleStage]
-    enum K: String, CodingKey { case id, sourceMessageID, kind, state, version, artifactID, stages }
-    init(id: UUID, sourceMessageID: UUID?, kind: String? = nil, state: String, version: Int? = nil, artifactID: UUID? = nil, stages: [ChatLifecycleStage] = []) {
-        self.id = id; self.sourceMessageID = sourceMessageID; self.kind = kind; self.state = state; self.version = version; self.artifactID = artifactID; self.stages = Array(stages.suffix(21))
+    let activeBuildJob: ChatActiveBuildJob?
+    enum K: String, CodingKey { case id, sourceMessageID, kind, state, version, artifactID, stages, activeBuildJob }
+    init(id: UUID, sourceMessageID: UUID?, kind: String? = nil, state: String, version: Int? = nil, artifactID: UUID? = nil, stages: [ChatLifecycleStage] = [], activeBuildJob: ChatActiveBuildJob? = nil) {
+        self.id = id; self.sourceMessageID = sourceMessageID; self.kind = kind; self.state = state; self.version = version; self.artifactID = artifactID; self.stages = Array(stages.suffix(21)); self.activeBuildJob = activeBuildJob
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -123,6 +131,7 @@ struct ChatLifecycleEntry: Decodable, Equatable {
         state = (try? c.decode(String.self, forKey: .state)) ?? "unknown"
         version = try? c.decode(Int.self, forKey: .version)
         artifactID = (try? c.decode(String.self, forKey: .artifactID)).flatMap { UUID(uuidString: $0) }
+        activeBuildJob = try? c.decode(ChatActiveBuildJob.self, forKey: .activeBuildJob)
         struct LossyStage: Decodable { let v: ChatLifecycleStage?; init(from d: Decoder) throws { v = try? ChatLifecycleStage(from: d) } }
         stages = Array(((try? c.decode([LossyStage].self, forKey: .stages)) ?? []).compactMap(\.v).suffix(21))
     }
@@ -180,10 +189,24 @@ enum ChatBuildPresentation {
         guard style == .terminal, let m = message else { return nil }
         return resolve(message: m, lifecycle: lifecycle, messages: messages)
     }
-    /// Newest running snapshot for the header pill (pill style only).
-    static func pill(style: ChatBuildStyle, messages: [ForgeChatMessage], lifecycle: [ChatLifecycleEntry]) -> ChatBuildProgress? {
+    /// Header status requires a server-proven admitted job in this exact thread.
+    /// Saved progress, stage history and assistant text never establish liveness.
+    static func pill(style: ChatBuildStyle, threadID: UUID, messages: [ForgeChatMessage], lifecycle: [ChatLifecycleEntry]) -> ChatBuildProgress? {
         guard style == .pill else { return nil }
-        return messages.reversed().lazy.compactMap { resolve(message: $0, lifecycle: lifecycle, messages: messages) }.first(where: \.isRunning)
+        for m in messages.reversed() where m.threadID == threadID && m.role == "user" {
+            guard let entry = lifecycle.last(where: { $0.sourceMessageID == m.id }),
+                  ["queued", "working"].contains(entry.state),
+                  let job = entry.activeBuildJob, job.threadID == threadID, job.isRunning else { continue }
+            // Even an old explicit message snapshot must not override job truth.
+            var liveMessage = m
+            liveMessage.buildProgress = nil
+            guard let progress = resolve(message: liveMessage, lifecycle: [entry], messages: messages),
+                  progress.isRunning else { continue }
+            return ChatBuildProgress(requestMessageID: m.id, buildID: job.id.uuidString,
+                phase: progress.phase, fraction: progress.fraction, title: progress.title,
+                events: progress.events, coarse: progress.coarse)
+        }
+        return nil
     }
 }
 
