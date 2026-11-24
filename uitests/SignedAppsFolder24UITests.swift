@@ -20,6 +20,12 @@ final class SignedAppsFolder24UITests: XCTestCase {
         let share = app.buttons["signed-file-share"].firstMatch
         XCTAssertTrue(share.waitForExistence(timeout: 15), "Real retained signing fixture must be listed")
         XCTAssertTrue(app.staticTexts["CI Signing Fixture"].exists)
+        let real = app.images["signed-file-icon-real"]
+        XCTAssertTrue(real.waitForExistence(timeout: 10), "Row with an icon in its signed IPA must render the extracted real icon")
+        XCTAssertEqual(app.images.matching(identifier: "signed-file-icon-real").count, 1)
+        XCTAssertEqual(app.images.matching(identifier: "signed-file-icon-generic").count, 1, "Icon-less signed IPA must use the generic fallback")
+        XCTAssertTrue(app.staticTexts["CI No Icon Fixture"].exists)
+        XCTAssertEqual(real.frame.width, 44, accuracy: 1)
         capture("Arabic-signed-outputs-real-IPA")
         share.tap()
         XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 5)

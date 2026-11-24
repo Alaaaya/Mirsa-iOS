@@ -1,4 +1,6 @@
 import SwiftUI
+import ImageIO
+import UIKit
 
 /// Lists only the persistent output directory populated AFTER certificate signing.
 /// Imported IPAs and PersonalLibraryApp.signed are deliberately not evidence here.
@@ -9,6 +11,8 @@ enum SignedAppsCatalog {
         let version: String
         let date: Date
         let bytes: Int64
+        /// PNG thumbnail extracted from the retained SIGNED IPA itself; nil means use the generic fallback.
+        var iconPNG: Data? = nil
         var id: String { url.path }
     }
 
@@ -57,10 +61,91 @@ enum SignedAppsCatalog {
                 let name = label?.trimmingCharacters(in: .whitespacesAndNewlines)
                 items.append(Item(url: file, name: name?.isEmpty == false ? name! : file.deletingPathExtension().lastPathComponent,
                                   version: info["CFBundleShortVersionString"] as? String ?? "",
-                                  date: values.creationDate ?? .distantPast, bytes: Int64(values.fileSize ?? 0)))
+                                  date: values.creationDate ?? .distantPast, bytes: Int64(values.fileSize ?? 0),
+                                  iconPNG: SignedIPAIcon.thumbnailPNG(in: file)))
             }
         }
         return items.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }
+    }
+}
+
+/// Safe, read-only icon lookup inside a retained signed IPA. Never executes or extracts to disk.
+/// Reuses ZipReader (bounded entries, no traversal, symlinks rejected, ratio and size limits).
+enum SignedIPAIcon {
+    static let maxEntryBytes: UInt64 = 4 * 1024 * 1024
+    static let maxPixels = 4096
+    static let maxPlistBytes: UInt64 = 2 * 1024 * 1024
+
+    /// Icon names in precedence order: primary CFBundleIcons files, icon name, top-level files, legacy file, AppIcon.
+    static func iconNames(_ info: [String: Any]) -> [String] {
+        var names: [String] = []
+        if let icons = info["CFBundleIcons"] as? [String: Any], let p = icons["CFBundlePrimaryIcon"] as? [String: Any] {
+            names += (p["CFBundleIconFiles"] as? [String]) ?? []
+            if let n = p["CFBundleIconName"] as? String { names.append(n) }
+        } else if let icons = info["CFBundleIcons"] as? [String: Any], let p = icons["CFBundlePrimaryIcon"] as? String {
+            names.append(p)
+        }
+        names += (info["CFBundleIconFiles"] as? [String]) ?? []
+        if let n = info["CFBundleIconFile"] as? String { names.append(n) }
+        names.append("AppIcon")
+        var seen = Set<String>()
+        return names.filter { !$0.isEmpty && !$0.contains("/") && !$0.contains("\\") && seen.insert($0).inserted }
+    }
+
+    static func thumbnailPNG(in ipa: URL) -> Data? {
+        var limits = IPALimits()
+        limits.maxEntries = 20_000
+        limits.rejectSymlinks = true
+        guard let values = try? ipa.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
+              values.isRegularFile == true, values.isSymbolicLink != true,
+              let size = values.fileSize, size > 22, Int64(size) <= 4 * 1024 * 1024 * 1024,
+              let data = try? Data(contentsOf: ipa, options: .mappedIfSafe),
+              let zip = try? ZipReader(data: data, limits: limits) else { return nil }
+        return thumbnailPNG(zip: zip, limits: limits)
+    }
+
+    static func thumbnailPNG(zip: ZipReader, limits: IPALimits) -> Data? {
+        var apps = Set<String>()
+        for e in zip.entries {
+            let c = e.name.split(separator: "/", omittingEmptySubsequences: true)
+            if c.count >= 2, c[0] == "Payload", c[1].hasSuffix(".app") { apps.insert(String(c[1])) }
+        }
+        guard apps.count == 1, let app = apps.first else { return nil }
+        let base = "Payload/\(app)/"
+        guard let infoEntry = zip.entry(base + "Info.plist"), infoEntry.uncompressedSize <= maxPlistBytes,
+              let infoData = try? zip.read(infoEntry, length: infoEntry.uncompressedSize, limits: limits),
+              let info = (try? PropertyListSerialization.propertyList(from: infoData, format: nil)) as? [String: Any]
+        else { return nil }
+        let pngs = zip.entries.filter { e in
+            guard e.name.hasPrefix(base), e.name.lowercased().hasSuffix(".png"),
+                  e.uncompressedSize > 0, e.uncompressedSize <= maxEntryBytes else { return false }
+            return !e.name.dropFirst(base.count).contains("/")
+        }
+        for name in iconNames(info) {
+            let matches = pngs.filter { String($0.name.dropFirst(base.count)).hasPrefix(name) }
+                .sorted { $0.uncompressedSize == $1.uncompressedSize ? $0.name < $1.name : $0.uncompressedSize > $1.uncompressedSize }
+            for e in matches {
+                if let png = decode(zip: zip, entry: e, limits: limits) { return png }
+            }
+        }
+        return nil
+    }
+
+    private static func decode(zip: ZipReader, entry: ZipEntry, limits: IPALimits) -> Data? {
+        guard let bytes = try? zip.read(entry, length: entry.uncompressedSize, limits: limits),
+              UInt64(bytes.count) == entry.uncompressedSize,
+              let source = CGImageSourceCreateWithData(bytes as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0,
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int,
+              w >= 16, h >= 16, w <= maxPixels, h <= maxPixels,
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 180,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg).pngData()
     }
 }
 
@@ -100,9 +185,19 @@ struct SignedAppsFolderView: View {
                         LazyVStack(spacing: MirsaSpacing.s) {
                             ForEach(items) { item in
                                 HStack(spacing: MirsaSpacing.m) {
-                                    Image(systemName: "app.badge.checkmark")
-                                        .font(.title2).foregroundStyle(MirsaPalette.accentGradient)
-                                        .frame(width: 44, height: 44)
+                                    if let png = item.iconPNG, let image = UIImage(data: png) {
+                                        Image(uiImage: image).resizable().scaledToFill()
+                                            .frame(width: 44, height: 44)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                            .accessibilityLabel(item.name)
+                                            .accessibilityIdentifier("signed-file-icon-real")
+                                    } else {
+                                        Image(systemName: "app.badge.checkmark")
+                                            .font(.title2).foregroundStyle(MirsaPalette.accentGradient)
+                                            .frame(width: 44, height: 44)
+                                            .accessibilityHidden(true)
+                                            .accessibilityIdentifier("signed-file-icon-generic")
+                                    }
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(item.name).font(MirsaFont.cardTitle).lineLimit(2)
                                         if !item.version.isEmpty {
