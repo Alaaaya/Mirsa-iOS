@@ -1,0 +1,38 @@
+import XCTest
+
+final class SignedAppsFolder24UITests: XCTestCase {
+    func testArabicProjectsFolderOpensAndSharesRetainedSignedIPA() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "signed-folder24",
+                               "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar"]
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        if alert.waitForExistence(timeout: 2) { alert.buttons.firstMatch.tap() }
+        let folder = app.buttons["projects-signed-folder"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 25))
+        let toggle = app.buttons["تبديل القائمة والشبكة"]
+        XCTAssertTrue(toggle.exists)
+        XCTAssertLessThan(folder.frame.midX, toggle.frame.midX, "Arabic must keep the LTR header controls")
+        capture("Arabic-projects-folder-beside-plus")
+        folder.tap()
+        let share = app.buttons["signed-file-share"].firstMatch
+        XCTAssertTrue(share.waitForExistence(timeout: 15), "Real retained signing fixture must be listed")
+        XCTAssertTrue(app.staticTexts["CI Signing Fixture"].exists)
+        capture("Arabic-signed-outputs-real-IPA")
+        share.tap()
+        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 5)
+                      || app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Copy' OR label CONTAINS 'نسخ'")).firstMatch.waitForExistence(timeout: 5)
+                      || app.collectionViews.firstMatch.waitForExistence(timeout: 5),
+                      "Sharing must open the actual system activity sheet")
+        capture("Arabic-signed-IPA-system-share")
+        let evidence = XCTAttachment(string: app.debugDescription)
+        evidence.name = "system-share-accessibility"; evidence.lifetime = .keepAlways; add(evidence)
+    }
+
+    private func capture(_ name: String) {
+        let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        a.name = name; a.lifetime = .keepAlways; add(a)
+    }
+}

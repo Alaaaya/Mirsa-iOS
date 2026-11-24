@@ -69,7 +69,7 @@ enum CertificateInstall {
 
     /// Moves the signed IPA to a persistent, backup-excluded folder so a failed
     /// install leaves a reachable file the user can share.
-    static func retain(_ url: URL) throws -> URL {
+    static func retain(_ url: URL, signedInfoPlist: Data? = nil) throws -> URL {
         let fm = FileManager.default
         let base = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("MirsaSignedExports", isDirectory: true)
@@ -80,6 +80,10 @@ enum CertificateInstall {
         try? dir.setResourceValues(values)
         let target = dir.appendingPathComponent(url.lastPathComponent)
         try fm.moveItem(at: url, to: target)
+        // Optional display metadata must never make a successful retention fail.
+        if let signedInfoPlist {
+            try? signedInfoPlist.write(to: dir.appendingPathComponent("Info.plist"), options: .atomic)
+        }
         MirsaManagedTmp.end(url.deletingLastPathComponent())
         return target
     }
