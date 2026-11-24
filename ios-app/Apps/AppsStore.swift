@@ -529,10 +529,15 @@ final class AppsStore: ObservableObject {
                 try IPAEditorService.run("extract", input: ipa, output: extractDir)
                 return try IPAEditorService.app(in: extractDir)
             }.value
-            let info = try IPAEditorService.info(in: app)
+            var info = try IPAEditorService.info(in: app)
             let bid = info["CFBundleIdentifier"] as! String
             let name = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? bid
             let version = (info["CFBundleShortVersionString"] as? String) ?? "1.0"
+            // Optional "translate to Arabic": inspects the downloaded contents; fail-open, original IPA kept for Downloads.
+            let pristineIPA = work.appendingPathComponent("pristine.ipa")
+            try? fm.copyItem(at: ipa, to: pristineIPA)
+            if let notice = await ArabicLocalizationPipeline.apply(workDir: work, ipa: ipa, app: app, bundleID: bid, version: version) { toast = notice }
+            info = (try? IPAEditorService.info(in: app)) ?? info
             let modes = info["UIBackgroundModes"] as? [String] ?? []
             let plugins = app.appendingPathComponent("PlugIns")
             let hasExt = ((try? fm.contentsOfDirectory(atPath: plugins.path)) ?? []).contains { $0.hasSuffix(".appex") }
@@ -545,7 +550,7 @@ final class AppsStore: ObservableObject {
             // saved IPA: it is never added to Downloads, and the work dir is removed
             // after install or cancel like any pending import.
             if injectTweakIDs == nil, !url.standardizedFileURL.path.hasPrefix(DownloadsLibrary.root.standardizedFileURL.path + "/") {
-                DownloadsLibrary.shared.add(ipa: ipa, bundleID: bid, name: name, version: version, size: size, icon: pending?.icon)
+                DownloadsLibrary.shared.add(ipa: fm.fileExists(atPath: pristineIPA.path) ? pristineIPA : ipa, bundleID: bid, name: name, version: version, size: size, icon: pending?.icon)
             }
             prepared = true
             MirsaInstallActivity.shared.setPhase(.ready, title: name)

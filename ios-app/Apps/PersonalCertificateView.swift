@@ -320,6 +320,7 @@ enum PersonalCertificateSigner {
         let root = stage.appendingPathComponent("archive", isDirectory: true)
         try IPAEditorService.run("extract", input: ipa, output: root)
         let app = try IPAEditorService.app(in: root)
+        if options.translateToArabic { ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app) }
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)
         }

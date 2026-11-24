@@ -34,6 +34,8 @@ struct PersonalProjectOptions: Sendable {
     var exportExtension = "ipa"
     /// Explicit opt-in: strips UIDeviceFamily, MinimumOSVersion and UIRequiredDeviceCapabilities from the project COPY.
     var removeDeviceRestrictions = false
+    /// Injects AI-translated ar.lproj before signing (fail-open). Skipped when the app already has Arabic.
+    var translateToArabic = false
 }
 
 enum PersonalGameMode: String, Codable, CaseIterable, Sendable { case keep, on, off }
@@ -55,6 +57,7 @@ struct PersonalProjectDraft: Codable, Equatable {
     var tweakIDs: [UUID] = []
     var removeExtensions: Bool? = nil
     var removeAppClips: Bool? = nil
+    var translateArabic: Bool? = nil
     var strictProfile: Bool? = nil
     var additionalProfileIDs: [String]? = nil
     var gameMode: PersonalGameMode? = nil

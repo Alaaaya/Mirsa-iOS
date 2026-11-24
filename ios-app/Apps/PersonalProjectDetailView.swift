@@ -586,6 +586,9 @@ struct PersonalProjectDetailView: View {
             toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile)
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
+            if !ArabicTranslatePrefs.hasArabicKnown(app.bundleID) {
+                toggle(ArabicTranslateText.rowTitle, ArabicTranslateText.rowHint, Binding(get: { draft.translateArabic ?? false }, set: { draft.translateArabic = $0 }))
+            }
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
             toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }))
@@ -789,6 +792,7 @@ struct PersonalProjectDetailView: View {
         options.removeWatchApp = draft.removeWatchApp
         options.removeExtensions = draft.removeExtensions ?? false
         options.removeAppClips = draft.removeAppClips ?? false
+        options.translateToArabic = draft.translateArabic ?? false
         options.strictProfile = draft.strictProfile ?? false
         options.gameMode = draft.gameMode ?? .keep
         options.fixDarkIcon = draft.fixDarkIcon ?? false

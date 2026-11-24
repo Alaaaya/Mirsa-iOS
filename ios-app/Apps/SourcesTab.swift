@@ -1560,6 +1560,8 @@ private struct SourceAppDetailSheet: View {
                     .accessibilityIdentifier("source-detail-versions")
                 }
                 .padding(.top, 16)
+                ArabicTranslateRow(bundleID: app.bundleID, theme: t)
+                    .padding(.top, 12)
 #if DEBUG
                 SourceVersions24RoutingProof()
 #endif
