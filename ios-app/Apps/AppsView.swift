@@ -1496,8 +1496,8 @@ struct LicensesView: View {
                     } label: {
                         Text(storeText("Full license", "نص الترخيص الكامل", de: "Vollständige Lizenz",
                                        ckb: "دەقی تەواوی مۆڵەتنامە", kmr: "Nivîsa tevahî ya lîsansê"))
+                            .accessibilityIdentifier("license-disclosure-" + i.name)
                     }
-                    .accessibilityIdentifier("license-disclosure-" + i.name)
                 }
             }
             .padding(.vertical, 4)
