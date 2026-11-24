@@ -69,11 +69,13 @@ final class ArabicLocalize31Tests: XCTestCase {
         for (source, unsafe) in [
             ("Visit <a href=\"%@\">site</a>, %d new", "%d جديد، <a href=\"%@\">موقع</a>"),
             ("{%@} has %d", "%d لدى {%@}"),
-            ("${%@} %d", "%d ${%@}")
+            ("Value ${%@} %d", "%d قيمة ${%@}")
         ] {
             let dir = try temp(), original = try fixture(at: dir)
             let en = original.app.appendingPathComponent("en.lproj/Localizable.strings")
             try plist(["greeting": source], to: en)
+            XCTAssertTrue(ArabicIPALocalizer.worthTranslating(source), source)
+            XCTAssertFalse(ArabicIPALocalizer.acceptable(source: source, translated: unsafe), source)
             try FileManager.default.removeItem(at: original.ipa)
             try IPAEditorService.run("pack", input: dir.appendingPathComponent("original"), output: original.ipa)
             let before = try Data(contentsOf: original.ipa), english = try Data(contentsOf: en)
@@ -250,7 +252,12 @@ final class ArabicLocalize31Tests: XCTestCase {
         XCTAssertEqual(ArabicLocalizationPipeline.lastNotice, ArabicTranslateText.failed)
         let failedInfo = try IPAEditorService.info(in: failedPrepared.app)
         let beforeInfo = try XCTUnwrap(try PropertyListSerialization.propertyList(from: originalInfo, options: [], format: nil) as? [String: Any])
-        XCTAssertTrue(NSDictionary(dictionary: failedInfo).isEqual(to: beforeInfo))
+        // Translation failure must preserve all original fields; prepare still applies requested signing options.
+        var expectedInfo = beforeInfo
+        expectedInfo["UIFileSharingEnabled"] = true
+        expectedInfo["LSSupportsOpeningDocumentsInPlace"] = true
+        XCTAssertTrue(options.fileSharing)
+        XCTAssertEqual(NSDictionary(dictionary: failedInfo), NSDictionary(dictionary: expectedInfo))
         XCTAssertFalse(fm.fileExists(atPath: failedPrepared.app.appendingPathComponent("ar.lproj").path))
         XCTAssertEqual(try Data(contentsOf: failed.ipa), originalIPA)
     }
