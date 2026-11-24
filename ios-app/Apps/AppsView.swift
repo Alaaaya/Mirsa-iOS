@@ -1355,17 +1355,56 @@ struct AppInfoSheet: View {
 // MARK: - Licenses
 
 struct LicensesView: View {
-    private struct Item: Identifiable { let id = UUID(); let name: String; let license: String; let url: String; let note: String }
-    private let items: [Item] = [
+    private struct Item: Identifiable {
+        var id: String { name }
+        let name: String; let license: String; let url: String; let note: String
+        var fullNotice: String? = nil
+    }
+    private var items: [Item] { [
+        Item(name: "Mirsa", license: "Mirsa License",
+             url: "https://github.com/Alaaaya/Mirsa-iOS/blob/main/LICENSE",
+             note: storeText(
+                "Credit \"Based on Mirsa\" and share the full corresponding source under the same license.",
+                "اذكر \"Based on Mirsa\" وانشر الكود المصدري الكامل بنفس الترخيص.",
+                de: "Nenne \"Based on Mirsa\" und veröffentliche den vollständigen zugehörigen Quellcode unter derselben Lizenz.",
+                ckb: "\"Based on Mirsa\" بنووسە و تەواوی کۆدی سەرچاوەی پەیوەندیدار بە هەمان مۆڵەتنامە بڵاو بکەرەوە.",
+                kmr: "Navê \"Based on Mirsa\" bi bîr bîne û hemû koda çavkaniyê ya têkildar bi heman lîsansê belav bike.")),
         Item(name: "isideload", license: "MIT", url: "https://github.com/nab138/isideload",
              note: "Apple ID sign-in, anisette, development certificates, App IDs, provisioning profiles and app signing."),
         Item(name: "idevice", license: "MIT", url: "https://github.com/jkcoxson/idevice",
              note: "AFC and installation_proxy over the on-device loopback tunnel; pairing and RSD."),
         Item(name: "apple-codesign-quick", license: "LGPL-2.1-or-later", url: "https://github.com/Dadoum/apple-codesign-quick",
              note: "Code signing (used by isideload). Statically linked: Mirsa's full source and build scripts are public so you can relink with a modified version, as the LGPL requires."),
-        Item(name: "Mirsa base code", license: "MIT", url: "https://github.com/Alaaaya/Mirsa-iOS",
-             note: "Copyright (c) 2026 Johnny Franks. MIT License."),
-    ]
+        Item(name: "AirCard-iOS", license: "MIT", url: "https://github.com/Mak5er/AirCard-iOS",
+             note: "Copyright (c) 2026 Johnny Franks. MIT License.",
+             fullNotice: Self.upstreamMITNotice),
+    ] }
+
+    // Verbatim upstream notice, kept inside the binary as well as the source.
+    // Provenance: Mak5er/AirCard-iOS, initial commit 848bf273.
+    static let upstreamMITNotice = """
+    MIT License
+    
+    Copyright (c) 2026 Johnny Franks
+    
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+    
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+    """ + "\n"
 
     @State private var showLicenses = false
     private var licensesTitle: String {
@@ -1412,6 +1451,7 @@ struct LicensesView: View {
                     .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel(licensesTitle)
+                .accessibilityIdentifier("licenses-open")
             }
         }.listRowBackground(MirsaPalette.row) }
         .mirsaScreen()
@@ -1434,14 +1474,30 @@ struct LicensesView: View {
     private func licenseRow(_ i: Item) -> some View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(i.name).font(.headline)
+                    Text(i.name).font(.headline).accessibilityIdentifier("license-name-" + i.name)
                     Spacer()
                     Text(i.license).font(.caption.weight(.semibold))
+                        .accessibilityIdentifier("license-badge-" + i.name)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Capsule().fill(Color.accentColor.opacity(0.2)))
                 }
                 Text(i.note).font(.footnote).foregroundStyle(.secondary)
-                if let u = URL(string: i.url) { Link(i.url, destination: u).font(.caption) }
+                    .accessibilityIdentifier("license-note-" + i.name)
+                if let u = URL(string: i.url) {
+                    Link(i.url, destination: u).font(.caption)
+                        .accessibilityIdentifier("license-link-" + i.name)
+                }
+                if let notice = i.fullNotice {
+                    DisclosureGroup {
+                        Text(notice).font(.footnote).textSelection(.enabled)
+                            .environment(\.layoutDirection, .leftToRight)
+                            .accessibilityIdentifier("license-full-notice-" + i.name)
+                    } label: {
+                        Text(storeText("Full license", "نص الترخيص الكامل", de: "Vollständige Lizenz",
+                                       ckb: "دەقی تەواوی مۆڵەتنامە", kmr: "Nivîsa tevahî ya lîsansê"))
+                    }
+                    .accessibilityIdentifier("license-disclosure-" + i.name)
+                }
             }
             .padding(.vertical, 4)
     }
