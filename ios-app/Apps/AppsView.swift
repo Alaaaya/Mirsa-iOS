@@ -1486,6 +1486,7 @@ struct LicensesView: View {
                     .accessibilityIdentifier("license-note-" + i.name)
                 if let u = URL(string: i.url) {
                     Link(i.url, destination: u).font(.caption)
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("license-link-" + i.name)
                 }
                 if let notice = i.fullNotice {

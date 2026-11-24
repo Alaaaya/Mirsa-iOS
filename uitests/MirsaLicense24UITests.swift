@@ -67,6 +67,15 @@ final class MirsaLicense24UITests: XCTestCase {
             XCTAssertTrue(notice.label.contains("Permission is hereby granted, free of charge"))
             XCTAssertTrue(notice.label.contains("OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE"))
             XCTAssertTrue(notice.label.contains("SOFTWARE."))
+            // Expanding an inline notice must not also activate the sibling web link.
+            XCTAssertEqual(app.state, .runningForeground)
+            for _ in 0..<6 {
+                if notice.isHittable && notice.frame.minY < 600 { break }
+                app.swipeUp()
+            }
+            XCTAssertTrue(notice.isHittable)
+            XCTAssertLessThan(notice.frame.minY, 600)
+            XCTAssertEqual(app.state, .runningForeground)
             shot(app, lang + "-full-mit")
             app.terminate()
         }
