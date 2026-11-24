@@ -34,7 +34,7 @@ if __name__ == "__main__":
     assert current["CFBundleDisplayName"] == "Mirsa"
     if os.environ.get("GITHUB_RUN_NUMBER"):
         from stamp_ci_build import ci_build
-        expected = ci_build(os.environ["GITHUB_RUN_NUMBER"], os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
+        expected = os.environ.get('MIRSA_RELEASE_BUILD') or ci_build(os.environ["GITHUB_RUN_NUMBER"], os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
         assert current["CFBundleVersion"] == expected, (current["CFBundleVersion"], expected)
         with zipfile.ZipFile(sys.argv[1]) as archive:
             for name in archive.namelist():
