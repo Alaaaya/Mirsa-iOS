@@ -29,7 +29,8 @@ enum ArabicIPALocalizer {
     static let sourceDirs = ["en.lproj", "English.lproj", "Base.lproj"]
 
     // Keep in sync with backend/ar-localize/logic.mjs.
-    static let tokenRegex = try! NSRegularExpression(pattern: #"%(?:\d+\$)?#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*(?:\d+\$)?)?(?:\.(?:\d+|\*(?:\d+\$)?))?(?:hh|h|ll|l|q|L|z|t|j)?[@diDuUoOxXeEfFgGaAcCsSpn]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|</?[A-Za-z][^<>]*>|\\[nrt]"#)
+    static let printfRegex = try! NSRegularExpression(pattern: #"%(?:\d+\$)?#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*(?:\d+\$)?)?(?:\.(?:\d+|\*(?:\d+\$)?))?(?:hh|h|ll|l|q|L|z|t|j)?[@diDuUoOxXeEfFgGaAcCsSpn]|%%"#)
+    static let tokenRegex = try! NSRegularExpression(pattern: printfRegex.pattern + #"|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|</?[A-Za-z][^<>]*>|\\[nrt]"#)
 
     static func tokens(_ s: String) -> [String] {
         let ns = s as NSString
@@ -42,13 +43,19 @@ enum ArabicIPALocalizer {
         if translated.unicodeScalars.contains(where: { $0.value < 0x20 && $0.value != 0x09 && $0.value != 0x0A && $0.value != 0x0D }) { return false }
         let original = tokens(source), replacement = tokens(translated)
         guard original.sorted() == replacement.sorted() else { return false }
-        let consumesArgument: (String) -> Bool = { $0.hasPrefix("%") && $0 != "%%" }
-        let args = original.filter(consumesArgument)
+        // Scan printf independently: HTML attributes and brace tokens may contain arguments.
+        func arguments(_ value: String) -> [String] {
+            let ns = value as NSString
+            return printfRegex.matches(in: value, range: NSRange(location: 0, length: ns.length))
+                .map { ns.substring(with: $0.range) }.filter { $0 != "%%" }
+        }
+        let args = arguments(source), translatedArgs = arguments(translated)
+        guard args.sorted() == translatedArgs.sorted() else { return false }
         let allExplicit = args.allSatisfy {
             $0.range(of: #"^%[1-9][0-9]*\$"#, options: .regularExpression) != nil &&
             $0.range(of: #"\*(?![1-9][0-9]*\$)"#, options: .regularExpression) == nil
         }
-        return allExplicit || args == replacement.filter(consumesArgument)
+        return allExplicit || args == translatedArgs
     }
 
     static func worthTranslating(_ s: String) -> Bool {

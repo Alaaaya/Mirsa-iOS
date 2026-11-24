@@ -10,6 +10,12 @@ final class ArabicLocalize31Tests: XCTestCase {
     }
     func testFormatArgumentOrderAndExplicitWidthPrecision() {
         let cases: [(String, String, Bool)] = [
+            ("Visit <a href=\"%@\">site</a>, %d new", "%d جديد، <a href=\"%@\">موقع</a>", false),
+            ("{%@} has %d", "%d لدى {%@}", false),
+            ("${%@} %d", "%d ${%@}", false),
+            ("Visit <a href=\"%@\">site</a>, %d new", "زر <a href=\"%@\">الموقع</a>، %d جديد", true),
+            ("Visit <a href=\"%1$@\">site</a>, %2$d new", "%2$d جديد، <a href=\"%1$@\">الموقع</a>", true),
+            ("%%@ {%@} %d", "%d {%@} %%@", false),
             ("Plain text", "نص %n", false),
             ("%D %@", "%@ %D", false),
             ("%1$#@items@ %2$@", "%2$@ %1$#@items@", true),
@@ -46,13 +52,48 @@ final class ArabicLocalize31Tests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: original.ipa), before)
         XCTAssertEqual(try Data(contentsOf: original.app.appendingPathComponent("en.lproj/Localizable.strings")), english)
         XCTAssertFalse(FileManager.default.fileExists(atPath: original.app.appendingPathComponent("ar.lproj").path))
-        let opts = PersonalProjectOptions()
-        let prepared = try PersonalCertificateSigner.prepare(ipa: original.ipa, options: opts,
-            translationOverride: true, translator: UnsafeFormatTranslator())
-        defer { MirsaManagedTmp.end(prepared.work) }
+        var opts = PersonalProjectOptions(); opts.translateToArabic = true
+        let prepared = try PersonalCertificateSigner.prepare(ipa: original.ipa, stage: dir.appendingPathComponent("unsafe-sign-stage"),
+            options: opts, arabicTranslator: UnsafeFormatTranslator())
         XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.app.appendingPathComponent("ar.lproj").path))
         XCTAssertEqual(ArabicLocalizationPipeline.lastNotice, ArabicTranslateText.failed)
         XCTAssertEqual(try Data(contentsOf: original.ipa), before)
+    }
+    private struct HiddenFormatTranslator: ArabicTranslating {
+        let output: String
+        func translate(bundleID: String, version: String, contentHash: String, items: [ArabicIPALocalizer.Item]) async throws -> [String: String] {
+            Dictionary(uniqueKeysWithValues: items.map { ($0.id, output) })
+        }
+    }
+    func testHiddenPrintfInTagsAndBracesFailsOpenBothProductionPaths() async throws {
+        for (source, unsafe) in [
+            ("Visit <a href=\"%@\">site</a>, %d new", "%d جديد، <a href=\"%@\">موقع</a>"),
+            ("{%@} has %d", "%d لدى {%@}"),
+            ("${%@} %d", "%d ${%@}")
+        ] {
+            let dir = try temp(), original = try fixture(at: dir)
+            let en = original.app.appendingPathComponent("en.lproj/Localizable.strings")
+            try plist(["greeting": source], to: en)
+            try FileManager.default.removeItem(at: original.ipa)
+            try IPAEditorService.run("pack", input: dir.appendingPathComponent("original"), output: original.ipa)
+            let before = try Data(contentsOf: original.ipa), english = try Data(contentsOf: en)
+            let bid = "org.mirsa.ar32.english", translator = HiddenFormatTranslator(output: unsafe)
+            ArabicTranslatePrefs.set(true, bundleID: bid)
+            defer { ArabicTranslatePrefs.set(false, bundleID: bid) }
+            let notice = await ArabicLocalizationPipeline.apply(workDir: dir, ipa: original.ipa, app: original.app,
+                bundleID: bid, version: "1.0", translator: translator)
+            XCTAssertEqual(notice, ArabicTranslateText.failed, source)
+            XCTAssertEqual(try Data(contentsOf: original.ipa), before, source)
+            XCTAssertEqual(try Data(contentsOf: en), english, source)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: original.app.appendingPathComponent("ar.lproj").path), source)
+            var options = PersonalProjectOptions(); options.translateToArabic = true
+            let prepared = try PersonalCertificateSigner.prepare(ipa: original.ipa, stage: dir.appendingPathComponent("hidden-format-stage"),
+                options: options, arabicTranslator: translator)
+            XCTAssertEqual(ArabicLocalizationPipeline.lastNotice, ArabicTranslateText.failed, source)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.app.appendingPathComponent("ar.lproj").path), source)
+            XCTAssertEqual(try Data(contentsOf: prepared.app.appendingPathComponent("en.lproj/Localizable.strings")), english, source)
+            XCTAssertEqual(try Data(contentsOf: original.ipa), before, source)
+        }
     }
     func testWorthTranslating() {
         XCTAssertTrue(ArabicIPALocalizer.worthTranslating("Settings"))

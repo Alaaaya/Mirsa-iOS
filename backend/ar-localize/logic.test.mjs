@@ -53,6 +53,12 @@ test("cache lookup rejects inherited properties and arrays", () => {
 
 test("implicit arguments preserve order, explicit index and star mappings may reorder", () => {
   for (const [source, translated, expected] of [
+    ["Visit <a href=\"%@\">site</a>, %d new", "%d جديد، <a href=\"%@\">موقع</a>", false],
+    ["{%@} has %d", "%d لدى {%@}", false],
+    ["${%@} %d", "%d ${%@}", false],
+    ["Visit <a href=\"%@\">site</a>, %d new", "زر <a href=\"%@\">الموقع</a>، %d جديد", true],
+    ["Visit <a href=\"%1$@\">site</a>, %2$d new", "%2$d جديد، <a href=\"%1$@\">الموقع</a>", true],
+    ["%%@ {%@} %d", "%d {%@} %%@", false],
     ["Plain text", "نص %n", false],
     ["%D %@", "%@ %D", false],
     ["%1$#@items@ %2$@", "%2$@ %1$#@items@", true],
