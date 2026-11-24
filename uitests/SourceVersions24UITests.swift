@@ -75,4 +75,24 @@ final class SourceVersions24UITests: XCTestCase {
             app.terminate()
         }
     }
+
+    func testGroupedLegacyEntriesShowOneCardAndOwnVersionRoutes() {
+        let app = launch()
+        XCTAssertEqual(app.staticTexts.matching(identifier: "Grouped Legacy App").count, 1, "one card per bundle")
+        app.staticTexts["Grouped Legacy App"].firstMatch.tap()
+        let history = app.buttons["source-detail-versions"]
+        XCTAssertTrue(history.waitForExistence(timeout: 5))
+        XCTAssertTrue(history.isEnabled)
+        app.buttons["source-detail-install"].tap()
+        proof("https://example.org/g3.ipa", app)
+        history.tap()
+        for v in ["3.0", "2.0", "1.0"] { XCTAssertTrue(app.buttons["source-version-" + v].waitForExistence(timeout: 5)) }
+        shot("grouped-history", app)
+        app.buttons["source-version-1.0"].tap()
+        proof("https://example.org/g1.ipa", app)
+        app.buttons["source-version-2.0"].tap()
+        proof("https://example.org/g2.ipa", app)
+        shot("grouped-selected", app)
+        app.terminate()
+    }
 }

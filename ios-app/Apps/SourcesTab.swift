@@ -512,7 +512,8 @@ final class SourcesStore: ObservableObject {
             return nil
         }
         var seen = Set<String>()
-        return list.compactMap { a -> RepoApp? in
+        var explicitBundle = Set<String>()
+        let entries: [RepoApp] = list.compactMap { a -> RepoApp? in
             // Decode mixed/malformed arrays entry by entry, never discard the entire history.
             let declared = ((a["versions"] as? [Any]) ?? []).compactMap { $0 as? [String: Any] }
             let dlKeys = ["downloadURL", "downloadUrl", "download_url", "down", "download", "ipa", "ipaURL", "ipa_url", "link", "url"]
@@ -535,6 +536,7 @@ final class SourcesStore: ObservableObject {
             let dl = latest.flatMap(downloadURL) ?? downloadURL(a)
             guard let dl else { return nil }
             let name = str(a, "name", "title") ?? "App"
+            if let b = str(a, "bundleIdentifier", "bundleID", "bundleId", "bundle", "identifier", "bundle_id") { explicitBundle.insert(b) }
             let app = RepoApp(
                 name: name,
                 bundleID: str(a, "bundleIdentifier", "bundleID", "bundleId", "bundle", "identifier", "bundle_id") ?? name,
@@ -554,7 +556,55 @@ final class SourcesStore: ObservableObject {
                 versions: releases
             )
             return app
-        }.filter { seen.insert($0.id).inserted }
+        }
+        return groupByBundle(entries, explicit: explicitBundle).filter { seen.insert($0.id).inserted }
+    }
+
+    /// One card per source-scoped bundle ID. Dictionary grouping, O(n); only multi-entry groups are sorted.
+    nonisolated static func groupByBundle(_ entries: [RepoApp], explicit: Set<String>) -> [RepoApp] {
+        var order: [String] = []
+        var groups: [String: [(Int, RepoApp)]] = [:]
+        var out: [Int: RepoApp] = [:]
+        for (i, e) in entries.enumerated() {
+            if explicit.contains(e.bundleID) {
+                if groups[e.bundleID] == nil { order.append(e.bundleID) }
+                groups[e.bundleID, default: []].append((i, e))
+            } else { out[i] = e }
+        }
+        var slots: [(Int, RepoApp)] = out.map { ($0.key, $0.value) }
+        for key in order {
+            let g = groups[key]!
+            if g.count == 1 { slots.append((g[0].0, g[0].1)); continue }
+            var seenRel = Set<String>(); var merged: [(Int, RepoAppVersion)] = []
+            var parsed: [String: Date?] = [:]   // each distinct date string parsed once
+            func when(_ r: RepoAppVersion) -> Date {
+                guard let raw = r.date else { return .distantPast }
+                if let hit = parsed[raw] { return hit ?? .distantPast }
+                let d = Self.date(raw); parsed[raw] = .some(d); return d ?? .distantPast
+            }
+            for (i, e) in g {
+                var rels = e.versions
+                // Legacy entries (no versions[]) contribute their own version/URL/date/size.
+                if !e.version.isEmpty { rels.append(RepoAppVersion(version: e.version, downloadURL: e.downloadURL, date: e.date, size: e.size.flatMap { $0 > 0 ? $0 : nil })) }
+                for r in rels where seenRel.insert(r.id).inserted { merged.append((i, r)) }
+            }
+            let ranked = merged.sorted { l, r in
+                let ld = when(l.1), rd = when(r.1)
+                if ld != rd { return ld > rd }
+                let c = l.1.version.compare(r.1.version, options: .numeric)
+                if c != .orderedSame { return c == .orderedDescending }
+                return l.0 < r.0
+            }
+            let newest = ranked[0].1
+            // Card metadata comes from the entry that owns the newest release.
+            let owner = g.first { $0.1.downloadURL == newest.downloadURL && $0.1.version == newest.version }?.1 ?? g.first { $0.1.versions.contains(newest) }?.1 ?? g[0].1
+            let card = RepoApp(name: owner.name, bundleID: owner.bundleID, developer: owner.developer, subtitle: owner.subtitle,
+                description: owner.description, version: newest.version, iconURL: owner.iconURL, downloadURL: newest.downloadURL,
+                size: newest.size ?? owner.size, date: newest.date ?? owner.date, screenshots: owner.screenshots,
+                versionNotes: owner.versionNotes, minOSVersion: owner.minOSVersion, category: owner.category, versions: ranked.map(\.1))
+            slots.append((g[0].0, card))
+        }
+        return slots.sorted { $0.0 < $1.0 }.map(\.1)
     }
 }
 

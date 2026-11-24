@@ -91,14 +91,14 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertEqual(data.count, 10_392_165)
         let store = makeStore { request in (data, self.response(request.url!)) }
         await store.ensureLoaded(appTesters)
-        XCTAssertEqual(store.apps[appTesters]?.count, 10_098)
-        XCTAssertEqual(store.listing(for: appTesters).count, 10_098)
+        XCTAssertEqual(store.apps[appTesters]?.count, 789, "10130 legacy release entries group into one card per bundleIdentifier")
+        XCTAssertEqual(store.listing(for: appTesters).count, 789)
         let found = try XCTUnwrap(store.listing(for: appTesters, query: " Sketchar ").first)
         XCTAssertEqual(found.bundleID, "tech.sketchar.ios")
         XCTAssertEqual(found.downloadURL.scheme, "https")
         XCTAssertTrue(found.downloadURL.absoluteString.contains("/releases/download/"))
         XCTAssertFalse(store.listing(for: appTesters, query: "HeyJapan").isEmpty, "tail of full JSON is searchable")
-        XCTAssertEqual(store.sources.first { $0.url == appTesters }?.appCount, 10_098)
+        XCTAssertEqual(store.sources.first { $0.url == appTesters }?.appCount, 789)
         XCTAssertNil(store.loadErrors[appTesters])
     }
 
@@ -348,4 +348,71 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertEqual(all.first { $0.name == "Broken" }?.installURL()?.absoluteString, "https://example.org/fallback.ipa")
     }
 
+
+    // MARK: Legacy AltStore grouped history
+
+    func testLegacyEntriesGroupIntoOneCardWithMergedHistory() throws {
+        let data = Data(#"""
+        {"apps":[
+          {"name":"X","downloadURL":"x.ipa","version":"1"},
+          {"name":"Multi","bundleIdentifier":"t.multi","version":"1.0","versionDate":"2026-01-01","size":"100","downloadURL":"m1.ipa"},
+          {"name":"Y","downloadURL":"y.ipa","version":"1"},
+          {"name":"Multi","bundleIdentifier":"t.multi","version":"3.0","versionDate":"2026-03-01","size":"300","downloadURL":"m3.ipa","iconURL":"i3.png"},
+          {"name":"Broken","bundleIdentifier":"t.multi","version":"9.9"},
+          {"name":"Multi","bundleIdentifier":"t.multi","version":"2.0","versionDate":"2026-02-01","downloadURL":"m2.ipa","versions":[
+            {"version":"2.0","downloadURL":"m2.ipa","date":"2026-02-01"},{"version":"1.0","downloadURL":"m1.ipa","date":"2026-01-01","size":100}]},
+          {"name":"Multi","bundleIdentifier":"t.multi","version":"3.0","versionDate":"2026-03-01","downloadURL":"m3b.ipa"},
+          {"name":"Solo","bundleIdentifier":"t.solo","version":"1","downloadURL":"s.ipa"},
+          {"name":"Solo","bundleIdentifier":"t.solo","version":"1","downloadURL":"s.ipa"},
+          {"name":"Other","bundleIdentifier":"t.other","version":"1","downloadURL":"o.ipa"}
+        ]}
+        """#.utf8)
+        let apps = try SourcesStore.decodeSource(data, base: URL(string: "https://e.org/s.json")!).apps
+        XCTAssertEqual(apps.map(\.bundleID), ["X", "t.multi", "Y", "t.solo", "t.other"])
+        let multi = try XCTUnwrap(apps.first { $0.bundleID == "t.multi" })
+        XCTAssertEqual(multi.versions.map(\.version), ["3.0", "3.0", "2.0", "1.0"])
+        XCTAssertEqual(multi.versions.map(\.downloadURL.lastPathComponent), ["m3.ipa", "m3b.ipa", "m2.ipa", "m1.ipa"])
+        XCTAssertEqual(multi.version, "3.0")
+        XCTAssertEqual(multi.installURL()?.lastPathComponent, "m3.ipa")
+        XCTAssertEqual(multi.installURL(for: multi.versions[3])?.lastPathComponent, "m1.ipa")
+        XCTAssertEqual(multi.versions[0].size, 300); XCTAssertEqual(multi.versions[3].size, 100)
+        XCTAssertEqual(multi.versions[2].date, "2026-02-01")
+        XCTAssertEqual(multi.iconURL?.lastPathComponent, "i3.png")
+        XCTAssertTrue(multi.hasVersionHistory)
+        let solo = try XCTUnwrap(apps.first { $0.bundleID == "t.solo" })
+        XCTAssertFalse(solo.hasVersionHistory, "identical duplicate entries collapse to one total release")
+        XCTAssertFalse(try XCTUnwrap(apps.first { $0.bundleID == "t.other" }).hasVersionHistory)
+        XCTAssertEqual(apps.filter { $0.bundleID == "X" || $0.bundleID == "Y" }.count, 2, "entries without bundle IDs stay distinct")
+    }
+
+    func testFullAppTestersUplensGroupedHistory() throws {
+        let data = try fixture("apptesters")
+        let apps = try SourcesStore.decodeSource(data, base: URL(string: "https://repository.apptesters.org/")!).apps
+        XCTAssertEqual(apps.count, 789)
+        XCTAssertEqual(Set(apps.map(\.bundleID)).count, apps.count)
+        let uplens = try XCTUnwrap(apps.first { $0.bundleID == "app.uplens" })
+        XCTAssertEqual(uplens.versions.count, 35)
+        XCTAssertEqual(Set(uplens.versions.map(\.downloadURL)).count, 35)
+        XCTAssertEqual(uplens.version, uplens.versions[0].version)
+        XCTAssertEqual(uplens.downloadURL, uplens.versions[0].downloadURL)
+        XCTAssertTrue(uplens.versions[0].downloadURL.absoluteString.contains(uplens.version))
+        XCTAssertTrue(uplens.versions.allSatisfy { $0.downloadURL.absoluteString.contains("_" + $0.version + "_") })
+        let dates = uplens.versions.compactMap { $0.date.flatMap(SourcesStore.date) }
+        XCTAssertEqual(dates, dates.sorted(by: >), "newest first")
+        XCTAssertTrue(uplens.hasVersionHistory)
+    }
+
+    func testGroupingBenchmark10kEntries() throws {
+        var rows = [String]()
+        for i in 0..<10_000 {
+            rows.append(#"{"name":"App\#(i % 2500)","bundleIdentifier":"b.\#(i % 2500)","version":"1.\#(i / 2500).\#(i)","versionDate":"2026-0\#(1 + i / 2500)-10","downloadURL":"https://e.org/\#(i).ipa"}"#)
+        }
+        let data = Data(("{\"apps\":[" + rows.reversed().joined(separator: ",") + "]}").utf8)
+        let start = Date()
+        let apps = try SourcesStore.decodeSource(data, base: URL(string: "https://e.org/s.json")!).apps
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertEqual(apps.count, 2500)
+        XCTAssertTrue(apps.allSatisfy { $0.versions.count == 4 && $0.version.hasPrefix("1.3.") })
+        XCTAssertLessThan(elapsed, 5, "dictionary grouping, no quadratic scans")
+    }
 }

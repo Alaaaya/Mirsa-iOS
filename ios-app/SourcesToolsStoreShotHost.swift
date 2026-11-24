@@ -57,7 +57,10 @@ enum SourcesToolsStoreShotHost {
                 {"version":"1.0","downloadURL":"oldest.ipa"}]},
               {"name":"Single App","bundleIdentifier":"test.versions24.single","versions":[{"version":"1.0","downloadURL":"single.ipa"}]},
               {"name":"Legacy App","bundleIdentifier":"test.versions24.legacy","version":"4.0","downloadURL":"legacy.ipa"},
-              {"name":"Broken History App","bundleIdentifier":"test.versions24.broken","version":"1.0","downloadURL":"fallback.ipa","versions":[null,42,{},{"version":"bad","downloadURL":"javascript:alert(1)"}]}
+              {"name":"Broken History App","bundleIdentifier":"test.versions24.broken","version":"1.0","downloadURL":"fallback.ipa","versions":[null,42,{},{"version":"bad","downloadURL":"javascript:alert(1)"}]},
+              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions25.grouped","version":"1.0","versionDate":"2026-01-05","downloadURL":"g1.ipa","size":"1000000"},
+              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions25.grouped","version":"3.0","versionDate":"2026-03-05","downloadURL":"g3.ipa","size":"3000000"},
+              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions25.grouped","version":"2.0","versionDate":"2026-02-05","downloadURL":"g2.ipa","size":"2000000"}
             ]}
             """#.utf8)
             store.sources = [small]
