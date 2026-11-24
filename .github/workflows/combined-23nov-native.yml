@@ -29,7 +29,7 @@ jobs:
           manifest += [{'path': 'tests/MirsaLicense24Tests.swift', 'sha256': 'db9bc5a548d39046be7b30efc4cd7e75e4417e97aa8c29cb71b5dd273ad60e46', 'blob': 'd0e5d23f60da30ef26312b199396cfe9f6e82506'}]
           manifest += [{'path': 'uitests/MirsaLicense24UITests.swift', 'sha256': 'bc524afc833208b83b62980b6a9962c84da59da1e34e028a73b0b2184af0e7c6', 'blob': 'fffe48ea88ec81dc64ad231961962b9c92f7b8c7'}]
           manifest += [{'path': 'ios-app/Apps/SourcesTheme.swift', 'sha256': '557a98c2c705143e255a9cfdd210e4cc44b49c07f10b05e2bcf67f5d0cf45506', 'blob': '3c21bf0d42c4c9a410c30afe58daf5f770f34727'}]
-          manifest += [{'path': 'tests/SourceCatalogTests.swift', 'sha256': 'bd75d2f8698601bcdae19990b078ad7f0dcfccf33f6e9a8d1046615c5e31417c', 'blob': 'f805169988e0354b6ed121a526ab65c821a18a31'}]
+          manifest += [{'path': 'tests/SourceCatalogTests.swift', 'sha256': '04d47588cafd4b1d51192983da3d8248d127f7eea8d041e39a7c10c5b8416998', 'blob': 'bfac9124cf69c6d08825351ab28a780fd2bc28ef'}]
           manifest += [{'path': 'uitests/SourcesToolsStoreScreenshotsUITests.swift', 'sha256': '6d7655d12e59cc61c5a9956467c24c974ab406650564e1656695ef69b86b03d1', 'blob': '5191ee9e37bbe9af4fa95f2117c26932115cb7d0'}]
           manifest += [{'path': 'uitests/SourceVersions24UITests.swift', 'sha256': 'c3852545abea0f4c0ec8ce5bb18ed0690022bbf7f1f3dabef4867c39ac9eda54', 'blob': '227040d496c0dfee9055de44f19f418e0bce8c8a'}]
           for f in manifest:
