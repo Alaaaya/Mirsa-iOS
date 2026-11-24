@@ -26,3 +26,27 @@ test("model map and chunk", () => {
   assert.equal(parseModelMap("nope"), null);
   assert.deepEqual(chunk([1,2,3],2), [[1,2],[3]]);
 });
+
+import { cacheHash, completeCachedTranslations } from "./logic.mjs";
+test("cache requires every requested ID and placeholder, never a partial hit", () => {
+  const items = [{ id: "0.0", text: "Hello %@" }, { id: "0.1", text: "Settings" }];
+  assert.equal(completeCachedTranslations(items, { "0.1": "الإعدادات" }), null);
+  assert.equal(completeCachedTranslations(items, { "0.0": "مرحبا %d", "0.1": "الإعدادات" }), null);
+  assert.equal(completeCachedTranslations(items, { "0.0": " ", "0.1": "الإعدادات" }), null);
+  assert.deepEqual({ ...completeCachedTranslations(items, { "0.0": "مرحبا %@", "0.1": "الإعدادات", other: "ignored" }) }, { "0.0": "مرحبا %@", "0.1": "الإعدادات" });
+});
+test("cache fingerprint binds actual source, IDs and supplied content hash", async () => {
+  const h = "a".repeat(64), first = [{ id: "1", text: "Hello %@" }, { id: "0", text: "Settings" }];
+  const key = await cacheHash(h, first);
+  assert.match(key, /^[a-f0-9]{64}$/);
+  assert.equal(key, await cacheHash(h, [...first].reverse()));
+  assert.notEqual(key, await cacheHash(h, [{ id: "1", text: "Goodbye %@" }, first[1]]));
+  assert.notEqual(key, await cacheHash(h, [{ id: "1", text: "Hello %d" }, first[1]]));
+  assert.notEqual(key, await cacheHash(h, [{ id: "2", text: "Hello %@" }, first[1]]));
+  assert.notEqual(key, await cacheHash("b".repeat(64), first));
+});
+test("cache lookup rejects inherited properties and arrays", () => {
+  assert.equal(completeCachedTranslations([{ id: "a", text: "Hello" }], Object.create({ a: "مرحبا" })), null);
+  assert.equal(completeCachedTranslations([{ id: "0", text: "Hello" }], ["مرحبا"]), null);
+  assert.equal(completeCachedTranslations([{ id: "a", text: "Hello" }], null), null);
+});

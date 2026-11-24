@@ -207,9 +207,10 @@ struct ArabicTranslationError: Error { let failure: ArabicLocalizationFailure }
 
 /// Calls the owner's Supabase edge function with the per-install anonymous JWT.
 struct ArabicBackendTranslator: ArabicTranslating {
+    var tokenProvider: DiscoveryTokenProvider? = nil
     static let endpoint = URL(string: WebBackendConfig.defaultProject + "/functions/v1/mirsa-ar-localize")!
     func translate(bundleID: String, version: String, contentHash: String, items: [ArabicIPALocalizer.Item]) async throws -> [String: String] {
-        let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
+        let auth: DiscoveryTokenProvider = tokenProvider ?? DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let body: [String: Any] = ["bundleId": bundleID, "version": version, "contentHash": contentHash,
                                    "items": items.map { ["id": $0.id, "text": $0.text] }]

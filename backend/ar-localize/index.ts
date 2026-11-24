@@ -3,7 +3,7 @@
 // Cache is private per user (user_id + bundle + version + content hash). Same free-tier attestation and model env as tweak-forge;
 // this function never changes model configuration. Secrets (names only): LLM_API_KEY/GEMINI_API_KEY, GEMINI_FREE_TIER_ATTESTED, LLM_MODEL.
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
-import { acceptable, chunk, parseModelMap, validateRequest } from "./logic.mjs";
+import { acceptable, chunk, parseModelMap, validateRequest, cacheHash, completeCachedTranslations } from "./logic.mjs";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
@@ -49,13 +49,10 @@ Deno.serve(async (req) => {
   try { const raw = await req.text(); if (raw.length > 400_000) return json({ error: "too_large" }, 413); body = JSON.parse(raw); } catch { return json({ error: "bad_body" }, 400); }
   const bad = validateRequest(body);
   if (bad) return json({ error: bad }, 400);
-  const key = { user_id: u.id, bundle_id: body.bundleId, version: body.version, content_hash: body.contentHash };
+  const key = { user_id: u.id, bundle_id: body.bundleId, version: body.version, content_hash: await cacheHash(body.contentHash, body.items) };
   const { data: hit } = await db.from("mirsa_ar_cache").select("translations").match(key).maybeSingle();
-  if (hit?.translations) {
-    const t: Record<string, string> = {};
-    for (const it of body.items) { const v = (hit.translations as any)[it.id]; if (acceptable(it.text, v)) t[it.id] = v; }
-    return json({ translations: t, cached: true });
-  }
+  const cached = completeCachedTranslations(body.items, hit?.translations);
+  if (cached) return json({ translations: cached, cached: true });
   const since = new Date(Date.now() - 3_600_000).toISOString();
   const { count } = await db.from("mirsa_ar_usage").select("id", { count: "exact", head: true }).eq("user_id", u.id).gte("created_at", since);
   if ((count ?? 0) >= HOURLY) return json({ error: "rate_limited" }, 429);
@@ -64,7 +61,7 @@ Deno.serve(async (req) => {
   try {
     for (const b of chunk(body.items as { id: string; text: string }[], BATCH)) {
       let got = await ask(b);
-      const missing = b.filter((x) => !(x.id in got));
+      const missing = b.filter((x: { id: string; text: string }) => !(x.id in got));
       if (missing.length && missing.length < b.length) Object.assign(got, await ask(missing).catch(() => ({})));
       Object.assign(result, got);
     }

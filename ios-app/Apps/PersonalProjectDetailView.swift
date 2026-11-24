@@ -587,7 +587,15 @@ struct PersonalProjectDetailView: View {
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
             if !ArabicTranslatePrefs.hasArabicKnown(app.bundleID) {
-                toggle(ArabicTranslateText.rowTitle, ArabicTranslateText.rowHint, Binding(get: { draft.translateArabic ?? false }, set: { draft.translateArabic = $0 }))
+                Toggle(isOn: Binding(get: { draft.translateArabic ?? false }, set: { draft.translateArabic = $0 })) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "globe").foregroundStyle(LCPalette.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ArabicTranslateText.rowTitle).font(.subheadline)
+                            Text(ArabicTranslateText.rowHint).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }.tint(LCPalette.green).accessibilityIdentifier("project-sign-translate-ar")
             }
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
@@ -844,6 +852,7 @@ struct PersonalProjectDetailView: View {
                 }.value
                 draft.appliedTweakIDs = draft.tweakIDs
                 message = personalText("Configuration applied. This IPA is NOT signed.", "انطبقت الإعدادات. هاد الـ IPA غير موقّع.")
+                if let notice = ArabicLocalizationPipeline.lastNotice { message = (message ?? "") + "\n" + notice }
                 sharing = true
             } catch { message = error.localizedDescription }
             configBusy = false
@@ -858,7 +867,7 @@ struct PersonalProjectDetailView: View {
             // Opening itms-services is a system handoff, never verified installation.
             // Keep this inline in the bottom bar instead of showing a success/failure modal.
             resultAlert = nil
-            message = nil
+            message = ArabicLocalizationPipeline.lastNotice
             return
         }
         guard let result = state.result else {
@@ -875,6 +884,7 @@ struct PersonalProjectDetailView: View {
         }
         if result.bundleIdentifierChanged { message = (message ?? "") + "\nتم تغيير المعرّف ليطابق البروفايل" }
         if !result.verification.isVerified { message = (message ?? "") + "\n" + result.verification.warningText }
+        if let notice = ArabicLocalizationPipeline.lastNotice { message = (message ?? "") + "\n" + notice }
         sharing = !result.installed
         resultAlert = message
     }

@@ -39,3 +39,21 @@ export function parseModelMap(text) {
   try { const o = JSON.parse(m[0]); return o && typeof o === "object" && !Array.isArray(o) ? o : null; } catch { return null; }
 }
 export const chunk = (arr, n) => { const o = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
+
+// Bind cache entries to the actual requested English strings, not just an untrusted client hash.
+export async function cacheHash(contentHash, items) {
+  const canonical = [...items].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map(({ id, text }) => [id, text]);
+  const bytes = new TextEncoder().encode(JSON.stringify([contentHash, canonical]));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (v) => v.toString(16).padStart(2, "0")).join("");
+}
+// Never claim a cache hit if any requested string is absent, corrupt or has different placeholders.
+export function completeCachedTranslations(items, translations) {
+  if (!translations || typeof translations !== "object" || Array.isArray(translations)) return null;
+  const out = Object.create(null);
+  for (const it of items) {
+    if (!Object.hasOwn(translations, it.id) || !acceptable(it.text, translations[it.id])) return null;
+    out[it.id] = translations[it.id];
+  }
+  return out;
+}

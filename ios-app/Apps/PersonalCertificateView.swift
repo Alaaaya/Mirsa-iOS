@@ -315,12 +315,14 @@ enum PersonalCertificateSigner {
         var installError: String? = nil
     }
     /// Extract and apply every non-signing edit. Shared by signed and configuration-only export.
-    private static func prepare(ipa: URL, stage: URL, options: PersonalProjectOptions, applyBundleID: Bool = true) throws -> (root: URL, app: URL, info: [String: Any]) {
+    static func prepare(ipa: URL, stage: URL, options: PersonalProjectOptions, applyBundleID: Bool = true,
+                        arabicTranslator: ArabicTranslating = ArabicBackendTranslator()) throws -> (root: URL, app: URL, info: [String: Any]) {
         let fm = FileManager.default
         let root = stage.appendingPathComponent("archive", isDirectory: true)
         try IPAEditorService.run("extract", input: ipa, output: root)
         let app = try IPAEditorService.app(in: root)
-        if options.translateToArabic { ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app) }
+        ArabicLocalizationPipeline.lastNotice = nil
+        if options.translateToArabic { ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app, translator: arabicTranslator) }
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)
         }
