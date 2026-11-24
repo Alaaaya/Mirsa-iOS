@@ -1375,8 +1375,9 @@ struct LicensesView: View {
              note: "AFC and installation_proxy over the on-device loopback tunnel; pairing and RSD."),
         Item(name: "apple-codesign-quick", license: "LGPL-2.1-or-later", url: "https://github.com/Dadoum/apple-codesign-quick",
              note: "Code signing (used by isideload). Statically linked: Mirsa's full source and build scripts are public so you can relink with a modified version, as the LGPL requires."),
-        Item(name: "AirCard-iOS", license: "MIT", url: "https://github.com/Mak5er/AirCard-iOS",
-             note: "Copyright (c) 2026 Johnny Franks. MIT License.",
+        Item(name: "Original base code", license: "MIT",
+             url: "https://github.com/Alaaaya/Mirsa-iOS/blob/848bf273a2f2e85ac76004544e89b2108cb2a635/LICENSE",
+             note: "Copyright (c) 2026 Johnny Franks",
              fullNotice: Self.upstreamMITNotice),
     ] }
 

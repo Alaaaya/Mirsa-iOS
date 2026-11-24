@@ -44,21 +44,24 @@ final class MirsaLicense24UITests: XCTestCase {
             if next.exists { XCTAssertLessThan(mirsa.frame.minY, next.frame.minY) }
             XCTAssertFalse(app.staticTexts["Mirsa base code"].exists)
             shot(app, lang + "-mirsa-first")
-            let upstream = app.staticTexts["license-name-AirCard-iOS"]
+            let upstream = app.staticTexts["license-name-Original base code"]
             for _ in 0..<10 {
                 if upstream.exists && upstream.isHittable { break }
                 app.swipeUp()
             }
             XCTAssertTrue(upstream.exists && upstream.isHittable)
-            XCTAssertEqual(app.staticTexts["license-badge-AirCard-iOS"].label, "MIT")
-            XCTAssertEqual(app.staticTexts["license-note-AirCard-iOS"].label,
-                           "Copyright (c) 2026 Johnny Franks. MIT License.")
-            XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "license-link-AirCard-iOS").firstMatch.label, "https://github.com/Mak5er/AirCard-iOS")
+            XCTAssertEqual(upstream.label, "Original base code")
+            XCTAssertFalse(app.staticTexts.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("aircard") })
+            XCTAssertFalse(app.links.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("aircard") })
+            XCTAssertEqual(app.staticTexts["license-badge-Original base code"].label, "MIT")
+            XCTAssertEqual(app.staticTexts["license-note-Original base code"].label,
+                           "Copyright (c) 2026 Johnny Franks")
+            XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "license-link-Original base code").firstMatch.label, "https://github.com/Alaaaya/Mirsa-iOS/blob/848bf273a2f2e85ac76004544e89b2108cb2a635/LICENSE")
             shot(app, lang + "-upstream")
             let disclosure = app.buttons[fullTitles[lang]!]
             for _ in 0..<4 { if disclosure.isHittable { break }; app.swipeUp() }
             XCTAssertTrue(disclosure.isHittable); disclosure.tap()
-            let notice = app.staticTexts["license-full-notice-AirCard-iOS"]
+            let notice = app.staticTexts["license-full-notice-Original base code"]
             XCTAssertTrue(notice.waitForExistence(timeout: 5))
             XCTAssertTrue(notice.label.contains("Copyright (c) 2026 Johnny Franks"))
             XCTAssertTrue(notice.label.contains("Permission is hereby granted, free of charge"))
