@@ -11,6 +11,7 @@ final class UnderDock23UITests: XCTestCase {
     private func inspect(_ app: XCUIApplication, _ name: String) {
         let dock = app.otherElements["mirsa-tab-dock"]
         XCTAssertTrue(dock.waitForExistence(timeout: 10))
+        assertDockAtWindowBottom(app, name)
         let containers = app.descendants(matching: .any).matching(NSPredicate(
             format: "elementType IN %@", [XCUIElement.ElementType.scrollView.rawValue,
                 XCUIElement.ElementType.table.rawValue, XCUIElement.ElementType.collectionView.rawValue]))
@@ -65,4 +66,84 @@ final class UnderDock23UITests: XCTestCase {
             app.terminate()
         }
     }
+    private func assertDockAtWindowBottom(_ app: XCUIApplication, _ name: String) {
+        let probe = app.otherElements["mirsa-dock-window-geometry"]
+        XCTAssertTrue(probe.waitForExistence(timeout: 10))
+        let values = (probe.value as? String ?? "").split(separator: ";").reduce(into: [String: Double]()) { result, item in
+            let pair = item.split(separator: "=")
+            if pair.count == 2 { result[String(pair[0])] = Double(pair[1]) }
+        }
+        guard let heightValue = values["height"], let safeValue = values["safeBottom"] else {
+            XCTFail("Missing actual UIWindow safe-area geometry"); return
+        }
+        let height = CGFloat(heightValue), safe = CGFloat(safeValue)
+        XCTAssertGreaterThan(height, 100)
+        let dock = app.otherElements["mirsa-tab-dock"]
+        let expectedBottom = height - max(8, safe / 2)
+        XCTAssertEqual(dock.frame.maxY, expectedBottom, accuracy: 1, name + " dock must sit near the actual home indicator")
+        if safe > 20 {
+            XCTAssertGreaterThan(dock.frame.maxY, height - safe - 8 + 10,
+                                 name + " must lower the old safe-area-anchored dock, not only raise the store bar")
+        }
+        let pill = app.otherElements["mirsa-main-tab-pill"]
+        let ai = app.buttons["main-tab-Mirsa AI"]
+        XCTAssertEqual(pill.frame.minY, dock.frame.minY, accuracy: 1)
+        XCTAssertEqual(ai.frame.midY, pill.frame.midY, accuracy: 1)
+        XCTAssertLessThanOrEqual(dock.frame.maxY, app.frame.maxY - 8)
+        print("DOCK24 \(name) windowHeight=\(height) safeBottom=\(safe) dock=\(dock.frame)")
+    }
+
+    func testBothStoreStylesKeepEveryInnerPageAboveLoweredMainDock() {
+        for lang in ["en", "ar"] {
+            for style in ["new", "classic"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
+                                       "-mirsa.store.style", style, "-mirsa.appLanguage", lang,
+                                       "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]
+                app.launch()
+                let tab = app.buttons["main-tab-Encrypted"]
+                XCTAssertTrue(tab.waitForExistence(timeout: 15)); tab.tap()
+                let pages = style == "new" ? ["discover", "search", "downloads", "account"] : ["search", "downloads", "account"]
+                for page in pages {
+                    let button = app.buttons["store-tab-" + page]
+                    XCTAssertTrue(button.waitForExistence(timeout: 10)); XCTAssertTrue(button.isHittable); button.tap()
+                    let bar = app.otherElements[style == "new" ? "store-gallery-capsule" : "store-classic-capsule"]
+                    XCTAssertTrue(bar.waitForExistence(timeout: 10))
+                    let dock = app.otherElements["mirsa-tab-dock"]
+                    let name = lang + "-" + style + "-" + page
+                    assertDockAtWindowBottom(app, name)
+                    XCTAssertLessThanOrEqual(bar.frame.maxY, dock.frame.minY - 8,
+                                             name + " inner bar must be fully above the main dock")
+                    XCTAssertGreaterThanOrEqual(bar.frame.minX, app.frame.minX)
+                    XCTAssertLessThanOrEqual(bar.frame.maxX, app.frame.maxX)
+                    for item in pages {
+                        let control = app.buttons["store-tab-" + item]
+                        XCTAssertTrue(control.isHittable, name + " inner control must not be covered")
+                        XCTAssertLessThanOrEqual(control.frame.maxY, dock.frame.minY - 8)
+                    }
+                    shot("dock24-" + name)
+                    let ax = XCTAttachment(string: app.debugDescription)
+                    ax.name = "dock24-" + name + "-geometry"; ax.lifetime = .keepAlways; add(ax)
+                }
+                app.terminate()
+            }
+        }
+    }
+
+    func testMainDockNearHomeIndicatorOnAllSixTabs() {
+        for lang in ["en", "ar"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
+                                   "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]
+            app.launch()
+            for tab in ["Apps", "Sources", "Mirsa AI", "Pairing", "Encrypted", "Personal Apps Hub"] {
+                let button = app.buttons["main-tab-" + tab]
+                XCTAssertTrue(button.waitForExistence(timeout: 10)); XCTAssertTrue(button.isHittable); button.tap()
+                assertDockAtWindowBottom(app, lang + "-" + tab)
+                shot("dock24-main-" + lang + "-" + tab)
+            }
+            app.terminate()
+        }
+    }
+
 }

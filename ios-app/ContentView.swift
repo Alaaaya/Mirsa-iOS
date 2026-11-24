@@ -658,8 +658,8 @@ struct ContentView: View {
                     // Its intrinsic content must not widen the shared ZStack/dock.
                     .frame(width: viewport.size.width > 1 ? viewport.size.width : nil,
                            height: viewport.size.height > 1 ? viewport.size.height : nil)
-                    // The dock remains inside this safe area while scroll views
-                    // expand beneath it. Preserve the home-indicator distance.
+                    // Measure before tabs expand under the home indicator. Both
+                    // bars and scroll content use the same full-window reference.
                     .environment(\.mirsaDockBottomSafeArea, viewport.safeAreaInsets.bottom)
                     // Inactive stacks are hidden below; never mask the active
                     // scroll surface at the dock or at its safe-area boundary.
@@ -691,7 +691,7 @@ struct ContentView: View {
             }
             // Classic (default) keeps the original store; New (gallery) floats its capsule above the main
             // dock and reserves the space for both itself. The main dock shows on this tab in both styles.
-            sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: newStoreStyle)) }
+            sixTab(.encrypted) { StoreStyleTab().modifier(LiquidTabChrome(liquid: liquidTheme, ownsBottomBar: true)) }
             sixTab(.personalHub) {
                 PersonalAppsHub()
                     .modifier(LiquidTabChrome(liquid: liquidTheme))
@@ -712,9 +712,28 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             // The main dock stays visible on every tab, the App Store included in both store styles.
             if liquidTheme && !chatComposerFocused && !wallpaperMakerFocused {
-                LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
+                GeometryReader { dockViewport in
+                    // The overlay receives the safe viewport. Extend ONLY its
+                    // layout to the window edge, then add the shared indicator
+                    // gap once. Content viewports and their hit areas stay intact.
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
+                            .padding(.bottom, MirsaTabBarMetrics.windowBottomGap(dockViewport.safeAreaInsets.bottom) - MirsaTabBarMetrics.bottomGap)
+                    }
+                    .frame(width: dockViewport.size.width,
+                           height: dockViewport.size.height + dockViewport.safeAreaInsets.bottom,
+                           alignment: .bottom)
+                }
                 .ignoresSafeArea(.keyboard)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            #if DEBUG
+            if MirsaUITestHarness.active {
+                MirsaDockWindowGeometryProbe().frame(width: 1, height: 1).allowsHitTesting(false)
+            }
+            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("mirsa.store.wishlist.open"))) { _ in vm.selectedTab = .encrypted }
         .onPreferenceChange(ForgeChatComposerFocusKey.self) { chatComposerFocused = $0 }
@@ -1290,9 +1309,9 @@ struct LiquidTabChrome: ViewModifier {
                 // Keep the viewport full-height. Only scroll content gets dock
                 // clearance, so rows travel behind the translucent overlay.
                 .ignoresSafeArea(.container, edges: .bottom)
-                .contentMargins(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.clearance + bottomSafeArea, for: .scrollContent)
+                .contentMargins(.bottom, chatEditing ? 0 : MirsaTabBarMetrics.scrollClearance(bottomSafeArea), for: .scrollContent)
                 // UIKit-hosted Forms/Lists inside the tab read this (mirsaDockClearance()).
-                .environment(\.mirsaDockClearance, chatEditing ? 0 : MirsaTabBarMetrics.clearance + bottomSafeArea)
+                .environment(\.mirsaDockClearance, chatEditing ? 0 : MirsaTabBarMetrics.scrollClearance(bottomSafeArea))
         } else {
             content.toolbar(chatEditing ? .hidden : .visible, for: .tabBar)
         }

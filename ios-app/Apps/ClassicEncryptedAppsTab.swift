@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 
 /// Fourth tab: App Store (FairPlay-encrypted) IPAs, installed unmodified.
 struct ClassicEncryptedAppsTab: View {
+    @Environment(\.mirsaDockBottomSafeArea) private var bottomSafeArea
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
     @ObservedObject private var storeAccount = AppStoreSectionModel.shared
@@ -44,11 +45,13 @@ struct ClassicEncryptedAppsTab: View {
                                     onSignedOut: { storeViewID = UUID() })
             }
         }
-        .contentMargins(.bottom, 56 + MirsaSpacing.xs + MirsaTabBarMetrics.clearance, for: .scrollContent)
+        .contentMargins(.bottom, 56 + MirsaSpacing.xs + MirsaTabBarMetrics.scrollClearance(bottomSafeArea), for: .scrollContent)
         .ignoresSafeArea(.container, edges: .bottom)
         .overlay(alignment: .bottom) {
             ClassicAppStoreSectionBar(selection: $section)
-                .padding(.bottom, MirsaTabBarMetrics.clearance)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("store-classic-capsule")
+                .padding(.bottom, MirsaTabBarMetrics.scrollClearance(bottomSafeArea))
         }
         .task {
             storeLoginAvailable = false

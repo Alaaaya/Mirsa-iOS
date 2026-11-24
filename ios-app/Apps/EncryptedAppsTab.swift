@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 /// Fourth tab: App Store (FairPlay-encrypted) IPAs, installed unmodified.
 struct EncryptedAppsTab: View {
+    @Environment(\.mirsaDockBottomSafeArea) private var bottomSafeArea
     @EnvironmentObject var vm: AppViewModel
     @ObservedObject private var store = EncryptedAppsStore.shared
     @ObservedObject private var storeAccount = AppStoreSectionModel.shared
@@ -59,7 +60,7 @@ struct EncryptedAppsTab: View {
         }
         // Both glass bars overlay a full-height scroll surface. Reserve their
         // combined height in scroll content, never by shortening page viewports.
-        .contentMargins(.bottom, StoreGallery.capsuleHeight + StoreGallery.capsuleTopGap + MirsaTabBarMetrics.clearance, for: .scrollContent)
+        .contentMargins(.bottom, StoreGallery.capsuleHeight + StoreGallery.capsuleTopGap + MirsaTabBarMetrics.scrollClearance(bottomSafeArea), for: .scrollContent)
         .ignoresSafeArea(.container, edges: .bottom)
         .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
@@ -67,7 +68,7 @@ struct EncryptedAppsTab: View {
                                        onReselect: { item in if item == .discover || item == .search { galleryReset += 1 } })
                     .padding(.top, StoreGallery.capsuleTopGap)
                 Color.clear
-                    .frame(height: MirsaTabBarMetrics.clearance)
+                    .frame(height: MirsaTabBarMetrics.scrollClearance(bottomSafeArea))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }

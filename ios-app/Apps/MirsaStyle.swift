@@ -390,4 +390,29 @@ enum MirsaTabBarMetrics {
     static let sideInset: CGFloat = 14
     /// Space content must keep free so nothing hides behind the floating bar.
     static var clearance: CGFloat { height + bottomGap + 10 }
+    /// Float just above the home indicator, not a whole safe area above it.
+    /// Zero-inset windows retain the original eight-point bottom gap.
+    static func windowBottomGap(_ safeBottom: CGFloat) -> CGFloat { max(bottomGap, safeBottom / 2) }
+    /// All scroll surfaces and nested bars measure from the physical window edge.
+    static func scrollClearance(_ safeBottom: CGFloat) -> CGFloat { height + windowBottomGap(safeBottom) + 10 }
 }
+
+#if DEBUG
+/// Independent UIKit window geometry for native layout regression assertions.
+/// Not the dock's proposed frame or a test-supplied safe-area constant.
+struct MirsaDockWindowGeometryProbe: UIViewRepresentable {
+    final class Probe: UIView {
+        func publish() {
+            guard let window else { return }
+            isAccessibilityElement = true
+            accessibilityIdentifier = "mirsa-dock-window-geometry"
+            accessibilityLabel = "Dock window geometry"
+            accessibilityValue = "height=\(window.bounds.height);safeBottom=\(window.safeAreaInsets.bottom)"
+        }
+        override func didMoveToWindow() { super.didMoveToWindow(); publish() }
+        override func layoutSubviews() { super.layoutSubviews(); publish() }
+    }
+    func makeUIView(context: Context) -> Probe { Probe() }
+    func updateUIView(_ uiView: Probe, context: Context) { uiView.publish() }
+}
+#endif
