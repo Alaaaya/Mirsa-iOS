@@ -107,13 +107,23 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertEqual(data.count, 2_366_545)
         let store = makeStore { request in (data, self.response(request.url!)) }
         await store.ensureLoaded(ryp0)
-        XCTAssertEqual(store.apps[ryp0]?.count, 163)
-        XCTAssertEqual(store.listing(for: ryp0).count, 163)
+        // 165 installable entries share 160 bundle IDs: four identities are published as several entries
+        // (kazumi 2, livecontainer 3, amethyst 2, Tweetie2 2). They group into one card each (165 - 5 = 160)
+        // and every release of every duplicate entry is kept with its own URL.
+        XCTAssertEqual(store.apps[ryp0]?.count, 160)
+        XCTAssertEqual(store.listing(for: ryp0).count, 160)
+        XCTAssertEqual(Set(store.listing(for: ryp0).map(\.bundleID)).count, 160)
+        for (bundle, releases) in [("com.example.kazumi", 82), ("com.kdt.livecontainer", 69),
+                                   ("org.angelauramc.amethyst", 7), ("com.atebits.Tweetie2", 13)] {
+            let card = try XCTUnwrap(store.listing(for: ryp0).first { $0.bundleID == bundle })
+            XCTAssertEqual(card.versions.count, releases, bundle)
+            XCTAssertEqual(Set(card.versions.map(\.downloadURL)).count, releases, bundle)
+        }
         let first = try XCTUnwrap(store.listing(for: ryp0, query: "wqfiles").first)
         XCTAssertEqual(first.bundleID, "cz.kolbi.wqfiles")
         XCTAssertEqual(first.downloadURL.scheme, "https")
         XCTAssertFalse(store.listing(for: ryp0, query: "Video Star").isEmpty, "tail of full JSON is searchable")
-        XCTAssertEqual(store.sources.first { $0.url == ryp0 }?.appCount, 163)
+        XCTAssertEqual(store.sources.first { $0.url == ryp0 }?.appCount, 160)
     }
 
     func testPersistedCountsReloadButMemoryDoesNotAndDetailLoadsSelectedURL() async throws {
@@ -121,10 +131,10 @@ final class SourceCatalogTests: XCTestCase {
         var requests = [String]()
         let store = makeStore { request in requests.append(request.url!.absoluteString); return (data, self.response(request.url!)) }
         var saved = store.sources
-        for index in saved.indices { saved[index].appCount = saved[index].url == self.ryp0 ? 163 : 10_098 }
+        for index in saved.indices { saved[index].appCount = saved[index].url == self.ryp0 ? 160 : 10_098 }
         store.sources = saved
         XCTAssertTrue(store.apps.isEmpty)
-        XCTAssertEqual(store.sources.first { $0.url == ryp0 }?.appCount, 163)
+        XCTAssertEqual(store.sources.first { $0.url == ryp0 }?.appCount, 160)
         await store.ensureLoaded(ryp0)
         XCTAssertEqual(requests, [ryp0])
         XCTAssertEqual(store.listing(for: ryp0).count, 1)
