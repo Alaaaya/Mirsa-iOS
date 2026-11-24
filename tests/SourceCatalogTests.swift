@@ -113,11 +113,34 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertEqual(store.apps[ryp0]?.count, 160)
         XCTAssertEqual(store.listing(for: ryp0).count, 160)
         XCTAssertEqual(Set(store.listing(for: ryp0).map(\.bundleID)).count, 160)
-        for (bundle, releases) in [("com.example.kazumi", 82), ("com.kdt.livecontainer", 69),
-                                   ("org.angelauramc.amethyst", 7), ("com.atebits.Tweetie2", 13)] {
+        typealias ReleaseFixtureRow = [String: Any]
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let rows = try XCTUnwrap(root["apps"] as? [ReleaseFixtureRow])
+        func identity(_ version: String, _ date: String?, _ url: URL, _ size: Int64?) -> [String?] {
+            [version, date, url.absoluteString, size.map { String($0) }]
+        }
+        for (bundle, releases, repeatedURLs) in [("com.example.kazumi", 82, 0), ("com.kdt.livecontainer", 69, 2),
+                                                   ("org.angelauramc.amethyst", 7, 0), ("com.atebits.Tweetie2", 13, 1)] {
             let card = try XCTUnwrap(store.listing(for: ryp0).first { $0.bundleID == bundle })
+            let raw = rows.filter { $0["bundleIdentifier"] as? String == bundle }
+                .flatMap { $0["versions"] as? [ReleaseFixtureRow] ?? [] }
+            XCTAssertEqual(raw.count, releases, bundle)
+            let expected = try raw.map { row in
+                let version = try XCTUnwrap(row["version"] as? String).trimmingCharacters(in: .whitespacesAndNewlines)
+                let url = try XCTUnwrap(URL(string: XCTUnwrap(row["downloadURL"] as? String), relativeTo: URL(string: ryp0))).absoluteURL
+                let size = (row["size"] as? NSNumber)?.int64Value ?? (row["size"] as? String).flatMap { Int64($0) }
+                return identity(version, row["date"] as? String, url, size.flatMap { $0 > 0 ? $0 : nil })
+            }
+            let identitiesByURL = Dictionary(grouping: expected) { $0[2] }
+            let sharedURLs = identitiesByURL.values.filter { $0.count > 1 }
+            XCTAssertEqual(sharedURLs.count, repeatedURLs, bundle)
+            for entries in sharedURLs {
+                XCTAssertEqual(entries.count, 2, bundle)
+                XCTAssertEqual(Set(entries.map { $0[0] }).count, entries.count, "Shared URL, distinct version identities")
+            }
             XCTAssertEqual(card.versions.count, releases, bundle)
-            XCTAssertEqual(Set(card.versions.map(\.downloadURL)).count, releases, bundle)
+            XCTAssertEqual(Set(card.versions.map(\.id)).count, releases, bundle)
+            XCTAssertEqual(Set(card.versions.map { identity($0.version, $0.date, $0.downloadURL, $0.size) }), Set(expected), bundle)
         }
         let first = try XCTUnwrap(store.listing(for: ryp0, query: "wqfiles").first)
         XCTAssertEqual(first.bundleID, "cz.kolbi.wqfiles")
