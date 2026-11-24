@@ -295,4 +295,57 @@ final class SourceCatalogTests: XCTestCase {
         XCTAssertTrue(discovery.failures.isEmpty)
     }
 
+    func testSourceVersionHistoryPreservesExactURLsAndOwnMetadata() throws {
+        let data = Data(#"""
+        {"apps":[{"name":"History","bundleIdentifier":"test.history","version":"99","downloadURL":"root.ipa","date":"2026-11-23","size":99999,"versions":[
+          {"version":"3.0","downloadUrl":"latest.ipa","date":"2026-11-21","size":12000000},
+          {"version":"2.0","downloadURL":"older.ipa","date":"2026-09-10","size":"8000000"},
+          {"version":"1.0","downloadURL":"oldest.ipa"}
+        ]}]}
+        """#.utf8)
+        let base = URL(string: "https://example.org/feed/source.json")!
+        let app = try XCTUnwrap(SourcesStore.decodeSource(data, base: base).apps.first)
+        XCTAssertTrue(app.hasVersionHistory)
+        XCTAssertEqual(app.versions.map(\.version), ["3.0", "2.0", "1.0"])
+        XCTAssertEqual(app.version, "3.0")
+        XCTAssertEqual(app.installURL()?.absoluteString, "https://example.org/feed/latest.ipa")
+        XCTAssertEqual(app.installURL(for: app.versions[1])?.absoluteString, "https://example.org/feed/older.ipa")
+        XCTAssertEqual(app.installURL(for: app.versions[2])?.absoluteString, "https://example.org/feed/oldest.ipa")
+        XCTAssertEqual(app.versions[1].date, "2026-09-10")
+        XCTAssertEqual(app.versions[1].size, 8_000_000)
+        XCTAssertNil(app.versions[2].date, "Never copy latest/root metadata to an older version")
+        XCTAssertNil(app.versions[2].size)
+        XCTAssertNotEqual(app.installURL(), app.installURL(for: app.versions[1]))
+        let foreign = RepoAppVersion(version: "2.0", downloadURL: URL(string: "https://other.example/wrong.ipa")!, date: nil, size: nil)
+        XCTAssertNil(app.installURL(for: foreign), "A release from another app/source cannot be routed here")
+        XCTAssertEqual(app.installURL()?.absoluteString, "https://example.org/feed/latest.ipa", "History selection must not mutate latest")
+    }
+
+    func testSourceHistoryZeroOneLegacyMalformedAndDuplicateEntries() throws {
+        let data = Data(#"""
+        {"apps":[
+          {"name":"Zero","downloadURL":"zero.ipa","version":"1","versions":[]},
+          {"name":"Legacy","downloadURL":"legacy.ipa","version":"4"},
+          {"name":"One","versions":[{"version":"1","downloadURL":"one.ipa"}]},
+          {"name":"Mixed","downloadURL":"fallback.ipa","versions":[null,7,"x",{},{"version":"unsafe","downloadURL":"file:///private/x.ipa"},{"version":"credential","downloadURL":"https://user:pass@example.org/x.ipa"},{"version":"scheme","downloadURL":"javascript:alert(1)"},{"version":"missing"},{"downloadURL":"unnamed.ipa"},{"version":"2","downloadURL":"second.ipa","size":-8},{"version":"1","downloadURL":"first.ipa"},{"version":"1","downloadURL":"first.ipa"}]},
+          {"name":"Broken","downloadURL":"fallback.ipa","version":"5","versions":[null,7,{"version":"bad","downloadURL":"javascript:alert(1)"}]}
+        ]}
+        """#.utf8)
+        let all = try SourcesStore.decodeSource(data, base: URL(string: "https://example.org/source.json")!).apps
+        XCTAssertEqual(all.count, 5)
+        for name in ["Zero", "Legacy", "One", "Broken"] {
+            let app = try XCTUnwrap(all.first { $0.name == name })
+            XCTAssertFalse(app.hasVersionHistory, name + " must never open an empty/one-version history")
+            XCTAssertNotNil(app.installURL())
+        }
+        let mixed = try XCTUnwrap(all.first { $0.name == "Mixed" })
+        XCTAssertTrue(mixed.hasVersionHistory)
+        XCTAssertEqual(mixed.version, "2")
+        XCTAssertEqual(mixed.installURL()?.absoluteString, "https://example.org/second.ipa")
+        XCTAssertEqual(mixed.versions.map(\.version), ["2", "1"])
+        XCTAssertNil(mixed.versions.first?.size)
+        XCTAssertEqual(mixed.versions.last?.downloadURL.absoluteString, "https://example.org/first.ipa")
+        XCTAssertEqual(all.first { $0.name == "Broken" }?.installURL()?.absoluteString, "https://example.org/fallback.ipa")
+    }
+
 }

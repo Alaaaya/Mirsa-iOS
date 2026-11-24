@@ -36,7 +36,7 @@ final class SourcesToolsStoreScreenshotsUITests: XCTestCase {
             let row = app.staticTexts["Small 1"].firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 5))
             row.tap()
-            XCTAssertTrue(app.buttons["source-detail-download"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["source-detail-versions"].waitForExistence(timeout: 5))
             shot("\(t)_source-app-sheet")
             app.terminate()
         }

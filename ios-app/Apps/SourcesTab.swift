@@ -56,6 +56,24 @@ struct RepoApp: Identifiable, Hashable, Sendable {
     var minOSVersion: String? = nil
     /// Source-declared category (AltStore `category`), when present. Never inferred.
     var category: String? = nil
+    /// Only downloadable releases explicitly declared in this app's source versions array, in source order.
+    var versions: [RepoAppVersion] = []
+
+    var hasVersionHistory: Bool { versions.count > 1 }
+
+    /// A history selection must be a member of this exact app's decoded source, never a guessed/latest URL.
+    func installURL(for release: RepoAppVersion? = nil) -> URL? {
+        guard let release else { return downloadURL }
+        return versions.contains(release) ? release.downloadURL : nil
+    }
+}
+
+struct RepoAppVersion: Identifiable, Hashable, Sendable {
+    var id: String { version + "|" + downloadURL.absoluteString }
+    let version: String
+    let downloadURL: URL
+    let date: String?
+    let size: Int64?
 }
 
 struct RepoNews: Identifiable, Sendable {
@@ -495,10 +513,26 @@ final class SourcesStore: ObservableObject {
         }
         var seen = Set<String>()
         return list.compactMap { a -> RepoApp? in
-            let latest = (a["versions"] as? [[String: Any]])?.first
+            // Decode mixed/malformed arrays entry by entry, never discard the entire history.
+            let declared = ((a["versions"] as? [Any]) ?? []).compactMap { $0 as? [String: Any] }
             let dlKeys = ["downloadURL", "downloadUrl", "download_url", "down", "download", "ipa", "ipaURL", "ipa_url", "link", "url"]
-            var dl: URL? = nil
-            for k in dlKeys where dl == nil { dl = url(latest?[k]) ?? url(a[k]) }
+            func downloadURL(_ entry: [String: Any]) -> URL? {
+                dlKeys.lazy.compactMap { url(entry[$0]) }.first
+            }
+            let latest = declared.first {
+                downloadURL($0) != nil && str($0, "version")?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            } ?? declared.first { downloadURL($0) != nil }
+            // A historical release must supply its OWN URL and version. Never inherit the latest file or metadata.
+            var releaseIDs = Set<String>()
+            let releases: [RepoAppVersion] = declared.compactMap { entry in
+                guard let version = str(entry, "version")?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !version.isEmpty, let download = downloadURL(entry) else { return nil }
+                let bytes = int(entry["size"]) ?? int(entry["fileSize"])
+                let release = RepoAppVersion(version: version, downloadURL: download,
+                    date: str(entry, "date", "versionDate"), size: bytes.flatMap { $0 > 0 ? $0 : nil })
+                return releaseIDs.insert(release.id).inserted ? release : nil
+            }
+            let dl = latest.flatMap(downloadURL) ?? downloadURL(a)
             guard let dl else { return nil }
             let name = str(a, "name", "title") ?? "App"
             let app = RepoApp(
@@ -516,7 +550,8 @@ final class SourcesStore: ObservableObject {
                 versionNotes: (latest.flatMap { str($0, "localizedDescription", "changelog", "whatsNew") })
                     ?? str(a, "versionDescription", "changelog", "whatsNew"),
                 minOSVersion: (latest.flatMap { str($0, "minOSVersion", "minimumOSVersion") }) ?? str(a, "minOSVersion", "minimumOSVersion", "minOS"),
-                category: str(a, "category", "genre")
+                category: str(a, "category", "genre"),
+                versions: releases
             )
             return app
         }.filter { seen.insert($0.id).inserted }
@@ -1245,7 +1280,7 @@ struct RepoAppRow: View {
         }
         .sheet(isPresented: $showInfo) {
             SourceAppDetailSheet(app: app, sourceName: sourceName, requestKey: requestKey, installTitle: detailInstallTitle,
-                                 allowsDownload: onSelectIPA == nil, theme: theme, install: install)
+                                 theme: theme, install: { install() }, installVersion: { install(version: $0) })
         }
         .alert(tr("Notice", "تنبيه"), isPresented: Binding(get: { selectionError != nil }, set: { if !$0 { selectionError = nil } })) { Button(tr("OK", "تمام")) { selectionError = nil } } message: { Text(selectionError ?? "") }
     }
@@ -1338,17 +1373,27 @@ struct RepoAppRow: View {
         return isCurrentInstalled ? SourcesText.reinstall : SourcesText.updateNow
     }
 
-    private func install() {
+    private func install(version: RepoAppVersion? = nil) {
+        guard let url = app.installURL(for: version) else { return }
+        let selectedKey = InstallTracker.urlKey(url)
+#if DEBUG
+        // Offline UI routing proof. Only the explicitly selected test fixture can intercept installation.
+        if ProcessInfo.processInfo.arguments.contains("-MirsaSourceVersionsFixture24"),
+           app.bundleID.hasPrefix("test.versions24.") {
+            SourceVersions24Probe.shared.url = url.absoluteString
+            return
+        }
+#endif
         if let onSelectIPA {
             guard !selecting else { return }
             selecting = true
             Task { @MainActor in
                 var file: URL?
-                let token = tracker.begin(key: requestKey, cancel: { downloader.cancel() })
+                let token = tracker.begin(key: selectedKey, cancel: { downloader.cancel() })
                 selectToken = token
                 defer { tracker.end(token); selectToken = nil; if let file { MirsaManagedTmp.end(file.deletingLastPathComponent()) }; selecting = false }
                 do {
-                    let url = try await downloader.download(app.downloadURL.absoluteString)
+                    let url = try await downloader.download(url.absoluteString)
                     file = url
                     tracker.set(token, phase: .preparing)
                     try await onSelectIPA(url)
@@ -1357,7 +1402,7 @@ struct RepoAppRow: View {
             return
         }
         let target = installed?.location   // update keeps its place; new apps ask Container or Real
-        Task { await apps.installFromURL(app.downloadURL, location: target, appID: app.bundleID) }
+        Task { await apps.installFromURL(url, location: target, appID: app.bundleID) }
     }
 }
 
@@ -1367,12 +1412,11 @@ private struct SourceAppDetailSheet: View {
     let sourceName: String?
     let requestKey: String
     let installTitle: String
-    let allowsDownload: Bool
     let theme: SourcesTheme
     let install: () -> Void
+    let installVersion: (RepoAppVersion) -> Void
+    @State private var showingVersions = false
     @ObservedObject private var tracker = InstallTracker.shared
-    @StateObject private var ipaDownloader = PersonalIPADownloader()
-    @State private var downloadMessage: String?
     @Environment(\.dismiss) private var dismiss
 
     private struct InfoItem: Identifiable { let id: String; let label: String; let value: String }
@@ -1452,29 +1496,23 @@ private struct SourceAppDetailSheet: View {
                     .buttonStyle(.mirsaPress)
                     .disabled(!tracker.isActive(requestKey) && tracker.current != nil)
                     .accessibilityIdentifier("source-detail-install")
-                    if allowsDownload {
-                        Button { downloadOnly() } label: {
-                            Group {
-                                if ipaDownloader.active {
-                                    SourceDownloadIndicator(fraction: ipaDownloader.fraction)
-                                } else {
-                                    Image(systemName: "arrow.down.to.line").font(.system(size: 18, weight: .semibold))
-                                }
-                            }
+                    Button { showingVersions = true } label: {
+                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(t.text)
-                            .frame(minWidth: 52, minHeight: 52)
-                            .padding(.horizontal, ipaDownloader.active ? 8 : 0)
+                            .frame(width: 52, height: 52)
                             .sourcesGlass(t, radius: 18)
-                        }
-                        .buttonStyle(.mirsaPress)
-                        .accessibilityLabel(SourcesText.downloadIPA)
-                        .accessibilityIdentifier("source-detail-download")
                     }
+                    .buttonStyle(.mirsaPress)
+                    .disabled(!app.hasVersionHistory)
+                    .opacity(app.hasVersionHistory ? 1 : 0.35)
+                    .accessibilityLabel(SourcesText.versions)
+                    .accessibilityHint(app.hasVersionHistory ? SourcesText.sourceVersions : SourcesText.noVersionHistory)
+                    .accessibilityIdentifier("source-detail-versions")
                 }
                 .padding(.top, 16)
-                if let downloadMessage {
-                    Text(downloadMessage).font(.footnote).foregroundStyle(t.secondary).padding(.top, 8)
-                }
+#if DEBUG
+                SourceVersions24RoutingProof()
+#endif
 
                 AppScreenshotGallery(app: app)
                     .foregroundStyle(t.text)
@@ -1517,28 +1555,95 @@ private struct SourceAppDetailSheet: View {
         .environment(\.colorScheme, t.colorScheme)
         .presentationDetents([.large, .medium])
         .presentationDragIndicator(.visible)
-        .onDisappear { if ipaDownloader.active { ipaDownloader.cancel() } }
-    }
-
-    /// Saves the IPA to Mirsa's Downloads library (Apps › Downloads) without installing it.
-    private func downloadOnly() {
-        if ipaDownloader.active { ipaDownloader.cancel(); return }
-        downloadMessage = nil
-        Task { @MainActor in
-            do {
-                let file = try await ipaDownloader.download(app.downloadURL.absoluteString)
-                defer { MirsaManagedTmp.end(file.deletingLastPathComponent()) }
-                let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
-                DownloadsLibrary.shared.add(ipa: file, bundleID: app.bundleID, name: app.name,
-                                            version: app.version.isEmpty ? "0" : app.version, size: bytes, icon: nil)
-                downloadMessage = SourcesText.savedToDownloads
-            } catch {
-                if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
-                downloadMessage = error.localizedDescription
-            }
+        .sheet(isPresented: $showingVersions) {
+            SourceAppVersionsSheet(app: app, theme: theme, install: installVersion)
         }
     }
 }
+
+/// No network discovery here. These are only the validated releases already supplied in this app's source.
+private struct SourceAppVersionsSheet: View {
+    let app: RepoApp
+    let theme: SourcesTheme
+    let install: (RepoAppVersion) -> Void
+    @ObservedObject private var tracker = InstallTracker.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let t = theme
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40).background(Circle().fill(t.card))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(SourcesText.close)
+                .accessibilityIdentifier("source-versions-close")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(SourcesText.versions).font(.system(size: 23, weight: .bold))
+                    Text(app.name).font(.subheadline).foregroundStyle(t.secondary).lineLimit(1)
+                        .mirsaNaturalDirection(app.name)
+                }
+                Spacer(minLength: 0)
+            }
+#if DEBUG
+            SourceVersions24RoutingProof()
+#endif
+            Text(SourcesText.sourceVersions).font(.footnote).foregroundStyle(t.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(app.versions) { release in
+                        let key = InstallTracker.urlKey(release.downloadURL)
+                        Button {
+                            if tracker.isActive(key) { tracker.cancelIfSupported(key) }
+                            else { install(release) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(SourcesText.version + " " + release.version)
+                                        .font(.system(size: 17, weight: .bold))
+                                        .mirsaNaturalDirection(release.version)
+                                    HStack(spacing: 12) {
+                                        if let raw = release.date, let date = SourcesStore.date(raw) {
+                                            Label(SourcesDates.label(date), systemImage: "calendar")
+                                        }
+                                        if let size = release.size, size > 0 {
+                                            Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                                        }
+                                    }
+                                    .font(.caption).foregroundStyle(t.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                InstallKeyedLabel(key: key) {
+                                    Image(systemName: "arrow.down.app").font(.system(size: 20, weight: .semibold))
+                                }
+                            }
+                            .foregroundStyle(t.text)
+                            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            .sourcesGlass(t, radius: 18)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.mirsaPress)
+                        .disabled(!tracker.isActive(key) && tracker.current != nil)
+                        .accessibilityIdentifier("source-version-" + release.version)
+                        .accessibilityHint(SourcesText.installNow)
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+        }
+        .padding(18)
+        .foregroundStyle(t.text)
+        .background(LinearGradient(colors: t.sheetBase, startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+        .environment(\.colorScheme, t.colorScheme)
+        .environment(\.layoutDirection, .leftToRight)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+}
+
 
 struct RemoteIcon: View {
     let url: URL?

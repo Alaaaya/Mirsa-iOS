@@ -48,6 +48,9 @@ enum SourcesText {
     static var reinstall: String { t("Install again", "إعادة التثبيت", "Erneut installieren", "دووبارە دامەزراندن", "Dîsa saz bike") }
     static var downloadIPA: String { t("Download IPA", "تنزيل الـIPA", "IPA laden", "داگرتنی IPA", "IPA daxe") }
     static var savedToDownloads: String { t("Saved to Mirsa Downloads.", "انحفظ بتنزيلات مرسى.", "In Mirsa-Downloads gesichert.", "لە داگرتنەکانی Mirsa پاشەکەوت کرا.", "Di daxistinên Mirsa de hate tomarkirin.") }
+    static var versions: String { t("Versions", "الإصدارات", "Versionen", "وەشانەکان", "Guherto") }
+    static var sourceVersions: String { t("Available releases from this source. Tap a version to install it. Dates and sizes appear only when provided.", "الإصدارات المتوفرة بهالسورس. اكبس على الإصدار لتثبيته. التاريخ والحجم بيظهروا بس إذا السورس موفّرهم.", "Verfügbare Versionen dieser Quelle. Zum Installieren antippen. Datum und Größe nur, wenn angegeben.", "وەشانە بەردەستەکانی ئەم سەرچاوەیە. بۆ دامەزراندن لە وەشانەکە بدە. بەروار و قەبارە تەنها ئەگەر دابین کرابن پیشان دەدرێن.", "Guhertoyên berdest ên vê çavkaniyê. Ji bo sazkirinê li guhertoyê bitikîne. Dîrok û mezinahî tenê dema hatibin dayîn tên nîşandan.") }
+    static var noVersionHistory: String { t("This source does not provide other downloadable versions.", "هالسورس ما موفّر إصدارات تانية قابلة للتثبيت.", "Diese Quelle bietet keine weiteren installierbaren Versionen.", "ئەم سەرچاوەیە وەشانی تری بەردەست بۆ دامەزراندن دابین ناکات.", "Ev çavkanî guhertoyên din ên sazkirinê nade.") }
     static var version: String { t("Version", "الإصدار", "Version", "وەشان", "Guherto") }
     static var size: String { t("Size", "الحجم", "Größe", "قەبارە", "Mezinahî") }
     static var source: String { t("Source", "السورس", "Quelle", "سەرچاوە", "Çavkanî") }

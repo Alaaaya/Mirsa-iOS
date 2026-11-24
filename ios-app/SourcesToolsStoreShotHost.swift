@@ -2,6 +2,21 @@
 import SwiftUI
 
 /// Deterministic, local-only fixtures for the Sources redesign screenshots. Never compiled into release builds.
+@MainActor
+final class SourceVersions24Probe: ObservableObject {
+    static let shared = SourceVersions24Probe()
+    @Published var url = ""
+}
+struct SourceVersions24RoutingProof: View {
+    @ObservedObject private var probe = SourceVersions24Probe.shared
+    var body: some View {
+        if ProcessInfo.processInfo.arguments.contains("-MirsaSourceVersionsFixture24") {
+            Text(probe.url).font(.caption2)
+                .accessibilityIdentifier("source-versions-route-proof")
+        }
+    }
+}
+
 enum SourcesToolsStoreShotHost {
     static func fixtureApps(_ n: Int, prefix: String) -> [RepoApp] {
         guard n > 0 else { return [] }
@@ -31,6 +46,24 @@ enum SourcesToolsStoreShotHost {
         })
         let small = RepoSource(url: "https://example.org/small.json", name: "Small Source")
         let large = RepoSource(url: "https://example.org/large.json", name: "Large Source")
+        if ProcessInfo.processInfo.arguments.contains("-MirsaSourceVersionsFixture24") {
+            SourceVersions24Probe.shared.url = ""
+            let feed = Data(#"""
+            {"apps":[
+              {"name":"History App","bundleIdentifier":"test.versions24.multi","version":"9.9","downloadURL":"latest-root.ipa","versions":[
+                {"version":"3.0","downloadURL":"latest.ipa","date":"2026-11-21","size":12000000},
+                null,17,{"version":"bad","downloadURL":"file:///private/x.ipa"},
+                {"version":"2.0","downloadURL":"older.ipa","date":"2026-09-10","size":8000000},
+                {"version":"1.0","downloadURL":"oldest.ipa"}]},
+              {"name":"Single App","bundleIdentifier":"test.versions24.single","versions":[{"version":"1.0","downloadURL":"single.ipa"}]},
+              {"name":"Legacy App","bundleIdentifier":"test.versions24.legacy","version":"4.0","downloadURL":"legacy.ipa"},
+              {"name":"Broken History App","bundleIdentifier":"test.versions24.broken","version":"1.0","downloadURL":"fallback.ipa","versions":[null,42,{},{"version":"bad","downloadURL":"javascript:alert(1)"}]}
+            ]}
+            """#.utf8)
+            store.sources = [small]
+            store.apps[small.url] = try! SourcesStore.decodeSource(feed, base: URL(string: small.url)!).apps
+            return (store, [small])
+        }
         // Explicit opt-in, DEBUG-only feed text fixture. Default fixtures and tests stay unchanged.
         if ProcessInfo.processInfo.arguments.contains("-MirsaArabicFeedFixture22") {
             let arabic = RepoSource(url: small.url, name: "مكتبة مرسى العربية")
