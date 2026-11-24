@@ -8,6 +8,23 @@ final class ArabicLocalize31Tests: XCTestCase {
         XCTAssertFalse(ArabicIPALocalizer.acceptable(source: "Hello %@", translated: "مرحبا"))
         XCTAssertFalse(ArabicIPALocalizer.acceptable(source: "Hi", translated: "  "))
     }
+    func testFormatArgumentOrderAndExplicitWidthPrecision() {
+        let cases: [(String, String, Bool)] = [
+            ("%@ has %d items", "%d عناصر عند %@", false),
+            ("%1$@ has %2$d items", "%2$d عناصر عند %1$@", true),
+            ("%1$@ has %2$d items", "%1$d عناصر عند %2$@", false),
+            ("%1$*2$.*3$f and %4$@", "%4$@ و %1$*2$.*3$f", true),
+            ("%1$*2$.*3$f and %4$@", "%4$@ و %1$*3$.*2$f", false),
+            ("%1$*f and %2$@", "%2$@ و %1$*f", false),
+            ("%*.*f and %@", "%@ و %*.*f", false),
+            ("%#@items@ for %@", "%@ مع %#@items@", false),
+            ("%% %@ %d", "%@ %d %%", true),
+            ("%%@ %d", "%d %%@", true)
+        ]
+        for (source, output, expected) in cases {
+            XCTAssertEqual(ArabicIPALocalizer.acceptable(source: source, translated: output), expected, source)
+        }
+    }
     func testWorthTranslating() {
         XCTAssertTrue(ArabicIPALocalizer.worthTranslating("Settings"))
         XCTAssertFalse(ArabicIPALocalizer.worthTranslating("https://example.com"))

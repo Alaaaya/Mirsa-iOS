@@ -1,7 +1,7 @@
 import test from "node:test"; import assert from "node:assert/strict";
 import { acceptable, sameTokens, validateRequest, parseModelMap, chunk } from "./logic.mjs";
 test("placeholders must match as multiset", () => {
-  assert.ok(sameTokens("%d items in %@", "%@ في %d"));
+  assert.ok(sameTokens("%d items in %@", "%d عناصر في %@"));
   assert.ok(!sameTokens("%d items", "عناصر"));
   assert.ok(!sameTokens("%1$@ and %2$@", "%1$@ و %1$@"));
   assert.ok(sameTokens("100%% done {name}", "تم 100%% {name}"));
@@ -49,4 +49,19 @@ test("cache lookup rejects inherited properties and arrays", () => {
   assert.equal(completeCachedTranslations([{ id: "a", text: "Hello" }], Object.create({ a: "مرحبا" })), null);
   assert.equal(completeCachedTranslations([{ id: "0", text: "Hello" }], ["مرحبا"]), null);
   assert.equal(completeCachedTranslations([{ id: "a", text: "Hello" }], null), null);
+});
+
+test("implicit arguments preserve order, explicit index and star mappings may reorder", () => {
+  for (const [source, translated, expected] of [
+    ["%@ has %d items", "%d عناصر عند %@", false],
+    ["%1$@ has %2$d items", "%2$d عناصر عند %1$@", true],
+    ["%1$@ has %2$d items", "%1$d عناصر عند %2$@", false],
+    ["%1$*2$.*3$f and %4$@", "%4$@ و %1$*2$.*3$f", true],
+    ["%1$*2$.*3$f and %4$@", "%4$@ و %1$*3$.*2$f", false],
+    ["%1$*f and %2$@", "%2$@ و %1$*f", false],
+    ["%*.*f and %@", "%@ و %*.*f", false],
+    ["%#@items@ for %@", "%@ مع %#@items@", false],
+    ["%% %@ %d", "%@ %d %%", true],
+    ["%%@ %d", "%d %%@", true],
+  ]) assert.equal(sameTokens(source, translated), expected, source);
 });

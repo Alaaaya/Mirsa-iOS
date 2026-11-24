@@ -29,18 +29,26 @@ enum ArabicIPALocalizer {
     static let sourceDirs = ["en.lproj", "English.lproj", "Base.lproj"]
 
     // Keep in sync with backend/ar-localize/logic.mjs.
-    static let tokenRegex = try! NSRegularExpression(pattern: #"%#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|q|L|z|t|j)?[@diouxXeEfFgGaAcCsSp]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|</?[A-Za-z][^<>]*>|\\[nrt]"#)
+    static let tokenRegex = try! NSRegularExpression(pattern: #"%#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*(?:\d+\$)?)?(?:\.(?:\d+|\*(?:\d+\$)?))?(?:hh|h|ll|l|q|L|z|t|j)?[@diouxXeEfFgGaAcCsSp]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|</?[A-Za-z][^<>]*>|\\[nrt]"#)
 
     static func tokens(_ s: String) -> [String] {
         let ns = s as NSString
-        return tokenRegex.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }.sorted()
+        return tokenRegex.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
     }
 
     static func acceptable(source: String, translated: String) -> Bool {
         let t = translated.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, t.count <= maxText * 2 else { return false }
         if translated.unicodeScalars.contains(where: { $0.value < 0x20 && $0.value != 0x09 && $0.value != 0x0A && $0.value != 0x0D }) { return false }
-        return tokens(source) == tokens(translated)
+        let original = tokens(source), replacement = tokens(translated)
+        guard original.sorted() == replacement.sorted() else { return false }
+        let consumesArgument: (String) -> Bool = { $0.hasPrefix("%") && $0 != "%%" }
+        let args = original.filter(consumesArgument)
+        let allExplicit = args.allSatisfy {
+            $0.range(of: #"^%[1-9][0-9]*\$"#, options: .regularExpression) != nil &&
+            $0.range(of: #"\*(?![1-9][0-9]*\$)"#, options: .regularExpression) == nil
+        }
+        return allExplicit || args == replacement.filter(consumesArgument)
     }
 
     static func worthTranslating(_ s: String) -> Bool {
@@ -215,7 +223,7 @@ struct ArabicBackendTranslator: ArabicTranslating {
         let body: [String: Any] = ["bundleId": bundleID, "version": version, "contentHash": contentHash,
                                    "items": items.map { ["id": $0.id, "text": $0.text] }]
         let payload = try JSONSerialization.data(withJSONObject: body)
-        let config = URLSessionConfiguration.ephemeral; config.timeoutIntervalForRequest = 120
+        let config = URLSessionConfiguration.ephemeral; config.timeoutIntervalForRequest = 120; config.timeoutIntervalForResource = 150
         let session = URLSession(configuration: config)
         var forced = false
         for _ in 0..<2 {

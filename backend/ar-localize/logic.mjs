@@ -3,11 +3,17 @@ export const MAX_ITEMS = 1500, MAX_TEXT = 2000, MAX_TOTAL = 150_000, MAX_ID = 30
 export const BUNDLE_RE = /^[A-Za-z0-9]([A-Za-z0-9.\-]{0,126}[A-Za-z0-9])?$/;
 export const HASH_RE = /^[0-9a-f]{64}$/;
 // Tokens that must survive translation unchanged (as a multiset): printf-style, %%, {braces}, ${x}, <tags>, escapes.
-const TOKEN_RE = /%#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|q|L|z|t|j)?[@diouxXeEfFgGaAcCsSp]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|<\/?[A-Za-z][^<>]*>|\\[nrt]/g;
+const TOKEN_RE = /%#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*(?:\d+\$)?)?(?:\.(?:\d+|\*(?:\d+\$)?))?(?:hh|h|ll|l|q|L|z|t|j)?[@diouxXeEfFgGaAcCsSp]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|<\/?[A-Za-z][^<>]*>|\\[nrt]/g;
 export const tokens = (s) => (String(s).match(TOKEN_RE) ?? []).slice().sort();
 export function sameTokens(a, b) {
   const x = tokens(a), y = tokens(b);
-  return x.length === y.length && x.every((v, i) => v === y[i]);
+  if (x.length !== y.length || !x.every((v, i) => v === y[i])) return false;
+  // Ignore %% (consumes no argument). Require original order if any conversion
+  // or dynamic width/precision uses an implicit argument, including named plurals.
+  const args = (s) => (s.match(TOKEN_RE) ?? []).filter(t => t.startsWith("%") && t !== "%%");
+  const source = args(a), translated = args(b);
+  const explicit = t => /^%[1-9][0-9]*\$/.test(t) && !/\*(?![1-9][0-9]*\$)/.test(t);
+  return source.every(explicit) || source.every((v, i) => v === translated[i]);
 }
 // A translation is acceptable when non-empty, bounded, token-multiset identical, and not just an echo of control chars.
 export function acceptable(src, out) {
