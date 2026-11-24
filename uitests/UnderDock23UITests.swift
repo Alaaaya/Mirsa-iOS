@@ -31,7 +31,7 @@ final class UnderDock23UITests: XCTestCase {
         ax.name = "underdock23-" + name + "-geometry"; ax.lifetime = .keepAlways; add(ax)
     }
     func testRealScreensUnderTranslucentDock() {
-        for lang in ["en", "ar"] {
+        for lang in MirsaUILanguages.selected(["en", "ar"]) {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
                                    "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]
@@ -94,7 +94,7 @@ final class UnderDock23UITests: XCTestCase {
     }
 
     func testBothStoreStylesKeepEveryInnerPageAboveLoweredMainDock() {
-        for lang in ["en", "ar"] {
+        for lang in MirsaUILanguages.selected(["en", "ar"]) {
             for style in ["new", "classic"] {
                 let app = XCUIApplication()
                 app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
@@ -131,7 +131,7 @@ final class UnderDock23UITests: XCTestCase {
     }
 
     func testMainDockNearHomeIndicatorOnAllSixTabs() {
-        for lang in ["en", "ar"] {
+        for lang in MirsaUILanguages.selected(["en", "ar"]) {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
                                    "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]

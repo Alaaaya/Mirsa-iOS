@@ -4,7 +4,7 @@ final class ArabicTranslate31UITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
     func testGlobeRowUnderInstallAllFiveLanguages() {
         let titles = ["en": "Translate to Arabic", "ar": "ترجم للعربي", "de": "Ins Arabische übersetzen", "kmr": "Bi Erebî wergerîne", "ckb": "وەریبگێڕە بۆ عەرەبی"]
-        for lang in ["en", "ar", "de", "kmr", "ckb"] {
+        for lang in MirsaUILanguages.selected(["en", "ar", "de", "kmr", "ckb"]) {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "sources-ts-small", "-MirsaSourceVersionsFixture24", "-mirsa.appLanguage", lang,
                                    "-mirsa.sourceTheme", "aurora", "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]
@@ -29,7 +29,7 @@ final class ArabicTranslate31UITests: XCTestCase {
     }
     func testProjectSigningGlobeAllFiveLanguages() {
         let titles = ["en": "Translate to Arabic", "ar": "ترجم للعربي", "de": "Ins Arabische übersetzen", "kmr": "Bi Erebî wergerîne", "ckb": "وەریبگێڕە بۆ عەرەبی"]
-        for lang in ["en", "ar", "de", "kmr", "ckb"] {
+        for lang in MirsaUILanguages.selected(["en", "ar", "de", "kmr", "ckb"]) {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29", "-mirsa.appLanguage", lang,
                                    "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]

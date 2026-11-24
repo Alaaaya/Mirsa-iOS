@@ -24,7 +24,7 @@ final class MirsaLicense24UITests: XCTestCase {
         ]
         let fullTitles = ["en": "Full license", "ar": "نص الترخيص الكامل", "de": "Vollständige Lizenz",
                           "ckb": "دەقی تەواوی مۆڵەتنامە", "kmr": "Nivîsa tevahî ya lîsansê"]
-        for lang in ["en", "ar", "de", "kmr", "ckb"] {
+        for lang in MirsaUILanguages.selected(["en", "ar", "de", "kmr", "ckb"]) {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "licenses",
                                    "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]

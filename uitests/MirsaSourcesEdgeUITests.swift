@@ -6,7 +6,7 @@ import UIKit
 final class MirsaSourcesEdgeUITests: XCTestCase {
     // Mirrors SourcesTheme.allCases.
     private static let themes = ["aurora", "sunset", "ocean", "light"]
-    private static let langs = ["en", "ar"]
+    private static var langs: [String] { MirsaUILanguages.selected(["en", "ar"]) }
     override func setUpWithError() throws { continueAfterFailure = true }
 
     private func launch(theme: String, lang: String) -> XCUIApplication {

@@ -12,7 +12,8 @@ final class CertificateParity29UITests: XCTestCase {
         add(attachment)
     }
 
-    private func verify(_ lang: String) {
+    private func verify(_ requestedLanguage: String) {
+        let lang = MirsaUILanguages.language(requestedLanguage)
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29",
                                "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))",
@@ -97,7 +98,8 @@ final class CertificateParity29UITests: XCTestCase {
 
     func testEnglishRealEditorSettingsAndIconMenu() { verify("en") }
     func testArabicRealEditorSettingsAndIconMenu() { verify("ar") }
-    private func launchDock(_ lang: String) -> XCUIApplication {
+    private func launchDock(_ requestedLanguage: String) -> XCUIApplication {
+        let lang = MirsaUILanguages.language(requestedLanguage)
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
                                "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]

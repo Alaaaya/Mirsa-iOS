@@ -3,8 +3,9 @@ final class TerminalStages23UITests: XCTestCase {
     func testRealCardRendersSuccessiveStructuredPackets() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        let lang = MirsaUILanguages.primary
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "terminal-stages23",
-                               "-mirsa.appLanguage", "en", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                               "-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]
         app.launch()
         let systemAlert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
         if systemAlert.waitForExistence(timeout: 2) {
@@ -13,15 +14,15 @@ final class TerminalStages23UITests: XCTestCase {
         }
         let next = app.buttons["terminal-fixture-next"]
         XCTAssertTrue(next.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "> Queued")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", (lang == "ar" ? "> بالدور" : "> Queued"))).firstMatch.waitForExistence(timeout: 5))
         capture("terminal-queued-synthetic")
         next.tap(); next.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "> Compiling")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "> Picked up by builder")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", (lang == "ar" ? "> عم يترجم الكود" : "> Compiling"))).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", (lang == "ar" ? "> استلمها عامل البناء" : "> Picked up by builder"))).firstMatch.exists)
         capture("terminal-compiling-synthetic")
         next.tap(); next.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "> Uploading the attachment")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "> Packaging the file")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", (lang == "ar" ? "> عم يرفع المرفق" : "> Uploading the attachment"))).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", (lang == "ar" ? "> عم يجهّز الملف" : "> Packaging the file"))).firstMatch.exists)
         capture("terminal-uploading-synthetic")
     }
     private func capture(_ name: String) {

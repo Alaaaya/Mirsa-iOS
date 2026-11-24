@@ -58,13 +58,16 @@ enum SourcesToolsStoreShotHost {
               {"name":"Single App","bundleIdentifier":"test.versions24.single","versions":[{"version":"1.0","downloadURL":"single.ipa"}]},
               {"name":"Legacy App","bundleIdentifier":"test.versions24.legacy","version":"4.0","downloadURL":"legacy.ipa"},
               {"name":"Broken History App","bundleIdentifier":"test.versions24.broken","version":"1.0","downloadURL":"fallback.ipa","versions":[null,42,{},{"version":"bad","downloadURL":"javascript:alert(1)"}]},
-              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions25.grouped","version":"1.0","versionDate":"2026-01-05","downloadURL":"g1.ipa","size":"1000000"},
-              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions25.grouped","version":"3.0","versionDate":"2026-03-05","downloadURL":"g3.ipa","size":"3000000"},
-              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions25.grouped","version":"2.0","versionDate":"2026-02-05","downloadURL":"g2.ipa","size":"2000000"}
+              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions24.grouped","version":"1.0","versionDate":"2026-01-05","downloadURL":"g1.ipa","size":"1000000"},
+              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions24.grouped","version":"3.0","versionDate":"2026-03-05","downloadURL":"g3.ipa","size":"3000000"},
+              {"name":"Grouped Legacy App","bundleIdentifier":"test.versions24.grouped","version":"2.0","versionDate":"2026-02-05","downloadURL":"g2.ipa","size":"2000000"}
             ]}
             """#.utf8)
             store.sources = [small]
-            store.apps[small.url] = try! SourcesStore.decodeSource(feed, base: URL(string: small.url)!).apps
+            let fixtureApps = try! SourcesStore.decodeSource(feed, base: URL(string: small.url)!).apps
+            // Every fixture must stay inside the DEBUG install interceptor, never real network/signing.
+            precondition(fixtureApps.allSatisfy { $0.bundleID.hasPrefix("test.versions24.") })
+            store.apps[small.url] = fixtureApps
             return (store, [small])
         }
         // Explicit opt-in, DEBUG-only feed text fixture. Default fixtures and tests stay unchanged.

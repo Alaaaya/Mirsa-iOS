@@ -4,7 +4,7 @@ import XCTest
 final class SourceVersions24UITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    private func launch(_ language: String = "en") -> XCUIApplication {
+    private func launch(_ language: String = MirsaUILanguages.primary) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "sources-ts-small",
                                "-MirsaSourceVersionsFixture24", "-mirsa.appLanguage", language,
@@ -27,7 +27,7 @@ final class SourceVersions24UITests: XCTestCase {
 
     func testActualHistoryAllFiveLanguagesAndExactSelectedVersionInstall() {
         let titles = ["en": "Versions", "ar": "الإصدارات", "de": "Versionen", "kmr": "Guherto", "ckb": "وەشانەکان"]
-        for lang in ["en", "ar", "de", "kmr", "ckb"] {
+        for lang in MirsaUILanguages.selected(["en", "ar", "de", "kmr", "ckb"]) {
             let app = launch(lang)
             app.staticTexts["History App"].firstMatch.tap()
             let history = app.buttons["source-detail-versions"]
@@ -74,6 +74,15 @@ final class SourceVersions24UITests: XCTestCase {
             shot(name, app)
             app.terminate()
         }
+    }
+
+    func testLanguagePolicyMatchesRunnerEnvironment() {
+        let mode = ProcessInfo.processInfo.environment["MIRSA_UI_LANGUAGE_MODE"] ?? "full"
+        let all = ["en", "ar", "de", "kmr", "ckb"]
+        XCTAssertEqual(MirsaUILanguages.selected(all), mode == "ar" ? ["ar"] : all)
+        XCTAssertEqual(MirsaUILanguages.primary, mode == "ar" ? "ar" : "en")
+        XCTAssertEqual(MirsaUILanguages.language("de"), mode == "ar" ? "ar" : "de")
+        print("UI_LANGUAGE_MODE=\(mode) languages=\(MirsaUILanguages.selected(all))")
     }
 
     func testGroupedLegacyEntriesShowOneCardAndOwnVersionRoutes() {

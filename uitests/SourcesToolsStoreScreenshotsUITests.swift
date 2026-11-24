@@ -6,7 +6,7 @@ final class SourcesToolsStoreScreenshotsUITests: XCTestCase {
     private static let themes = ["aurora", "sunset", "ocean", "light"]
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    private func launch(_ page: String, theme: String, language: String = "en") -> XCUIApplication {
+    private func launch(_ page: String, theme: String, language: String = MirsaUILanguages.primary) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", page,
                                "-mirsa.appLanguage", language, "-mirsa.sourceTheme", theme,
@@ -54,7 +54,7 @@ final class SourcesToolsStoreScreenshotsUITests: XCTestCase {
     }
 
     func testToolsStoreLiveAllLanguagesAndThemes() {
-        for language in ["ar", "en", "de", "kmr", "ckb"] {
+        for language in MirsaUILanguages.selected(["ar", "en", "de", "kmr", "ckb"]) {
             for t in Self.themes {
                 let app = launch("tools", theme: t, language: language)
                 let tab = app.buttons["tools-section-store"]

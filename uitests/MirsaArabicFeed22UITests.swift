@@ -9,7 +9,8 @@ final class MirsaArabicFeed22UITests: XCTestCase {
         add(a)
     }
 
-    private func verify(_ language: String) throws {
+    private func verify(_ requestedLanguage: String) throws {
+        let language = MirsaUILanguages.language(requestedLanguage)
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaLiveStyle", "-MirsaStylePage", "sources-real",

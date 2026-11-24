@@ -28,7 +28,8 @@ final class MirsaKeyboardReturn22UITests: XCTestCase {
         XCTAssertGreaterThan(bins.count, 8, "Uniform body")
     }
 
-    private func verify(_ lang: String) throws {
+    private func verify(_ requestedLanguage: String) throws {
+        let lang = MirsaUILanguages.language(requestedLanguage)
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaLiveStyle", "-MirsaStylePage", "sources-real",

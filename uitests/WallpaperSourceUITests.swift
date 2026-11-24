@@ -45,7 +45,7 @@ final class WallpaperSourceUITests: XCTestCase {
     }
 
     func testPreviewInstallDismissesThenOpensImportedWallpaper() {
-        let app = launch("en")
+        let app = launch(MirsaUILanguages.primary)
         let card = app.buttons["wallpaper-preview-original-1"]
         reveal(card, app: app)
         card.tap()
@@ -69,12 +69,12 @@ final class WallpaperSourceUITests: XCTestCase {
     }
 
     func testToolsStoreWallpaperSourcesOnlyInFiveLanguages() {
-        for language in ["ar", "en", "de", "kmr", "ckb"] {
+        for language in MirsaUILanguages.selected(["ar", "en", "de", "kmr", "ckb"]) {
             continueAfterFailure = false
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
                 "-MirsaWallpaperSourceFixture", "-mirsa.appLanguage", language,
-                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                "-AppleLanguages", "(\(language))", "-AppleLocale", language]
             app.launch()
             defer { app.terminate() }
             let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -213,7 +213,7 @@ final class WallpaperSourceUITests: XCTestCase {
         }
     }
     func testFullscreenImageVideoAndWideThumbnail() {
-        for language in ["ar", "en", "de", "kmr", "ckb"] {
+        for language in MirsaUILanguages.selected(["ar", "en", "de", "kmr", "ckb"]) {
             let app = XCUIApplication()
             app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
                 "-MirsaWallpaperSourceFixture", "-mirsa.appLanguage", language]
@@ -278,7 +278,7 @@ final class WallpaperSourceUITests: XCTestCase {
     func testLiveDefaultCAPlaygroundCatalog() {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
-            "-mirsa.appLanguage", "ar", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar"]
         app.launch()
         defer { app.terminate() }
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")

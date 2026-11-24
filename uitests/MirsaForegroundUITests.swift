@@ -4,7 +4,8 @@ import XCTest
 final class MirsaForegroundUITests: XCTestCase {
     func testBackgroundForegroundKeepsContent() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(en)"]
+        let lang = MirsaUILanguages.primary
+        app.launchArguments = ["-mirsa.appLanguage", lang, "-AppleLanguages", "(\(lang))", "-AppleLocale", lang]
         app.launch()
         Thread.sleep(forTimeInterval: 4)
         func shot(_ n: String) { let a = XCTAttachment(screenshot: app.screenshot()); a.name = n; a.lifetime = .keepAlways; add(a) }
