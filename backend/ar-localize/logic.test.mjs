@@ -53,6 +53,10 @@ test("cache lookup rejects inherited properties and arrays", () => {
 
 test("implicit arguments preserve order, explicit index and star mappings may reorder", () => {
   for (const [source, translated, expected] of [
+    ["Plain text", "نص %n", false],
+    ["%D %@", "%@ %D", false],
+    ["%1$#@items@ %2$@", "%2$@ %1$#@items@", true],
+    ["%1$#@items@ %2$@", "%2$@ %1$#@other@", false],
     ["%@ has %d items", "%d عناصر عند %@", false],
     ["%1$@ has %2$d items", "%2$d عناصر عند %1$@", true],
     ["%1$@ has %2$d items", "%1$d عناصر عند %2$@", false],

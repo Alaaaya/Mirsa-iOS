@@ -29,7 +29,7 @@ enum ArabicIPALocalizer {
     static let sourceDirs = ["en.lproj", "English.lproj", "Base.lproj"]
 
     // Keep in sync with backend/ar-localize/logic.mjs.
-    static let tokenRegex = try! NSRegularExpression(pattern: #"%#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*(?:\d+\$)?)?(?:\.(?:\d+|\*(?:\d+\$)?))?(?:hh|h|ll|l|q|L|z|t|j)?[@diouxXeEfFgGaAcCsSp]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|</?[A-Za-z][^<>]*>|\\[nrt]"#)
+    static let tokenRegex = try! NSRegularExpression(pattern: #"%(?:\d+\$)?#@\w+@|%(?:\d+\$)?[-+ 0#']*(?:\d+|\*(?:\d+\$)?)?(?:\.(?:\d+|\*(?:\d+\$)?))?(?:hh|h|ll|l|q|L|z|t|j)?[@diDuUoOxXeEfFgGaAcCsSpn]|%%|\$\{[^}]*\}|\{\{[^}]*\}\}|\{[^{}]*\}|</?[A-Za-z][^<>]*>|\\[nrt]"#)
 
     static func tokens(_ s: String) -> [String] {
         let ns = s as NSString
