@@ -1408,6 +1408,7 @@ struct LicensesView: View {
     """ + "\n"
 
     @State private var showLicenses = false
+    @State private var expandedLicenses: Set<String> = []
     private var licensesTitle: String {
         storeText("Licenses", "التراخيص", de: "Lizenzen", ckb: "مۆڵەتنامەکان", kmr: "Lîsans")
     }
@@ -1486,18 +1487,27 @@ struct LicensesView: View {
                     .accessibilityIdentifier("license-note-" + i.name)
                 if let u = URL(string: i.url) {
                     Link(i.url, destination: u).font(.caption)
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderless)
                         .accessibilityIdentifier("license-link-" + i.name)
                 }
                 if let notice = i.fullNotice {
-                    DisclosureGroup {
+                    Button {
+                        withAnimation { if expandedLicenses.contains(i.name) { expandedLicenses.remove(i.name) } else { expandedLicenses.insert(i.name) } }
+                    } label: {
+                        HStack {
+                            Text(storeText("Full license", "نص الترخيص الكامل", de: "Vollständige Lizenz",
+                                           ckb: "دەقی تەواوی مۆڵەتنامە", kmr: "Nivîsa tevahî ya lîsansê"))
+                            Spacer()
+                            Image(systemName: expandedLicenses.contains(i.name) ? "chevron.down" : "chevron.right").font(.caption)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("license-disclosure-" + i.name)
+                    if expandedLicenses.contains(i.name) {
                         Text(notice).font(.footnote).textSelection(.enabled)
                             .environment(\.layoutDirection, .leftToRight)
                             .accessibilityIdentifier("license-full-notice-" + i.name)
-                    } label: {
-                        Text(storeText("Full license", "نص الترخيص الكامل", de: "Vollständige Lizenz",
-                                       ckb: "دەقی تەواوی مۆڵەتنامە", kmr: "Nivîsa tevahî ya lîsansê"))
-                            .accessibilityIdentifier("license-disclosure-" + i.name)
                     }
                 }
             }
