@@ -5,6 +5,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { acceptable, chunk, parseModelMap, validateRequest, cacheHash, completeCachedTranslations } from "./logic.mjs";
 
+import { fetchModelJSON } from "./provider.mjs";
+
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const LLM_URL = Deno.env.get("LLM_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai";
 const FREE_ATTESTED = Deno.env.get("GEMINI_FREE_TIER_ATTESTED") === "owner-attested-2026-11-07";
@@ -28,12 +30,11 @@ async function user(req: Request) {
 
 async function ask(batch: { id: string; text: string }[]): Promise<Record<string, string>> {
   const input: Record<string, string> = {}; for (const b of batch) input[b.id] = b.text;
-  const r = await fetch(LLM_URL + "/chat/completions", {
-    method: "POST", signal: AbortSignal.timeout(45_000), headers: { authorization: "Bearer " + LLM_KEY, "content-type": "application/json" },
+  const response = await fetchModelJSON(LLM_URL + "/chat/completions", {
+    method: "POST", headers: { authorization: "Bearer " + LLM_KEY, "content-type": "application/json" },
     body: JSON.stringify({ model: LLM_MODEL, temperature: 0.2, max_tokens: 8192, messages: [{ role: "system", content: SYSTEM }, { role: "user", content: JSON.stringify(input) }] }),
   });
-  if (!r.ok) throw new Error(r.status === 429 ? "busy" : "llm_failed");
-  const text = (await r.json()).choices?.[0]?.message?.content ?? "";
+  const text = response.choices?.[0]?.message?.content ?? "";
   const map = parseModelMap(text);
   if (!map) throw new Error("llm_failed");
   const out: Record<string, string> = {};
