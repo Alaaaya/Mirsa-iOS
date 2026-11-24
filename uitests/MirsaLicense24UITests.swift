@@ -37,7 +37,7 @@ final class MirsaLicense24UITests: XCTestCase {
             XCTAssertTrue(mirsa.isHittable)
             XCTAssertEqual(app.staticTexts["license-badge-Mirsa"].label, "Mirsa License")
             XCTAssertEqual(app.staticTexts["license-note-Mirsa"].label, notes[lang]!)
-            let link = app.descendants(matching: .any)["license-link-Mirsa"].firstMatch
+            let link = app.descendants(matching: .any).matching(identifier: "license-link-Mirsa").firstMatch
             XCTAssertTrue(link.exists)
             XCTAssertEqual(link.label, "https://github.com/Alaaaya/Mirsa-iOS/blob/main/LICENSE")
             let next = app.staticTexts["license-name-isideload"]
@@ -53,7 +53,7 @@ final class MirsaLicense24UITests: XCTestCase {
             XCTAssertEqual(app.staticTexts["license-badge-AirCard-iOS"].label, "MIT")
             XCTAssertEqual(app.staticTexts["license-note-AirCard-iOS"].label,
                            "Copyright (c) 2026 Johnny Franks. MIT License.")
-            XCTAssertEqual(app.descendants(matching: .any)["license-link-AirCard-iOS"].firstMatch.label, "https://github.com/Mak5er/AirCard-iOS")
+            XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "license-link-AirCard-iOS").firstMatch.label, "https://github.com/Mak5er/AirCard-iOS")
             shot(app, lang + "-upstream")
             let disclosure = app.buttons[fullTitles[lang]!]
             for _ in 0..<4 { if disclosure.isHittable { break }; app.swipeUp() }
