@@ -782,7 +782,6 @@ private struct EncryptedEntryCard: View {
     let onDelete: () -> Void
 
     @State private var installStart: Date?
-    @State private var showPremiumUnlock = false
     /// Icon average colour, computed once per entry off the main thread.
     @State private var iconTint: Color?
     private var tintKey: String { "store-ipa|" + entry.id.uuidString }
@@ -872,17 +871,6 @@ private struct EncryptedEntryCard: View {
             }
             if store.decryptingID == entry.id {
                 ProgressView().tint(MirsaPalette.accentSoft)
-            }
-            // Premium Unlock: decrypted entries first; encrypted ones with a
-            // licence too — the flow decrypts first, then scans and injects.
-            if store.decryptedIDs.contains(entry.id) || (entry.encryptedBinary == true && entry.hasSinf) {
-                Button { showPremiumUnlock = true } label: {
-                    Label(t("Premium Unlock", "فك المميزات", "کردنەوەی پرێمیۆم", "Premium Vekirin"), systemImage: "key.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.mirsaSecondary)
-                .disabled(store.busy != nil)
-                .accessibilityIdentifier("encrypted-premium-unlock")
             }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { onInstall() } label: {
@@ -978,7 +966,6 @@ private struct EncryptedEntryCard: View {
             guard iconTint == nil else { return }
             if let c = await StoreIconTintCache.color(tintKey, image: store.icon(entry)) { iconTint = c }
         }
-        .sheet(isPresented: $showPremiumUnlock) { PremiumUnlockView(preselected: entry, vm: vm) }
     }
 
     @ViewBuilder private var stateBadge: some View {

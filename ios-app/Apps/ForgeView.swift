@@ -57,7 +57,6 @@ struct ForgeView: View {
     @State private var targetLink = false
     @State private var targetSources = false
     @State private var gallery = false
-    @State private var premiumUnlock = false
     @State private var toDelete: ForgeProject?
 
     var body: some View {
@@ -90,7 +89,6 @@ struct ForgeView: View {
                     .gesture(DragGesture(minimumDistance: 30).onEnded { g in if g.translation.width < -60 && abs(g.translation.height) < 40 { toDelete = p } })
                 }
                 forgeButton("person.2.fill", tr("Community tweaks", "تويكس المجتمع", ckb: "تویکی کۆمەڵگا", kmr: "Tweakên civakê")) { gallery = true }
-                forgeButton("key.fill", tr("Premium Unlock", "فك المميزات", ckb: "کردنەوەی پرێمیۆم", kmr: "Premium Vekirin")) { premiumUnlock = true }
                 if let status { Text(status).font(.footnote).foregroundStyle(.white.opacity(0.7)) }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
             }.padding(MirsaSpacing.page).frame(maxWidth: .infinity, alignment: .leading)
@@ -120,7 +118,6 @@ struct ForgeView: View {
             })
         }
         .sheet(isPresented: $gallery) { ForgeGalleryView() }
-        .sheet(isPresented: $premiumUnlock) { PremiumUnlockView() }
         .sheet(item: Binding(get: { shareURL.map { ForgeShareItem(url: $0) } }, set: { _ in shareURL = nil })) { ForgeShareSheet(url: $0.url) }
     }
     private func createTarget(_ url: URL) async throws {

@@ -454,7 +454,6 @@ private struct ClassicEncryptedEntryCard: View {
     let onDelete: () -> Void
 
     @State private var installStart: Date?
-    @State private var showPremiumUnlock = false
     @State private var showNotes = false
 
     private func t(_ en: String, _ ar: String, _ ckb: String, _ kmr: String) -> String { EncryptedText.t(en, ar, ckb, kmr) }
@@ -538,17 +537,6 @@ private struct ClassicEncryptedEntryCard: View {
                 .disabled(store.busy != nil)
                 .accessibilityIdentifier("encrypted-decrypt")
             }
-            // Premium Unlock: decrypted entries first; encrypted ones with a
-            // licence too — the flow decrypts first, then scans and injects.
-            if store.decryptedIDs.contains(entry.id) || (entry.encryptedBinary == true && entry.hasSinf) {
-                Button { showPremiumUnlock = true } label: {
-                    Label(t("Premium Unlock", "فك المميزات", "کردنەوەی پرێمیۆم", "Premium Vekirin"), systemImage: "key.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.mirsaSecondary)
-                .disabled(store.busy != nil)
-                .accessibilityIdentifier("encrypted-premium-unlock")
-            }
             HStack(spacing: MirsaSpacing.xs) {
                 Button { Task { await store.install(entry, vm: vm) } } label: {
                     InstallKeyedLabel(key: "entry:" + entry.id.uuidString) {
@@ -570,7 +558,6 @@ private struct ClassicEncryptedEntryCard: View {
         .padding(MirsaSpacing.card)
         .mirsaCard()
         .onChange(of: store.installingID) { _, id in installStart = id == entry.id ? Date() : nil }
-        .sheet(isPresented: $showPremiumUnlock) { PremiumUnlockView(preselected: entry, vm: vm) }
     }
 
     /// Percentage from the existing install progress; speed estimated in the UI from
