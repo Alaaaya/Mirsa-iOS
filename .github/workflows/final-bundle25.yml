@@ -126,6 +126,12 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Reject stale staging fixture before the native build
+        env:
+          MIRSA_RT_STAGING_TOKEN: ${{ secrets.RT_STAGING_TOKEN }}
+        run: |
+          python3 scripts/test-runtime-staging-fixture.py
+          python3 scripts/check-runtime-staging-fixture.py
       - name: Select Xcode
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)

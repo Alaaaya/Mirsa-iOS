@@ -14,6 +14,12 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
             if env["MIRSA_RT_REQUIRED_STAGING"] == "1" { XCTFail("REQUIRED staging endpoint/token missing"); return }
             throw XCTSkip("staging env not provided")
         }
+        // Diagnose expired operator setup before any generic network error, never log the JWT.
+        let expiry = try RuntimeStagingSession.validate(token: token, now: Date())
+        guard expiry.timeIntervalSinceNow > 60 else {
+            XCTFail("Staging fixture expired or too close to expiry; refresh before dispatch.")
+            return
+        }
         let endpoint = try XCTUnwrap(URL(string: raw))
         let translator = RuntimeArabicBackendTranslator(endpoint: endpoint, tokenProvider: EnvAuth(value: token))
         let items = [
@@ -50,8 +56,10 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
         // A user session token must NOT be accepted as a runtime capability.
         do {
             _ = try await RuntimeTranslationHTTP().post(grantEndpoint, token: token, object: ["action": "missing", "consent": true,
-                "bundleId": "com.example.stagingprobe", "revision": revision, "items": [["id": "s0", "text": "Hello"]]])
+                "bundleId": "com.example.stagingprobe", "revision": revision, "items": [["id": "s0", "text": "删除 %d 张照片"]]])
             XCTFail("user JWT accepted for missing")
-        } catch {}
+        } catch RuntimeTranslationError.httpStatus(let status) {
+            XCTAssertEqual(status, 401, "valid missing request must be rejected by auth, not input validation")
+        }
     }
 }

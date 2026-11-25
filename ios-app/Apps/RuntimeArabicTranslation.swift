@@ -18,7 +18,7 @@ protocol RuntimeDictionaryTranslating {
     func dictionary(bundleID: String, revision: String, items: [ArabicIPALocalizer.Item]) async throws -> RuntimeTranslationPackage
 }
 
-enum RuntimeTranslationError: Error { case notConfigured, network, invalid, timeout, changedOriginal }
+enum RuntimeTranslationError: Error { case notConfigured, network, invalid, timeout, changedOriginal, httpStatus(Int) }
 
 /// The retained library IPA is the immutable input, never a previous signed export.
 /// Hash sidecars migrate/delete alongside that original and are checked before every preparation.
@@ -240,8 +240,10 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         if let activation { request.setValue(activation, forHTTPHeaderField: "X-Mirsa-Activation") }
         let (bytes, response) = try await session.bytes(for: request)
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200,
-              response.expectedContentLength <= 48 * 1024 else { throw RuntimeTranslationError.network }
+        guard let response = response as? HTTPURLResponse else { throw RuntimeTranslationError.network }
+        // Status is safe to diagnose; never include response bodies, URLs or credentials in errors.
+        guard response.statusCode == 200 else { throw RuntimeTranslationError.httpStatus(response.statusCode) }
+        guard response.expectedContentLength <= 48 * 1024 else { throw RuntimeTranslationError.invalid }
         var data = Data()
         for try await byte in bytes {
             data.append(byte)
