@@ -14,7 +14,7 @@ struct RuntimeStagingSession: Codable, Equatable {
     static let pathPrefix = "/runtime-translate-"
     static let issuer = "urn:mirsa:runtime-staging25"
     static let audience = "mirsa-runtime-staging25"
-    static let maxLifetime: TimeInterval = 3 * 3600
+    static let maxLifetime: TimeInterval = 3600
 
     enum Failure: Error, Equatable { case format, endpoint, token, expired }
 
