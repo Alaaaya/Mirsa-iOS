@@ -13,12 +13,13 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
         let entry: [String: Any] = ["source": source, "labelId": UUID().uuidString, "reviewId": UUID().uuidString, "version": 1, "kind": "missing"]
         let good: [String: Any] = ["queue": ["persisted": true, "entries": [entry]]]
         XCTAssertNotNil(RuntimeArabicBackendTranslator.queueReceipt(good, sources: [source]))
-        for bad: [String: Any] in [
+        let badReceipts: [[String: Any]] = [
             [:], ["error": "unavailable"], ["queue": ["persisted": false, "entries": [entry]]],
             ["queue": ["persisted": true, "entries": []]],
             ["queue": ["persisted": true, "entries": [entry, entry]]],
             ["queue": ["persisted": true, "entries": [["source": source, "labelId": "fake"]]]]
-        ] { XCTAssertNil(RuntimeArabicBackendTranslator.queueReceipt(bad, sources: [source])) }
+        ]
+        for bad in badReceipts { XCTAssertNil(RuntimeArabicBackendTranslator.queueReceipt(bad, sources: [source])) }
         XCTAssertNil(RuntimeArabicBackendTranslator.queueReceipt(good, sources: [source, "说明"]))
     }
     func testStagingDictionaryPreservesSpecifiersAndIssuesScopedGrant() async throws {
