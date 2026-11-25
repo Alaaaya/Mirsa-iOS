@@ -63,7 +63,7 @@ final class DiscoveryAuthTests: XCTestCase {
     }
     func testTranslationExistingOnlyRefreshKeepsAccountAndRejectsSwitch() async throws {
         func jwt(_ sub: String, marker: String) -> String {
-            let data = Data(("{\"sub\":\"" + sub + "\",\"marker\":\"" + marker + "\"}").utf8)
+            let data = Data(("{\"sub\":\"" + sub + "\",\"role\":\"authenticated\",\"marker\":\"" + marker + "\"}").utf8)
             return "header." + data.base64EncodedString().replacingOccurrences(of: "=", with: "") + ".signature"
         }
         let id = "11111111-1111-4111-8111-111111111111"

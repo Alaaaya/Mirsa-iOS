@@ -22,6 +22,7 @@ def validate_budget(token, now, minimum=2700):
             or claims["aud"] != "mirsa-runtime-staging25"
             or claims["sub"] != "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
             or claims["scope"] != "runtime:bootstrap"
+            or claims["role"] != "authenticated"
             or not 0 < exp - iat <= 3600 or iat > now + 60):
             raise ValueError
     except (ValueError, KeyError, TypeError, UnicodeError):

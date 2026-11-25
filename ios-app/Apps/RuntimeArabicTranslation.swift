@@ -150,7 +150,7 @@ enum RuntimeArabicPipeline {
                               originalRevision: String? = nil, bundleIDOverride: String? = nil) throws -> String {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("runtime-ar-" + UUID().uuidString)
-        defer { try? fm.removeItem(at: work) }
+        defer { if fm.fileExists(atPath: work.path) { try? fm.removeItem(at: work) } }
         do {
             let scan = try RuntimeTranslationScanner.scan(app: app)
             let revision = originalRevision ?? scan.revision
@@ -242,8 +242,8 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
             issued = try await http.post(endpoint, token: token, object: issue)
         }
         guard let online = Self.validOnline(issued["online"] as? [String: String], bundleID: bundleID, revision: revision),
-              let activation = online["activation"], try ForgeClient.fixUserID(activation) == account,
-              activationScope(activation, bundle: bundleID, revision: revision, installation: installation,
+              let activation = online["activation"],
+              activationScope(activation, account: account, bundle: bundleID, revision: revision, installation: installation,
                               capability: online["token"] ?? "") else { throw RuntimeTranslationError.invalid }
         var groups: [[ArabicIPALocalizer.Item]] = [], current: [ArabicIPALocalizer.Item] = [], chars = 0
         for item in items where RuntimeTranslationScanner.safeText(item.text) {
@@ -272,7 +272,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
         }
         return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts, deferredReasons: reasons)
     }
-    private func activationScope(_ token: String, bundle: String, revision: String,
+    func activationScope(_ token: String, account: UUID, bundle: String, revision: String,
                                  installation: String, capability: String) -> Bool {
         let parts = token.split(separator: ".")
         guard parts.count == 3 else { return false }
@@ -282,7 +282,10 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
               let claims = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any] else { return false }
         // Server verifies the signature; these checks prevent accepting any response for another scope/account.
         let hash = SHA256.hash(data: Data(capability.utf8)).map { String(format: "%02x", $0) }.joined()
-        return claims["bundleId"] as? String == bundle && claims["revision"] as? String == revision &&
+        return (claims["sub"] as? String).flatMap(UUID.init(uuidString:)) == account &&
+            claims["iss"] as? String == "urn:mirsa:translation25" &&
+            claims["aud"] as? String == "mirsa-translated-app" &&
+            claims["bundleId"] as? String == bundle && claims["revision"] as? String == revision &&
             claims["installationId"] as? String == installation && claims["capHash"] as? String == hash
     }
     /// Only a scoped committed label + durable outbox review counts as a designed fallback.

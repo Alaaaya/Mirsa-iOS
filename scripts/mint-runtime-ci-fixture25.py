@@ -8,7 +8,7 @@ import base64,hashlib,hmac,json,os,time,uuid
 def mint(secret, now):
     def b64(raw): return base64.urlsafe_b64encode(raw).rstrip(b'=')
     claims={'iss':'urn:mirsa:runtime-staging25','aud':'mirsa-runtime-staging25',
-            'sub':'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','scope':'runtime:bootstrap',
+            'sub':'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','scope':'runtime:bootstrap','role':'authenticated',
             'iat':now,'exp':now+3600,'jti':str(uuid.uuid4())}
     data=b'.'.join(b64(json.dumps(v,separators=(',',':')).encode()) for v in ({'alg':'HS256'},claims))
     return (data+b'.'+b64(hmac.new(secret,data,hashlib.sha256).digest())).decode()

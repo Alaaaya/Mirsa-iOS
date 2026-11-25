@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import Mirsa
 
 final class RuntimeArabicTranslation25Tests: XCTestCase {
@@ -231,6 +232,29 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
          "activation": "fixture.payload.signature", "installationId": "11111111-1111-4111-8111-111111111111",
          "endpoint": "https://runtime.example.com/translate",
          "expiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))]
+    }
+
+    func testActivationClaimsUseTheirOwnRealmAndKeepAccountBinding() throws {
+        let account = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let capability = "mrt1." + String(repeating: "a", count: 64)
+        let hash = SHA256.hash(data: Data(capability.utf8)).map { String(format: "%02x", $0) }.joined()
+        var claims: [String: String] = ["sub": account.uuidString.lowercased(),
+            "iss": "urn:mirsa:translation25", "aud": "mirsa-translated-app",
+            "bundleId": "org.mirsa.test", "revision": String(repeating: "a", count: 64),
+            "installationId": "installation", "capHash": hash]
+        func accepted() throws -> Bool {
+            let body = try JSONSerialization.data(withJSONObject: claims).base64EncodedString()
+                .replacingOccurrences(of: "=", with: "").replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+            return RuntimeArabicBackendTranslator().activationScope("header." + body + ".signature",
+                account: account, bundle: "org.mirsa.test", revision: String(repeating: "a", count: 64),
+                installation: "installation", capability: capability)
+        }
+        XCTAssertTrue(try accepted(), "Activation is not an authenticated user JWT")
+        for key in ["sub", "iss", "aud", "bundleId", "revision", "installationId", "capHash"] {
+            let saved = claims[key]; claims[key] = "wrong"
+            XCTAssertFalse(try accepted(), key)
+            claims[key] = saved
+        }
     }
 
     /// No injected translator, endpoint or manual staging session. The same app account,

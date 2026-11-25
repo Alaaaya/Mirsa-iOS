@@ -11,7 +11,7 @@ spec.loader.exec_module(module)
 class FixtureTests(unittest.TestCase):
     def token(self, **updates):
         claims = dict(iss="urn:mirsa:runtime-staging25", aud="mirsa-runtime-staging25",
-            sub="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", scope="runtime:bootstrap", iat=10000, exp=13600)
+            sub="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", scope="runtime:bootstrap", role="authenticated", iat=10000, exp=13600)
         claims.update(updates)
         data = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
         return "header." + data + ".signature"
@@ -26,7 +26,7 @@ class FixtureTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.validate_budget(self.token(**claims), 10000)
     def test_wrong_scope_not_accepted(self):
-        for key in ("iss", "aud", "sub", "scope"):
+        for key in ("iss", "aud", "sub", "scope", "role"):
             with self.assertRaises(ValueError):
                 module.validate_budget(self.token(**{key:"wrong"}), 10000)
     def test_malformed_does_not_echo_secret(self):
