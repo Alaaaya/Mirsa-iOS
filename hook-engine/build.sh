@@ -18,10 +18,11 @@ fi
 "${CC[@]}" -target arm64-apple-ios15.0 -isysroot "$SDK" -fobjc-arc \
   -O2 -Wall -Wextra -Werror -fvisibility=hidden -dynamiclib \
   -I include -I vendor/fishhook src/MirsaHook.m "$WORK/fishhook.c" \
-  -lobjc -framework Foundation "${LINK[@]}" \
+  -lobjc -framework Foundation ${LINK[@]+"${LINK[@]}"} \
   -Wl,-install_name,@rpath/CydiaSubstrate.framework/CydiaSubstrate \
   -Wl,-current_version,1.0.0,-compatibility_version,1.0.0 \
   -o "$WORK/CydiaSubstrate"
+[[ -s "$WORK/CydiaSubstrate" ]] || { echo "Fresh hook engine build produced no binary" >&2; exit 1; }
 if [[ "$(uname -s)" == Darwin ]]; then
   codesign --force --sign - "$WORK/CydiaSubstrate"
   codesign --verify --strict "$WORK/CydiaSubstrate"
