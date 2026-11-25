@@ -30,13 +30,14 @@ static NSTimeInterval OnlineExpiry(id value) {
  return d.timeIntervalSince1970;
 }
 static NSDictionary *onlineConfig;
-static NSMutableDictionary *onlinePositive,*onlineNegative;
+static NSMutableDictionary *onlinePositive,*onlineNegative,*onlineMeta;
 static NSMutableSet *onlinePending;
 static dispatch_queue_t onlineQueue;
 static BOOL onlineDenied;
 static NSUInteger onlineIssued, onlineWaiting;
 static NSMutableSet *onlineUncovered;
 static os_unfair_lock onlineLock=OS_UNFAIR_LOCK_INIT;
+#import "OnlineMerge.h"
 static NSString *SafePrefix(NSString *s,NSUInteger n) {
  if(s.length<=n)return [s copy];
  if(n && CFStringIsSurrogateHighCharacter([s characterAtIndex:n-1]))n--;
@@ -70,8 +71,11 @@ static NSString *DictionaryCacheKey(void) {
  return [NSString stringWithFormat:@"MirsaTranslationDictionary25.%@.%@",onlineConfig[@"bundleId"],onlineConfig[@"revision"]];
 }
 static void SaveOnlineCache(void) {
- os_unfair_lock_lock(&onlineLock);NSDictionary *snapshot=[onlinePositive copy];os_unfair_lock_unlock(&onlineLock);
- NSData *d=[NSJSONSerialization dataWithJSONObject:snapshot options:0 error:NULL];
+ os_unfair_lock_lock(&onlineLock);
+ NSMutableDictionary *snapshot=[NSMutableDictionary dictionaryWithCapacity:onlinePositive.count];
+ for(NSString *k in onlinePositive){NSDictionary *m=onlineMeta[k];snapshot[k]=@{@"t":onlinePositive[k],@"v":m[@"v"]?:@0,@"p":m[@"p"]?:@"gemini"};}
+ os_unfair_lock_unlock(&onlineLock);
+ NSData *d=[NSJSONSerialization dataWithJSONObject:@{@"format":@2,@"entries":snapshot} options:0 error:NULL];
  if(d.length && d.length<=1048576)[NSUserDefaults.standardUserDefaults setObject:d forKey:DictionaryCacheKey()];
 }
 static void RefreshBannerCoverage(void) {
@@ -87,9 +91,9 @@ static void ApplyOnlineEntries(NSArray *entries) {
  for(id item in entries){
   if(![item isKindOfClass:NSDictionary.class])continue;
   id source=item[@"source"],value=item[@"translation"];
-  if(![source isKindOfClass:NSString.class] || !ValidOnlineValue(source,value))continue;
+  if(![source isKindOfClass:NSString.class] || !ValidOnlineValue(source,value) || !ProvenanceValid(item[@"provenance"]) || !VersionValid(item[@"version"]))continue;
   os_unfair_lock_lock(&onlineLock);
-  if(onlinePositive[source] || onlinePositive.count<2048){onlinePositive[source]=value;[onlineUncovered removeObject:source];}
+  MergeOnlineLocked(source,value,[item[@"version"] integerValue],item[@"provenance"]);
   os_unfair_lock_unlock(&onlineLock);
  }
  SaveOnlineCache();RefreshBannerCoverage();
@@ -157,14 +161,19 @@ static void QueueOnline(NSString *s) {
     if([obj isKindOfClass:NSDictionary.class] && [obj[@"bundleId"] isEqual:onlineConfig[@"bundleId"]] && [obj[@"revision"] isEqual:onlineConfig[@"revision"]] && [obj[@"translations"] isKindOfClass:NSDictionary.class]){
      id v=obj[@"translations"][@"s0"];
      if([v isKindOfClass:NSString.class] && [v length]>0 && [v length]<=1024 && PlaceholdersPreserved(s,v) && !HasCJK(v))translated=v;
+     // Canonical entries win over the bare map (the server returns protected latest values).
+     if([obj[@"entries"] isKindOfClass:NSArray.class])ApplyOnlineEntries(obj[@"entries"]);
     }
    }
    [session invalidateAndCancel];
   } @catch(__unused NSException *e) {}
   @finally {
    os_unfair_lock_lock(&onlineLock);
-   if(translated && onlinePositive.count<2048){onlinePositive[s]=translated;[onlineUncovered removeObject:s];}
-   else {if(onlineNegative.count>=128)[onlineNegative removeAllObjects];onlineNegative[s]=@(NSDate.date.timeIntervalSince1970+60);}
+   if(translated && (onlinePositive[s] || onlinePositive.count<2048)){
+    // Bare translation without entry is unversioned Gemini: only fills a gap, never overrides.
+    if(!onlineMeta[s])MergeOnlineLocked(s,translated,0,@"gemini");
+    [onlineUncovered removeObject:s];
+   } else {if(onlineNegative.count>=128)[onlineNegative removeAllObjects];onlineNegative[s]=@(NSDate.date.timeIntervalSince1970+60);}
    [onlinePending removeObject:s];if(onlineWaiting)onlineWaiting--;
    os_unfair_lock_unlock(&onlineLock);
    if(translated)SaveOnlineCache();RefreshBannerCoverage();
@@ -173,17 +182,27 @@ static void QueueOnline(NSString *s) {
 }
 static void LoadOnlineCache(void) {
  id stored=[NSUserDefaults.standardUserDefaults objectForKey:DictionaryCacheKey()];
- if([stored isKindOfClass:NSData.class] && [stored length]<=1048576){
-  id map=[NSJSONSerialization JSONObjectWithData:stored options:0 error:NULL];
-  if([map isKindOfClass:NSDictionary.class] && [map count]<=2048)
-   for(id source in map)if([source isKindOfClass:NSString.class] && ValidOnlineValue(source,map[source]))onlinePositive[source]=map[source];
+ if(![stored isKindOfClass:NSData.class] || [stored length]>1048576)return;
+ id map=[NSJSONSerialization JSONObjectWithData:stored options:0 error:NULL];
+ if(![map isKindOfClass:NSDictionary.class])return;
+ if([map[@"format"] isEqual:@2] && [map[@"entries"] isKindOfClass:NSDictionary.class]){
+  NSDictionary *e=map[@"entries"];if(e.count>2048)return;
+  for(id source in e){
+   id it=e[source];
+   if(![source isKindOfClass:NSString.class] || ![it isKindOfClass:NSDictionary.class] || !ValidOnlineValue(source,it[@"t"]) || !ProvenanceValid(it[@"p"]) || !VersionValid(it[@"v"]))continue;
+   os_unfair_lock_lock(&onlineLock);MergeOnlineLocked(source,it[@"t"],[it[@"v"] integerValue],it[@"p"]);os_unfair_lock_unlock(&onlineLock);
+  }
+ } else if([map count]<=2048){
+  // Legacy v1 cache: unversioned Gemini, any later entry supersedes it.
+  for(id source in map)if([source isKindOfClass:NSString.class] && ValidOnlineValue(source,map[source])){
+   os_unfair_lock_lock(&onlineLock);MergeOnlineLocked(source,map[source],0,@"gemini");os_unfair_lock_unlock(&onlineLock);}
  }
 }
 static void ConfigureOnline(NSDictionary *config) {
- onlinePositive=[NSMutableDictionary dictionary];onlineNegative=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];onlineUncovered=[NSMutableSet set];
+ onlinePositive=[NSMutableDictionary dictionary];onlineNegative=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];onlineUncovered=[NSMutableSet set];
  onlineQueue=dispatch_queue_create("app.mirsa.translate.online",DISPATCH_QUEUE_SERIAL);
  id c=config[@"online"];if(![c isKindOfClass:NSDictionary.class])return;
- for(NSString *k in @[@"endpoint",@"token",@"bundleId",@"revision"])if(![c[k] isKindOfClass:NSString.class] || ![c[k] length])return;
+ for(NSString *k in @[@"endpoint",@"token",@"bundleId",@"revision",@"activation",@"installationId"])if(![c[k] isKindOfClass:NSString.class] || ![c[k] length])return;
  NSRegularExpression *tokenRE=[NSRegularExpression regularExpressionWithPattern:@"^mrt1\\.[0-9a-f]{64}$" options:0 error:NULL];
  NSRegularExpression *revisionRE=[NSRegularExpression regularExpressionWithPattern:@"^[0-9a-f]{64}$" options:0 error:NULL];
  if(![tokenRE firstMatchInString:c[@"token"] options:0 range:NSMakeRange(0,[c[@"token"] length])] || ![revisionRE firstMatchInString:c[@"revision"] options:0 range:NSMakeRange(0,[c[@"revision"] length])])return;

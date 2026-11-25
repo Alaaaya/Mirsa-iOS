@@ -209,7 +209,11 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
               let token = value["token"], token.range(of: "^mrt1\\.[0-9a-f]{64}$", options: .regularExpression) != nil,
               let raw = value["endpoint"], let url = URL(string: raw), url.scheme == "https", url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil, DiscoveryURLPolicy.isSafe(url),
-              let expiry = value["expiresAt"] else { return nil }
+              let expiry = value["expiresAt"],
+              let activation = value["activation"], activation.count <= 4096,
+              activation.split(separator: ".", omittingEmptySubsequences: false).count == 3,
+              activation.split(separator: ".", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty }),
+              let installation = value["installationId"], !installation.isEmpty, installation.count <= 128 else { return nil }
         let formatter = ISO8601DateFormatter()
         var date = formatter.date(from: expiry)
         if date == nil { formatter.formatOptions.insert(.withFractionalSeconds); date = formatter.date(from: expiry) }

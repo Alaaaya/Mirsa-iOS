@@ -1,0 +1,29 @@
+name: runtime-translation-native25
+on:
+  workflow_dispatch:
+  push:
+    branches: ["mirsa/translation-queue25"]
+    paths: ["runtime-translation/**","ios-app/Apps/RuntimeArabicTranslation.swift",".github/workflows/runtime-translation-native25.yml"]
+jobs:
+  native:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Merge race tests (native, executed)
+        working-directory: runtime-translation
+        run: |
+          clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation MergeRace.m -o MergeRace
+          ./MergeRace
+      - name: Compile dylib for iOS (Werror)
+        working-directory: runtime-translation
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          python3 - <<'PY'
+          from pathlib import Path
+          d=Path('runtime-table.json').read_bytes()
+          Path('Table.h').write_text('static const unsigned char runtime_table[] = {'+','.join(map(str,d))+'};\nstatic const unsigned long runtime_table_len = sizeof(runtime_table);\n')
+          PY
+          xcrun clang -target arm64-apple-ios15.0 -isysroot "$SDK" -fobjc-arc -fblocks -O2 -Wall -Wextra -Werror -dynamiclib RuntimeTranslate.m fishhook.c -framework UIKit -framework Foundation -framework CoreText -framework CoreGraphics -framework Security -o /tmp/MirsaTranslate.dylib
+      - name: Source tests
+        working-directory: runtime-translation
+        run: python3 test_runtime.py RuntimeTests.test_online_bounds RuntimeTests.test_scoped_contract RuntimeTests.test_no_ui_wait
