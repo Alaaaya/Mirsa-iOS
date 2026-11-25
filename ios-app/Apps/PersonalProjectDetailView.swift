@@ -601,7 +601,7 @@ struct PersonalProjectDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: Binding(get: { draft.backgroundNotifications ?? false }, set: { draft.backgroundNotifications = $0 })) {
                 HStack(alignment: .center, spacing: 10) {
-                    Image(systemName: "bell.badge.fill").foregroundStyle(LCPalette.green)
+                    settingSymbol("bell.badge.fill", color: LCPalette.green)
                     Text(personalText("Background notifications", "إشعارات بالخلفية")).font(.subheadline)
                 }
             }.tint(LCPalette.green).accessibilityIdentifier("project-sign-background-notifications")
@@ -628,15 +628,15 @@ struct PersonalProjectDetailView: View {
         AnyView(
         VStack(alignment: .leading, spacing: 12) {
             Label(personalText("Project settings", "إعدادات المشروع"), systemImage: "gearshape.fill").font(.subheadline.weight(.semibold))
-            toggle(personalText("Enable Files access", "تمكين الوصول إلى الملفات"), personalText("Shows app documents in Files.", "بيظهر ملفات التطبيق بتطبيق الملفات."), $draft.fileSharing)
-            toggle(personalText("Remove URL schemes", "إزالة مخططات URL"), personalText("Deletes the app's custom URL schemes.", "بيحذف مخططات URL تبع التطبيق."), $draft.removeURLSchemes)
-            toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile)
-            toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
-            toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
+            toggle(personalText("Enable Files access", "تمكين الوصول إلى الملفات"), personalText("Shows app documents in Files.", "بيظهر ملفات التطبيق بتطبيق الملفات."), $draft.fileSharing, symbol: "folder", color: .blue)
+            toggle(personalText("Remove URL schemes", "إزالة مخططات URL"), personalText("Deletes the app's custom URL schemes.", "بيحذف مخططات URL تبع التطبيق."), $draft.removeURLSchemes, symbol: "link.slash", color: .red)
+            toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile, symbol: "doc.badge", color: .purple)
+            toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }), symbol: "puzzlepiece", color: .orange)
+            toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }), symbol: "appclip", color: .blue)
             VStack(alignment: .leading, spacing: 4) {
                 Toggle(isOn: Binding(get: { draft.translateArabic ?? false }, set: { draft.translateArabic = $0 })) {
                     HStack(alignment: .center, spacing: 10) {
-                        Image(systemName: "globe").foregroundStyle(LCPalette.green)
+                        settingSymbol("globe", color: LCPalette.green)
                         Text(ArabicTranslateText.rowTitle).font(.subheadline)
                     }
                 }.tint(LCPalette.green).accessibilityIdentifier("project-sign-translate-ar")
@@ -647,13 +647,14 @@ struct PersonalProjectDetailView: View {
                 }.padding(.leading, 32).frame(maxWidth: .infinity, alignment: .leading)
             }
             backgroundNotificationsSettings
-            toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
-            toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
-            toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }))
-            toggle(personalText("Fix dark icon (iOS 18)", "إصلاح الأيقونة الداكنة (iOS 18)"), personalText("Removes primary dark icon renditions only when a matching default exists. Other assets stay intact.", "بيشيل نسخة الأيقونة الداكنة إذا إلها نسخة افتراضية مطابقة. باقي صور التطبيق بتضل."), Binding(get: { draft.fixDarkIcon ?? false }, set: { draft.fixDarkIcon = $0 }))
-            toggle(personalText("Direct injection (main executable)", "حقن مباشر بالملف الرئيسي"), personalText("Off uses LoadControl (arm64 only).", "إذا طفيته بيستخدم LoadControl (arm64 بس)."), Binding(get: { !loaderOn }, set: { draft.directInjection = $0 }))
-            toggle(personalText("New tweaks first", "الإضافات الجديدة أولاً"), personalText("Injected libraries load before the app's own.", "المكتبات المحقونة بتتحمّل قبل مكتبات التطبيق."), Binding(get: { draft.newTweaksFirst ?? false }, set: { draft.newTweaksFirst = $0 }))
-            HStack {
+            toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }), symbol: "checkmark.shield", color: .blue)
+            toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp, symbol: "applewatch", color: .purple)
+            toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }), symbol: "square", color: .gray)
+            toggle(personalText("Fix dark icon (iOS 18)", "إصلاح الأيقونة الداكنة (iOS 18)"), personalText("Removes primary dark icon renditions only when a matching default exists. Other assets stay intact.", "بيشيل نسخة الأيقونة الداكنة إذا إلها نسخة افتراضية مطابقة. باقي صور التطبيق بتضل."), Binding(get: { draft.fixDarkIcon ?? false }, set: { draft.fixDarkIcon = $0 }), symbol: "moon", color: .yellow)
+            toggle(personalText("Direct injection (main executable)", "حقن مباشر بالملف الرئيسي"), personalText("Off uses LoadControl (arm64 only).", "إذا طفيته بيستخدم LoadControl (arm64 بس)."), Binding(get: { !loaderOn }, set: { draft.directInjection = $0 }), symbol: "syringe", color: .orange)
+            toggle(personalText("New tweaks first", "الإضافات الجديدة أولاً"), personalText("Injected libraries load before the app's own.", "المكتبات المحقونة بتتحمّل قبل مكتبات التطبيق."), Binding(get: { draft.newTweaksFirst ?? false }, set: { draft.newTweaksFirst = $0 }), symbol: "square.3.layers.3d.top.filled", color: .teal)
+            HStack(spacing: 10) {
+                settingSymbol("gamecontroller", color: .red)
                 Text(personalText("Game Mode", "وضع الألعاب")).font(.subheadline)
                 Spacer()
                 Picker("", selection: Binding(get: { draft.gameMode ?? .keep }, set: { draft.gameMode = $0 })) {
@@ -662,7 +663,8 @@ struct PersonalProjectDetailView: View {
                     Text(personalText("Off", "إيقاف")).tag(PersonalGameMode.off)
                 }.pickerStyle(.menu)
             }
-            HStack {
+            HStack(spacing: 10) {
+                settingSymbol("iphone.gear", color: .gray)
                 Text(personalText("Minimum iOS", "أدنى إصدار iOS")).font(.subheadline)
                 Spacer()
                 Picker("", selection: $draft.minimumOS) {
@@ -670,7 +672,8 @@ struct PersonalProjectDetailView: View {
                     ForEach(["12.0", "13.0", "14.0", "15.0", "16.0", "17.0", "18.0"], id: \.self) { Text($0).tag($0) }
                 }.pickerStyle(.menu)
             }
-            HStack {
+            HStack(spacing: 10) {
+                settingSymbol("key", color: .indigo)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(personalText("Custom entitlements", "Entitlements مخصّصة")).font(.subheadline)
                     Text(draft.customEntitlementsName ?? personalText("None. Still limited by the profile.", "ما في. وبتبقى محدودة بالبروفايل.")).font(.caption).foregroundStyle(.secondary)
@@ -684,11 +687,19 @@ struct PersonalProjectDetailView: View {
         }
             )
     }
-    private func toggle(_ title: String, _ sub: String, _ value: Binding<Bool>) -> some View {
+    private func settingSymbol(_ name: String, color: Color) -> some View {
+        Image(systemName: name).font(.body).foregroundStyle(color)
+            .frame(width: 22).accessibilityHidden(true)
+    }
+    private func toggle(_ title: String, _ sub: String, _ value: Binding<Bool>, symbol: String? = nil, color: Color = .secondary) -> some View {
         Toggle(isOn: value) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline)
+                HStack(spacing: 10) {
+                    if let symbol { settingSymbol(symbol, color: color) }
+                    Text(title).font(.subheadline)
+                }
                 Text(sub).font(.caption).foregroundStyle(.secondary)
+                    .padding(.leading, symbol == nil ? 0 : 32)
             }
         }.tint(LCPalette.green)
     }

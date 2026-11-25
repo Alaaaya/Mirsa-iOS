@@ -37,6 +37,28 @@ final class RuntimeTranslate25UITests: XCTestCase {
         let ax = XCTAttachment(string: app.debugDescription); ax.name = "AX"; ax.lifetime = .keepAlways; add(ax)
     }
 
+    func testArabicColoredProjectSettingsRowsKeepLabels() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29", "-MirsaProjectThemesFixture",
+            "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar"]
+        app.launch()
+        let editor = app.scrollViews["mirsa.project.editor-scroll"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 20))
+        for title in ["تمكين الوصول إلى الملفات", "مطابقة صارمة للبروفايل", "الإضافات الجديدة أولاً"] {
+            let row = app.switches.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            for _ in 0..<22 { if row.exists && row.isHittable { break }; editor.swipeUp() }
+            XCTAssertTrue(row.exists && row.isHittable, title)
+            capture("Arabic-settings-colored-symbols-" + title)
+        }
+        let entitlements = app.staticTexts["Entitlements مخصّصة"]
+        for _ in 0..<10 { if entitlements.exists && entitlements.isHittable { break }; editor.swipeUp() }
+        XCTAssertTrue(entitlements.exists)
+        XCTAssertTrue(app.staticTexts["أدنى إصدار iOS"].exists)
+        XCTAssertTrue(app.staticTexts["وضع الألعاب"].exists)
+        capture("Arabic-settings-colored-symbols-bottom")
+        let ax = XCTAttachment(string: app.debugDescription); ax.name = "AX-colored-settings"; ax.lifetime = .keepAlways; add(ax)
+    }
+
     func testArabicEncryptedFixtureShowsProductionNotice() {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29", "-MirsaProjectThemesFixture",
