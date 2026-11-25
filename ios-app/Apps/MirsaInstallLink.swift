@@ -129,9 +129,18 @@ struct MirsaProjectInstallLink: View {
     let latest: URL?
     private var signed: URL? {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
-        if let latest, let safe = try? PersonalProjectFolder.validated(latest, in: root) { return safe }
+        if let latest, let safe = try? PersonalProjectFolder.validated(latest, in: root), matchesCurrentDraft(safe) { return safe }
         guard let relative = UserDefaults.standard.string(forKey: "mirsa.project.signed." + projectID.uuidString) else { return nil }
-        return try? PersonalProjectFolder.validated(root.appendingPathComponent(relative), in: root)
+        guard let safe = try? PersonalProjectFolder.validated(root.appendingPathComponent(relative), in: root),
+              matchesCurrentDraft(safe) else { return nil }
+        return safe
+    }
+    private func matchesCurrentDraft(_ archive: URL) -> Bool {
+        guard let revision = UserDefaults.standard.string(forKey: "mirsa.project.revision." + projectID.uuidString),
+              let data = try? Data(contentsOf: PersonalInjectionProof.sidecar(archive)),
+              let record = try? JSONDecoder().decode(PersonalInjectionProof.Attempt.self, from: data),
+              record.draftRevision == revision else { return false }
+        return (try? PersonalInjectionProof.verifyRecord(archive)) != nil
     }
     var body: some View {
         if let signed { MirsaInstallLinkView(signedIPA: signed).id(signed.path) }

@@ -23,6 +23,7 @@ final class PersonalSigningOperation: ObservableObject {
     struct State {
         let id: UUID
         let projectID: UUID
+        var selectedTweakIDs: [UUID] = []
         var stage: Stage = .preparing
         var fraction: Double?
         var completedUnits: UInt64 = 0
@@ -132,16 +133,16 @@ final class PersonalSigningOperation: ObservableObject {
     }
 
     func start(projectID: UUID, title: String, input: URL, material: PersonalIdentityVault.Material,
-               pairingPath: String, options: PersonalProjectOptions) {
+               pairingPath: String, options: PersonalProjectOptions, selectedTweakIDs: [UUID] = []) {
         guard !running else { return }
         if let previous = state?.result?.url {
             MirsaManagedTmp.end(previous.deletingLastPathComponent())
         }
-        let id = UUID()
+        let id = options.attemptID
         let control = PersonalSigningControl()
         self.control = control
         lastActivityStage = nil
-        state = State(id: id, projectID: projectID)
+        state = State(id: id, projectID: projectID, selectedTweakIDs: selectedTweakIDs)
         let operation = MirsaOperationProgress.shared.begin(appID: projectID.uuidString, phase: .preparing)
         MirsaOperationProgress.shared.update(operation, phase: .preparing, fraction: 0)
         activityID = MirsaInstallActivity.shared.begin(title: title, phase: .preparing)

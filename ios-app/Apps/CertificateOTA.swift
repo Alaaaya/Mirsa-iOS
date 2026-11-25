@@ -76,7 +76,8 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         let kept: URL
         do { kept = try CertificateInstall.retain(signed.url, signedInfoPlist: signed.signedInfoPlist) }
         catch { throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, signed.url), signedURL: signed.url) }
-        if let projectID {
+        if let projectID,
+           options.draftRevision == nil || UserDefaults.standard.string(forKey: "mirsa.project.revision." + projectID.uuidString) == options.draftRevision {
             let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")
             let relative = kept.path.replacingOccurrences(of: base.path + "/", with: "")
             UserDefaults.standard.set(relative, forKey: "mirsa.project.signed." + projectID.uuidString)

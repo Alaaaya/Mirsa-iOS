@@ -79,7 +79,18 @@ enum CertificateInstall {
         var values = URLResourceValues(); values.isExcludedFromBackup = true
         try? dir.setResourceValues(values)
         let target = dir.appendingPathComponent(url.lastPathComponent)
+        let proof = PersonalInjectionProof.sidecar(url)
+        if fm.fileExists(atPath: proof.path) { try PersonalInjectionProof.verifyRecord(url) }
         try fm.moveItem(at: url, to: target)
+        if fm.fileExists(atPath: proof.path) {
+            do {
+                try fm.moveItem(at: proof, to: PersonalInjectionProof.sidecar(target))
+                try PersonalInjectionProof.verifyRecord(target)
+            } catch {
+                // The retained archive stays reachable even if its evidence cannot be retained.
+                throw Failure.retained(error.localizedDescription, signedURL: target)
+            }
+        }
         // Optional display metadata must never make a successful retention fail.
         if let signedInfoPlist {
             try? signedInfoPlist.write(to: dir.appendingPathComponent("Info.plist"), options: .atomic)

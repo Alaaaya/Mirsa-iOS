@@ -31,6 +31,98 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRealImporterBarrierBlocksImmediateSignAndMissingSelectedIDFails() async throws {
+        let library = IPATweakLibrary.shared, intake = PersonalProjectIntake()
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "GenericMarker25", withExtension: "dylib"))
+        let entered = expectation(description: "production importer suspended")
+        var resume: CheckedContinuation<Void, Never>?
+        library.importBarrierForTesting = {
+            await withCheckedContinuation { continuation in resume = continuation; entered.fulfill() }
+        }
+        defer { library.importBarrierForTesting = nil }
+        var imported: IPATweak?, failure: Error?
+        let task = intake.beginImport(fixture, library: library) { result in
+            switch result {
+            case .success(let value): imported = value
+            case .failure(let error): failure = error
+            }
+        }
+        // No yield before this assertion: this is the original picker/sign race.
+        XCTAssertThrowsError(try intake.requireReady(loaded: true, library: library))
+        await fulfillment(of: [entered], timeout: 5)
+        XCTAssertTrue(library.importing)
+        XCTAssertThrowsError(try intake.requireReady(loaded: true, library: library))
+        resume?.resume()
+        await task.value
+        XCTAssertNil(failure)
+        XCTAssertNotNil(imported)
+        XCTAssertNoThrow(try intake.requireReady(loaded: true, library: library))
+        XCTAssertThrowsError(try intake.requireReady(loaded: false, library: library))
+        XCTAssertThrowsError(try library.urls(for: Set([UUID()])))
+    }
+
+    /// All fixtures are Mirsa-owned, inert device Mach-O data, never launched here.
+    /// Covers the exact prepare -> dispatch -> Rust signer -> pack -> retain chain.
+    func testGenericDirectLoaderAndHookDependencyUseExactProductionAttempt() throws {
+        let fixture = try realFixture(), bundle = Bundle(for: Self.self)
+        let material = PersonalIdentityVault.Material(
+            p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
+            password: "mirsa-test",
+            profile: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "mobileprovision"))))
+        let marker = try XCTUnwrap(bundle.url(forResource: "GenericMarker25", withExtension: "dylib"))
+        let hook = try XCTUnwrap(bundle.url(forResource: "GenericHookMarker25", withExtension: "dylib"))
+        let original = try RuntimeOriginalIPA.hash(fixture.ipa)
+        var attempts = Set<UUID>()
+        for (source, method) in [(marker, InjectionMethod.direct), (marker, .loader), (hook, .loader)] {
+            var options = PersonalProjectOptions()
+            options.libraries = [source]
+            options.selectedComponentIDs = ["fixture:" + source.lastPathComponent]
+            options.draftRevision = "original-draft"
+            options.injections = [InjectionPlanEntry(library: source.path, method: method.rawValue, target: "@main")]
+            let result = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: options)
+            try PersonalInjectionProof.verifyRecord(result.url)
+            let proof = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
+                                                from: Data(contentsOf: PersonalInjectionProof.sidecar(result.url)))
+            XCTAssertEqual(proof.attemptID, options.attemptID)
+            XCTAssertTrue(attempts.insert(proof.attemptID).inserted)
+            XCTAssertEqual(proof.sourceSHA256, original)
+            XCTAssertEqual(proof.componentSHA256.values.first, try RuntimeOriginalIPA.hash(source))
+            XCTAssertEqual(proof.selectedComponentIDs, options.selectedComponentIDs)
+            XCTAssertFalse(proof.installed.dependencies.isEmpty)
+            XCTAssertTrue(proof.installed.dependencies.keys.contains { $0.hasSuffix(source.lastPathComponent) })
+            if method == .loader {
+                XCTAssertTrue(proof.installed.resources.keys.contains { $0.hasSuffix("MirsaLoadOrder.txt") })
+                XCTAssertTrue(proof.installed.dependencies.values.contains { $0.contains("@loader_path/Frameworks/MirsaLoader.dylib") })
+            }
+            if source == hook {
+                XCTAssertTrue(proof.installed.dependencies.keys.contains { $0.hasSuffix("CydiaSubstrate.framework/CydiaSubstrate") })
+            }
+            // Changing the next draft cannot relabel this output's immutable evidence.
+            options.selectedComponentIDs = ["different-draft"]
+            options.draftRevision = "different-draft"
+            let retainedRoot = fixture.root.appendingPathComponent(UUID().uuidString)
+            let retained = try CertificateInstall.retain(result.url, root: retainedRoot)
+            try PersonalInjectionProof.verifyRecord(retained)
+            let retainedProof = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
+                from: Data(contentsOf: PersonalInjectionProof.sidecar(retained)))
+            XCTAssertEqual(retainedProof.selectedComponentIDs, proof.selectedComponentIDs)
+            XCTAssertEqual(retainedProof.draftRevision, "original-draft")
+            let extracted = fixture.root.appendingPathComponent(UUID().uuidString)
+            try IPAEditorService.run("extract", input: retained, output: extracted)
+            let app = try IPAEditorService.app(in: extracted)
+            try PersonalInjectionProof.verify(proof.installed, app: app)
+            let injected = app.appendingPathComponent("Frameworks/" + source.lastPathComponent)
+            try FileManager.default.removeItem(at: injected)
+            XCTAssertThrowsError(try PersonalInjectionProof.verify(proof.installed, app: app))
+            // Archive mutation cannot pass retained/shared/OTA evidence validation.
+            let handle = try FileHandle(forWritingTo: retained)
+            try handle.seekToEnd(); try handle.write(contentsOf: Data([0])); try handle.close()
+            XCTAssertThrowsError(try PersonalInjectionProof.verifyRecord(retained))
+        }
+        XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
+    }
+
     private func temp() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

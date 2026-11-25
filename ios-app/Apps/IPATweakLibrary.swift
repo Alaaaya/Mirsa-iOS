@@ -10,6 +10,26 @@ struct IPATweak: Identifiable, Codable {
     let packageOnlyCode: Bool
 }
 
+/// Owns the synchronous picker-to-async-import boundary used by the production editor.
+@MainActor
+final class PersonalProjectIntake: ObservableObject {
+    @Published private(set) var queued = false
+    func requireReady(loaded: Bool, library: IPATweakLibrary) throws {
+        guard loaded, !queued, !library.importing else {
+            throw SideloadError.message(personalText("Wait for the project and addition import to finish.", "استنّى ليكتمل تحميل المشروع واستيراد الإضافة."))
+        }
+    }
+    @discardableResult
+    func beginImport(_ url: URL, library: IPATweakLibrary, completion: @escaping (Result<IPATweak, Error>) -> Void) -> Task<Void, Never> {
+        queued = true
+        return Task {
+            defer { queued = false }
+            do { completion(.success(try await library.addFile(url, allowSelection: true))) }
+            catch { completion(.failure(error)) }
+        }
+    }
+}
+
 /// User-supplied code is stored inertly until explicitly selected in the editor.
 /// No package scripts, system installation or automatic third-party downloads.
 @MainActor
@@ -22,6 +42,7 @@ final class IPATweakLibrary: ObservableObject {
     private var activeCancellation: URL?
 
     #if DEBUG
+    var importBarrierForTesting: (() async -> Void)?
     /// Inert UI screenshot fixture, never imported or executed.
     func projectThemesScreenshotFixture() -> UUID {
         let id = UUID(uuidString: "D8A35F00-0000-4000-8000-000000000001")!
@@ -97,7 +118,7 @@ final class IPATweakLibrary: ObservableObject {
     /// Like urls(for:) but skips components the user excluded; order of roots is kept.
     func urls(for id: UUID, excluding excluded: Set<String>) throws -> [URL] {
         guard let item = items.first(where: { $0.id == id }) else {
-            throw SideloadError.message("A selected tweak is missing. Select it again.")
+            throw SideloadError.message(personalText("A selected tweak is missing. Select it again.", "إضافة مختارة مو موجودة. اختارها من جديد."))
         }
         return item.roots.filter { !excluded.contains(Self.componentID(item, $0)) }.map {
             Self.root.appendingPathComponent(item.id.uuidString).appendingPathComponent($0)
@@ -105,7 +126,7 @@ final class IPATweakLibrary: ObservableObject {
     }
     func urls(for ids: Set<UUID>) throws -> [URL] {
         guard ids.isSubset(of: Set(items.map(\.id))) else {
-            throw SideloadError.message("A selected tweak is missing. Select it again.")
+            throw SideloadError.message(personalText("A selected tweak is missing. Select it again.", "إضافة مختارة مو موجودة. اختارها من جديد."))
         }
         return items.filter { ids.contains($0.id) }.flatMap { item in
             item.roots.map { Self.root.appendingPathComponent(item.id.uuidString).appendingPathComponent($0) }
@@ -118,6 +139,9 @@ final class IPATweakLibrary: ObservableObject {
         guard !importing else { throw SideloadError.message(IPATweakImportText.error("busy")) }
         importing = true
         defer { importing = false }
+        #if DEBUG
+        if let barrier = importBarrierForTesting { await barrier() }
+        #endif
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let session = try MirsaManagedTmp.begin("tweak-import")

@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Security
+import CryptoKit
 import AirliftFFI
 
 @_silgen_name("al_ipa_editor_run")
@@ -303,6 +304,165 @@ struct PersonalEncryptionWarning: Error, Decodable {
     }
 }
 
+/// Exact production-attempt contract. Reads bytes only; never executes package code.
+enum PersonalInjectionProof {
+    struct Snapshot: Codable {
+        var dependencies: [String: [String]]
+        var resources: [String: String]
+    }
+    static var failure: Error {
+        SideloadError.message(personalText("The requested additions could not be verified. No IPA was exported.", "ما قدرت أتأكد من الإضافات المطلوبة. ما تم تصدير IPA."))
+    }
+    struct Attempt: Codable {
+        let attemptID: UUID
+        let draftRevision: String?
+        let selectedComponentIDs: [String]
+        let sourceSHA256: String
+        let componentSHA256: [String: String]
+        let outputSHA256: String
+        let installed: Snapshot
+    }
+    static func revision(_ draft: PersonalProjectDraft) throws -> String {
+        var value = draft
+        value.appliedTweakIDs = nil // output bookkeeping is not a new signing request
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(value)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    static func sidecar(_ archive: URL) -> URL { archive.appendingPathExtension("mirsa-attempt.json") }
+    static func componentHashes(_ options: PersonalProjectOptions) throws -> [String: String] {
+        let sources = options.injections.isEmpty ? options.libraries : options.injections.map { URL(fileURLWithPath: $0.library) }
+        var result: [String: String] = [:]
+        for (index, source) in sources.enumerated() {
+            let id = options.selectedComponentIDs.indices.contains(index) ? options.selectedComponentIDs[index] : String(index)
+            var dir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: source.path, isDirectory: &dir) else { throw failure }
+            if dir.boolValue {
+                for file in try files(source) { result[id + "/" + relative(file, source)] = try RuntimeOriginalIPA.hash(file) }
+            } else { result[id] = try RuntimeOriginalIPA.hash(source) }
+        }
+        return result
+    }
+    static func record(_ archive: URL, source: URL, options: PersonalProjectOptions, hashes: [String: String], snapshot: Snapshot) throws {
+        let record = Attempt(attemptID: options.attemptID, draftRevision: options.draftRevision,
+                             selectedComponentIDs: options.selectedComponentIDs,
+                             sourceSHA256: try RuntimeOriginalIPA.hash(source), componentSHA256: hashes,
+                             outputSHA256: try RuntimeOriginalIPA.hash(archive), installed: snapshot)
+        try JSONEncoder().encode(record).write(to: sidecar(archive), options: [.atomic, .completeFileProtection])
+    }
+    static func verifyRecord(_ archive: URL) throws {
+        let record = try JSONDecoder().decode(Attempt.self, from: Data(contentsOf: sidecar(archive)))
+        guard try RuntimeOriginalIPA.hash(archive) == record.outputSHA256 else { throw failure }
+    }
+    static func files(_ app: URL) throws -> [URL] {
+        guard let walk = FileManager.default.enumerator(at: app, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else { throw failure }
+        var result: [URL] = []
+        for case let url as URL in walk {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true else { throw failure }
+            if values.isRegularFile == true { result.append(url) }
+        }
+        return result
+    }
+    static func relative(_ url: URL, _ app: URL) -> String {
+        String(url.path.dropFirst(app.path.count + 1))
+    }
+    static func isMachO(_ url: URL) throws -> Bool {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let magic = Array(try handle.read(upToCount: 4) ?? Data())
+        return [[0xcf,0xfa,0xed,0xfe], [0xce,0xfa,0xed,0xfe], [0xca,0xfe,0xba,0xbe], [0xbe,0xba,0xfe,0xca]].contains(magic.map(Int.init))
+    }
+    static func capture(app: URL, options: PersonalProjectOptions) throws -> Snapshot {
+        let sources = options.injections.isEmpty ? options.libraries : options.injections.map { URL(fileURLWithPath: $0.library) }
+        if sources.isEmpty { return Snapshot(dependencies: [:], resources: [:]) }
+        let all = try files(app)
+        var roots = Set<String>(), requestedNames = Set<String>()
+        for source in sources {
+            let name = source.lastPathComponent
+            requestedNames.insert(name)
+            let matches = all.filter { file in
+                let path = relative(file, app)
+                return path.contains("/Frameworks/" + name + "/") || path.hasPrefix("Frameworks/" + name + "/") ||
+                    path.hasSuffix("/Frameworks/" + name) || path == "Frameworks/" + name
+            }
+            guard !matches.isEmpty else { throw failure }
+            roots.formUnion(matches.map { relative($0, app) })
+        }
+        var deps: [String: [String]] = [:], resources: [String: String] = [:]
+        var linked = Set<String>()
+        for file in all {
+            let path = relative(file, app)
+            if file.lastPathComponent == "MirsaLoadOrder.txt" {
+                let order = try String(contentsOf: file, encoding: .utf8)
+                guard order.hasSuffix("\n") else { throw failure }
+                let entries = order.split(separator: "\n").map(String.init)
+                guard !entries.isEmpty, Set(entries).count == entries.count else { throw failure }
+                let manifestNames = entries.map { $0.split(separator: "/").first.map(String.init) ?? "" }
+                let requestedOrder = sources.map(\.lastPathComponent).filter { manifestNames.contains($0) }
+                let actualOrder = manifestNames.filter { requestedNames.contains($0) }
+                guard actualOrder == requestedOrder else { throw failure }
+                for entry in entries {
+                    guard !entry.hasPrefix("/"), !entry.split(separator: "/").contains(".."),
+                          FileManager.default.fileExists(atPath: file.deletingLastPathComponent().appendingPathComponent(entry).path) else { throw failure }
+                    let root = entry.split(separator: "/").first.map(String.init) ?? ""
+                    if requestedNames.contains(root) { linked.insert(root) }
+                }
+                resources[path] = try RuntimeOriginalIPA.hash(file)
+            }
+            guard try isMachO(file) else {
+                if roots.contains(path), !path.contains("/_CodeSignature/"),
+                   file.lastPathComponent != "Info.plist", file.lastPathComponent != "embedded.mobileprovision" {
+                    resources[path] = try RuntimeOriginalIPA.hash(file)
+                }
+                continue
+            }
+            let loads = try IPAEditorService.dependencies(of: file)
+            let relevant = loads.contains { dep in
+                dep.hasSuffix("/MirsaLoader.dylib") || requestedNames.contains { name in dep.hasSuffix("/" + name) || dep.contains("/" + name + "/") }
+            }
+            if roots.contains(path) || relevant || file.lastPathComponent == "MirsaLoader.dylib" ||
+                path.hasSuffix("/CydiaSubstrate.framework/CydiaSubstrate") {
+                deps[path] = loads
+            }
+            if relevant {
+                for name in requestedNames where loads.contains(where: { $0.hasSuffix("/" + name) || $0.contains("/" + name + "/") }) { linked.insert(name) }
+            }
+        }
+        for path in resources.keys where path.hasSuffix("/MirsaLoadOrder.txt") || path == "Frameworks/MirsaLoadOrder.txt" {
+            let directory = (path as NSString).deletingLastPathComponent
+            let owner = (directory as NSString).deletingLastPathComponent
+            guard deps.contains(where: { key, loads in
+                (key as NSString).deletingLastPathComponent == owner &&
+                loads.contains("@loader_path/Frameworks/MirsaLoader.dylib")
+            }) else { throw failure }
+        }
+        guard requestedNames.isSubset(of: linked), !deps.isEmpty else { throw failure }
+        return Snapshot(dependencies: deps, resources: resources)
+    }
+    static func verify(_ snapshot: Snapshot, app: URL) throws {
+        for (path, expected) in snapshot.dependencies {
+            guard try IPAEditorService.dependencies(of: app.appendingPathComponent(path)) == expected else { throw failure }
+        }
+        for (path, sha) in snapshot.resources {
+            guard try RuntimeOriginalIPA.hash(app.appendingPathComponent(path)) == sha else { throw failure }
+        }
+    }
+    /// Compare the actual final ZIP to signed staging bytes, not just filenames/notices.
+    static func verifyPacked(_ archive: URL, app: URL, snapshot: Snapshot) throws {
+        guard !snapshot.dependencies.isEmpty else { return }
+        let stage = try MirsaManagedTmp.begin("injection-packed-proof")
+        defer { MirsaManagedTmp.end(stage) }
+        let root = stage.appendingPathComponent("archive")
+        try IPAEditorService.run("extract", input: archive, output: root)
+        let packed = try IPAEditorService.app(in: root)
+        try verify(snapshot, app: packed)
+        for path in Set(snapshot.dependencies.keys).union(snapshot.resources.keys) {
+            guard try RuntimeOriginalIPA.hash(app.appendingPathComponent(path)) == RuntimeOriginalIPA.hash(packed.appendingPathComponent(path)) else { throw failure }
+        }
+    }
+}
+
 enum PersonalCertificateSigner {
     struct Result {
         let url: URL
@@ -320,6 +480,7 @@ enum PersonalCertificateSigner {
                         runtimeTranslator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator()) throws -> (root: URL, app: URL, info: [String: Any]) {
         let fm = FileManager.default
         let originalSHA = try RuntimeOriginalIPA.pin(ipa)
+        let sourceComponents = try PersonalInjectionProof.componentHashes(options)
         let root = stage.appendingPathComponent("archive", isDirectory: true)
         try IPAEditorService.run("extract", input: ipa, output: root)
         let app = try IPAEditorService.app(in: root)
@@ -404,6 +565,8 @@ enum PersonalCertificateSigner {
             ArabicLocalizationPipeline.lastNotice = try RuntimeArabicPipeline.applyRequired(app: app, translator: runtimeTranslator,
                 originalRevision: originalSHA, bundleIDOverride: options.bundleID)
         }
+        guard try PersonalInjectionProof.componentHashes(options) == sourceComponents else { throw PersonalInjectionProof.failure }
+        _ = try PersonalInjectionProof.capture(app: app, options: options)
         try RuntimeOriginalIPA.verify(ipa, expected: originalSHA)
         return (root, app, info)
     }
@@ -413,12 +576,20 @@ enum PersonalCertificateSigner {
         let stage = try MirsaManagedTmp.begin("personal-config")
         defer { MirsaManagedTmp.end(stage) }
         try fm.createDirectory(at: stage, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.complete])
+        let hashes = try PersonalInjectionProof.componentHashes(options)
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options)
         guard let executable = info["CFBundleExecutable"] as? String, !executable.isEmpty else {
             throw SideloadError.message(PersonalSigningFileError.localized("Personal signing failed.", language: AppLanguageStore.snapshot.rawValue))
         }
         try IPAEditorService.run("validate", input: app.appendingPathComponent(executable))
-        return try pack(root: root, options: options, suffix: "-unsigned")
+        let proof = try PersonalInjectionProof.capture(app: app, options: options)
+        let output = try pack(root: root, options: options, suffix: "-unsigned")
+        do {
+            try PersonalInjectionProof.verifyPacked(output, app: app, snapshot: proof)
+            try PersonalInjectionProof.record(output, source: ipa, options: options, hashes: hashes, snapshot: proof)
+        }
+        catch { MirsaManagedTmp.end(output.deletingLastPathComponent()); throw error }
+        return output
     }
     private static func pack(root: URL, options: PersonalProjectOptions, suffix: String = "") throws -> URL {
         let fm = FileManager.default
@@ -458,7 +629,9 @@ enum PersonalCertificateSigner {
         defer { MirsaManagedTmp.end(stage) }
         try fm.createDirectory(at: stage, withIntermediateDirectories: true,
                                attributes: [.protectionKey: FileProtectionType.complete])
+        let hashes = try PersonalInjectionProof.componentHashes(options)
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options, applyBundleID: false)
+        let injectionProof = try PersonalInjectionProof.capture(app: app, options: options)
         let originalSHA = try RuntimeOriginalIPA.pin(ipa)
         let runtimeBundleID = options.bundleID ?? (info["CFBundleIdentifier"] as? String ?? "")
         let runtimeConfiguration = options.translateToArabic
@@ -520,10 +693,28 @@ enum PersonalCertificateSigner {
                                                      expectedConfiguration: runtimeConfiguration)
         }
         try RuntimeOriginalIPA.verify(ipa, expected: originalSHA)
+        try PersonalInjectionProof.verify(injectionProof, app: app)
         progress(PersonalSigningEvent(stage: .packaging))
         let output = try pack(root: root, options: options)
         var handedOff = false
         defer { if !handedOff { MirsaManagedTmp.end(output.deletingLastPathComponent()) } }
+        try PersonalInjectionProof.verifyPacked(output, app: app, snapshot: injectionProof)
+        if options.translateToArabic || options.backgroundNotifications {
+            let check = try MirsaManagedTmp.begin("runtime-final-packed-proof")
+            defer { MirsaManagedTmp.end(check) }
+            let unpacked = check.appendingPathComponent("archive")
+            try IPAEditorService.run("extract", input: output, output: unpacked)
+            let finalApp = try IPAEditorService.app(in: unpacked)
+            if options.translateToArabic {
+                let actual = try IPAEditorService.info(in: finalApp)["CFBundleIdentifier"] as? String
+                guard actual == runtimeBundleID else { throw RuntimeTranslationError.invalid }
+                try RuntimeArabicPipeline.verifyInstalled(app: finalApp, revision: originalSHA, bundleID: runtimeBundleID)
+            }
+            if options.backgroundNotifications {
+                try BackgroundNotifications.verifyInstalled(app: finalApp, methods: options.backgroundMethods)
+            }
+        }
+        try PersonalInjectionProof.record(output, source: ipa, options: options, hashes: hashes, snapshot: injectionProof)
         let signedInfo = try IPAEditorService.info(in: app)
         var r = Result(url: output, bundleIdentifierChanged:
             (signedInfo["CFBundleIdentifier"] as? String) != (info["CFBundleIdentifier"] as? String),

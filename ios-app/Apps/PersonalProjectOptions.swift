@@ -2,6 +2,9 @@ import Foundation
 
 /// Per-project signing options consumed by PersonalCertificateSigner.sign.
 struct PersonalProjectOptions: Sendable {
+    var attemptID = UUID()
+    var draftRevision: String? = nil
+    var selectedComponentIDs: [String] = []
     var displayName: String? = nil
     var bundleID: String? = nil
     var version: String? = nil

@@ -17,9 +17,10 @@ struct PersonalProjectDetailView: View {
     @State private var showCertificates = false
     @State private var pickingTweak = false
     @State private var configBusy = false
+    @StateObject private var intake = PersonalProjectIntake()
     @ObservedObject var signing = PersonalSigningOperation.shared
     @State private var consumedResult: UUID?
-    private var busy: Bool { configBusy || signing.running }
+    private var busy: Bool { !loaded || intake.queued || tweaks.importing || configBusy || signing.running }
     @State private var message: String?
     @State private var resultAlert: String?
     @State private var output: URL?
@@ -54,11 +55,12 @@ struct PersonalProjectDetailView: View {
         .sheet(isPresented: $showCertificates, onDismiss: reloadIdentities) { PersonalCertificateManagerView() }
         .sheet(isPresented: $pickingTweak) {
             DocumentPickerView(allowedContentTypes: ["zip", "dylib", "deb", "framework"].compactMap { UTType(filenameExtension: $0) } + [.data]) { url in
-                Task {
-                    do {
-                        let imported = try await tweaks.addFile(url, allowSelection: true)
+                intake.beginImport(url, library: tweaks) { result in
+                    switch result {
+                    case .success(let imported):
                         if !draft.tweakIDs.contains(imported.id) { draft.tweakIDs.append(imported.id) }
-                    } catch { message = error.localizedDescription }
+                    case .failure(let error): message = error.localizedDescription
+                    }
                 }
             }
         }
@@ -128,7 +130,18 @@ struct PersonalProjectDetailView: View {
             catch { message = OpenInAttachmentText.failed }
         }
         .onChange(of: signing.state?.running) { _ in consumeSigningResult() }
-        .onChange(of: draft) { _ in if loaded, let destination = draftDestination { draftWriter.schedule(draft, to: destination) } }
+        .onChange(of: draft) { _ in
+            if loaded, let destination = draftDestination {
+                draftWriter.schedule(draft, to: destination)
+                let key = "mirsa.project.revision." + app.id.uuidString
+                let revision = try? PersonalInjectionProof.revision(draft)
+                if UserDefaults.standard.string(forKey: key) != revision {
+                    UserDefaults.standard.set(revision, forKey: key)
+                    // A project-level link must never represent a newer, unsigned draft.
+                    UserDefaults.standard.removeObject(forKey: "mirsa.project.signed." + app.id.uuidString)
+                }
+            }
+        }
         .onChange(of: scenePhase) { phase in if phase != .active { draftWriter.flush() } }
         .onDisappear { draftWriter.flush(); if !sharing { cleanOutput() } }
     }
@@ -323,7 +336,7 @@ struct PersonalProjectDetailView: View {
                 addTweakMenu { Label(personalText("Add", "إضافة"), systemImage: "plus") }
             }
             tweakNotices
-            let comps = components()
+            let comps = visibleComponents()
             ForEach(Array(comps.enumerated()), id: \.element.id) { index, comp in
                 HStack(spacing: 10) {
                     Button { removeComponent(comp) } label: {
@@ -378,15 +391,25 @@ struct PersonalProjectDetailView: View {
     struct TweakComponent { let id: String; let tweakID: UUID; let title: String; let subtitle: String; let url: URL }
     /// Every selected package expands to one component per dylib/framework root (stable id uuid:path).
     /// Order = persisted componentOrder (still valid) then new components in package order. Excluded ones are hidden.
-    private func components() -> [TweakComponent] {
+    private func components(requireAvailable: Bool = false) throws -> [TweakComponent] {
+        if requireAvailable { _ = try tweaks.urls(for: Set(draft.tweakIDs)) }
         let excluded = Set(draft.excludedRoots ?? [])
         var all: [TweakComponent] = []
         for id in draft.tweakIDs {
-            guard let item = tweak(id) else { continue }
+            guard let item = tweak(id) else {
+                if requireAvailable { throw SideloadError.message(personalText("A selected addition is unavailable. Import it again.", "إضافة مختارة مو موجودة. استوردها من جديد.")) }
+                continue
+            }
+            if requireAvailable && item.roots.isEmpty {
+                throw SideloadError.message(personalText("The selected addition has no usable files.", "الإضافة المختارة ما فيها ملفات قابلة للاستخدام."))
+            }
             for root in item.roots {
                 let cid = IPATweakLibrary.componentID(item, root)
                 if excluded.contains(cid) { continue }
                 let url = IPATweakLibrary.root.appendingPathComponent(item.id.uuidString).appendingPathComponent(root)
+                if requireAvailable && !FileManager.default.fileExists(atPath: url.path) {
+                    throw SideloadError.message(personalText("A selected file is missing. Import the addition again.", "ملف مختار مو موجود. استورد الإضافة من جديد."))
+                }
                 all.append(TweakComponent(id: cid, tweakID: id, title: (root as NSString).lastPathComponent, subtitle: item.name, url: url))
             }
         }
@@ -396,8 +419,9 @@ struct PersonalProjectDetailView: View {
         var seen = Set<String>()
         return (saved + all.filter { !savedSet.contains($0.id) }).filter { seen.insert($0.id).inserted }
     }
+    private func visibleComponents() -> [TweakComponent] { (try? components()) ?? [] }
     private func moveComponent(_ id: String, _ delta: Int) {
-        var order = components().map(\.id)
+        var order = visibleComponents().map(\.id)
         guard let i = order.firstIndex(of: id), order.indices.contains(i + delta) else { return }
         order.swapAt(i, i + delta)
         draft.componentOrder = order
@@ -407,7 +431,7 @@ struct PersonalProjectDetailView: View {
         list.append(comp.id)
         draft.excludedRoots = list
         draft.componentOrder = (draft.componentOrder ?? []).filter { $0 != comp.id }
-        if !components().contains(where: { $0.tweakID == comp.tweakID }) {
+        if !visibleComponents().contains(where: { $0.tweakID == comp.tweakID }) {
             draft.tweakIDs.removeAll { $0 == comp.tweakID }
             draft.excludedRoots = (draft.excludedRoots ?? []).filter { !$0.hasPrefix(comp.tweakID.uuidString + ":") }
         }
@@ -547,7 +571,7 @@ struct PersonalProjectDetailView: View {
         // Drop old capabilities first so stale ones can never be used while re-inspecting.
         injectionCaps = InjectionCapabilities()
         let input = library.url(app)
-        let comps = components()
+        let comps = visibleComponents()
         Task {
             let loaded: ([(id: String, kind: String, label: String)], InjectionCapabilities)? = await Task.detached(priority: .userInitiated) {
                 let stage = FileManager.default.temporaryDirectory.appendingPathComponent("targets-\(UUID().uuidString)", isDirectory: true)
@@ -817,6 +841,9 @@ struct PersonalProjectDetailView: View {
     }
 
     private func sign() {
+        do { try intake.requireReady(loaded: loaded, library: tweaks) }
+        catch { message = error.localizedDescription; return }
+        guard !configBusy, !signing.running else { return }
         draftWriter.flush()
         let material = selected?.material
         cleanOutput(); message = nil
@@ -853,8 +880,10 @@ struct PersonalProjectDetailView: View {
             if let overlay = draft.bundleOverlay, !overlay.isEmpty {
                 options.bundleOverlay = overlay; options.bundleBlobs = bundleDirs.staging; options.bundleOriginal = bundleDirs.original
             }
-            let comps = components()
+            let comps = try components(requireAvailable: true)
             options.libraries = comps.map(\.url)
+            options.selectedComponentIDs = comps.map(\.id)
+            options.draftRevision = try PersonalInjectionProof.revision(draft)
             let targets = draft.tweakTargets ?? [:]
             let methods = draft.injectionMethods ?? [:]
             if comps.contains(where: { targets[$0.id] != nil || methods[$0.id] != nil }) {
@@ -871,12 +900,14 @@ struct PersonalProjectDetailView: View {
                 options.injectionOrder = comps.map(\.id)
             }
         } catch { message = error.localizedDescription; return }
+        UserDefaults.standard.set(options.draftRevision, forKey: "mirsa.project.revision." + app.id.uuidString)
+        let selectedTweakIDs = draft.tweakIDs
         let input = library.url(app)
         let signingOptions = options
         if let material {
             showInstallLog = true
             signing.start(projectID: app.id, title: app.name, input: input, material: material,
-                          pairingPath: PairingController.pairingFilePath(), options: signingOptions)
+                          pairingPath: PairingController.pairingFilePath(), options: signingOptions, selectedTweakIDs: selectedTweakIDs)
             return
         }
         configBusy = true
@@ -885,7 +916,7 @@ struct PersonalProjectDetailView: View {
                 output = try await Task.detached(priority: .userInitiated) {
                     try PersonalCertificateSigner.exportConfigurationOnly(ipa: input, options: signingOptions)
                 }.value
-                draft.appliedTweakIDs = draft.tweakIDs
+                draft.appliedTweakIDs = selectedTweakIDs
                 message = personalText("Configuration applied. This IPA is NOT signed.", "انطبقت الإعدادات. هاد الـ IPA غير موقّع.")
                 if let notice = ArabicLocalizationPipeline.lastNotice { message = (message ?? "") + "\n" + notice }
                 sharing = true
@@ -911,7 +942,7 @@ struct PersonalProjectDetailView: View {
             resultAlert = message; return
         }
         output = result.url
-        draft.appliedTweakIDs = draft.tweakIDs
+        draft.appliedTweakIDs = state.selectedTweakIDs
         if result.installed { message = personalText("Signed and installed.", "تم التوقيع والتثبيت.") }
         else {
             message = personalText("Signed locally but install failed: ", "تم التوقيع بس التثبيت فشل: ") + (result.installError ?? "")
