@@ -150,8 +150,22 @@ enum RuntimeArabicPipeline {
 
 /// A release must explicitly configure a reviewed HTTPS endpoint; this branch has no live deployment.
 struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
-    var endpoint: URL? = (Bundle.main.object(forInfoDictionaryKey: "MirsaRuntimeTranslationEndpoint") as? String).flatMap(URL.init(string:))
-    var tokenProvider: DiscoveryTokenProvider? = nil
+    /// Release endpoint from Info.plist wins; otherwise an explicitly imported owner staging session.
+    var endpoint: URL? = RuntimeArabicBackendTranslator.defaultEndpoint()
+    var tokenProvider: DiscoveryTokenProvider? = RuntimeArabicBackendTranslator.defaultTokenProvider()
+    private static var releaseEndpoint: String? {
+        (Bundle.main.object(forInfoDictionaryKey: "MirsaRuntimeTranslationEndpoint") as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+    static func defaultEndpoint() -> URL? {
+        if let raw = releaseEndpoint { return URL(string: raw) }
+        guard RuntimeStagingSessionStore.importEnabled, let s = RuntimeStagingSessionStore.load() else { return nil }
+        return URL(string: s.endpoint)
+    }
+    static func defaultTokenProvider() -> DiscoveryTokenProvider? {
+        if releaseEndpoint != nil { return nil }
+        guard RuntimeStagingSessionStore.importEnabled, let s = RuntimeStagingSessionStore.load() else { return nil }
+        return RuntimeStagingTokenProvider(session: s)
+    }
     var http: RuntimeTranslationHTTP = RuntimeTranslationHTTP()
     func dictionary(bundleID: String, revision: String, items: [ArabicIPALocalizer.Item]) async throws -> RuntimeTranslationPackage {
         guard let endpoint, endpoint.scheme == "https", endpoint.host != nil, endpoint.user == nil,

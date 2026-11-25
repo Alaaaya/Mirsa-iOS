@@ -348,6 +348,8 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>MirsaRuntimeStagingImport</key>
+	<true/>
 	<key>MirsaToolsStoreEndpoint</key>
 	<string>https://hirebeofomiyumwysppj.supabase.co/functions/v1/mirsa-tools-store</string>
 </dict>

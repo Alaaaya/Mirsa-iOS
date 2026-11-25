@@ -11,6 +11,7 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
     func testStagingDictionaryPreservesSpecifiersAndIssuesScopedGrant() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let raw = env["MIRSA_RT_STAGING_ENDPOINT"], let token = env["MIRSA_RT_STAGING_TOKEN"], !raw.isEmpty, !token.isEmpty else {
+            if env["MIRSA_RT_REQUIRED_STAGING"] == "1" { XCTFail("REQUIRED staging endpoint/token missing"); return }
             throw XCTSkip("staging env not provided")
         }
         let endpoint = try XCTUnwrap(URL(string: raw))
@@ -35,8 +36,22 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
         let missing = try await translator.dictionary(bundleID: "com.example.stagingprobe", revision: revision,
             items: [ArabicIPALocalizer.Item(id: "zz", text: "Zzqx unlikelyword")])
         XCTAssertTrue(missing.translations.values.allSatisfy { arabic($0) })
-        if let online = package.online {
-            XCTAssertNotNil(RuntimeArabicBackendTranslator.validOnline(online, bundleID: "com.example.stagingprobe", revision: revision))
-        }
+        // The issued runtime capability must exist and drive a real 'missing' request exactly as the injected dylib does.
+        let online = try XCTUnwrap(package.online, "staging issued no runtime capability")
+        XCTAssertNotNil(RuntimeArabicBackendTranslator.validOnline(online, bundleID: "com.example.stagingprobe", revision: revision))
+        let grant = try XCTUnwrap(online["token"])
+        let grantEndpoint = try XCTUnwrap(URL(string: try XCTUnwrap(online["endpoint"])))
+        let reply = try await RuntimeTranslationHTTP().post(grantEndpoint, token: grant, object: [
+            "action": "missing", "consent": true, "bundleId": "com.example.stagingprobe", "revision": revision,
+            "items": [["id": "s0", "text": "Delete %d photos"]]])
+        let map = try XCTUnwrap(reply["translations"] as? [String: String])
+        let value = try XCTUnwrap(map["s0"], "missing request returned no translation")
+        XCTAssertTrue(arabic(value)); XCTAssertTrue(value.contains("%d"))
+        // A user session token must NOT be accepted as a runtime capability.
+        do {
+            _ = try await RuntimeTranslationHTTP().post(grantEndpoint, token: token, object: ["action": "missing", "consent": true,
+                "bundleId": "com.example.stagingprobe", "revision": revision, "items": [["id": "s0", "text": "Hello"]]])
+            XCTFail("user JWT accepted for missing")
+        } catch {}
     }
 }
