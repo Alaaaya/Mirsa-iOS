@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
@@ -40,6 +40,25 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-16
           bash backend/runtime-translate/test-postgres.sh
+
+      - name: Authenticated provider 429 and 503 queue durability and shared batching throttle
+        env:
+          RUNTIME_TEST_ACTIVATION_PEM: ${{ secrets.RT_STAGING_ACTIVATION_PEM }}
+        run: |
+          umask 077
+          test -n "$RUNTIME_TEST_ACTIVATION_PEM"
+          sudo mkdir -p /home/kit
+          sudo chown "$(id -u):$(id -g)" /home/kit
+          KEY=$(mktemp)
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s' "$RUNTIME_TEST_ACTIVATION_PEM" > "$KEY"
+          unset RUNTIME_TEST_ACTIVATION_PEM
+          RUNTIME_ACTIVATION_PRIVATE_KEY_FILE="$KEY" python3 backend/runtime-translate/e2e-staging.py | tee backend-fallback-proof.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-final25-backend-fallback-proof
+          path: backend-fallback-proof.log
+          if-no-files-found: error
 
   build:
     needs: [simulator, backend, native-hook-smoke]

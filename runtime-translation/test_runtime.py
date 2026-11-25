@@ -11,18 +11,19 @@ class RuntimeTests(unittest.TestCase):
   for token in ("O_NOFOLLOW","fchmod(fd,0600)","st.st_nlink==1","missingWaiting<16","1024*1024","SafePrefix(result,4096)"):
    self.assertIn(token,s)
   self.assertIn("CFStringIsSurrogateHighCharacter",o)
+  self.assertIn("onlinePositive.count>=2048",Path("OnlineMerge.h").read_text())
  def test_online_bounds(self):
   s=Path("Online.h").read_text()
-  for token in ("s.length>256","onlineWaiting>=16","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","body.length+d.length>1048576","done(nil)","onlinePositive.count<2048","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
+  for token in ("s.length>256","onlineWaiting>=128","batch.count>=16","chars+source.length>2048","150*NSEC_PER_MSEC","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","body.length+d.length>1048576","done(nil)","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
    self.assertIn(token,s)
  def test_scoped_contract(self):
   s=Path("Online.h").read_text()
-  for token in ('@"missing"','@"consent":@YES','@"items"','@"s0"','OnlineExpiry','@"mrt1'):
+  for token in ('@"missing"','@"consent":@YES','@"items"','@"s%lu"','OnlineExpiry','@"mrt1'):
    # token pattern contains ^ prefix, check separately
    if token=='@"mrt1':continue
    self.assertIn(token,s)
   self.assertIn('^mrt1',s);self.assertIn('NSBundle.mainBundle.bundleIdentifier',s)
-  self.assertIn('PlaceholdersPreserved(s,v)',s)
+  self.assertIn('PlaceholdersPreserved(s,v)',s);self.assertIn('ApplyOnlineEntries(obj[@"entries"])',s)
   self.assertIn('[obj[@"revision"] isEqual:onlineConfig[@"revision"]]',s)
  def test_binary_macho_signature_bounds(self):
   d=Path("out/MirsaTranslate.dylib").read_bytes()

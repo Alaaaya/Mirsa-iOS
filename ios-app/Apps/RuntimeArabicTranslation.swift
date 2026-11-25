@@ -12,6 +12,8 @@ struct RuntimeTranslationPackage {
     /// Exact source text to Arabic. Contains no user/provider credentials.
     let translations: [String: String]
     var online: [String: String]? = nil
+    var queueReceipts: [[String: Any]] = []
+    var deferredReasons: [String] = []
 }
 
 protocol RuntimeDictionaryTranslating {
@@ -189,6 +191,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
         }
         if !current.isEmpty { groups.append(current) }
         var translations: [String: String] = [:]
+        var receipts: [[String: Any]] = [], reasons: [String] = []
         for group in groups {
             try Task.checkCancellation()
             let response = try await http.post(endpoint, token: token, activation: activation, object: [
@@ -197,11 +200,30 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
             ])
             guard response["bundleId"] as? String == bundleID, response["revision"] as? String == revision,
                   let map = response["translations"] as? [String: String] else { throw RuntimeTranslationError.invalid }
+            if let deferred = response["deferred"] as? String {
+                guard ["provider_429", "provider_503", "provider_throttled"].contains(deferred),
+                      let verified = Self.queueReceipt(response, sources: group.map(\.text)) else { throw RuntimeTranslationError.invalid }
+                receipts += verified; reasons.append(deferred)
+            } else if let verified = Self.queueReceipt(response, sources: group.map(\.text)) { receipts += verified }
             for item in group {
                 if let value = map[item.id], ArabicIPALocalizer.acceptable(source: item.text, translated: value) { translations[item.text] = value }
             }
         }
-        return RuntimeTranslationPackage(translations: translations, online: online)
+        return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts, deferredReasons: reasons)
+    }
+    /// Only a scoped committed label + durable outbox review counts as a designed fallback.
+    static func queueReceipt(_ response: [String: Any], sources: [String]) -> [[String: Any]]? {
+        guard let queue = response["queue"] as? [String: Any], queue["persisted"] as? Bool == true,
+              let entries = queue["entries"] as? [[String: Any]], entries.count == Set(sources).count else { return nil }
+        var seen = Set<String>()
+        for entry in entries {
+            guard let source = entry["source"] as? String, Set(sources).contains(source), seen.insert(source).inserted,
+                  let label = entry["labelId"] as? String, UUID(uuidString: label) != nil,
+                  let review = entry["reviewId"] as? String, UUID(uuidString: review) != nil,
+                  let version = entry["version"] as? Int, version > 0,
+                  let kind = entry["kind"] as? String, ["missing", "review"].contains(kind) else { return nil }
+        }
+        return entries
     }
     static func validOnline(_ value: [String: String]?, bundleID: String, revision: String, now: Date = Date()) -> [String: String]? {
         guard let value, revision.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,

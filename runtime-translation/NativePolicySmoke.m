@@ -1,6 +1,43 @@
 // Compile/link on iOS simulator and execute via simulator-smoke.sh.
 #import "RuntimeTranslate.m"
 #import <assert.h>
+#import <objc/runtime.h>
+static NSInteger fixtureCode,fixtureCalls,fixtureItems;
+@interface MirsaFallbackProtocol : NSURLProtocol
+@end
+@implementation MirsaFallbackProtocol
++ (BOOL)canInitWithRequest:(NSURLRequest *)request { return [request.URL.host isEqual:@"staging.fixture.invalid"]; }
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (void)startLoading {
+ NSData *body=self.request.HTTPBody;
+ if(!body && self.request.HTTPBodyStream){
+  NSInputStream *stream=self.request.HTTPBodyStream;[stream open];NSMutableData *data=[NSMutableData data];uint8_t b[1024];NSInteger n;
+  while((n=[stream read:b maxLength:sizeof(b)])>0)[data appendBytes:b length:(NSUInteger)n];
+  [stream close];body=data;
+ }
+ NSDictionary *request=[NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+ NSArray *items=request[@"items"];assert(items.count==3);
+ @synchronized(MirsaFallbackProtocol.class){fixtureCalls++;fixtureItems=items.count;}
+ NSMutableArray *entries=[NSMutableArray array];
+ for(NSDictionary *item in items)[entries addObject:@{@"source":item[@"text"],@"labelId":NSUUID.UUID.UUIDString,@"reviewId":NSUUID.UUID.UUIDString,@"kind":@"missing",@"version":@1}];
+ NSDictionary *reply=@{@"bundleId":request[@"bundleId"],@"revision":request[@"revision"],@"translations":@{},@"entries":@[],
+  @"deferred":[NSString stringWithFormat:@"provider_%ld",(long)fixtureCode],@"queue":@{@"persisted":@YES,@"entries":entries}};
+ NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc]initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type":@"application/json"}];
+ [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+ [self.client URLProtocol:self didLoadData:[NSJSONSerialization dataWithJSONObject:reply options:0 error:NULL]];
+ [self.client URLProtocolDidFinishLoading:self];
+}
+- (void)stopLoading {}
+@end
+@interface NSURLSessionConfiguration (MirsaFallbackFixture)
++ (NSURLSessionConfiguration *)mirsaFixtureConfiguration;
+@end
+@implementation NSURLSessionConfiguration (MirsaFallbackFixture)
++ (NSURLSessionConfiguration *)mirsaFixtureConfiguration {
+ NSURLSessionConfiguration *config=[self mirsaFixtureConfiguration]; // original after swap
+ config.protocolClasses=@[MirsaFallbackProtocol.class];return config;
+}
+@end
 int main(int argc,char **argv) {@autoreleasepool {
  assert(NetworkSafe(@"设置"));
  assert(NetworkSafe(@"设置 %@") && NetworkSafe(@"설정 %lld") && NetworkSafe(@"せってい %.*f"));
@@ -96,5 +133,33 @@ int main(int argc,char **argv) {@autoreleasepool {
  ApplyOnlineEntries(@[@{@"source":@"设置 %d",@"translation":@"الإعدادات %@",@"provenance":@"kat",@"version":@2}]);
  assert(!OnlineLookup(@"设置 %d")); // placeholders never changed
  [NSUserDefaults.standardUserDefaults removeObjectForKey:oldKey];
+ // Exercise REAL runtime queue batching and original-rendering path on both fallback kinds.
+ Method original=class_getClassMethod(NSURLSessionConfiguration.class,@selector(ephemeralSessionConfiguration));
+ Method mocked=class_getClassMethod(NSURLSessionConfiguration.class,@selector(mirsaFixtureConfiguration));
+ method_exchangeImplementations(original,mocked);
+ for(NSNumber *code in @[@429,@503]){
+  NSMutableDictionary *fixture=[c mutableCopy];fixture[@"endpoint"]=@"https://staging.fixture.invalid/runtime";
+  fixture[@"expiresAt"]=@"2033-05-19T03:33:20Z";onlineConfig=fixture;
+  onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];
+  onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];onlineIssued=0;onlineWaiting=0;onlineFlushScheduled=NO;
+  onlineQueue=dispatch_queue_create("mirsa.runtime.fixture.batch",DISPATCH_QUEUE_SERIAL);
+  fixtureCode=code.integerValue;fixtureCalls=0;fixtureItems=0;
+  NSArray *sources=@[@"重试按钮",@"帮助按钮",@"更多按钮"];
+  NSTimeInterval started=NSDate.date.timeIntervalSince1970;
+  for(NSString *source in sources){assert([Translate(source) isEqual:source]);QueueOnline(source);}
+  assert(NSDate.date.timeIntervalSince1970-started<0.2); // rendering did not wait for HTTP
+  NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+  BOOL waiting=YES;
+  while(waiting && deadline.timeIntervalSinceNow>0){
+   [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+   os_unfair_lock_lock(&onlineLock);waiting=onlineWaiting>0;os_unfair_lock_unlock(&onlineLock);
+  }
+  assert(!waiting);
+  @synchronized(MirsaFallbackProtocol.class){assert(fixtureCalls==1 && fixtureItems==3);}
+  for(NSString *source in sources){assert(!OnlineLookup(source));assert([Translate(source) isEqual:source]);}
+  assert(!onlinePositive.count && onlineNegative.count==3);
+ }
+ method_exchangeImplementations(original,mocked);
+ NSLog(@"Native batched 429/503 fallback original UI and no-crash smoke passed");
  NSLog(@"Native policy, activation, queue cache and banner persistence smoke passed");return 0;
 }}

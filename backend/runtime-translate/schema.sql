@@ -235,3 +235,40 @@ create table if not exists public.mirsa_runtime_batches (
 alter table public.mirsa_runtime_batches enable row level security;
 revoke all on public.mirsa_runtime_batches from public,anon,authenticated;
 grant select,insert,update,delete on public.mirsa_runtime_batches to service_role;
+
+-- Shared provider budget, single credential/model. DB row lock serializes all workers.
+create table if not exists public.mirsa_runtime_provider_budget(
+ singleton boolean primary key default true check(singleton),
+ next_at timestamptz not null default '-infinity', failures integer not null default 0 check(failures between 0 and 4)
+);
+insert into public.mirsa_runtime_provider_budget(singleton) values(true) on conflict do nothing;
+alter table public.mirsa_runtime_provider_budget enable row level security;
+revoke all on public.mirsa_runtime_provider_budget from public,anon,authenticated;
+grant select,update on public.mirsa_runtime_provider_budget to service_role;
+create or replace function public.mirsa_runtime_provider_slot()
+returns boolean language plpgsql security definer set search_path='' as $$
+begin
+ -- At most five calls in any rolling minute, including retries and all accounts.
+ update public.mirsa_runtime_provider_budget set next_at=clock_timestamp()+interval '13 seconds'
+ where singleton and next_at<=clock_timestamp();
+ return found;
+end $$;
+create or replace function public.mirsa_runtime_provider_backoff()
+returns boolean language plpgsql security definer set search_path='' as $$
+begin
+ -- Retry is deferred to a future batch, never sleeps/blocks rendering or floods another worker.
+ update public.mirsa_runtime_provider_budget set failures=least(4,failures+1),
+ next_at=greatest(next_at,clock_timestamp()+make_interval(secs=>least(240,15*power(2,failures+1)::integer))) where singleton;
+ return found;
+end $$;
+create or replace function public.mirsa_runtime_receipt(p_hash text,p_bundle text,p_revision text,p_items jsonb)
+returns jsonb language sql security definer set search_path='' as $$
+ select coalesce(jsonb_agg(jsonb_build_object('source',l.source,'labelId',l.id,'reviewId',r.id,'kind',r.kind,'version',l.version) order by l.id),'[]'::jsonb)
+ from public.mirsa_runtime_labels l join public.mirsa_runtime_caps c
+ on c.user_id=l.user_id and c.bundle_id=l.bundle_id and c.revision=l.revision
+ join lateral(select id,kind from public.mirsa_runtime_reviews where label_id=l.id order by created_at,id limit 1) r on true
+ where c.token_hash=p_hash and not c.revoked and c.expires_at>clock_timestamp() and c.bundle_id=p_bundle and c.revision=p_revision
+ and l.source in(select value->>'text' from jsonb_array_elements(p_items));
+$$;
+revoke all on function public.mirsa_runtime_provider_slot(),public.mirsa_runtime_provider_backoff(),public.mirsa_runtime_receipt(text,text,text,jsonb) from public,anon,authenticated;
+grant execute on function public.mirsa_runtime_provider_slot(),public.mirsa_runtime_provider_backoff(),public.mirsa_runtime_receipt(text,text,text,jsonb) to service_role;

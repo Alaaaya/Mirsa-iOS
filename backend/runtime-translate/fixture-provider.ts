@@ -11,6 +11,8 @@ globalThis.fetch=async(input:RequestInfo|URL,init?:RequestInit):Promise<Response
  if(body.model!=='gemini-2.5-flash')throw Error('wrong model');
  const requested=JSON.parse(body.messages.at(-1).content);
  const answers=JSON.parse(await Deno.readTextFile(path));
+ if(answers.__network===true)throw new TypeError('synthetic provider transport failure');
+ if([429,503,401,500].includes(answers.__status))return Response.json({error:{code:answers.__status}},{status:answers.__status});
  const out=Object.fromEntries(Object.entries(requested).filter(([,text])=>Object.hasOwn(answers,String(text))).map(([id,text])=>[id,answers[String(text)]]));
  return Response.json({model:'gemini-2.5-flash',choices:[{message:{content:JSON.stringify(out)}}]});
 };

@@ -124,63 +124,77 @@ static void RefreshOnlineDictionary(void) {
   } @catch(__unused NSException *e){}
  }});
 }
+// One debounced batch, never one provider request per rendered label.
+static BOOL onlineFlushScheduled;
+static void FlushOnline(void);
+static void ScheduleOnlineFlush(void) {
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,150*NSEC_PER_MSEC),onlineQueue,^{FlushOnline();});
+}
+static void FlushOnline(void) { @autoreleasepool {
+ os_unfair_lock_lock(&onlineLock);
+ NSMutableArray *batch=[NSMutableArray array];NSUInteger chars=0;
+ for(NSString *source in [[onlinePending allObjects] sortedArrayUsingSelector:@selector(compare:)]){
+  if(batch.count>=16 || chars+source.length>2048)break;
+  [batch addObject:source];chars+=source.length;
+ }
+ os_unfair_lock_unlock(&onlineLock);
+ @try {
+  if(!batch.count || OnlineDenied() || OnlineExpiry(onlineConfig[@"expiresAt"])<=NSDate.date.timeIntervalSince1970)return;
+  NSMutableArray *items=[NSMutableArray array];
+  for(NSUInteger i=0;i<batch.count;i++)[items addObject:@{@"id":[NSString stringWithFormat:@"s%lu",(unsigned long)i],@"text":batch[i]}];
+  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:onlineConfig[@"endpoint"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:22];
+  req.HTTPMethod=@"POST";
+  [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
+  [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
+  [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
+  req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"action":@"missing",@"consent":@YES,@"items":items,@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} options:0 error:NULL];
+  NSURLSessionConfiguration *cfg=NSURLSessionConfiguration.ephemeralSessionConfiguration;
+  cfg.timeoutIntervalForRequest=22;cfg.timeoutIntervalForResource=22;cfg.HTTPShouldSetCookies=NO;cfg.HTTPCookieStorage=nil;cfg.URLCache=nil;cfg.URLCredentialStorage=nil;
+  MirsaNoRedirect *delegate=[MirsaNoRedirect new];NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
+  NSURLSession *session=[NSURLSession sessionWithConfiguration:cfg delegate:delegate delegateQueue:callbacks];
+  NSURLSessionDataTask *task=[session dataTaskWithRequest:req];[task resume];
+  BOOL completed=dispatch_semaphore_wait(delegate.finished,dispatch_time(DISPATCH_TIME_NOW,23*NSEC_PER_SEC))==0;
+  if(!completed)[task cancel];
+  if(completed && delegate.response.statusCode==403)DenyOnline();
+  if(completed && !delegate.error && delegate.response.statusCode==200 && delegate.body.length<=65536){
+   id obj=[NSJSONSerialization JSONObjectWithData:delegate.body options:0 error:NULL];
+   if([obj isKindOfClass:NSDictionary.class] && [obj[@"bundleId"] isEqual:onlineConfig[@"bundleId"]] && [obj[@"revision"] isEqual:onlineConfig[@"revision"]]){
+    // Empty map plus durable queued receipt is intentional: keep the EXACT original UI.
+    // Only canonical versioned entries can change text, and Kat always wins.
+    ApplyOnlineEntries(obj[@"entries"]);
+   }
+  }
+  [session invalidateAndCancel];
+ } @catch(__unused NSException *e) {}
+ @finally {
+  os_unfair_lock_lock(&onlineLock);
+  for(NSString *source in batch){
+   if(!onlinePositive[source]){
+    if(onlineNegative.count>=128)[onlineNegative removeAllObjects];
+    onlineNegative[source]=@(NSDate.date.timeIntervalSince1970+60);
+   }
+   [onlinePending removeObject:source];if(onlineWaiting)onlineWaiting--;
+  }
+  BOOL more=onlinePending.count>0;onlineFlushScheduled=more;
+  os_unfair_lock_unlock(&onlineLock);
+  RefreshBannerCoverage();
+  if(more)ScheduleOnlineFlush();
+ }
+}}
 static void QueueOnline(NSString *s) {
  if(!onlineConfig || OnlineDenied() || !NetworkSafe(s))return;
  os_unfair_lock_lock(&onlineLock);
  if(!onlinePositive[s] && onlineUncovered.count<128)[onlineUncovered addObject:s];
+ BOOL skip=onlinePositive[s] || [onlinePending containsObject:s] || [onlineNegative[s] doubleValue]>NSDate.date.timeIntervalSince1970 || onlineWaiting>=128 || onlineIssued>=128;
+ BOOL schedule=NO;
+ if(!skip){
+  onlineWaiting++;onlineIssued++;[onlinePending addObject:s];
+  if(!onlineFlushScheduled){onlineFlushScheduled=YES;schedule=YES;}
+ }
  os_unfair_lock_unlock(&onlineLock);
+ if(schedule)ScheduleOnlineFlush();
  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),onlineQueue,^{RefreshBannerCoverage();});
- os_unfair_lock_lock(&onlineLock);
- NSTimeInterval now=NSDate.date.timeIntervalSince1970;
- BOOL skip=onlinePositive[s] || [onlinePending containsObject:s] || [onlineNegative[s] doubleValue]>now || onlineWaiting>=16 || onlineIssued>=128;
- if(!skip){onlineWaiting++;onlineIssued++;[onlinePending addObject:s];}
- os_unfair_lock_unlock(&onlineLock);if(skip)return;
- dispatch_async(onlineQueue,^{@autoreleasepool{
-  __block NSString *translated=nil;
-  @try {
-   if(OnlineExpiry(onlineConfig[@"expiresAt"])<=NSDate.date.timeIntervalSince1970)return;
-   NSURL *url=[NSURL URLWithString:onlineConfig[@"endpoint"]];
-   NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5];
-   req.HTTPMethod=@"POST";
-   [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-   [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
-   [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
-   [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
-   req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"action":@"missing",@"consent":@YES,@"items":@[@{@"id":@"s0",@"text":s}],@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} options:0 error:NULL];
-   NSURLSessionConfiguration *cfg=NSURLSessionConfiguration.ephemeralSessionConfiguration;
-   cfg.timeoutIntervalForRequest=5;cfg.timeoutIntervalForResource=5;cfg.HTTPShouldSetCookies=NO;cfg.HTTPCookieStorage=nil;cfg.URLCache=nil;cfg.URLCredentialStorage=nil;
-   MirsaNoRedirect *delegate=[MirsaNoRedirect new];
-   NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
-   NSURLSession *session=[NSURLSession sessionWithConfiguration:cfg delegate:delegate delegateQueue:callbacks];
-   NSURLSessionDataTask *task=[session dataTaskWithRequest:req];
-   [task resume];
-   // A bounded background worker wait, never a rendering/UI wait.
-   BOOL completed=dispatch_semaphore_wait(delegate.finished,dispatch_time(DISPATCH_TIME_NOW,6*NSEC_PER_SEC))==0;
-   if(!completed)[task cancel];
-   if(completed && delegate.response.statusCode==403)DenyOnline();
-   if(completed && !delegate.error && delegate.response.statusCode==200 && delegate.body.length<=65536){
-    id obj=[NSJSONSerialization JSONObjectWithData:delegate.body options:0 error:NULL];
-    if([obj isKindOfClass:NSDictionary.class] && [obj[@"bundleId"] isEqual:onlineConfig[@"bundleId"]] && [obj[@"revision"] isEqual:onlineConfig[@"revision"]] && [obj[@"translations"] isKindOfClass:NSDictionary.class]){
-     id v=obj[@"translations"][@"s0"];
-     if([v isKindOfClass:NSString.class] && [v length]>0 && [v length]<=1024 && PlaceholdersPreserved(s,v) && !HasCJK(v))translated=v;
-     // Canonical entries win over the bare map (the server returns protected latest values).
-     if([obj[@"entries"] isKindOfClass:NSArray.class])ApplyOnlineEntries(obj[@"entries"]);
-    }
-   }
-   [session invalidateAndCancel];
-  } @catch(__unused NSException *e) {}
-  @finally {
-   os_unfair_lock_lock(&onlineLock);
-   if(translated && (onlinePositive[s] || onlinePositive.count<2048)){
-    // Bare translation without entry is unversioned Gemini: only fills a gap, never overrides.
-    if(!onlineMeta[s])MergeOnlineLocked(s,translated,0,@"gemini");
-    [onlineUncovered removeObject:s];
-   } else {if(onlineNegative.count>=128)[onlineNegative removeAllObjects];onlineNegative[s]=@(NSDate.date.timeIntervalSince1970+60);}
-   [onlinePending removeObject:s];if(onlineWaiting)onlineWaiting--;
-   os_unfair_lock_unlock(&onlineLock);
-   if(translated)SaveOnlineCache();RefreshBannerCoverage();
-  }
- }});
 }
 static void LoadOnlineCache(void) {
  id stored=[NSUserDefaults.standardUserDefaults objectForKey:DictionaryCacheKey()];

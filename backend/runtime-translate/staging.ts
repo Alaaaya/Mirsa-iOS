@@ -39,6 +39,15 @@ const handler = createHandler(env, (url, key, deadline) => ({
   rpc: async (name: string, p: Record<string,unknown>) => {
     try {
       const vars = Object.fromEntries(Object.entries(p).map(([k,v])=>[k,v == null ? '' : String(v)]));
+      if(['mirsa_runtime_provider_slot','mirsa_runtime_provider_backoff'].includes(name)){
+        const result=await sql('select public.'+name+'();',{},deadline);
+        return {data:result==='t',error:null};
+      }
+      if(name==='mirsa_runtime_receipt'){
+        vars.p_items=JSON.stringify(p.p_items);
+        const result=await sql("select public.mirsa_runtime_receipt(:'p_hash',:'p_bundle',:'p_revision',:'p_items'::jsonb);",vars,deadline);
+        return {data:JSON.parse(result),error:null};
+      }
       if(name === 'mirsa_runtime_anomaly') {
         const result=await sql("select public.mirsa_runtime_anomaly(:'p_hash',:'p_ip',:'p_window'::integer,:'p_throttle'::integer,:'p_revoke'::integer);",vars,deadline);
         return {data:result,error:null};

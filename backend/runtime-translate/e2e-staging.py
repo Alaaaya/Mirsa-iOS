@@ -4,9 +4,9 @@ import os,sys,tempfile,subprocess,json,secrets,socket,time,base64,hmac,hashlib,u
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 private=os.environ.get('RUNTIME_ACTIVATION_PRIVATE_KEY_FILE')
-base=os.environ.get('MIRSA_RELAY_BASE_MODULE')
+base=os.environ.get('MIRSA_RELAY_BASE_MODULE') or '/home/kit/fixture-relay-placeholder'
 if not private or not base:raise SystemExit('Explicit staging signing key and existing relay module required')
-pg='/usr/lib/postgresql/16/bin'
+pg=os.environ.get('PG_BIN','/usr/lib/postgresql/16/bin')
 def port():
  s=socket.socket();s.bind(('127.0.0.1',0));p=s.getsockname()[1];s.close();return str(p)
 def run(cmd,**kw):
@@ -43,6 +43,8 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
    'RUNTIME_ACTIVATION_PRIVATE_PEM':Path(private).read_text(),'PORT':httpport}
   p=subprocess.Popen(['npx','--yes','deno','run','--allow-env','--allow-net','--allow-read','--allow-run=/usr/bin/psql',str(root/'backend/runtime-translate/staging.ts')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,start_new_session=True)
   children.append(p);waitline(p,'Listening on')
+  if base=='/home/kit/fixture-relay-placeholder':
+   fixture=t/'fixture-relay.mjs';fixture.write_text((root/'backend/runtime-translate/fixture-relay.mjs').read_text());base=str(fixture)
   relayenv={**os.environ,'MIRSA_RELAY_BASE_MODULE':base,'MCP_TOKEN':mcp,'HOOK_TOKEN':hook,'DB_PATH':str(t/'relay.sqlite'),'PORT':relayport}
   relay=subprocess.Popen(['node',str(root/'backend/mcp-translation-relay/extension.mjs')],env=relayenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,start_new_session=True)
   children.append(relay);waitline(relay,'translation relay ready')
@@ -106,9 +108,11 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
    env=providerenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,start_new_session=True)
   children.append(pp);waitline(pp,'Listening on')
   endpoint='http://127.0.0.1:'+providerport+path
+  sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
   status,reply=post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)
   assert status==200 and reply['translations']=={'s':'إلغاء'} and reply['entries'][0]['provenance']=='gemini',(status,reply)
   # Runtime fallback must enqueue every Gemini candidate, but never replace a Kat correction.
+  sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
   status,reply=post(missing,token,activation)
   assert status==200 and reply['translations']=={'s0':'الإعدادات %d'} and reply['entries'][0]['provenance']=='kat',(status,reply)
   rows=json.loads(run(op+['list'],env=openv))
@@ -120,6 +124,7 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
   stale=subprocess.run(op+['resolve',dictionary['id'],str(dictionary['version']),'نص قديم'],env=openv,capture_output=True)
   assert stale.returncode!=0
   # Same Gemini candidate remains immutable and deduped after the correction.
+  sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
   status,reply=post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)
   assert status==200 and reply['translations']=={'s':'إلغاء العملية'} and reply['entries'][0]['provenance']=='kat'
   status,reply=post(refreshed,new['token'],new['activation'])
@@ -127,6 +132,7 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
   # Move the isolated DB into a new quota minute without sleeping or changing limits.
   sql("update public.mirsa_runtime_usage set minute=minute-interval '1 minute';")
   # 33 dictionary inputs produce both missing/review work; every event is <=32 homogeneous entries.
+  sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
   status,reply=post({**scope,'action':'dictionary','items':[{'id':'l'+str(i),'text':'Label '+str(i)} for i in range(33)]},bootstrap,activation)
   assert status==200 and len(reply['entries'])==33,(status,reply)
   result=json.loads(run(op+['emit'],env=openv))
@@ -149,6 +155,43 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
   assert post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)[0]!=200
   for event in events:rpc('mirsa_ack_translation_event',{'event_id':event['eventId']})
   assert not json.loads(rpc('mirsa_pending_translation_events')['content'][0]['text'])['events']
+  # Forced real provider HTTP 429/503 with actual auth, handler, PG and durable relay.
+  status,newest=post(issue,bootstrap);assert status==200
+  cap=newest['online'];freshToken=cap['token'];freshActivation=cap['activation']
+  for code,source in [(429,'重试按钮'),(503,'帮助按钮')]:
+   sql("update public.mirsa_runtime_usage set minute=minute-interval '1 minute';")
+   sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
+   answers.write_text(json.dumps({'__status':code}))
+   forced={**scope,'action':'missing','items':[{'id':'f','text':source}]}
+   status,reply=post(forced,freshToken,freshActivation)
+   assert status==200 and reply['deferred']=='provider_'+str(code) and reply['translations']=={},(status,reply)
+   receipt=reply['queue'];assert receipt['persisted'] and len(receipt['entries'])==1
+   entry=receipt['entries'][0];assert entry['source']==source and entry['kind']=='missing'
+   assert sql("select count(*) from public.mirsa_runtime_reviews where id='"+entry['reviewId']+"' and label_id='"+entry['labelId']+"' and kind='missing';")=='1'
+   assert json.loads(run(op+['emit'],env=openv))['emitted']==1
+   pending=json.loads(rpc('mirsa_pending_translation_events')['content'][0]['text'])['events']
+   assert len(pending)==1 and pending[0]['data']['entries'][0]['queue_id']==entry['reviewId']
+   rpc('mirsa_ack_translation_event',{'event_id':pending[0]['eventId']})
+   # Backoff is shared with other workers: the next call queues, not another provider attempt.
+   status,limited=post(forced,freshToken,freshActivation)
+   assert status==200 and limited['deferred']=='provider_throttled' and limited['queue']['entries']==receipt['entries']
+   assert limited['translations'].get('f',source)==source
+  # Unrelated provider auth/errors MUST remain failures, never accepted as designed fallback.
+  sql("update public.mirsa_runtime_usage set minute=minute-interval '1 minute';")
+  for code in [401,500]:
+   sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
+   answers.write_text(json.dumps({'__status':code}))
+   assert post(forced,freshToken,freshActivation)[0]==503
+  sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
+  answers.write_text(json.dumps({'__network':True}))
+  assert post(forced,freshToken,freshActivation)[0]==503
+  # Multi-worker budget uses a single DB lock: exactly one slot, no quota burst.
+  sql("update public.mirsa_runtime_provider_budget set next_at='-infinity';")
+  with __import__('concurrent.futures',fromlist=['ThreadPoolExecutor']).ThreadPoolExecutor(max_workers=12) as pool:
+   results=list(pool.map(lambda _:sql('select public.mirsa_runtime_provider_slot();'),range(30)))
+  assert results.count('t')==1 and results.count('f')==29
+  assert sql("select next_at>clock_timestamp() and failures between 1 and 4 from public.mirsa_runtime_provider_budget;")=='t'
+  print('Authenticated forced 429/503 persisted queue and event fallback, shared throttle 1/30 passed')
   print(json.dumps({'proof':'isolated real HTTP PG account issuer queue relay operator OTA revocation','passed':True,'liveKatWake':False,'provider':'unconfigured failure durability + test-only deterministic transport (NOT live Gemini)','newLaunchRefresh':True,'allOutputReview':True,'katCASAndPriority':True,'batchBound32':True,'crashReplayDeduped':True,'noLiveServicesChanged':True}))
  finally:
   for c in children:
