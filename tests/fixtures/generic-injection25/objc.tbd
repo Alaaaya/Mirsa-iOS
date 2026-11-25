@@ -1,0 +1,8 @@
+--- !tapi-tbd
+ tbd-version: 4
+ targets: [ arm64-ios ]
+ install-name: '/usr/lib/libobjc.A.dylib'
+ exports:
+  - targets: [ arm64-ios ]
+    symbols: [ _objc_getClass, _sel_registerName ]
+...

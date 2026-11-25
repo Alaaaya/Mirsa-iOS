@@ -65,7 +65,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
     /// All fixtures are Mirsa-owned, inert device Mach-O data, never launched here.
     /// Covers the exact prepare -> dispatch -> Rust signer -> pack -> retain chain.
     func testGenericDirectLoaderAndHookDependencyUseExactProductionAttempt() throws {
-        let fixture = try realFixture(), bundle = Bundle(for: Self.self)
+        let fixture = try realFixture(name: "GenericLaunch25Fixture"), bundle = Bundle(for: Self.self)
         let material = PersonalIdentityVault.Material(
             p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
             password: "mirsa-test",
@@ -74,7 +74,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let hook = try XCTUnwrap(bundle.url(forResource: "GenericHookMarker25", withExtension: "dylib"))
         let original = try RuntimeOriginalIPA.hash(fixture.ipa)
         var attempts = Set<UUID>()
-        for (source, method) in [(marker, InjectionMethod.direct), (marker, .loader), (hook, .loader)] {
+        for (source, method) in [(marker, InjectionMethod.direct), (marker, .load_control), (hook, .load_control)] {
             var options = PersonalProjectOptions()
             options.libraries = [source]
             options.selectedComponentIDs = ["fixture:" + source.lastPathComponent]
@@ -91,13 +91,21 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             XCTAssertEqual(proof.selectedComponentIDs, options.selectedComponentIDs)
             XCTAssertFalse(proof.installed.dependencies.isEmpty)
             XCTAssertTrue(proof.installed.dependencies.keys.contains { $0.hasSuffix(source.lastPathComponent) })
-            if method == .loader {
+            if method == .load_control {
                 XCTAssertTrue(proof.installed.resources.keys.contains { $0.hasSuffix("MirsaLoadOrder.txt") })
                 XCTAssertTrue(proof.installed.dependencies.values.contains { $0.contains("@loader_path/Frameworks/MirsaLoader.dylib") })
             }
             if source == hook {
                 XCTAssertTrue(proof.installed.dependencies.keys.contains { $0.hasSuffix("CydiaSubstrate.framework/CydiaSubstrate") })
             }
+            let mode = source == hook ? "HOOK" : (method == .load_control ? "LOADER" : "DIRECT")
+            let proofDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("RuntimeSigningProof25")
+            try FileManager.default.createDirectory(at: proofDir, withIntermediateDirectories: true)
+            let proofIPA = proofDir.appendingPathComponent("GENERIC-" + mode + ".ipa")
+            try? FileManager.default.removeItem(at: proofIPA)
+            try FileManager.default.copyItem(at: result.url, to: proofIPA)
+            try Data(contentsOf: PersonalInjectionProof.sidecar(result.url)).write(to: PersonalInjectionProof.sidecar(proofIPA))
             // Changing the next draft cannot relabel this output's immutable evidence.
             options.selectedComponentIDs = ["different-draft"]
             options.draftRevision = "different-draft"
@@ -169,9 +177,9 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let bytes = try Data(contentsOf: app.appendingPathComponent(executable))
         XCTAssertNil(bytes.range(of: Data("MirsaTranslate.dylib".utf8)), file: file, line: line)
     }
-    private func realFixture() throws -> (ipa: URL, app: URL, root: URL) {
+    private func realFixture(name: String = "SignedFolder24Fixture") throws -> (ipa: URL, app: URL, root: URL) {
         // Generated as own-code signed arm64 fixture by native CI, not checked into this tree.
-        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24Fixture", withExtension: "ipa"))
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "ipa"))
         let root = try temp(), unpacked = root.appendingPathComponent("unpacked")
         try IPAEditorService.run("extract", input: fixture, output: unpacked)
         let app = try IPAEditorService.app(in: unpacked)

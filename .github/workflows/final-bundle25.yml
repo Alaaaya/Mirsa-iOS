@@ -230,6 +230,17 @@ jobs:
           codesign --force --sign - build/NoIconFixture/Payload/SignedFixture.app
           codesign --verify --strict build/NoIconFixture/Payload/SignedFixture.app
           (cd build/NoIconFixture && zip -q -r ../../tests/fixtures/SignedFolder24NoIcon.ipa Payload)
+      - name: Prepare owned native injection launch host
+        run: |
+          mkdir -p build/GenericLaunch/Payload/GenericLaunch25.app
+          xcrun --sdk iphoneos clang -target arm64-apple-ios18.0 -fobjc-arc tests/fixtures/generic-injection25/LaunchHost.m -framework UIKit -framework Foundation -Wl,-headerpad,4096 -o build/GenericLaunch/Payload/GenericLaunch25.app/GenericLaunch25
+          python3 - <<'PY'
+          import pathlib,plistlib
+          app=pathlib.Path('build/GenericLaunch/Payload/GenericLaunch25.app')
+          (app/'Info.plist').write_bytes(plistlib.dumps(dict(CFBundleIdentifier='com.mirsa.ci.genericlaunch25',CFBundleExecutable='GenericLaunch25',CFBundlePackageType='APPL',CFBundleVersion='1',CFBundleShortVersionString='1.0')))
+          PY
+          codesign --force --sign - build/GenericLaunch/Payload/GenericLaunch25.app
+          (cd build/GenericLaunch && zip -q -r ../../tests/fixtures/generic-injection25/GenericLaunch25Fixture.ipa Payload)
       - name: Prepare Assets.car-only fixture (own actool compiled AppIcon, no loose icon PNGs)
         run: |
           rm -rf build/CarFixture build/CarAssets
@@ -286,6 +297,8 @@ jobs:
           cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/ON.ipa" build/production-sign-proof/
           cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/OFF.ipa" build/production-sign-proof/
           python3 scripts/verify-production-sign25.py build/production-sign-proof
+          cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/"GENERIC-*.ipa* build/production-sign-proof/
+          python3 scripts/verify-generic-launch25.py build/production-sign-proof "$DEVICE" 2>&1 | tee build/production-sign-proof/generic-launch.log
           RETAINED="$CONTAINER/Library/Application Support/MirsaSignedExports/0A3A3FB2-D1A0-48F0-91D2-397B285B6ED5"
           mkdir -p "$RETAINED"
           cp tests/fixtures/SignedFolder24Fixture.ipa "$RETAINED/SignedFolder24Fixture.ipa"

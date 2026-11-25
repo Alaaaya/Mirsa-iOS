@@ -113,6 +113,8 @@ targets:
           - fixtures/foreground
           - fixtures/tendies
           - fixtures/generic-injection25
+      - path: tests/fixtures/generic-injection25/GenericLaunch25Fixture.ipa
+        buildPhase: resources
       - path: tests/fixtures/generic-injection25/GenericMarker25.dylib
         buildPhase: resources
       - path: tests/fixtures/generic-injection25/GenericHookMarker25.dylib
