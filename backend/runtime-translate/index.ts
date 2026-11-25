@@ -60,10 +60,11 @@ return async (req: Request, peerIP?: string) => {
     // Same error for invalid scope, expired/revoked token and exhausted runtime quota.
     if(reserved !== true) fail(['missing','refresh'].includes(body.action) ? 'capability_denied':'rate_limited',['missing','refresh'].includes(body.action)?403:429);
     if(body.action === 'issue') {
-      const capability = newToken(), expiresAt = new Date(Date.now()+86400000).toISOString();
+      const lifetime=Math.max(60,Math.min(86400,Number(env('RUNTIME_CAPABILITY_TTL_SECONDS'))||86400));
+      const capability = newToken(), expiresAt = new Date(Date.now()+lifetime*1000).toISOString();
       const activation=await issueActivation(env('RUNTIME_ACTIVATION_PRIVATE_PEM'),{
         sub:userId!,bundleId:body.bundleId,revision:body.revision,installationId:body.installationId,capHash:await digest(capability)
-      });
+      },Date.now(),lifetime);
       // Detect key mismatch now rather than shipping unusable activation.
       await verifyActivation(activation,body,await digest(capability),userId);
       const {error} = await db.from('mirsa_runtime_caps').insert({

@@ -26,3 +26,22 @@ Deno.test('untrusted forwarded header ignored and trusted immediate peer is expl
  const out=await anomalyIP(req,'9.9.9.9',env);assert(out?.length===64 && !out.includes('1.1'));
  await rejects(()=>anomalyIP(req,undefined,env));
 });
+
+import {verifyStagingAccount} from './staging-auth.ts';
+import {SignJWT} from 'npm:jose@6.2.18';
+Deno.test('staging autoaccount verifies pinned Auth, rejects forged expired foreign account, never signup',async()=>{
+ const secret=new Uint8Array(64).fill(1),uid='11111111-1111-4111-8111-111111111111';
+ const jwt=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setSubject(uid)
+  .setIssuer('https://hirebeofomiyumwysppj.supabase.co/auth/v1').setAudience('authenticated')
+  .setIssuedAt().setExpirationTime('5m').sign(secret);
+ let reads=0;
+ const good=await verifyStagingAccount(jwt,secret,AbortSignal.timeout(1000),async t=>{assert(t===jwt);reads++;return {data:{user:{id:uid}},error:null};});
+ assert(good.data.user?.id===uid && reads===1);
+ for(const getUser of [async()=>({data:{user:null},error:true}),async()=>({data:{user:{id:'22222222-2222-4222-8222-222222222222'}},error:null})])
+  assert((await verifyStagingAccount(jwt,secret,AbortSignal.timeout(1000),getUser)).error===true);
+ const expired=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setSubject(uid)
+  .setIssuer('https://hirebeofomiyumwysppj.supabase.co/auth/v1').setAudience('authenticated').setExpirationTime(1).sign(secret);
+ assert((await verifyStagingAccount(expired,secret,AbortSignal.timeout(1000),async()=>({data:{user:{id:uid}},error:null}))).error===true);
+ const foreign=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setSubject(uid).setIssuer('https://evil.test/auth/v1').sign(secret);
+ assert((await verifyStagingAccount(foreign,secret,AbortSignal.timeout(1000),async()=>{throw Error('must not contact foreign issuer');})).error===true);
+});

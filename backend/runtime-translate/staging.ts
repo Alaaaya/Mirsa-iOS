@@ -1,6 +1,6 @@
 // WEB private staging ONLY. Never deployed as a production Edge Function.
 import { createHandler } from './index.ts';
-import { jwtVerify } from 'npm:jose@6.2.18';
+import {verifyStagingAccount} from './staging-auth.ts';
 
 const env = (name: string) => Deno.env.get(name);
 if (env('RUNTIME_STAGING_ONLY') !== 'true') throw new Error('staging opt-in required');
@@ -12,7 +12,6 @@ const path = env('RUNTIME_STAGING_PATH') || '';
 if (!/^\/runtime-translate-[a-f0-9]{24}$/.test(path)) throw new Error('unique path required');
 const stagingSecret = new TextEncoder().encode(env('RUNTIME_STAGING_JWT_SECRET') || '');
 if (stagingSecret.length < 64) throw new Error('independent staging secret required');
-const testUser = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 // Subprocess arguments and SQL variable literals, never shell interpolation.
 async function sql(statement: string, vars: Record<string,string>, signal: AbortSignal) {
   const args = ['-XAt','-h',socket,'-p',port,'-d','postgres','-v','ON_ERROR_STOP=1'];
@@ -25,17 +24,7 @@ async function sql(statement: string, vars: Record<string,string>, signal: Abort
   return new TextDecoder().decode(result.stdout).trim();
 }
 const handler = createHandler(env, (url, key, deadline) => ({
-  auth: {getUser: async (token: string) => {
-    try {
-      const {payload} = await jwtVerify(token,stagingSecret,{
-        algorithms:['HS256'],issuer:'urn:mirsa:runtime-staging25',audience:'mirsa-runtime-staging25',
-        requiredClaims:['sub','iat','exp','jti'],maxTokenAge:'1h'
-      });
-      if (payload.sub !== testUser || payload.scope !== 'runtime:bootstrap' ||
-          Number(payload.exp)-Number(payload.iat) > 3600) throw new Error('scope');
-      return {data:{user:{id:testUser}},error:null};
-    } catch { return {data:{user:null},error:true}; }
-  }},
+  auth: {getUser: (token: string) => verifyStagingAccount(token,stagingSecret,deadline)},
   rpc: async (name: string, p: Record<string,unknown>) => {
     try {
       const vars = Object.fromEntries(Object.entries(p).map(([k,v])=>[k,v == null ? '' : String(v)]));
