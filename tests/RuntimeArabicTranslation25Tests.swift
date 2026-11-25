@@ -162,24 +162,40 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         XCTAssertEqual(try snapshot(app), before)
     }
     func testGenericRuntimeInjectionWritesOnlyPerAppSafeDictionaryAndKeepsSourceIPA() throws {
+        try assertGenericRuntimeInjection(onlineEnabled: true)
+    }
+    func testOfflineRuntimeInjectionWritesSafeDictionaryAndKeepsSourceIPA() throws {
+        try assertGenericRuntimeInjection(onlineEnabled: false)
+    }
+    private func assertGenericRuntimeInjection(onlineEnabled: Bool) throws {
         let fixture = try realFixture(), original = try Data(contentsOf: fixture.ipa)
         let sha = try RuntimeOriginalIPA.pin(fixture.ipa)
         let scan = try RuntimeTranslationScanner.scan(app: fixture.app)
         let info = try IPAEditorService.info(in: fixture.app)
         let bundle = try XCTUnwrap(info["CFBundleIdentifier"] as? String)
-        let online = grant(bundle: bundle, revision: scan.revision)
+        let online = onlineEnabled ? grant(bundle: bundle, revision: scan.revision) : nil
         let translator = Translator(.success(RuntimeTranslationPackage(translations: [
             "Save %@": "حفظ %@", "Settings": "الإعدادات", "%d items": "عناصر",
             "Not in this app": "دخيل"
         ], online: online)))
         let dylib = try XCTUnwrap(RuntimeArabicPipeline.bundledDylib, "Native app resource RuntimeTranslationAssets/MirsaTranslate.dylib is required")
         let en = try Data(contentsOf: fixture.app.appendingPathComponent("en.lproj/Localizable.strings"))
-        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: fixture.app, translator: translator, dylib: dylib), ArabicTranslateText.applied)
+        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: fixture.app, translator: translator, dylib: dylib),
+                       onlineEnabled ? ArabicTranslateText.applied : RuntimeArabicText.offline)
         let config = fixture.app.appendingPathComponent("Frameworks/MirsaTranslations.json")
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
         let table = try XCTUnwrap(json["translations"] as? [String: String])
-        XCTAssertEqual(table["Save %@"], "حفظ %@")
-        XCTAssertEqual(table["Settings"], "الإعدادات")
+        if onlineEnabled {
+            // Protected online dictionaries are fetched with the scoped capability at launch,
+            // never embedded in plaintext where they bypass revocation/Kat's OTA corrections.
+            XCTAssertTrue(table.isEmpty)
+            let bytes = try Data(contentsOf: config)
+            XCTAssertNil(bytes.range(of: Data("حفظ %@".utf8)))
+            XCTAssertNil(bytes.range(of: Data("الإعدادات".utf8)))
+        } else {
+            XCTAssertEqual(table["Save %@"], "حفظ %@")
+            XCTAssertEqual(table["Settings"], "الإعدادات")
+        }
         XCTAssertNil(table["%d items"]); XCTAssertNil(table["Not in this app"])
         XCTAssertEqual(json["revision"] as? String, scan.revision)
         XCTAssertEqual(json["online"] as? [String: String], online)
