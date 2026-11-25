@@ -17,6 +17,7 @@ export CFLAGS="${CFLAGS:-} -ffile-prefix-map=${HOME}=/build"
 export TARGET_CFLAGS="${TARGET_CFLAGS:-} -ffile-prefix-map=${HOME}=/build"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+bash "$ROOT/hook-engine/build.sh"
 cd "$ROOT/rust-core"
 
 echo "==> Installing iOS targets (if needed)"
