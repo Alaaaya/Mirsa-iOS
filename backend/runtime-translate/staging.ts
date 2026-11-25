@@ -36,9 +36,20 @@ const handler = createHandler(env, (url, key, deadline) => ({
       return {data:{user:{id:testUser}},error:null};
     } catch { return {data:{user:null},error:true}; }
   }},
-  rpc: async (_name: string, p: Record<string,unknown>) => {
+  rpc: async (name: string, p: Record<string,unknown>) => {
     try {
       const vars = Object.fromEntries(Object.entries(p).map(([k,v])=>[k,v == null ? '' : String(v)]));
+      if(name === 'mirsa_runtime_anomaly') {
+        const result=await sql("select public.mirsa_runtime_anomaly(:'p_hash',:'p_ip',:'p_window'::integer,:'p_throttle'::integer,:'p_revoke'::integer);",vars,deadline);
+        return {data:result,error:null};
+      }
+      if(name === 'mirsa_runtime_queue' || name === 'mirsa_runtime_refresh') {
+      if(name === 'mirsa_runtime_queue') vars.p_items=JSON.stringify(p.p_items);
+        const result=await sql(name === 'mirsa_runtime_queue'
+          ? "select public.mirsa_runtime_queue(:'p_hash',:'p_bundle',:'p_revision',:'p_items'::jsonb);"
+          : "select public.mirsa_runtime_refresh(:'p_hash',:'p_bundle',:'p_revision');",vars,deadline);
+        return {data:JSON.parse(result),error:null};
+      }
       const statement = "begin; set local statement_timeout='2000ms';\n"+
         "insert into auth.users(id) select nullif(:'p_user','')::uuid where nullif(:'p_user','') is not null on conflict do nothing;\n"+
         "select public.mirsa_runtime_reserve(nullif(:'p_user','')::uuid,nullif(:'p_hash',''),:'p_bundle',:'p_revision',:'p_action',:'p_chars'::integer);\ncommit;";
@@ -56,11 +67,11 @@ const handler = createHandler(env, (url, key, deadline) => ({
 }));
 // Global admission bound protects auth/provider resources even before user quota.
 let active = 0, minute = 0, admissions = 0;
-Deno.serve({hostname:'0.0.0.0',port:Number(env('PORT'))}, async req => {
+Deno.serve({hostname:'0.0.0.0',port:Number(env('PORT'))}, async (req,info) => {
   if (new URL(req.url).pathname !== path) return new Response(null,{status:404});
   const now = Math.floor(Date.now()/60000);
   if (minute !== now) {minute=now;admissions=0;}
   if (active >= 4 || ++admissions > 60) return new Response('{"error":"rate_limited"}',{status:429,headers:{'content-type':'application/json','cache-control':'no-store'}});
   active++;
-  try {return await handler(req);} finally {active--;}
+  try {return await handler(req,info.remoteAddr.hostname);} finally {active--;}
 });

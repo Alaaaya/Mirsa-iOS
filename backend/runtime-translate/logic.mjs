@@ -10,13 +10,14 @@ export function safeText(s) {
 }
 export function validate(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail('bad_body');
-  if (!['issue','dictionary','missing'].includes(body.action)) fail('bad_action');
-  const keys = ['action','bundleId','revision','consent',...(body.action === 'issue' ? [] : ['items'])];
+  if (!['issue','dictionary','missing','refresh'].includes(body.action)) fail('bad_action');
+  const keys = ['action','bundleId','revision','consent',...(body.action === 'issue' ? ['installationId'] : body.action === 'refresh' ? [] : ['items'])];
   if (Object.keys(body).some(k => !keys.includes(k))) fail('bad_fields');
   if (typeof body.bundleId !== 'string' || !BUNDLE_RE.test(body.bundleId) || !body.bundleId.includes('.')) fail('bad_bundle');
   if (typeof body.revision !== 'string' || !HASH_RE.test(body.revision)) fail('bad_revision');
   if (body.consent !== true) fail('consent_required',403);
-  if (body.action === 'issue') return { ...body, chars: 0 };
+  if (body.action === 'issue' && (typeof body.installationId !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(body.installationId))) fail('bad_installation');
+  if (['issue','refresh'].includes(body.action)) return { ...body, chars: 0 };
   const runtime = body.action === 'missing', maxItems = runtime ? 16 : 128, maxTotal = runtime ? 2048 : 8192;
   if (!Array.isArray(body.items) || !body.items.length || body.items.length > maxItems) fail('bad_items');
   const ids = new Set(); let chars = 0;

@@ -6,7 +6,7 @@ const rejects = (patch,code) => assert.throws(()=>validate({...base,...patch}),n
 test('valid scoped CJK and extracted dictionary',()=>{
  assert.equal(validate(base).chars,5);
  assert.equal(validate({...base,action:'dictionary',items:[{id:'s1',text:'Settings'}]}).chars,8);
- assert.equal(validate({action:'issue',bundleId:base.bundleId,revision:base.revision,consent:true}).chars,0);
+ assert.equal(validate({installationId:'11111111-1111-4111-8111-111111111111',action:'issue',bundleId:base.bundleId,revision:base.revision,consent:true}).chars,0);
 });
 test('consent, unknown fields, invalid actions and request identity',()=>{
  rejects({consent:false},'consent'); rejects({userId:'other'},'bad_fields');
