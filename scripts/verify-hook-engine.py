@@ -22,10 +22,31 @@ install_name = None
 platform = None
 signature = False
 export_range = None
+sections = []
+image_base = None
 for _ in range(u32(16)):
     cmd, size = struct.unpack_from('<II', data, offset)
     assert size >= 8 and size % 8 == 0 and offset + size <= end
-    if cmd == 0xD:
+    if cmd == 0x19:
+        assert size >= 72
+        vmaddr, vmsize, fileoff, filesize = struct.unpack_from('<QQQQ', data, offset + 24)
+        initprot, nsects = struct.unpack_from('<II', data, offset + 60)
+        assert 72 + nsects * 80 <= size and fileoff + filesize <= len(data)
+        if fileoff == 0 and filesize:
+            assert image_base is None, 'ambiguous image base'
+            image_base = vmaddr
+        for i in range(nsects):
+            at = offset + 72 + i * 80
+            address, length = struct.unpack_from('<QQ', data, at + 32)
+            section_offset = u32(at + 48)
+            flags = u32(at + 64)
+            executable = bool(initprot & 4 and flags & 0x80000400 and flags & 0xff == 0)
+            if executable:
+                assert address >= vmaddr and address + length <= vmaddr + vmsize
+                assert section_offset >= fileoff and section_offset + length <= fileoff + filesize
+                assert address - vmaddr == section_offset - fileoff, 'invalid executable section mapping'
+            sections.append((address, length, executable))
+    elif cmd == 0xD:
         start = offset + u32(offset + 8)
         assert offset + 24 <= start < offset + size
         stop = data.index(b'\0', start, offset + size)
@@ -56,7 +77,7 @@ assert signature, 'device engine requires a replaceable ad-hoc signature'
 assert symtab is not None, 'engine symbol table missing'
 symoff, count, stroff, strsize = symtab
 assert symoff + count * 16 <= len(data) and stroff + strsize <= len(data)
-exports = set()
+exports = {}
 for i in range(count):
     strx, kind, section, desc, value = struct.unpack_from('<IBBHQ', data, symoff + i * 16)
     if kind & 0xF0 or not kind & 1 or kind & 0x0E != 0x0E:
@@ -64,9 +85,10 @@ for i in range(count):
     assert strx < strsize
     start = stroff + strx
     name = data[start:data.index(b'\0', start, stroff + strsize)].decode()
-    exports.add(name)
+    assert name not in exports, 'duplicate public symbol definition'
+    exports[name] = (value, section)
 required = {'_MSHookMessageEx', '_MSHookFunction', '_MSFindSymbol', '_MSGetImageByName', '_LHHookFunctions', '_LBHookMessage', '_substitute_hook_functions'}
-assert not required - exports, f'missing public nlist definitions {required - exports}'
+assert not required - exports.keys(), f'missing public nlist definitions {required - exports.keys()}'
 
 # nlist definitions alone do not establish dyld bindings. Read the actual export
 # trie, rejecting reexports, resolvers, private definitions and malformed edges.
@@ -86,7 +108,7 @@ def uleb(pos, limit):
             return value, pos
     raise AssertionError('oversized export trie ULEB')
 
-public = set()
+public = {}
 pending = [(0, '', frozenset())]
 visited = 0
 while pending:
@@ -104,17 +126,30 @@ while pending:
         if flags == 0:  # regular, locally defined, no resolver or reexport
             address, cursor = uleb(cursor, terminal_end)
             assert cursor == terminal_end and address, 'invalid function export'
-            public.add(prefix)
+            assert prefix not in public, 'duplicate dyld export'
+            assert image_base is not None and prefix in exports, 'dyld export lacks public definition'
+            value, section = exports[prefix]
+            assert 0 < section <= len(sections), 'bad export section index'
+            start, section_size, executable = sections[section - 1]
+            # Only required function exports must be executable; other public
+            # data exports may legitimately occupy non-executable sections.
+            if prefix in required:
+                assert executable and start <= value < start + section_size, 'function outside executable section'
+                assert image_base + address == value, 'dyld/nlist export address mismatch'
+            public[prefix] = address
     pos = terminal_end
     children = trie[pos]
     pos += 1
+    edges = []
     for _ in range(children):
         stop = trie.index(b'\0', pos)
         assert stop > pos, 'empty export edge'
         edge = trie[pos:stop].decode()
+        assert not any(edge.startswith(old) or old.startswith(edge) for old in edges), 'ambiguous sibling export edges'
+        edges.append(edge)
         child, pos = uleb(stop + 1, len(trie))
         pending.append((child, prefix + edge, ancestors))
-assert not required - public, f'missing actual dyld exports {required - public}'
+assert not required - public.keys(), f'missing actual dyld exports {required - public.keys()}'
 info = plistlib.loads((framework / 'Info.plist').read_bytes())
 assert info['CFBundleExecutable'] == 'CydiaSubstrate'
 assert info['CFBundlePackageType'] == 'FMWK'
