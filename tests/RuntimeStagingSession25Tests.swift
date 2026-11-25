@@ -3,12 +3,12 @@ import XCTest
 
 final class RuntimeStagingSession25Tests: XCTestCase {
     private let ep = "https://willingly-dejectedly-superb-neanderthal.kitten.space/runtime-translate-634f43ff16d0315cd0f4d44f"
-    private func jwt(iss: String = RuntimeStagingSession.issuer, aud: String = RuntimeStagingSession.audience, exp: Date) -> String {
+    private func jwt(iss: String = RuntimeStagingSession.issuer, aud: String = RuntimeStagingSession.audience, exp: Date, iat: Date? = nil) -> String {
         func b(_ o: [String: Any]) -> String {
             Data(try! JSONSerialization.data(withJSONObject: o)).base64EncodedString()
                 .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         }
-        return "\(b(["alg": "HS256"])).\(b(["iss": iss, "aud": aud, "exp": exp.timeIntervalSince1970])).sig"
+        return "\(b(["alg": "HS256"])).\(b(["iss": iss, "aud": aud, "exp": exp.timeIntervalSince1970, "iat": (iat ?? exp.addingTimeInterval(-3000)).timeIntervalSince1970])).sig"
     }
     func testAcceptsStagingSessionInBothFormats() throws {
         let t = jwt(exp: Date().addingTimeInterval(3000))
@@ -25,6 +25,12 @@ final class RuntimeStagingSession25Tests: XCTestCase {
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: Date().addingTimeInterval(86400)))"))
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: Date().addingTimeInterval(3700)))"))
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep)?x=1 \(ok)"))
+    }
+    func testRejectsLifetimeOverOneHourAndFutureIat() {
+        let now = Date()
+        XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: now.addingTimeInterval(3000), iat: now.addingTimeInterval(-3700)))"))
+        XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: now.addingTimeInterval(3500), iat: now.addingTimeInterval(600)))"))
+        XCTAssertNoThrow(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: now.addingTimeInterval(3500), iat: now.addingTimeInterval(-100)))"))
     }
     func testStoreRoundTripAndExpiry() throws {
         let s = try RuntimeStagingSession.parse("\(ep) \(jwt(exp: Date().addingTimeInterval(3000)))")

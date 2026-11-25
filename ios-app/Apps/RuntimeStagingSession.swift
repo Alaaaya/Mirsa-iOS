@@ -47,6 +47,7 @@ struct RuntimeStagingSession: Codable, Equatable {
               claims["iss"] as? String == issuer, let exp = (claims["exp"] as? NSNumber)?.doubleValue else { throw Failure.token }
         let aud = claims["aud"]
         guard (aud as? String) == audience || ((aud as? [String])?.contains(audience) == true) else { throw Failure.token }
+        guard let iat = (claims["iat"] as? NSNumber)?.doubleValue, iat <= now.timeIntervalSince1970 + 60, exp - iat > 0, exp - iat <= maxLifetime else { throw Failure.token }
         let date = Date(timeIntervalSince1970: exp)
         guard date > now else { throw Failure.expired }
         guard date.timeIntervalSince(now) <= maxLifetime else { throw Failure.token }
