@@ -46,6 +46,7 @@ enum IPAEditorService {
 
     static func editingError(_ detail: String, language: AppLanguage = AppLanguageStore.snapshot) -> String {
         let lower = detail.lowercased()
+        if let message = hookEngineError(detail, language: language) { return message }
         guard lower.contains("mach-o"), lower.contains("limit") || lower.contains("editing storage") || lower.contains("editing mapping") else { return detail }
         switch language {
         case .english: return "Cannot safely edit this app binary. The supported size is up to 1.5 GB; make sure enough free storage is available, then try again."
@@ -53,6 +54,57 @@ enum IPAEditorService {
         case .german: return "Diese App-Datei kann nicht sicher bearbeitet werden. Unterstützt werden bis zu 1,5 GB. Sorge für genügend freien Speicher und versuche es erneut."
         case .kurmanji: return "Ev dosyeya sepanê bi ewlehî nayê guherandin. Mezinahiya piştgirîkirî heta 1.5 GB ye; cihê vala yê têr peyda bike û dîsa biceribîne."
         case .sorani: return "ناتوانرێت فایلی ئەپەکە بە سەلامەتی دەستکاری بکرێت. قەبارەی پشتگیریکراو تا 1.5 GB ـە؛ دڵنیابە شوێنی بەتاڵی پێویست هەیە و دووبارە هەوڵ بدە."
+        }
+    }
+
+    /// No raw symbol names or archive-controlled paths in user-facing hook failures.
+    static func hookEngineError(_ detail: String, language: AppLanguage) -> String? {
+        let lower = detail.lowercased()
+        func text(_ en: String, _ ar: String, _ de: String, _ kmr: String, _ ckb: String) -> String {
+            switch language {
+            case .english: return en
+            case .arabic: return ar
+            case .german: return de
+            case .kurmanji: return kmr
+            case .sorani: return ckb
+            }
+        }
+        if lower.contains("missing dependency") {
+            return text("A required library is missing. Import a compatible copy with the tweak. Supported hook dependencies are added automatically.",
+                        "في مكتبة لازمة ناقصة. استورد نسخة متوافقة معها. مكتبات الهوك المدعومة بتنضاف لحالها.",
+                        "Eine benötigte Bibliothek fehlt. Importiere eine kompatible Kopie mit dem Tweak. Unterstützte Hook-Abhängigkeiten werden automatisch ergänzt.",
+                        "Pirtûkxaneyeke pêwîst kêm e. Kopiyeke lihevhatî bi tweakê re bîne. Girêdayiyên hook ên piştgirîkirî bixweber tên zêdekirin.",
+                        "کتێبخانەیەکی پێویست کەمە. کۆپییەکی گونجاو لەگەڵ تویکسەکە هاوردە بکە. پێداویستییە پشتگیریکراوەکانی hook خۆکار زیاد دەکرێن.")
+        }
+        guard lower.contains("hook engine") else { return nil }
+        if lower.contains("unsupported") {
+            return text("This tweak needs hook APIs that Mirsa does not support. Objective-C replacement and eligible imported-function pointers are supported, not inline hooks.",
+                        "هالتويك بده وظائف هوك مو مدعومة بمرسى. المدعوم تبديل دوال Objective-C ومؤشرات الدوال المستوردة المتوافقة، مو تعديل تعليمات الدوال مباشرة.",
+                        "Dieser Tweak benötigt nicht unterstützte Hook-APIs. Unterstützt werden Objective-C-Ersetzungen und geeignete importierte Funktionszeiger, keine Inline-Hooks.",
+                        "Ev tweak pêdivî bi APIyên hook ên nepiştgirîkirî heye. Guherandina Objective-C û nîşankerên fonksiyonên împortkirî yên guncaw tên piştgirîkirin, ne hookên inline.",
+                        "ئەم تویکسە پێویستی بە APIی hookی پشتگیرینەکراو هەیە. گۆڕینی Objective-C و نیشاندەرە گونجاوەکانی فەنکشنی هاوردەکراو پشتگیری دەکرێن، نەک hookی inline.")
+        }
+        if lower.contains("conflict") || lower.contains("collid") || lower.contains("reserved") {
+            return text("An existing hook library conflicts with Mirsa's compatibility engine. The original app has not been changed. Use a copy without the conflicting library.",
+                        "في تعارض بين مكتبة هوك موجودة ومحرك التوافق بمرسى. التطبيق الأصلي ما تغيّر. استخدم نسخة بدون المكتبة المتعارضة.",
+                        "Eine vorhandene Hook-Bibliothek steht mit Mirsas Kompatibilitätsmodul in Konflikt. Die Original-App bleibt unverändert. Verwende eine Kopie ohne diese Bibliothek.",
+                        "Pirtûkxaneya hook ya heyî bi motora lihevhatinê ya Mirsa re li hev dikeve. Sepana orîjînal neguherî. Kopiyeke bê pirtûkxaneya nakok bikar bîne.",
+                        "کتێبخانەی hookی هەبوو لەگەڵ بزوێنەری گونجانی مرسى ناکۆکە. ئەپی ئەسڵی نەگۆڕاوە. کۆپییەک بەبێ کتێبخانە ناکۆکەکە بەکاربهێنە.")
+        }
+        return text("Could not safely prepare the hook compatibility engine. The original app has not been changed. Try again with the latest Mirsa version.",
+                    "ما قدرت جهّز محرك توافق الهوك بأمان. التطبيق الأصلي ما تغيّر. جرّب بأحدث نسخة من مرسى.",
+                    "Das Hook-Kompatibilitätsmodul konnte nicht sicher vorbereitet werden. Die Original-App bleibt unverändert. Versuche es mit der neuesten Mirsa-Version.",
+                    "Motora lihevhatina hook bi ewlehî nehat amadekirin. Sepana orîjînal neguherî. Bi guhertoya herî nû ya Mirsa dîsa biceribîne.",
+                    "نەتوانرا بزوێنەری گونجانی hook بە سەلامەتی ئامادە بکرێت. ئەپی ئەسڵی نەگۆڕاوە. بە نوێترین وەشانی مرسى دووبارە هەوڵ بدە.")
+    }
+
+    static func injectionNotice(language: AppLanguage = AppLanguageStore.snapshot) -> String {
+        switch language {
+        case .english: return "Injected code can read the app's data. Only use code you trust. Compatible unencrypted arm64 binaries need spare header space; original files stay unchanged. Mirsa adds its own limited hook compatibility engine when needed. Objective-C replacement and eligible imported pointers are supported, not inline hooks or arbitrary jailbreak tweaks."
+        case .arabic: return "الكود المحقون بيقدر يقرأ بيانات التطبيق. اختار بس كود بتثق فيه. الدعم لملفات arm64 المتوافقة غير المشفّرة وفيها مساحة بالهيدر، والأصل ما بيتغيّر. مرسى بيضيف محرك توافق الهوك الخاص فيه عند الحاجة. بيدعم تبديل دوال Objective-C ومؤشرات الدوال المستوردة المتوافقة، مو تعديل تعليمات الدوال مباشرة ولا كل تويكس الجيلبريك."
+        case .german: return "Injizierter Code kann App-Daten lesen. Verwende nur vertrauenswürdigen Code. Kompatible unverschlüsselte arm64-Dateien brauchen freien Header-Platz; Originale bleiben unverändert. Mirsa ergänzt bei Bedarf ein eigenes eingeschränktes Hook-Kompatibilitätsmodul. Unterstützt werden Objective-C-Ersetzungen und geeignete importierte Zeiger, keine Inline-Hooks oder beliebigen Jailbreak-Tweaks."
+        case .kurmanji: return "Koda têxistî dikare daneyên sepanê bixwîne. Tenê koda pêbawer bikar bîne. Pelên arm64 yên lihevhatî û neşîfrekirî cihê vala di headerê de dixwazin; orîjînal naguherin. Mirsa dema pêwîst be motora xwe ya hook a sînordar zêde dike. Guherandina Objective-C û nîşankerên împortkirî yên guncaw tên piştgirîkirin, ne hookên inline an hemû tweakên jailbreak."
+        case .sorani: return "کۆدی تێخراو دەتوانێت داتای ئەپ بخوێنێتەوە. تەنها کۆدی متمانەپێکراو بەکاربهێنە. فایلە گونجاوەکانی arm64ی کۆدنەکراو شوێنی بەتاڵ لە header پێویستە؛ ئەسڵەکان ناگۆڕدرێن. مرسى لە کاتی پێویستدا بزوێنەری سنوورداری hookی خۆی زیاد دەکات. گۆڕینی Objective-C و نیشاندەرە گونجاوە هاوردەکراوەکان پشتگیری دەکرێن، نەک hookی inline یان هەموو تویکسەکانی جەیلبرەیک."
         }
     }
 
