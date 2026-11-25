@@ -1,0 +1,42 @@
+import XCTest
+@testable import Mirsa
+
+/// Real network gate against the branch-only staging endpoint. Credentials come only from the
+/// CI launch environment (ephemeral, staging-scoped, 1h). Nothing is stored in the app or IPA.
+final class RuntimeStagingNetwork25Tests: XCTestCase {
+    private struct EnvAuth: DiscoveryTokenProvider {
+        let value: String
+        func token(forceRefresh: Bool) async throws -> String { value }
+    }
+    func testStagingDictionaryPreservesSpecifiersAndIssuesScopedGrant() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let raw = env["MIRSA_RT_STAGING_ENDPOINT"], let token = env["MIRSA_RT_STAGING_TOKEN"], !raw.isEmpty, !token.isEmpty else {
+            throw XCTSkip("staging env not provided")
+        }
+        let endpoint = try XCTUnwrap(URL(string: raw))
+        let translator = RuntimeArabicBackendTranslator(endpoint: endpoint, tokenProvider: EnvAuth(value: token))
+        let items = [
+            ArabicIPALocalizer.Item(id: "a", text: "Cancel"),
+            ArabicIPALocalizer.Item(id: "b", text: "%d items selected"),
+            ArabicIPALocalizer.Item(id: "c", text: "Open %@ settings"),
+            ArabicIPALocalizer.Item(id: "d", text: "Save changes")
+        ]
+        let revision = String(repeating: "ab", count: 32)
+        let package = try await translator.dictionary(bundleID: "com.example.stagingprobe", revision: revision, items: items)
+        let arabic = { (s: String) in s.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) } }
+        XCTAssertFalse(package.translations.isEmpty, "staging returned no translations")
+        for (source, translated) in package.translations {
+            XCTAssertTrue(arabic(translated), "not Arabic: \(source)")
+            for spec in ["%d", "%@"] where source.contains(spec) { XCTAssertTrue(translated.contains(spec), "specifier lost in \(source)") }
+        }
+        XCTAssertNotNil(package.translations["%d items selected"], "specifier string missing from dictionary")
+        XCTAssertNotNil(package.translations["Open %@ settings"])
+        // Missing/unknown ids must fail open (no throw, no bogus entries).
+        let missing = try await translator.dictionary(bundleID: "com.example.stagingprobe", revision: revision,
+            items: [ArabicIPALocalizer.Item(id: "zz", text: "Zzqx unlikelyword")])
+        XCTAssertTrue(missing.translations.values.allSatisfy { arabic($0) })
+        if let online = package.online {
+            XCTAssertNotNil(RuntimeArabicBackendTranslator.validOnline(online, bundleID: "com.example.stagingprobe", revision: revision))
+        }
+    }
+}
