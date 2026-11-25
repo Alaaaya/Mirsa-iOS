@@ -40,10 +40,10 @@ test('translations preserve printf order/multiset and return only requested safe
  assert.equal(Object.keys(filterTranslations([{id:'x',text:'设置 {name}'}],{x:'إعداد {name}'})).length,1);
 });
 test('configuration fail closed with no weak or implicit model, no unapproved host',()=>{
- const cfg = {RUNTIME_LLM_MODEL:'strong-v1',RUNTIME_LLM_API_KEY:'test',RUNTIME_LLM_BASE_URL:'https://provider.example/v1',RUNTIME_STRONG_MODELS:'strong-v1',RUNTIME_PROVIDER_ORIGINS:'https://provider.example'};
+ const cfg = {RUNTIME_LLM_MODEL:'gemini-2.5-flash',RUNTIME_LLM_API_KEY:'test',RUNTIME_LLM_BASE_URL:'https://generativelanguage.googleapis.com/v1beta/openai',RUNTIME_STRONG_MODELS:'gemini-2.5-flash',RUNTIME_PROVIDER_ORIGINS:'https://generativelanguage.googleapis.com'};
  const load = o => providerConfig(k=>({...cfg,...o})[k]);
- assert.equal(load({}).model,'strong-v1');
- for(const model of ['flash','model-lite','x-mini','x-nano','small','weak','']) assert.throws(()=>load({RUNTIME_LLM_MODEL:model,RUNTIME_STRONG_MODELS:model}),/not_configured/);
+ assert.equal(load({}).model,'gemini-2.5-flash');
+ for(const model of ['openai/gpt-oss-120b','qwen/qwen3.8-27b','gemini-2.5-pro','flash','model-lite','x-mini','x-nano','small','weak','']) assert.throws(()=>load({RUNTIME_LLM_MODEL:model,RUNTIME_STRONG_MODELS:model}),/not_configured/);
  for(const url of ['http://provider.example','https://evil.example','https://user:pass@provider.example','https://provider.example?q=x']) assert.throws(()=>load({RUNTIME_LLM_BASE_URL:url}),/not_configured/);
  assert.throws(()=>load({RUNTIME_LLM_MODEL:'not-approved'}),/not_configured/);
  assert.throws(()=>load({RUNTIME_LLM_API_KEY:''}),/not_configured/);
