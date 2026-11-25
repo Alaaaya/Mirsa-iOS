@@ -46,3 +46,11 @@ Provider outage fallback update25. HTTP provider 429/503 are designed queue-only
 All workers share one PostgreSQL admission row, at least13 seconds between starts (at most5 calls per rolling minute). Native rendering queues/debounces150ms and batches at most16 labels/2048 UTF16 units, bounded128 labels per process. Provider429/503 set a shared bounded exponential cooldown30,60,120,240 seconds; no automatic in-request retry consumes another slot. Later batches retry only through the global slot, with at most128 native labels and existing account/capability lifetime quotas. No request sleeps on the render thread. Native HTTP completion is bounded22 seconds/23 second wait on background queue. Existing canonical Kat entries retain priority over concurrent or later Gemini output.
 
 CI includes real authenticated HTTP+disposable PostgreSQL+durable metadata relay integration forcing429/503, checking committed label and outbox review IDs, persisted relay events, no fake translation, and30 concurrent provider reservations with exactly1 admitted. The native live gate requires valid scoped committed queue receipts on deferred response; arbitrary503 is never accepted as success. Separate real native runtime batching fixture checks both provider fallback kinds, one request for3 labels, original rendered text and no crash. Success-path fixture checks, real provider path, activation/expiry/revocation/privacy and Kat CAS/OTA tests remain required. No Supabase auth or production deployment is authorized by these tests.
+
+Private CI quota setup (Nov25): before minting a fresh bootstrap JWT, with no
+other CI using the fixed synthetic subject, run
+`python3 scripts/prepare-runtime-staging-quota.py --no-active-ci` on WEB.
+Archive its before-usage receipt privately. This verifies the exact local PostgreSQL
+cluster and resets only the current-day allowance of the isolated synthetic
+subject. A new JWT does not reset daily usage. Never reset real account usage,
+raise quota limits, or skip the native signing/dictionary assertions to clear CI.
