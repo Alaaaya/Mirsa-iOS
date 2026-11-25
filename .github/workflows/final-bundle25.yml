@@ -241,6 +241,20 @@ jobs:
           PY
           codesign --force --sign - build/GenericLaunch/Payload/GenericLaunch25.app
           (cd build/GenericLaunch && zip -q -r ../../tests/fixtures/generic-injection25/GenericLaunch25Fixture.ipa Payload)
+      - name: Prepare exact owned Alaa and MirsaHookTest UIKit launch host
+        run: |
+          mkdir -p build/ExactLaunch/Payload/ExactLaunch25.app
+          xcrun --sdk iphoneos clang -target arm64-apple-ios18.0 -fobjc-arc tests/fixtures/exact-hooks25/ExactLaunch25.m -framework UIKit -framework Foundation -Wl,-headerpad,4096 -o build/ExactLaunch/Payload/ExactLaunch25.app/ExactLaunch25
+          python3 - <<'PY25'
+          import pathlib,plistlib,hashlib
+          for name,digest in [('Alaa','04afc06b8a95d5ef1761bfa221bd1386f8762452970226d3c1ff64a4642d6565'),('MirsaHookTest','58e1161b49abb5ff332d6d9a368ab2d04c83a67d904b4cd5e92360b807b88997')]:
+              assert hashlib.sha256(pathlib.Path('tests/fixtures/exact-hooks25/'+name+'.dylib').read_bytes()).hexdigest()==digest
+          app=pathlib.Path('build/ExactLaunch/Payload/ExactLaunch25.app')
+          info=dict(CFBundleIdentifier='com.mirsa.ci.exactlaunch25',CFBundleExecutable='ExactLaunch25',CFBundlePackageType='APPL',CFBundleVersion='1',CFBundleShortVersionString='1.0',CFBundleSupportedPlatforms=['iPhoneOS'],LSRequiresIPhoneOS=True,UILaunchScreen={},UIApplicationSceneManifest={'UIApplicationSupportsMultipleScenes':False,'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Exact25','UISceneDelegateClassName':'ExactScene25'}]}})
+          (app/'Info.plist').write_bytes(plistlib.dumps(info))
+          PY25
+          codesign --force --sign - build/ExactLaunch/Payload/ExactLaunch25.app
+          (cd build/ExactLaunch && zip -q -r ../../tests/fixtures/exact-hooks25/ExactLaunch25Fixture.ipa Payload)
       - name: Prepare Assets.car-only fixture (own actool compiled AppIcon, no loose icon PNGs)
         run: |
           rm -rf build/CarFixture build/CarAssets
@@ -299,6 +313,8 @@ jobs:
           python3 scripts/verify-production-sign25.py build/production-sign-proof
           cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/"GENERIC-*.ipa* build/production-sign-proof/
           python3 scripts/verify-generic-launch25.py build/production-sign-proof "$DEVICE" 2>&1 | tee build/production-sign-proof/generic-launch.log
+          cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/"EXACT-*.ipa* build/production-sign-proof/
+          python3 scripts/verify-exact-hook-launch25.py build/production-sign-proof "$DEVICE" 2>&1 | tee build/production-sign-proof/exact-launch.log
           RETAINED="$CONTAINER/Library/Application Support/MirsaSignedExports/0A3A3FB2-D1A0-48F0-91D2-397B285B6ED5"
           mkdir -p "$RETAINED"
           cp tests/fixtures/SignedFolder24Fixture.ipa "$RETAINED/SignedFolder24Fixture.ipa"

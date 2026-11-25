@@ -131,6 +131,41 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
     }
 
+    func testExactAlaaAndMirsaHookTestUseRealSigningAndPinnedPayloads() throws {
+        let fixture = try realFixture(name: "ExactLaunch25Fixture"), bundle = Bundle(for: Self.self)
+        let material = PersonalIdentityVault.Material(
+            p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
+            password: "mirsa-test",
+            profile: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "mobileprovision"))))
+        let proofDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("RuntimeSigningProof25")
+        try FileManager.default.createDirectory(at: proofDir, withIntermediateDirectories: true)
+        for (mode, name, expected) in [
+            ("ALAA", "Alaa", "04afc06b8a95d5ef1761bfa221bd1386f8762452970226d3c1ff64a4642d6565"),
+            ("HOOK", "MirsaHookTest", "58e1161b49abb5ff332d6d9a368ab2d04c83a67d904b4cd5e92360b807b88997")
+        ] {
+            let source = try XCTUnwrap(bundle.url(forResource: name, withExtension: "dylib"))
+            XCTAssertEqual(try RuntimeOriginalIPA.hash(source), expected)
+            var options = PersonalProjectOptions()
+            options.libraries = [source]; options.selectedComponentIDs = ["exact:" + name]
+            options.draftRevision = "exact-original-draft"
+            options.injections = [InjectionPlanEntry(library: source.path, method: InjectionMethod.load_control.rawValue, target: "@main")]
+            let result = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: options)
+            try PersonalInjectionProof.verifyRecord(result.url)
+            let attempt = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
+                from: Data(contentsOf: PersonalInjectionProof.sidecar(result.url)))
+            XCTAssertEqual(Array(attempt.componentSHA256.values), [expected])
+            XCTAssertTrue(attempt.installed.dependencies.keys.contains { $0.hasSuffix(name + ".dylib") })
+            if mode == "HOOK" {
+                XCTAssertTrue(attempt.installed.dependencies.keys.contains { $0.hasSuffix("CydiaSubstrate.framework/CydiaSubstrate") })
+            }
+            let output = proofDir.appendingPathComponent("EXACT-" + mode + ".ipa")
+            try? FileManager.default.removeItem(at: output)
+            try FileManager.default.copyItem(at: result.url, to: output)
+            try Data(contentsOf: PersonalInjectionProof.sidecar(result.url)).write(to: PersonalInjectionProof.sidecar(output))
+        }
+    }
+
     private func temp() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -113,6 +113,13 @@ targets:
           - fixtures/foreground
           - fixtures/tendies
           - fixtures/generic-injection25
+          - fixtures/exact-hooks25
+      - path: tests/fixtures/exact-hooks25/ExactLaunch25Fixture.ipa
+        buildPhase: resources
+      - path: tests/fixtures/exact-hooks25/Alaa.dylib
+        buildPhase: resources
+      - path: tests/fixtures/exact-hooks25/MirsaHookTest.dylib
+        buildPhase: resources
       - path: tests/fixtures/generic-injection25/GenericLaunch25Fixture.ipa
         buildPhase: resources
       - path: tests/fixtures/generic-injection25/GenericMarker25.dylib

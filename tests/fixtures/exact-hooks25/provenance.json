@@ -1,0 +1,13 @@
+{
+  "origin": "Mirsa-authored test files previously supplied to Alaa, copied byte-for-byte from DEFAULT hook-test",
+  "userIPAExecuted": false,
+  "payloads": {
+    "Alaa.dylib": "04afc06b8a95d5ef1761bfa221bd1386f8762452970226d3c1ff64a4642d6565",
+    "MirsaHookTest.dylib": "58e1161b49abb5ff332d6d9a368ab2d04c83a67d904b4cd5e92360b807b88997"
+  },
+  "sourceFiles": {
+    "ExactLaunch25.m": "4946fbfd81711330f92d047b527882ce3231adc10d8e598797de7a0d6a1e07e1",
+    "MirsaHookTest.m": "b3e4d64836e52ad05533e20c453708e11ec54571c7bab7013584ea2f35d95332",
+    "Alaa.m": "05b856d2404e6dd11a4b7e7986fdd6fd2053a573537fd30266e6d700f55b7185"
+  }
+}
