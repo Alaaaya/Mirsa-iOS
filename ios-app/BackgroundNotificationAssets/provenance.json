@@ -1,0 +1,16 @@
+{
+  "architecture": "arm64",
+  "dylibSHA256": "d8a6e642528aaaeb484a64fe5cb82c4774a32fe12b2ff90fcff3b51540a97243",
+  "format": 1,
+  "methodsDefaultOff": true,
+  "minimumIOS": "15.0",
+  "recordsCoordinates": false,
+  "sources": {
+    "BackgroundNotifications.m": "71578cb5e267ac71d8255763ecbce338aec464cb87855a958126fc769f439872",
+    "Policy.h": "c3e6dbca4314dcf5694ba445b7e387582160b33ce0e3edad0bb7de724162fd51",
+    "build-apple.sh": "2cb41c3b5a6d37fb53a87610215a6f52e3d900f7ab8578dc5513b492bf556603",
+    "build-linux.sh": "cb668e579e2a2ba0ab73db480c4b792b94afcf70ae122d79300182da236d0e35"
+  },
+  "toolchain": "linux-cross",
+  "transmitsData": false
+}

@@ -1,0 +1,12 @@
+{
+  "deviceExecution": false,
+  "swiftNativeCompile": "pending coordinator CI",
+  "libraryCrossCompile": "passed clang18 arm64 ios15 Werror",
+  "pythonContractTests": 7,
+  "portableCPolicyTests": "executed passed",
+  "syntheticIPAResourceValidation": "passed",
+  "actualFinalIPAValidation": "pending combined IPA",
+  "binarySHA256": "d8a6e642528aaaeb484a64fe5cb82c4774a32fe12b2ff90fcff3b51540a97243",
+  "nativeXCTestSuite": "MirsaTests/BackgroundNotifications25Tests",
+  "nativeTestsExecuted": false
+}

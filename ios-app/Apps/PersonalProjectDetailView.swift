@@ -573,6 +573,29 @@ struct PersonalProjectDetailView: View {
     @State private var injectionCaps = InjectionCapabilities()
     @State private var targetList: [(id: String, kind: String, label: String)] = []
     @State private var targetsLoading = false
+    private var backgroundNotificationsSettings: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(get: { draft.backgroundNotifications ?? false }, set: { draft.backgroundNotifications = $0 })) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "bell.badge.fill").foregroundStyle(LCPalette.green)
+                    Text(personalText("Background notifications", "إشعارات بالخلفية")).font(.subheadline)
+                }
+            }.tint(LCPalette.green).accessibilityIdentifier("project-sign-background-notifications")
+            Text(personalText("Uses battery and stops if you force-quit the app", "بتاكل بطارية، وبتوقف إذا سكّرت التطبيق من المهام"))
+                .font(.caption).foregroundStyle(.secondary).padding(.leading, 32)
+                .accessibilityIdentifier("project-sign-background-hint")
+            if draft.backgroundNotifications ?? false {
+                VStack(alignment: .leading, spacing: 10) {
+                    toggle(personalText("Silent audio", "صوت صامت"), personalText("Opt in to silent playback, without the microphone. Stops on interruption; may affect the app’s audio.", "موافقة على تشغيل صوت صامت بدون ميكروفون. بيوقف عند المقاطعة، وممكن يأثر على صوت التطبيق."), Binding(get: { draft.backgroundAudio ?? false }, set: { draft.backgroundAudio = $0 }))
+                        .accessibilityIdentifier("project-sign-background-audio")
+                    toggle(personalText("Significant location changes", "تغيّر الموقع الكبير"), personalText("Opt in to iOS location permission for occasional runtime opportunities. No coordinates saved or sent by Mirsa. Requires Always permission; not continuous.", "موافقة على طلب إذن الموقع من iOS لفرص تشغيل متقطّعة. مرسى ما بيحفظ ولا بيبعت الإحداثيات. بدّه إذن دائماً، ومو تشغيل متواصل."), Binding(get: { draft.backgroundLocation ?? false }, set: { draft.backgroundLocation = $0 }))
+                        .accessibilityIdentifier("project-sign-background-location")
+                    Text(personalText("Optional methods, both off by default. Without them only observed events can notify. The app asks before activation. Not all apps expose events, and delivery or background survival is not guaranteed. Re-sign with this off to remove it; location can also be disabled in iOS Settings.", "الطريقتين اختياريتين وطافيين بالبداية. بدونهما بس الأحداث المرصودة بتعمل إشعار. التطبيق بيطلب موافقتك قبل التشغيل. مو كل التطبيقات بتكشف أحداثها، ووصول الإشعارات أو البقاء بالخلفية مو مضمون. وقّع من جديد والميزة طافية لإزالتها، وفيك توقف الموقع من إعدادات iOS."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }.padding(.leading, 32)
+            }
+        }
+    }
     private var settingsCard: some View {
         settingsContent.lcCard()
     }
@@ -600,6 +623,7 @@ struct PersonalProjectDetailView: View {
                     RuntimeStagingImportRow()
                 }.padding(.leading, 32).frame(maxWidth: .infinity, alignment: .leading)
             }
+            backgroundNotificationsSettings
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
             toggle(personalText("Fix white/blank icon", "إصلاح الأيقونة البيضاء"), personalText("Flattens transparent icon PNGs onto black.", "بيحوّل أيقونات PNG الشفافة لخلفية سودا."), Binding(get: { draft.fixWhiteIcon ?? false }, set: { draft.fixWhiteIcon = $0 }))
@@ -809,6 +833,10 @@ struct PersonalProjectDetailView: View {
         options.removeExtensions = draft.removeExtensions ?? false
         options.removeAppClips = draft.removeAppClips ?? false
         options.translateToArabic = draft.translateArabic ?? false
+        options.backgroundNotifications = draft.backgroundNotifications ?? false
+        options.backgroundMethods = []
+        if draft.backgroundAudio ?? false { options.backgroundMethods.append(.audio) }
+        if draft.backgroundLocation ?? false { options.backgroundMethods.append(.significantLocation) }
         options.strictProfile = draft.strictProfile ?? false
         options.gameMode = draft.gameMode ?? .keep
         options.fixDarkIcon = draft.fixDarkIcon ?? false

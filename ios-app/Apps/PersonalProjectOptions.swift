@@ -35,6 +35,8 @@ struct PersonalProjectOptions: Sendable {
     /// Explicit opt-in: strips UIDeviceFamily, MinimumOSVersion and UIRequiredDeviceCapabilities from the project COPY.
     var removeDeviceRestrictions = false
     /// Opt-in generic runtime Arabic dictionary and missing-only online grant on a separate signing copy.
+    var backgroundNotifications = false
+    var backgroundMethods: [BackgroundNotificationMethod] = []
     var translateToArabic = false
 }
 
@@ -58,6 +60,10 @@ struct PersonalProjectDraft: Codable, Equatable {
     var removeExtensions: Bool? = nil
     var removeAppClips: Bool? = nil
     var translateArabic: Bool? = nil
+    /// Optional keys use synthesized decodeIfPresent. Old projects remain off.
+    var backgroundNotifications: Bool? = nil
+    var backgroundAudio: Bool? = nil
+    var backgroundLocation: Bool? = nil
     var strictProfile: Bool? = nil
     var additionalProfileIDs: [String]? = nil
     var gameMode: PersonalGameMode? = nil

@@ -386,6 +386,7 @@ enum PersonalCertificateSigner {
         if let png = options.iconPNG { try IPAEditorService.installIcon(png: png, in: app, info: &info) }
         if options.fixDarkIcon { _ = try PersonalDarkIconFixer.repair(app: app, info: info) }
         if options.fixWhiteIcon { try PersonalIconFixer.flattenAlpha(app: app, info: info) }
+        try BackgroundNotifications.apply(app: app, info: &info, options: options)
         try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0)
             .write(to: app.appendingPathComponent("Info.plist"), options: .atomic)
         if options.displayName != nil {
