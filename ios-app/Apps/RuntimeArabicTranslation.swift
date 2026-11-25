@@ -338,7 +338,19 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         request.setValue("MirsaRuntimeTranslation/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         if let activation { request.setValue(activation, forHTTPHeaderField: "X-Mirsa-Activation") }
-        let (bytes, response) = try await session.bytes(for: request)
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do { (bytes, response) = try await session.bytes(for: request) }
+        catch {
+            #if DEBUG
+            // Allowlisted diagnostics only. Never log endpoint, headers, body or error userInfo.
+            let code = (error as NSError).code
+            let phase = ["issue", "dictionary", "refresh"].contains(object["action"] as? String ?? "")
+                ? (object["action"] as? String ?? "unknown") : "unknown"
+            print("RuntimeTranslationHTTP transport phase=\(phase) code=\(code) main=\(Thread.isMainThread)")
+            #endif
+            throw error
+        }
         guard let response = response as? HTTPURLResponse else { throw RuntimeTranslationError.network }
         // Status is safe to diagnose; never include response bodies, URLs or credentials in errors.
         guard response.statusCode == 200 else { throw RuntimeTranslationError.httpStatus(response.statusCode) }

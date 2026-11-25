@@ -259,7 +259,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
 
     /// No injected translator, endpoint or manual staging session. The same app account,
     /// prepare -> Rust personal_sign -> post-sign verification -> pack path as the UI.
-    func testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject() throws {
+    func testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let token = env["MIRSA_RT_STAGING_TOKEN"], !token.isEmpty else {
             if env["MIRSA_RT_REQUIRED_STAGING"] == "1" { XCTFail("Required private account fixture missing"); return }
@@ -283,7 +283,14 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         options.translateToArabic = true
         options.backgroundNotifications = true
         options.backgroundMethods = [.audio, .significantLocation]
-        let on = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: options)
+        // Match the UI worker boundary. Blocking the host application's main thread
+        // here starves simulator networking while applyRequired waits on its semaphore.
+        let enabledOptions = options
+        let on = try await PersonalEncryptionWarning.signWithConsent { allowEncrypted in
+            XCTAssertFalse(Thread.isMainThread, "Signing must use the same off-main worker as the UI")
+            return try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "",
+                options: enabledOptions, allowEncryptedSigning: allowEncrypted)
+        }
         let unpacked = fixture.root.appendingPathComponent("signed-on")
         try IPAEditorService.run("extract", input: on.url, output: unpacked)
         let app = try IPAEditorService.app(in: unpacked)
@@ -310,7 +317,11 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         try FileManager.default.removeItem(at: config)
         XCTAssertThrowsError(try RuntimeArabicPipeline.verifyInstalled(app: app, revision: original, bundleID: id))
         XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
-        let off = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: .init())
+        let off = try await PersonalEncryptionWarning.signWithConsent { allowEncrypted in
+            XCTAssertFalse(Thread.isMainThread)
+            return try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "",
+                options: .init(), allowEncryptedSigning: allowEncrypted)
+        }
         let offRoot = fixture.root.appendingPathComponent("signed-off")
         try IPAEditorService.run("extract", input: off.url, output: offRoot)
         try assertNoRuntime(IPAEditorService.app(in: offRoot))
