@@ -28,6 +28,7 @@ jobs:
       - name: Compile embedded iOS hook engine from this revision
         run: |
           bash hook-engine/build.sh
+          python3 scripts/test-verify-hook-engine.py
           python3 scripts/verify-hook-engine.py
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -78,6 +79,7 @@ jobs:
       - name: Compile embedded iOS hook engine from this revision
         run: |
           bash hook-engine/build.sh
+          python3 scripts/test-verify-hook-engine.py
           python3 scripts/verify-hook-engine.py
       - uses: dtolnay/rust-toolchain@stable
         with:
