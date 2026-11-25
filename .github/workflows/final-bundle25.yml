@@ -33,7 +33,8 @@ jobs:
       - name: Backend unit and schema type checks
         run: |
           node --test backend/runtime-translate/logic.test.mjs backend/mcp-translation-relay/extension.test.mjs
-          deno check backend/runtime-translate/index.ts
+          deno check backend/runtime-translate/index.ts backend/runtime-translate/staging.ts backend/runtime-translate/operator.ts
+          deno test --allow-read backend/runtime-translate/security.test.ts
       - name: Disposable schema and concurrent durable quota validation
         run: |
           sudo apt-get update -qq

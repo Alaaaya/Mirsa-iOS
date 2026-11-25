@@ -132,7 +132,7 @@ enum RuntimeArabicPipeline {
                   (try? fm.destinationOfSymbolicLink(atPath: config.path)) == nil else { throw RuntimeTranslationError.invalid }
             try IPAEditorService.run("inject", input: copy, executable: executable, libraries: [dylib], newFirst: true)
             var dictionary: [String: Any] = ["translations": table, "substrings": [:], "regex": [], "revision": revision]
-            if let online { dictionary["online"] = online }
+            if let online { dictionary["online"] = online; dictionary["translations"] = [:] }
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
             guard data.count < 4 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])
@@ -174,6 +174,14 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
         let auth: DiscoveryTokenProvider = tokenProvider ?? DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
             publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
         let token = try await auth.token(forceRefresh: false)
+        let defaults = UserDefaults.standard
+        let installKey = "MirsaRuntimeInstallationClaim25"
+        let installation = defaults.string(forKey: installKey) ?? UUID().uuidString.lowercased()
+        defaults.set(installation, forKey: installKey)
+        let issued = try await http.post(endpoint, token: token, object: ["action": "issue", "consent": true,
+            "bundleId": bundleID, "revision": revision, "installationId": installation])
+        guard let online = Self.validOnline(issued["online"] as? [String: String], bundleID: bundleID, revision: revision),
+              let activation = online["activation"] else { throw RuntimeTranslationError.invalid }
         var groups: [[ArabicIPALocalizer.Item]] = [], current: [ArabicIPALocalizer.Item] = [], chars = 0
         for item in items where RuntimeTranslationScanner.safeText(item.text) {
             if current.count == 128 || chars + item.text.utf16.count > 8192 { groups.append(current); current = []; chars = 0 }
@@ -183,7 +191,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
         var translations: [String: String] = [:]
         for group in groups {
             try Task.checkCancellation()
-            let response = try await http.post(endpoint, token: token, object: [
+            let response = try await http.post(endpoint, token: token, activation: activation, object: [
                 "action": "dictionary", "consent": true, "bundleId": bundleID, "revision": revision,
                 "items": group.map { ["id": $0.id, "text": $0.text] }
             ])
@@ -193,9 +201,6 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
                 if let value = map[item.id], ArabicIPALocalizer.acceptable(source: item.text, translated: value) { translations[item.text] = value }
             }
         }
-        // A dictionary remains useful if issuing an online grant fails. Never embed the bootstrap JWT.
-        let issued = try? await http.post(endpoint, token: token, object: ["action": "issue", "consent": true, "bundleId": bundleID, "revision": revision])
-        let online = Self.validOnline(issued?["online"] as? [String: String], bundleID: bundleID, revision: revision)
         return RuntimeTranslationPackage(translations: translations, online: online)
     }
     static func validOnline(_ value: [String: String]?, bundleID: String, revision: String, now: Date = Date()) -> [String: String]? {
@@ -217,7 +222,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
 final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
-    func post(_ endpoint: URL, token: String, object: [String: Any]) async throws -> [String: Any] {
+    func post(_ endpoint: URL, token: String, activation: String? = nil, object: [String: Any]) async throws -> [String: Any] {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 25; configuration.timeoutIntervalForResource = 28
         configuration.httpCookieStorage = nil; configuration.urlCache = nil; configuration.urlCredentialStorage = nil
@@ -228,6 +233,7 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         var request = URLRequest(url: endpoint); request.httpMethod = "POST"; request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        if let activation { request.setValue(activation, forHTTPHeaderField: "X-Mirsa-Activation") }
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200,
               response.expectedContentLength <= 48 * 1024 else { throw RuntimeTranslationError.network }

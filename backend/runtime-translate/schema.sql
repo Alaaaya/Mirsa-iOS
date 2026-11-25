@@ -71,7 +71,7 @@ create table if not exists public.mirsa_runtime_labels (
  user_id uuid not null references auth.users(id) on delete cascade,
  bundle_id text not null, revision text not null,
  source text not null check(length(source) between 1 and 256 and octet_length(source)<=1024),
- translation text check(length(translation) between 1 and 256 and octet_length(translation)<=1024),
+ translation text check(length(translation) between 1 and 1024 and octet_length(translation)<=4096),
  created_at timestamptz not null default now(), resolved_at timestamptz,
  notified_at timestamptz,
  unique(user_id,bundle_id,revision,source)
@@ -93,8 +93,10 @@ begin
  for item in select value from jsonb_array_elements(p_items) loop
    if jsonb_typeof(item->'text')<>'string' or length(item->>'text') not between 1 and 256 or octet_length(item->>'text')>1024 then continue; end if;
    -- HTTP privacy filter is mandatory before this service-only RPC.
-   if (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id and bundle_id=p_bundle and revision=p_revision)>=64 or
-      (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id)>=1024 then exit; end if;
+   if (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id and bundle_id=p_bundle and revision=p_revision and translation is null)>=64 or
+      (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id)>=20000 or
+      (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id and bundle_id=p_bundle and revision=p_revision)>=1564 or
+      (select coalesce(sum(octet_length(source)+coalesce(octet_length(translation),0)),0) from public.mirsa_runtime_labels where user_id=c.user_id and bundle_id=p_bundle and revision=p_revision)>785000 then exit; end if;
    insert into public.mirsa_runtime_labels(user_id,bundle_id,revision,source)
      values(c.user_id,p_bundle,p_revision,item->>'text') on conflict do nothing;
    get diagnostics n=row_count; added:=added+n;
@@ -141,3 +143,29 @@ begin
 end $$;
 revoke all on function public.mirsa_runtime_anomaly(text,text,integer,integer,integer) from public,anon,authenticated;
 grant execute on function public.mirsa_runtime_anomaly(text,text,integer,integer,integer) to service_role;
+
+-- Generated sign-time dictionary lives server-side, not plaintext in the IPA.
+create or replace function public.mirsa_runtime_store(p_hash text,p_bundle text,p_revision text,p_entries jsonb)
+returns integer language plpgsql security definer set search_path='' as $$
+declare c public.mirsa_runtime_caps%rowtype; item jsonb; n integer:=0; size_now integer;
+begin
+ select * into c from public.mirsa_runtime_caps where token_hash=p_hash;
+ if not found then return 0;end if;
+ perform pg_advisory_xact_lock(hashtextextended(c.user_id::text,812589));
+ select * into c from public.mirsa_runtime_caps where token_hash=p_hash for update;
+ if c.revoked or c.expires_at<=clock_timestamp() or c.bundle_id<>p_bundle or c.revision<>p_revision then return 0;end if;
+ if jsonb_typeof(p_entries)<>'array' or jsonb_array_length(p_entries)>128 then return 0;end if;
+ select coalesce(sum(octet_length(source)+coalesce(octet_length(translation),0)),0) into size_now from public.mirsa_runtime_labels where user_id=c.user_id and bundle_id=p_bundle and revision=p_revision;
+ for item in select value from jsonb_array_elements(p_entries) loop
+  if jsonb_typeof(item->'source')<>'string' or jsonb_typeof(item->'translation')<>'string' or length(item->>'source') not between 1 and 256 or length(item->>'translation') not between 1 and 1024 then continue;end if;
+  if size_now+octet_length(item::text)>786432 or
+   (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id and bundle_id=p_bundle and revision=p_revision)>=1500 or
+   (select count(*) from public.mirsa_runtime_labels where user_id=c.user_id)>=20000 then exit;end if;
+  insert into public.mirsa_runtime_labels(user_id,bundle_id,revision,source,translation,resolved_at)
+    values(c.user_id,p_bundle,p_revision,item->>'source',item->>'translation',clock_timestamp()) on conflict do nothing;
+  size_now:=size_now+octet_length(item::text);n:=n+1;
+ end loop;
+ return n;
+end $$;
+revoke all on function public.mirsa_runtime_store(text,text,text,jsonb) from public,anon,authenticated;
+grant execute on function public.mirsa_runtime_store(text,text,text,jsonb) to service_role;

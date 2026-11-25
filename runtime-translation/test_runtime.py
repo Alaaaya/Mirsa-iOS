@@ -13,7 +13,7 @@ class RuntimeTests(unittest.TestCase):
   self.assertIn("CFStringIsSurrogateHighCharacter",o)
  def test_online_bounds(self):
   s=Path("Online.h").read_text()
-  for token in ("s.length>256","onlineWaiting>=16","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","body.length+d.length>65536","done(nil)","onlinePositive.count<128","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
+  for token in ("s.length>256","onlineWaiting>=16","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","body.length+d.length>1048576","done(nil)","onlinePositive.count<2048","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
    self.assertIn(token,s)
  def test_scoped_contract(self):
   s=Path("Online.h").read_text()

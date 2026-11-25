@@ -41,9 +41,9 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
         XCTAssertNotNil(RuntimeArabicBackendTranslator.validOnline(online, bundleID: "com.example.stagingprobe", revision: revision))
         let grant = try XCTUnwrap(online["token"])
         let grantEndpoint = try XCTUnwrap(URL(string: try XCTUnwrap(online["endpoint"])))
-        let reply = try await RuntimeTranslationHTTP().post(grantEndpoint, token: grant, object: [
+        let reply = try await RuntimeTranslationHTTP().post(grantEndpoint, token: grant, activation: online["activation"], object: [
             "action": "missing", "consent": true, "bundleId": "com.example.stagingprobe", "revision": revision,
-            "items": [["id": "s0", "text": "Delete %d photos"]]])
+            "items": [["id": "s0", "text": "删除 %d 张照片"]]])
         let map = try XCTUnwrap(reply["translations"] as? [String: String])
         let value = try XCTUnwrap(map["s0"], "missing request returned no translation")
         XCTAssertTrue(arabic(value)); XCTAssertTrue(value.contains("%d"))

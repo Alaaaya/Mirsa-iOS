@@ -43,9 +43,11 @@ const handler = createHandler(env, (url, key, deadline) => ({
         const result=await sql("select public.mirsa_runtime_anomaly(:'p_hash',:'p_ip',:'p_window'::integer,:'p_throttle'::integer,:'p_revoke'::integer);",vars,deadline);
         return {data:result,error:null};
       }
-      if(name === 'mirsa_runtime_queue' || name === 'mirsa_runtime_refresh') {
+      if(['mirsa_runtime_queue','mirsa_runtime_refresh','mirsa_runtime_store'].includes(name)) {
       if(name === 'mirsa_runtime_queue') vars.p_items=JSON.stringify(p.p_items);
-        const result=await sql(name === 'mirsa_runtime_queue'
+        if(name === 'mirsa_runtime_store') vars.p_entries=JSON.stringify(p.p_entries);
+        const result=await sql(name === 'mirsa_runtime_store'
+          ? "select public.mirsa_runtime_store(:'p_hash',:'p_bundle',:'p_revision',:'p_entries'::jsonb);" : name === 'mirsa_runtime_queue'
           ? "select public.mirsa_runtime_queue(:'p_hash',:'p_bundle',:'p_revision',:'p_items'::jsonb);"
           : "select public.mirsa_runtime_refresh(:'p_hash',:'p_bundle',:'p_revision');",vars,deadline);
         return {data:JSON.parse(result),error:null};

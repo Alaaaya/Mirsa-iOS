@@ -8,6 +8,10 @@ export function safeText(s) {
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(s) &&
     !/(?:https?:|www\.|mailto:|[\w.+-]+@[\w.-]+|\b[a-z0-9-]+\.(?:com|net|org|de|io|app)\b|(?:\d[\s().+-]*){7}|(?:bearer|password|passwd|secret|api[_ -]?key|token|address|phone|email|iban|ssn|姓名|身份证|手机号|密码|邮箱|住址)\s*[:=：]|(?:sk-|eyJ)[a-zA-Z0-9_-]{12}|[a-zA-Z0-9_+/=-]{40,}|(?:\/Users\/|\/home\/|file:\/\/))/iu.test(s);
 }
+export function runtimeSafeText(s) {
+ const stripped=typeof s==='string'?s.replace(/%(?:[0-9]+\$)?[-+#0 ']*(?:\*|[0-9]+)?(?:\.(?:\*|[0-9]+))?(?:hh|ll|[hljztL])?[@a-zA-Z%]/g,''):'';
+ return safeText(s) && !/(?:@|[/\\]|[0-9０-９]{4,}|token|secret|password|passwd|bearer|api.?key|authorization|cookie|private|密码|密钥|验证码|账户|账号|地址|姓名|电话|邮件|订单|余额|消息|聊天|身份证|信用卡)/iu.test(stripped);
+}
 export function validate(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail('bad_body');
   if (!['issue','dictionary','missing','refresh'].includes(body.action)) fail('bad_action');
@@ -25,6 +29,7 @@ export function validate(body) {
     if (!item || Object.keys(item).some(k => !['id','text'].includes(k)) || typeof item.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(item.id) || ids.has(item.id)) fail('bad_item');
     ids.add(item.id);
     if (!safeText(item.text) || item.text.length > 256) fail('unsafe_text');
+    if (runtime && !runtimeSafeText(item.text)) fail('unsafe_text');
     if (runtime && !/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(item.text)) fail('not_cjk');
     chars += item.text.length;
   }

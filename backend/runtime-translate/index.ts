@@ -75,7 +75,7 @@ return async (req: Request, peerIP?: string) => {
     if(body.action === 'refresh') {
       const {data,error} = await db.rpc('mirsa_runtime_refresh',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision});
       if(error || !Array.isArray(data)) fail('unavailable',503);
-      return json({bundleId:body.bundleId,revision:body.revision,entries:data},200,262144);
+      return json({bundleId:body.bundleId,revision:body.revision,entries:data},200,1048576);
     }
     if(body.action === 'missing') {
       // Commit safe missing labels before Gemini. A failed provider never loses the queue.
@@ -106,6 +106,11 @@ return async (req: Request, peerIP?: string) => {
     const map = parseModelMap(result?.choices?.[0]?.message?.content || '');
     const translations = filterTranslations(body.items,map);
     if(!Object.keys(translations).length) fail('translation_unavailable',503);
+    if(body.action==='dictionary') {
+      const entries=body.items.filter((x:{id:string})=>Object.hasOwn(translations,x.id)).map((x:{id:string,text:string})=>({source:x.text,translation:translations[x.id]}));
+      const {error}=await db.rpc('mirsa_runtime_store',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision,p_entries:entries});
+      if(error) fail('dictionary_store_unavailable',503);
+    }
     return json({bundleId:body.bundleId,revision:body.revision,translations});
   } catch(e) {
     // Never log request bodies, bearer values, provider errors or source labels.

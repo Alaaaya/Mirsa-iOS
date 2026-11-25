@@ -39,6 +39,8 @@ static BOOL HasCJK(NSString *s) {
  return NO;
 }
 #import "Tokens.h"
+#import "Activation.h"
+#import "Banner.h"
 #import "Online.h"
 #import "Bidi.h"
 static void LogMissing(NSString *source,NSString *result) {
@@ -81,6 +83,8 @@ static void LogMissing(NSString *source,NSString *result) {
 }
 
 static NSString *Translate(NSString *s) {
+ if (onlineConfig && OnlineDenied())return s;
+ if (onlineConfig && OnlineExpiry(onlineConfig[@"expiresAt"])<=NSDate.date.timeIntervalSince1970)return s;
  if (!enabled || translating || ![s isKindOfClass:NSString.class] || !s.length || s.length>16384) return s;
  translating=YES;
  NSString *result=s;
@@ -245,6 +249,7 @@ __attribute__((constructor)) static void Start(void) {
    missingSeen=[NSMutableSet set];
    missingQueue=dispatch_queue_create("app.mirsa.translate.missing",DISPATCH_QUEUE_SERIAL);
    ConfigureOnline(config);
+   if(!onlineConfig)return;
    enabled=YES;
    HookString(UILabel.class,@selector(setText:));HookAttr(UILabel.class,@selector(setAttributedText:));
    HookString(UITextField.class,@selector(setPlaceholder:));HookAttr(UITextField.class,@selector(setAttributedPlaceholder:));
