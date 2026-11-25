@@ -3,6 +3,48 @@ import SwiftUI
 @testable import Mirsa
 
 final class SignedAppsFolder24Tests: XCTestCase {
+    func testDeleteRemovesWholeRetainedDirectoryAndLeavesOthers() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        var urls: [URL] = []
+        for index in 0..<3 {
+            let dir = root.appendingPathComponent(UUID().uuidString)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("App\(index).ipa")
+            try Data([1, 2, 3]).write(to: url)
+            try Data([4]).write(to: dir.appendingPathComponent("Info.plist"))
+            urls.append(url)
+        }
+        try SignedAppsCatalog.delete([urls[0]], root: root)
+        XCTAssertFalse(fm.fileExists(atPath: urls[0].deletingLastPathComponent().path))
+        XCTAssertTrue(SignedAppsCatalog.available(urls[1], root: root))
+        try SignedAppsCatalog.delete(Array(urls.dropFirst()), root: root)
+        XCTAssertTrue(try fm.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    func testDeleteRejectsOutsideAndSymlinkSelectionBeforeAnyRemoval() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let outside = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root); try? fm.removeItem(at: outside) }
+        let dir = root.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        let good = dir.appendingPathComponent("good.ipa")
+        let other = outside.appendingPathComponent("private.ipa")
+        try Data([1]).write(to: good)
+        try Data([2]).write(to: other)
+        XCTAssertThrowsError(try SignedAppsCatalog.delete([good, other], root: root))
+        XCTAssertTrue(fm.fileExists(atPath: good.path))
+        let link = root.appendingPathComponent(UUID().uuidString)
+        try fm.createSymbolicLink(at: link, withDestinationURL: outside)
+        XCTAssertThrowsError(try SignedAppsCatalog.delete([link.appendingPathComponent("private.ipa")], root: root))
+        XCTAssertTrue(fm.fileExists(atPath: other.path))
+        try SignedAppsCatalog.delete([], root: root)
+        XCTAssertTrue(fm.fileExists(atPath: good.path))
+    }
+
     func testMissingEmptyUnsignedAndSymlinkInputsAreExcluded() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)

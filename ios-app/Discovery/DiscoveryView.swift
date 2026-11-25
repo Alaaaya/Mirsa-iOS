@@ -28,14 +28,7 @@ final class DiscoveryStore: ObservableObject {
         // A nonempty cache can still be partial. Join every missing source load,
         // not just refresh when the whole dictionary happens to be empty.
         await sources.loadMissing()
-        var seen = Set<String>()
-        results = sources.visibleSources.flatMap { source in
-            (sources.apps[source.url] ?? []).compactMap { app -> Match? in
-                guard app.name.localizedCaseInsensitiveContains(term) else { return nil }
-                let match = Match(sourceURL: source.url, sourceName: source.name, app: app)
-                return seen.insert(match.id).inserted ? match : nil
-            }
-        }
+        results = sources.appMatches(query: term)
         failures = sources.visibleSources.compactMap { source in
             sources.loadErrors[source.url].map { source.name + " · " + $0 }
         }
@@ -77,10 +70,7 @@ struct DiscoveryView: View {
                         .foregroundStyle(.secondary).listRowBackground(Color.clear)
                 }
                 ForEach(store.results) { match in
-                    VStack(alignment: .leading, spacing: 6) {
-                        RepoAppRow(app: match.app, installed: apps.apps.first { $0.id == match.app.bundleID })
-                        Text(match.sourceName).font(.caption).foregroundStyle(.secondary)
-                    }
+                    DiscoveryAppResultRow(match: match)
                     .listRowBackground(Color.clear)
                 }
                 ForEach(store.failures, id: \.self) { message in
@@ -97,6 +87,38 @@ struct DiscoveryView: View {
                 }
             }
             .mirsaScreen()
+        }
+    }
+}
+
+/// Both entry points render the exact same installation row.
+struct DiscoveryAppResultRow: View {
+    let match: DiscoveryStore.Match
+    var onSelectIPA: ((URL) async throws -> Void)? = nil
+    @ObservedObject private var apps = AppsStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            RepoAppRow(app: match.app, installed: apps.apps.first { $0.id == match.app.bundleID }, onSelectIPA: onSelectIPA)
+            Text(match.sourceName).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+extension SourcesStore {
+    /// Cached by catalogue revision, includes complete catalogues rather than a paginated detail list.
+    func appMatches(query: String) -> [DiscoveryStore.Match] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return [] }
+        return derived("global-app-search", url: "", query: term) {
+            var seen = Set<String>()
+            return visibleSources.flatMap { source in
+                (apps[source.url] ?? []).compactMap { app -> DiscoveryStore.Match? in
+                    guard app.name.localizedCaseInsensitiveContains(term) else { return nil }
+                    let match = DiscoveryStore.Match(sourceURL: source.url, sourceName: source.name, app: app)
+                    return seen.insert(match.id).inserted ? match : nil
+                }
+            }
         }
     }
 }

@@ -4,6 +4,34 @@ import XCTest
 
 @MainActor
 final class SourceCatalogTests: XCTestCase {
+    func testMainAppSearchMatchesAppsOnlyAcrossSourcesAndInvalidatesCache() throws {
+        let store = makeStore { request in (Data(), self.response(request.url!)) }
+        let a = RepoSource(url: "https://example.org/a.json", name: "Insta Source")
+        let b = RepoSource(url: "https://example.org/b.json", name: "Second")
+        store.sources = [a, b]
+        let data = Data(#"{"apps":[{"name":"Instagram","bundleIdentifier":"test.insta","version":"vv2.1.0","downloadURL":"a.ipa"}]}"#.utf8)
+        let apps = try SourcesStore.decodeSource(data, base: URL(string: a.url)!).apps
+        store.apps[a.url] = apps
+        store.apps[b.url] = apps
+        XCTAssertEqual(store.appMatches(query: " INSTA ").count, 2)
+        XCTAssertEqual(store.appMatches(query: "Insta Source").count, 0, "Source names must not match")
+        XCTAssertTrue(store.appMatches(query: " ").isEmpty)
+        XCTAssertEqual(apps[0].displayVersion, "v2.1.0")
+        XCTAssertEqual(apps[0].version, "vv2.1.0", "Normalize display only, preserve release identity")
+        store.apps[b.url] = []
+        XCTAssertEqual(store.appMatches(query: "insta").count, 1)
+        store.hiddenIDs.insert(a.id)
+        XCTAssertTrue(store.appMatches(query: "insta").isEmpty)
+    }
+
+    func testVersionDisplayNormalizesOnlyLeadingPrefixes() throws {
+        for (raw, expected) in [("2.1.0", "v2.1.0"), ("v2.1.0", "v2.1.0"), ("VVv2.1.0", "v2.1.0"), ("  v1.0  ", "v1.0"), ("", ""), ("1.0-dev", "v1.0-dev")] {
+            let data = try JSONSerialization.data(withJSONObject: ["apps": [["name": "Test", "bundleIdentifier": "test.version", "version": raw, "downloadURL": "a.ipa"]]])
+            let app = try XCTUnwrap(SourcesStore.decodeSource(data, base: URL(string: "https://example.org/source.json")!).apps.first)
+            XCTAssertEqual(app.displayVersion, expected)
+        }
+    }
+
     private let appTesters = "https://repository.apptesters.org"
     private let ryp0 = "https://raw.githubusercontent.com/Sami-Wali/ryP0-repository/main/repo.json"
     private let simple = Data(#"{"apps":[{"name":"Sample","bundleIdentifier":"test.sample","version":"1.0","downloadURL":"https://example.org/sample.ipa"}]}"#.utf8)

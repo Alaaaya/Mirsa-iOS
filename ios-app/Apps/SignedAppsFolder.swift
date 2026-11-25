@@ -36,6 +36,16 @@ enum SignedAppsCatalog {
         return FileManager.default.isReadableFile(atPath: url.path)
     }
 
+    /// Remove only the validated retained export directory, never an imported IPA or a symlink target.
+    static func delete(_ urls: [URL], root: URL = SignedAppsCatalog.root) throws {
+        // Validate the entire selection before touching any directory.
+        guard urls.allSatisfy({ available($0, root: root) }) else {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        let directories = Set(urls.map { $0.deletingLastPathComponent().standardizedFileURL })
+        for directory in directories { try FileManager.default.removeItem(at: directory) }
+    }
+
     static func load(root: URL = SignedAppsCatalog.root) throws -> [Item] {
         let fm = FileManager.default
         guard fm.fileExists(atPath: root.path) else { return [] }
@@ -323,6 +333,11 @@ struct SignedAppsFolderView: View {
     @State private var items: [SignedAppsCatalog.Item] = []
     @State private var loading = true
     @State private var error: String?
+    @State private var selecting = false
+    @State private var selected = Set<String>()
+    @State private var pendingDelete: [SignedAppsCatalog.Item] = []
+    @State private var deleteError: String?
+    @State private var deleting = false
     @State private var sharing: SignedAppsCatalog.Item?
 
     var body: some View {
@@ -348,10 +363,21 @@ struct SignedAppsFolderView: View {
                     }
                     .accessibilityIdentifier("signed-folder-empty")
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: MirsaSpacing.s) {
+                    List {
                             ForEach(items) { item in
                                 HStack(spacing: MirsaSpacing.m) {
+                                    if selecting {
+                                        Button {
+                                            if !selected.insert(item.id).inserted { selected.remove(item.id) }
+                                        } label: {
+                                            Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                                .frame(width: 44, height: 44)
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .accessibilityLabel(personalText("Select", "تحديد") + " " + item.name)
+                                        .accessibilityIdentifier("signed-file-select")
+                                        .accessibilityValue(selected.contains(item.id) ? "1" : "0")
+                                    }
                                     if let png = item.iconPNG, let image = UIImage(data: png) {
                                         Image(uiImage: image).resizable().scaledToFill()
                                             .frame(width: 44, height: 44)
@@ -381,6 +407,7 @@ struct SignedAppsFolderView: View {
                                         Text(item.date, style: .date).font(.caption2).foregroundStyle(.secondary)
                                     }
                                     Spacer(minLength: 8)
+                                    if !selecting {
                                     Button {
                                         guard SignedAppsCatalog.available(item.url) else {
                                             error = personalText("This signed file is no longer available.", "ملف التوقيع ما عاد متاح.")
@@ -393,17 +420,49 @@ struct SignedAppsFolderView: View {
                                     .buttonStyle(.mirsaPress)
                                     .accessibilityLabel(personalText("Share", "مشاركة") + " " + item.name)
                                     .accessibilityIdentifier("signed-file-share")
+                                    }
                                 }
                                 .padding(MirsaSpacing.card).appsGlass(cornerRadius: MirsaRadius.l)
                                 .accessibilityElement(children: .contain)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if !selecting {
+                                        Button(role: .destructive) { pendingDelete = [item] } label: {
+                                            Label(personalText("Delete", "حذف"), systemImage: "trash")
+                                        }
+                                    }
+                                }
                             }
-                        }.padding(MirsaSpacing.page)
-                    }.refreshable { await reload() }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .disabled(deleting)
+                    .refreshable { await reload() }
                 }
             }
             .navigationTitle(Self.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if !items.isEmpty {
+                        Button(selecting ? personalText("Done", "تم") : personalText("Select", "تحديد")) {
+                            selecting.toggle(); selected.removeAll()
+                        }
+                        .accessibilityIdentifier("signed-folder-select")
+                        if selecting {
+                            Button(personalText("Delete selected", "حذف المحدد"), role: .destructive) {
+                                pendingDelete = items.filter { selected.contains($0.id) }
+                            }
+                            .disabled(selected.isEmpty || deleting)
+                            .accessibilityIdentifier("signed-folder-delete-selected")
+                        } else {
+                            Button(personalText("Delete all", "حذف الكل"), role: .destructive) { pendingDelete = items }
+                                .disabled(deleting)
+                                .accessibilityIdentifier("signed-folder-delete-all")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: { Image(systemName: "chevron.left") }
                         .accessibilityLabel(personalText("Back", "رجوع"))
@@ -417,10 +476,41 @@ struct SignedAppsFolderView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await reload() } }
         }
+        .confirmationDialog(personalText("Delete retained IPA files?", "تحذف ملفات IPA المحفوظة؟"),
+                            isPresented: Binding(get: { !pendingDelete.isEmpty }, set: { if !$0 { pendingDelete = [] } }),
+                            titleVisibility: .visible, presenting: pendingDelete.isEmpty ? nil : pendingDelete) { candidates in
+            Button(personalText("Delete", "حذف"), role: .destructive) {
+                let urls = candidates.map(\.url)
+                pendingDelete = []
+                Task { await remove(urls) }
+            }
+            Button(personalText("Cancel", "إلغاء"), role: .cancel) { pendingDelete = [] }
+        } message: { _ in
+            Text(personalText("This removes the saved signed files, not the installed apps.",
+                              "بينحذف الملف المحفوظ، مو التطبيق المثبّت على جهازك."))
+        }
+        .alert(personalText("Couldn’t delete files", "ما قدرت احذف الملفات"),
+               isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button(personalText("OK", "تمام")) { deleteError = nil }
+        } message: { Text(deleteError ?? "") }
         .sheet(item: $sharing) { item in
             // Export the existing retained IPA, never the original unsigned import.
             PersonalSignedShare(url: item.url)
         }
+    }
+
+    @MainActor private func remove(_ urls: [URL]) async {
+        guard !deleting else { return }
+        deleting = true
+        defer { deleting = false }
+        do {
+            try await Task.detached { try SignedAppsCatalog.delete(urls) }.value
+            selected.removeAll()
+            selecting = false
+        } catch {
+            deleteError = personalText("Some files couldn’t be deleted. Try again.", "بعض الملفات ما انحذفت. جرّب مرة تانية.")
+        }
+        await reload()
     }
 
     @MainActor private func reload() async {

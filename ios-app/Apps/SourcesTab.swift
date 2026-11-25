@@ -59,6 +59,12 @@ struct RepoApp: Identifiable, Hashable, Sendable {
     /// Only downloadable releases explicitly declared in this app's source versions array, in source order.
     var versions: [RepoAppVersion] = []
 
+    var displayVersion: String {
+        let value = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bare = value.drop(while: { $0 == "v" || $0 == "V" })
+        return bare.isEmpty ? "" : "v" + String(bare)
+    }
+
     var hasVersionHistory: Bool { versions.count > 1 }
 
     /// A history selection must be a member of this exact app's decoded source, never a guessed/latest URL.
@@ -626,7 +632,6 @@ struct SourcesTab: View {
     @State private var adding = false
     @State private var sharingURL: URL?
     @State private var input = ""
-    @State private var finding = false
     @State private var searching = false
     @State private var query = ""
     @State private var editMode: EditMode = .inactive
@@ -640,14 +645,9 @@ struct SourcesTab: View {
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var isFiltering: Bool { !trimmedQuery.isEmpty }
-    /// Search filters the visible list by name or link. Reordering is only offered on the unfiltered list.
-    private var shownSources: [RepoSource] {
-        let term = trimmedQuery
-        guard !term.isEmpty else { return store.visibleSources }
-        return store.visibleSources.filter {
-            $0.name.localizedCaseInsensitiveContains(term) || $0.url.localizedCaseInsensitiveContains(term)
-        }
-    }
+    /// Search shows app matches only; clearing restores the sortable source list.
+    private var shownSources: [RepoSource] { isFiltering ? [] : store.visibleSources }
+    private var appMatches: [DiscoveryStore.Match] { store.appMatches(query: trimmedQuery) }
 
     var body: some View {
         let t = theme
@@ -656,7 +656,7 @@ struct SourcesTab: View {
                 Group {
                     header(t)
                     if searching {
-                        SourcesSearchField(placeholder: SourcesText.searchSources, theme: t, text: $query, identifier: "sources-list-search")
+                        SourcesSearchField(placeholder: SourcesText.searchApps, theme: t, text: $query, identifier: "sources-list-search")
                     }
                     if !store.visibleSources.isEmpty {
                         statsCard(t)
@@ -675,7 +675,7 @@ struct SourcesTab: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
-                if !store.availableUpdates().isEmpty || store.updatingAll {
+                if !isFiltering && (!store.availableUpdates().isEmpty || store.updatingAll) {
                     Button {
                         Task { await store.updateAll() }
                     } label: {
@@ -738,13 +738,25 @@ struct SourcesTab: View {
                         store.requestDelete(id: first.id)
                     }
                 }
-                if isFiltering && shownSources.isEmpty {
-                    Text(SourcesText.noMatchingSources)
-                        .foregroundStyle(t.secondary)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                if isFiltering {
+                    if !store.loading.isEmpty {
+                        ProgressView().listRowBackground(Color.clear)
+                    }
+                    ForEach(appMatches) { match in
+                        DiscoveryAppResultRow(match: match, onSelectIPA: onSelectIPA)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                    if appMatches.isEmpty && store.loading.isEmpty {
+                        Text(tr("No matching apps.", "ما لقيت تطبيقات بهالاسم."))
+                            .foregroundStyle(t.secondary).listRowBackground(Color.clear)
+                    }
+                    ForEach(store.visibleSources.filter { store.loadErrors[$0.url] != nil }) { source in
+                        Text(source.name + " · " + (store.loadErrors[source.url] ?? ""))
+                            .font(.caption).foregroundStyle(.orange).listRowBackground(Color.clear)
+                    }
                 }
-                if !store.hiddenSources.isEmpty {
+                if !isFiltering && !store.hiddenSources.isEmpty {
                     Section {
                         ForEach(store.hiddenSources) { source in
                             HStack {
@@ -780,7 +792,6 @@ struct SourcesTab: View {
             .mirsaStatusBarScrim()
             .navigationTitle(SourcesText.title)
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $finding) { DiscoveryView() }
             .confirmationDialog(tr("Delete this source?", "تحذف هالسورس؟", ckb: "ئەم سەرچاوەیە بسڕدرێتەوە؟", kmr: "Ev çavkanî were jêbirin?"), isPresented: Binding(get: { store.pendingDelete != nil }, set: { if !$0 { store.cancelDelete() } }), titleVisibility: .visible, presenting: store.pendingDelete) { src in
                 Button(tr("Delete", "حذف", ckb: "سڕینەوە", kmr: "Jêbirin"), role: .destructive) { store.confirmDelete() }
                 Button(tr("Cancel", "إلغاء", ckb: "پاشگەزبوونەوە", kmr: "Betal"), role: .cancel) { store.cancelDelete() }
@@ -802,6 +813,7 @@ struct SourcesTab: View {
         .tint(t.accent[0])
         .environment(\.colorScheme, t.colorScheme)
         .environment(\.sourcesTheme, t)
+        .environment(\.layoutDirection, .leftToRight)
     }
 
     private func header(_ t: SourcesTheme) -> some View {
@@ -826,7 +838,7 @@ struct SourcesTab: View {
                 }
             } label: { SourcesCircleLabel(systemName: searching ? "xmark" : "magnifyingglass", theme: t) }
             .buttonStyle(.mirsaPress)
-            .accessibilityLabel(SourcesText.searchSources)
+            .accessibilityLabel(SourcesText.searchApps)
             .accessibilityIdentifier("sources-search-toggle")
             if editMode.isEditing {
                 Button { withAnimation { editMode = .inactive } } label: {
@@ -840,9 +852,6 @@ struct SourcesTab: View {
                 .accessibilityIdentifier("sources-edit-done")
             } else {
                 Menu {
-                    Button { finding = true } label: {
-                        Label(SourcesText.findOnWeb, systemImage: "sparkle.magnifyingglass")
-                    }
                     Button { withAnimation { editMode = .active } } label: {
                         Label(SourcesText.edit, systemImage: "arrow.up.arrow.down")
                     }
@@ -1341,7 +1350,7 @@ struct RepoAppRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(app.name).font(.system(size: 15.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
                     .mirsaNaturalDirection(app.name)
-                let meta = [app.developer, app.version.isEmpty ? nil : "v" + app.version]
+                let meta = [app.developer, app.displayVersion.isEmpty ? nil : app.displayVersion]
                     .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
                 if !meta.isEmpty {
                     Text(meta).font(.caption).foregroundStyle(theme.secondary).lineLimit(1)
@@ -1362,7 +1371,7 @@ struct RepoAppRow: View {
             RemoteIcon(url: app.iconURL, size: 62, corner: 15)
             Text(app.name).font(.system(size: 14.5, weight: .bold)).foregroundStyle(theme.text).lineLimit(1)
                 .mirsaNaturalDirection(app.name)
-            let meta = [app.version.isEmpty ? nil : "v" + app.version,
+            let meta = [app.displayVersion.isEmpty ? nil : app.displayVersion,
                         app.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }]
                 .compactMap { $0 }.joined(separator: " · ")
             Text(meta.isEmpty ? " " : meta).font(.system(size: 11)).foregroundStyle(theme.secondary).lineLimit(1)
