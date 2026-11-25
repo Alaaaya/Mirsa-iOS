@@ -20,6 +20,12 @@ for mode in ('DIRECT','LOADER','HOOK'):
             p=pathlib.PurePosixPath(name)
             assert not p.is_absolute() and '..' not in p.parts and '\\' not in name
         archive.extractall(directory)
+        # zipfile intentionally drops Unix execute bits; restore the archived modes.
+        # This changes no signed file bytes and must happen before native launch.
+        for entry in archive.infolist():
+            if not entry.is_dir():
+                mode=(entry.external_attr >> 16) & 0o777
+                if mode: (pathlib.Path(directory)/entry.filename).chmod(mode)
         app=pathlib.Path(directory)/'Payload/GenericLaunch25.app'
         assert list((pathlib.Path(directory)/'Payload').glob('*.app'))==[app]
         info=plistlib.loads((app/'Info.plist').read_bytes())
