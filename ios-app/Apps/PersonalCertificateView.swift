@@ -316,13 +316,26 @@ enum PersonalCertificateSigner {
     }
     /// Extract and apply every non-signing edit. Shared by signed and configuration-only export.
     static func prepare(ipa: URL, stage: URL, options: PersonalProjectOptions, applyBundleID: Bool = true,
-                        arabicTranslator: ArabicTranslating = ArabicBackendTranslator()) throws -> (root: URL, app: URL, info: [String: Any]) {
+                        arabicTranslator: ArabicTranslating? = nil,
+                        runtimeTranslator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator()) throws -> (root: URL, app: URL, info: [String: Any]) {
         let fm = FileManager.default
+        let originalSHA = try RuntimeOriginalIPA.pin(ipa)
         let root = stage.appendingPathComponent("archive", isDirectory: true)
         try IPAEditorService.run("extract", input: ipa, output: root)
         let app = try IPAEditorService.app(in: root)
         ArabicLocalizationPipeline.lastNotice = nil
-        if options.translateToArabic { ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app, translator: arabicTranslator) }
+        var runtimeAllowed = options.translateToArabic && arabicTranslator == nil
+        if options.translateToArabic, let arabicTranslator {
+            ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app, translator: arabicTranslator)
+        } else if runtimeAllowed {
+            // Even removed extensions must not bypass the original encryption gate.
+            do { _ = try RuntimeTranslationScanner.scan(app: app) }
+            catch RuntimeTranslationScanError.encrypted {
+                runtimeAllowed = false; ArabicLocalizationPipeline.lastNotice = RuntimeArabicText.encrypted
+            } catch {
+                runtimeAllowed = false; ArabicLocalizationPipeline.lastNotice = RuntimeArabicText.failed
+            }
+        }
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)
         }
@@ -390,6 +403,11 @@ enum PersonalCertificateSigner {
         } else if !options.libraries.isEmpty {
             try IPAEditorService.run(options.useLoader ? "inject_loader" : "inject", input: app, executable: info["CFBundleExecutable"] as? String, libraries: options.libraries, newFirst: options.newTweaksFirst)
         }
+        if runtimeAllowed {
+            ArabicLocalizationPipeline.lastNotice = RuntimeArabicPipeline.applyBlocking(app: app, translator: runtimeTranslator,
+                originalRevision: originalSHA, bundleIDOverride: options.bundleID)
+        }
+        try RuntimeOriginalIPA.verify(ipa, expected: originalSHA)
         return (root, app, info)
     }
     /// Configuration-only export: same edits, NO signing. Caller must label the result unsigned.

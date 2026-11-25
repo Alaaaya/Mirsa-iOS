@@ -1,0 +1,17 @@
+{
+  "dylibSHA256": "1d8a1731da61b553605e405ddefbc0d6ecbd449ddef5e94e45e5910e3e47cd97",
+  "format": 1,
+  "genericTableEmpty": true,
+  "sources": {
+    "Bidi.h": "5a13e2233ac8fd10bfe7a4a281bebae29cbcff92f94e670b7562c3cd14aa2624",
+    "Online.h": "fd49c8d463b3bf90aaa9aaa91d08de79f1b74d7aa3d196d2090dcae6acf1fde6",
+    "RuntimeTranslate.m": "6af0c34cf5d7cb0715f7b1eea7a376a772507563f7ef2def06604d96548dd171",
+    "Table.h": "5acc340a06ee5fec82b6e3b241e646a78ce21570042446bb94c003958fab902d",
+    "Tokens.h": "91d6fc9ed251a0bae655838e91738d21a6a698303120870fad8710736e7a0f02",
+    "build-apple.sh": "3b9286574c2c8f2c8ef72a35f5e0bd184528f2b60b140a156dff986a24b3cce2",
+    "build-linux.sh": "f6a6bf3eec3bb946d26d08ff051391b6d854582ce82251da2a5d38d8c4e8077b",
+    "fishhook.c": "8ce8086118beb4d2535c67f25736cbd312849a6664307b83e08857086e610635",
+    "fishhook.h": "5432b81bd302956adcbfc8836af74e47dd38748d5078495cbe1b5bea62180120",
+    "runtime-table.json": "9725d96bcbe62dc5b81d4a3aa8625a9967714126d8656db4cf4cb51a5f499f1a"
+  }
+}

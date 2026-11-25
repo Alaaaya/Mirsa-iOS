@@ -34,7 +34,7 @@ struct PersonalProjectOptions: Sendable {
     var exportExtension = "ipa"
     /// Explicit opt-in: strips UIDeviceFamily, MinimumOSVersion and UIRequiredDeviceCapabilities from the project COPY.
     var removeDeviceRestrictions = false
-    /// Injects AI-translated ar.lproj before signing (fail-open). Skipped when the app already has Arabic.
+    /// Opt-in generic runtime Arabic dictionary and missing-only online grant on a separate signing copy.
     var translateToArabic = false
 }
 

@@ -60,7 +60,7 @@ final class PersonalAppsLibrary: ObservableObject {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let directory = try PersonalProjectFolder.directory(documents: documents, id: app.id)
         // Inspect legacy names directly, even when an interrupted migration already moved the IPA.
-        let files = [app.filename, "icon-\(app.id.uuidString).png", "project-\(app.id.uuidString).json"]
+        let files = [app.filename, app.filename + ".mirsa-original.sha256", "icon-\(app.id.uuidString).png", "project-\(app.id.uuidString).json"]
             .map { root.appendingPathComponent($0) }
         try PersonalProjectFolder.migrate(files: files, to: directory)
         return directory
@@ -74,7 +74,7 @@ final class PersonalAppsLibrary: ObservableObject {
     func delete(_ app: PersonalLibraryApp) throws {
         try persist(apps.filter { $0.id != app.id })
         let fm = FileManager.default
-        for u in [url(app), iconURL(app), draftURL(app)] { try? fm.removeItem(at: u) }
+        for u in [url(app), RuntimeOriginalIPA.manifest(for: url(app)), iconURL(app), draftURL(app)] { try? fm.removeItem(at: u) }
         iconCache.removeObject(forKey: app.id.uuidString as NSString)
     }
 
@@ -324,7 +324,10 @@ final class PersonalAppsLibrary: ObservableObject {
                 signed: signed, date: Date())
             let target = destination.appendingPathComponent(item.filename)
             try fm.copyItem(at: snapshot, to: target)
-            do { try fm.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: target.path) }
+            do {
+                try fm.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: target.path)
+                try RuntimeOriginalIPA.pin(target)
+            }
             catch { try? fm.removeItem(at: target); throw error }
             // Icon is best effort; a missing icon never blocks the import.
             if let png = Self.iconPNG(bundle: bundle, info: info) {
@@ -336,6 +339,7 @@ final class PersonalAppsLibrary: ObservableObject {
         do { try persist([app] + apps) }
         catch {
             try? FileManager.default.removeItem(at: url(app))
+            try? FileManager.default.removeItem(at: RuntimeOriginalIPA.manifest(for: url(app)))
             try? FileManager.default.removeItem(at: iconURL(app))
             throw error
         }
