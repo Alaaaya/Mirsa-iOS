@@ -16,7 +16,7 @@ int main(void){@autoreleasepool{
  CHECK(!M(@"a",@"g9",9,@"gemini"));CHECK([Get(@"a") isEqual:@"k2"]);
  CHECK(!M(@"a",@"k1",1,@"kat"));CHECK(M(@"a",@"k3",3,@"kat"));
  CHECK(M(@"b",@"k1",1,@"kat"));CHECK(!M(@"b",@"g",0,@"gemini"));
- CHECK(M(@"c",@"g",0,@"gemini"));CHECK(M(@"c",@"k",0,@"kat") || YES);
+ CHECK(M(@"c",@"g",0,@"gemini"));CHECK(M(@"c",@"k",0,@"kat"));CHECK([Get(@"c") isEqual:@"k"]);
  CHECK(ProvenanceValid(@"kat") && !ProvenanceValid(@"x") && !VersionValid(@-1) && !VersionValid(@1.5) && VersionValid(@4));
  // concurrent race: gemini versions hammer while kat lands in the middle, any order
  dispatch_group_t g=dispatch_group_create();

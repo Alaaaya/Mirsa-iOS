@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <math.h>
 #import <os/lock.h>
 // Requires onlinePositive, onlineMeta, onlineUncovered, onlineLock declared before inclusion.
 // Monotonic merge, atomic under the lock. Kat-approved text is never replaced by Gemini,

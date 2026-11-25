@@ -59,21 +59,45 @@ struct RuntimeStagingSession: Codable, Equatable {
 
 enum RuntimeStagingSessionStore {
     private static let service = "com.alaa.mirsa.runtime.staging.session"
-    private static var base: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] }
-    static func load(now: Date = Date()) -> RuntimeStagingSession? {
+    struct KeychainFailure: LocalizedError, Equatable {
+        let status: OSStatus
+        var errorDescription: String? { "Translation session Keychain error (\(status))." }
+    }
+    private static var base: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+         kSecAttrAccount as String: "owner-staging"]
+    }
+    /// Fail closed for automatic use; explicit operator imports surface the native OSStatus.
+    static func load(now: Date = Date()) -> RuntimeStagingSession? { try? read(now: now) }
+    static func read(now: Date = Date()) throws -> RuntimeStagingSession? {
         var q = base; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data,
-              let s = try? JSONDecoder().decode(RuntimeStagingSession.self, from: d), s.expiresAt > now else { return nil }
+        let status = SecItemCopyMatching(q as CFDictionary, &out)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw KeychainFailure(status: status) }
+        guard let d = out as? Data else { throw KeychainFailure(status: errSecDecode) }
+        let s = try JSONDecoder().decode(RuntimeStagingSession.self, from: d)
+        guard s.expiresAt > now else { return nil }
         return s
     }
-    static func save(_ s: RuntimeStagingSession?) {
-        SecItemDelete(base as CFDictionary)
-        guard let s, let d = try? JSONEncoder().encode(s) else { return }
-        var add = base
-        add[kSecValueData as String] = d
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        SecItemAdd(add as CFDictionary, nil)
+    static func save(_ s: RuntimeStagingSession?) throws {
+        guard let s else {
+            let status = SecItemDelete(base as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainFailure(status: status) }
+            return
+        }
+        let d = try JSONEncoder().encode(s)
+        // Update atomically. Never delete a working credential before a write succeeds.
+        let attrs: [String: Any] = [kSecValueData as String: d,
+                                  kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        var status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = base; attrs.forEach { add[$0.key] = $0.value }
+            status = SecItemAdd(add as CFDictionary, nil)
+            if status == errSecDuplicateItem { status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary) }
+        }
+        guard status == errSecSuccess else { throw KeychainFailure(status: status) }
+        guard try read() == s else { throw KeychainFailure(status: errSecDecode) }
     }
     /// The owner import UI is only offered when this build opts in via Info.plist.
     static var importEnabled: Bool { (Bundle.main.object(forInfoDictionaryKey: "MirsaRuntimeStagingImport") as? Bool) == true }
@@ -119,9 +143,12 @@ struct RuntimeStagingImportRow: View {
     }
     private func save() {
         do {
-            RuntimeStagingSessionStore.save(try RuntimeStagingSession.parse(text))
+            try RuntimeStagingSessionStore.save(RuntimeStagingSession.parse(text))
             text = ""; active = true; sheet = false
             message = personalText("Session saved.", "انحفظت الجلسة.")
+        } catch let error as RuntimeStagingSessionStore.KeychainFailure {
+            message = personalText("Could not save test session.", "ما قدرت احفظ جلسة الاختبار.") + " (\(error.status))"
+            sheet = false
         } catch {
             message = personalText("Invalid or expired staging session.", "الجلسة غير صالحة أو منتهية.")
             sheet = false

@@ -236,6 +236,7 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         guard body.count <= 48 * 1024 else { throw RuntimeTranslationError.invalid }
         var request = URLRequest(url: endpoint); request.httpMethod = "POST"; request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("MirsaRuntimeTranslation/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         if let activation { request.setValue(activation, forHTTPHeaderField: "X-Mirsa-Activation") }
         let (bytes, response) = try await session.bytes(for: request)

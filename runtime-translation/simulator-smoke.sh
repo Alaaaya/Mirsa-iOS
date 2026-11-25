@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 cp fixtures/ActivationPublicVector.json "$TMP/"
-cp RuntimeTranslate.m Online.h Activation.h ActivationKey.h Banner.h Bidi.h Tokens.h fishhook.[ch] Smoke.m NativePolicySmoke.m "$TMP/"
+cp RuntimeTranslate.m Online.h OnlineMerge.h Activation.h ActivationKey.h Banner.h Bidi.h Tokens.h fishhook.[ch] Smoke.m NativePolicySmoke.m "$TMP/"
 cd "$TMP"
 python3 - <<'PY'
 import json

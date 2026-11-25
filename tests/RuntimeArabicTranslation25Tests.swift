@@ -91,6 +91,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
     private func grant(bundle: String, revision: String) -> [String: String] {
         ["bundleId": bundle, "revision": revision,
          "token": "mrt1." + String(repeating: "a", count: 64),
+         "activation": "fixture.payload.signature", "installationId": "11111111-1111-4111-8111-111111111111",
          "endpoint": "https://runtime.example.com/translate",
          "expiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))]
     }
@@ -145,7 +146,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         try assertNoRuntime(app)
     }
     func testOnlineScopeAndExpiryAreValidated() throws {
-        let bundle = "org.mirsa.runtime25.generic", revision = "revision-a"
+        let bundle = "org.mirsa.runtime25.generic", revision = String(repeating: "a", count: 64)
         let valid = grant(bundle: bundle, revision: revision)
         XCTAssertNotNil(RuntimeArabicBackendTranslator.validOnline(valid, bundleID: bundle, revision: revision))
         for (key, value) in [("bundleId", "org.other.app"), ("revision", "revision-b"),

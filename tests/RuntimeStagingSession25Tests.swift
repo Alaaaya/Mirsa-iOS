@@ -34,10 +34,10 @@ final class RuntimeStagingSession25Tests: XCTestCase {
     }
     func testStoreRoundTripAndExpiry() throws {
         let s = try RuntimeStagingSession.parse("\(ep) \(jwt(exp: Date().addingTimeInterval(3000)))")
-        RuntimeStagingSessionStore.save(s)
-        XCTAssertEqual(RuntimeStagingSessionStore.load()?.endpoint, ep)
+        try RuntimeStagingSessionStore.save(s)
+        XCTAssertEqual(try RuntimeStagingSessionStore.read()?.endpoint, ep)
         XCTAssertNil(RuntimeStagingSessionStore.load(now: Date().addingTimeInterval(4000)))
-        RuntimeStagingSessionStore.save(nil)
+        try RuntimeStagingSessionStore.save(nil)
         XCTAssertNil(RuntimeStagingSessionStore.load())
     }
 }

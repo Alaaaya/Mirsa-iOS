@@ -104,6 +104,7 @@ static void RefreshOnlineDictionary(void) {
    if(!ValidActivation(onlineConfig,NSBundle.mainBundle.bundleIdentifier,NSDate.date.timeIntervalSince1970))return;
    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:onlineConfig[@"endpoint"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5];
    req.HTTPMethod=@"POST";[req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+   [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
    [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
    [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"action":@"refresh",@"consent":@YES,@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} options:0 error:NULL];
@@ -142,6 +143,7 @@ static void QueueOnline(NSString *s) {
    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5];
    req.HTTPMethod=@"POST";
    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+   [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
    [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
    [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"action":@"missing",@"consent":@YES,@"items":@[@{@"id":@"s0",@"text":s}],@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} options:0 error:NULL];
