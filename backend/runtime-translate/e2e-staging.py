@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Disposable real HTTP/PostgreSQL/service-operator/relay proof. Never changes existing staging."""
-import os,sys,tempfile,subprocess,json,secrets,socket,time,base64,hmac,hashlib,urllib.request,urllib.error,selectors
+import os,sys,tempfile,subprocess,json,secrets,socket,time,base64,hmac,hashlib,urllib.request,urllib.error,selectors,signal
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
 private=os.environ.get('RUNTIME_ACTIVATION_PRIVATE_KEY_FILE')
@@ -41,10 +41,10 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
   env={**os.environ,'RUNTIME_STAGING_ONLY':'true','RUNTIME_STAGING_PG_SOCKET':str(t),'RUNTIME_STAGING_PG_PORT':pgport,
    'SUPABASE_URL':'http://127.0.0.1/unused-independent-adapter','SUPABASE_SERVICE_ROLE_KEY':'isolated-adapter-no-production-secret','RUNTIME_STAGING_JWT_SECRET':secret,'RUNTIME_STAGING_PATH':path,'RUNTIME_PUBLIC_ENDPOINT':'https://fixture.invalid'+path,
    'RUNTIME_ACTIVATION_PRIVATE_PEM':Path(private).read_text(),'PORT':httpport}
-  p=subprocess.Popen(['npx','--yes','deno','run','--allow-env','--allow-net','--allow-read','--allow-run=/usr/bin/psql',str(root/'backend/runtime-translate/staging.ts')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+  p=subprocess.Popen(['npx','--yes','deno','run','--allow-env','--allow-net','--allow-read','--allow-run=/usr/bin/psql',str(root/'backend/runtime-translate/staging.ts')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,start_new_session=True)
   children.append(p);waitline(p,'Listening on')
   relayenv={**os.environ,'MIRSA_RELAY_BASE_MODULE':base,'MCP_TOKEN':mcp,'HOOK_TOKEN':hook,'DB_PATH':str(t/'relay.sqlite'),'PORT':relayport}
-  relay=subprocess.Popen(['node',str(root/'backend/mcp-translation-relay/extension.mjs')],env=relayenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+  relay=subprocess.Popen(['node',str(root/'backend/mcp-translation-relay/extension.mjs')],env=relayenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,start_new_session=True)
   children.append(relay);waitline(relay,'translation relay ready')
   endpoint='http://127.0.0.1:'+httpport+path;revision='a'*64;bundle='com.example.queueproof'
   scope={'consent':True,'bundleId':bundle,'revision':revision}
@@ -103,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
    'RUNTIME_STRONG_MODELS':'gemini-2.5-flash','RUNTIME_PROVIDER_ORIGINS':'https://generativelanguage.googleapis.com'}
   pp=subprocess.Popen(['npx','--yes','deno','run','--allow-env','--allow-net','--allow-read','--allow-run=/usr/bin/psql',
    '--preload',str(root/'backend/runtime-translate/fixture-provider.ts'),str(root/'backend/runtime-translate/staging.ts')],
-   env=providerenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+   env=providerenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True,start_new_session=True)
   children.append(pp);waitline(pp,'Listening on')
   endpoint='http://127.0.0.1:'+providerport+path
   status,reply=post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)
@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
   print(json.dumps({'proof':'isolated real HTTP PG account issuer queue relay operator OTA revocation','passed':True,'liveKatWake':False,'provider':'unconfigured failure durability + test-only deterministic transport (NOT live Gemini)','newLaunchRefresh':True,'allOutputReview':True,'katCASAndPriority':True,'batchBound32':True,'crashReplayDeduped':True,'noLiveServicesChanged':True}))
  finally:
   for c in children:
-   c.terminate()
+   os.killpg(c.pid,signal.SIGTERM)
    try:c.wait(timeout=5)
-   except subprocess.TimeoutExpired:c.kill();c.wait()
+   except subprocess.TimeoutExpired:os.killpg(c.pid,signal.SIGKILL);c.wait()
   subprocess.run([pg+'/pg_ctl','-D',str(t/'db'),'-m','immediate','stop'],capture_output=True)
