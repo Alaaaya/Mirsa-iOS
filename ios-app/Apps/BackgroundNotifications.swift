@@ -37,6 +37,57 @@ enum BackgroundNotifications {
         return ["schema": 1, "enabled": true, "methods": BackgroundNotificationMethod.allCases.filter { methods.contains($0) }.map(\.rawValue)]
     }
 
+    private enum VerificationError: Error { case invalid }
+
+    /// The same fail-closed boundary is used for the staged app and final signed archive.
+    /// Check actual files, parsed load commands and selected opt-in methods, not a log notice.
+    static func verifyInstalled(app: URL, methods: [BackgroundNotificationMethod]) throws {
+        do {
+            let fm = FileManager.default
+            let frameworks = app.appendingPathComponent("Frameworks")
+            let library = frameworks.appendingPathComponent("MirsaBackground.dylib")
+            let config = app.appendingPathComponent(configurationName)
+            let infoPath = app.appendingPathComponent("Info.plist")
+            for path in [app, frameworks, library, config, infoPath] {
+                guard (try? fm.destinationOfSymbolicLink(atPath: path.path)) == nil else {
+                    throw VerificationError.invalid
+                }
+            }
+            let attributes = try config.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            let libraryAttributes = try library.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard attributes.isRegularFile == true, let size = attributes.fileSize, size > 0, size < 16_384,
+                  libraryAttributes.isRegularFile == true, let librarySize = libraryAttributes.fileSize,
+                  librarySize > 0, librarySize < 4 * 1024 * 1024,
+                  let actual = try PropertyListSerialization.propertyList(from: Data(contentsOf: config), format: nil) as? [String: Any],
+                  let expected = configuration(enabled: true, methods: methods),
+                  NSDictionary(dictionary: actual).isEqual(to: expected) else { throw VerificationError.invalid }
+            let info = try IPAEditorService.info(in: app)
+            guard let executable = info["CFBundleExecutable"] as? String, !executable.isEmpty,
+                  !executable.contains("/"), !executable.contains("\\"), executable != ".", executable != ".." else {
+                throw VerificationError.invalid
+            }
+            let main = app.appendingPathComponent(executable)
+            guard (try? fm.destinationOfSymbolicLink(atPath: main.path)) == nil else { throw VerificationError.invalid }
+            let loads = try IPAEditorService.dependencies(of: main)
+            guard loads.filter({ $0 == "@loader_path/Frameworks/MirsaBackground.dylib" }).count == 1 else {
+                throw VerificationError.invalid
+            }
+            let modes = info["UIBackgroundModes"] as? [String] ?? []
+            if methods.contains(.audio), !modes.contains("audio") { throw VerificationError.invalid }
+            if methods.contains(.significantLocation) {
+                guard modes.contains("location") else { throw VerificationError.invalid }
+                for key in ["NSLocationWhenInUseUsageDescription", "NSLocationAlwaysAndWhenInUseUsageDescription"] {
+                    guard let value = info[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        throw VerificationError.invalid
+                    }
+                }
+            }
+            try IPAEditorService.run("validate", input: library)
+        } catch {
+            throw SideloadError.message(personalText("The requested background notifications could not be verified. No IPA was exported.", "ما قدرت أتأكد من إشعارات الخلفية المطلوبة. ما تم تصدير IPA."))
+        }
+    }
+
     /// Transactional changes to the extracted COPY. The caller pins/verifies the retained IPA.
     /// Called once before the caller saves Info.plist. No translation state or backend access.
     static func apply(app: URL, info: inout [String: Any], options: PersonalProjectOptions,
@@ -76,6 +127,7 @@ enum BackgroundNotifications {
             .write(to: copy.appendingPathComponent(configurationName), options: [.atomic, .completeFileProtection])
         try PropertyListSerialization.data(fromPropertyList: updatedInfo, format: .binary, options: 0)
             .write(to: copy.appendingPathComponent("Info.plist"), options: .atomic)
+        try verifyInstalled(app: copy, methods: options.backgroundMethods)
         let backup = work.appendingPathComponent("original.app")
         try fm.moveItem(at: app, to: backup)
         do { try fm.moveItem(at: copy, to: app) }

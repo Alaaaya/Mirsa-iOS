@@ -77,6 +77,57 @@ final class BackgroundNotifications25Tests: XCTestCase {
         XCTAssertNil(info["NSLocationAlwaysAndWhenInUseUsageDescription"])
     }
 
+    func testRequiredBackgroundProofRejectsMissingConfigLibraryAndLoadCommand() throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24Fixture", withExtension: "ipa"))
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        var options = PersonalProjectOptions()
+        options.backgroundNotifications = true
+        options.backgroundMethods = [.audio, .significantLocation]
+        let stage = root.appendingPathComponent("enabled")
+        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        let enabled = try PersonalCertificateSigner.prepare(ipa: fixture, stage: stage, options: options)
+        try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: options.backgroundMethods)
+        XCTAssertThrowsError(try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: [.audio]))
+        let config = enabled.app.appendingPathComponent(BackgroundNotifications.configurationName)
+        let originalConfig = try Data(contentsOf: config)
+        try fm.removeItem(at: config)
+        XCTAssertThrowsError(try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: options.backgroundMethods))
+        let external = root.appendingPathComponent("outside.plist")
+        try originalConfig.write(to: external)
+        try fm.createSymbolicLink(at: config, withDestinationURL: external)
+        XCTAssertThrowsError(try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: options.backgroundMethods))
+        try fm.removeItem(at: config)
+        try originalConfig.write(to: config)
+        let library = enabled.app.appendingPathComponent("Frameworks/MirsaBackground.dylib")
+        let originalLibrary = try Data(contentsOf: library)
+        try fm.removeItem(at: library)
+        XCTAssertThrowsError(try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: options.backgroundMethods))
+        try originalLibrary.write(to: library)
+        let infoURL = enabled.app.appendingPathComponent("Info.plist")
+        let originalInfo = try Data(contentsOf: infoURL)
+        var incompleteInfo = enabled.info
+        incompleteInfo.removeValue(forKey: "UIBackgroundModes")
+        try PropertyListSerialization.data(fromPropertyList: incompleteInfo, format: .binary, options: 0).write(to: infoURL)
+        XCTAssertThrowsError(try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: options.backgroundMethods))
+        try originalInfo.write(to: infoURL)
+        try BackgroundNotifications.verifyInstalled(app: enabled.app, methods: options.backgroundMethods)
+        let plainStage = root.appendingPathComponent("plain")
+        try fm.createDirectory(at: plainStage, withIntermediateDirectories: true)
+        let plain = try PersonalCertificateSigner.prepare(ipa: fixture, stage: plainStage, options: .init())
+        try fm.createDirectory(at: plain.app.appendingPathComponent("Frameworks"), withIntermediateDirectories: true)
+        try originalLibrary.write(to: plain.app.appendingPathComponent("Frameworks/MirsaBackground.dylib"))
+        try originalConfig.write(to: plain.app.appendingPathComponent(BackgroundNotifications.configurationName))
+        var plainInfo = BackgroundNotifications.configuredInfo(plain.info, enabled: true, methods: options.backgroundMethods)
+        // Metadata and payload alone are insufficient without the executable load command.
+        plainInfo["CFBundleExecutable"] = plain.info["CFBundleExecutable"]
+        try PropertyListSerialization.data(fromPropertyList: plainInfo, format: .binary, options: 0)
+            .write(to: plain.app.appendingPathComponent("Info.plist"))
+        XCTAssertThrowsError(try BackgroundNotifications.verifyInstalled(app: plain.app, methods: options.backgroundMethods))
+    }
+
     func testNativeSigningInjectionPreservesOriginalAndToggleOff() throws {
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24Fixture", withExtension: "ipa"))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

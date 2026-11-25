@@ -692,6 +692,9 @@ enum PersonalCertificateSigner {
             try RuntimeArabicPipeline.verifyInstalled(app: app, revision: originalSHA, bundleID: runtimeBundleID,
                                                      expectedConfiguration: runtimeConfiguration)
         }
+        if options.backgroundNotifications {
+            try BackgroundNotifications.verifyInstalled(app: app, methods: options.backgroundMethods)
+        }
         try RuntimeOriginalIPA.verify(ipa, expected: originalSHA)
         try PersonalInjectionProof.verify(injectionProof, app: app)
         progress(PersonalSigningEvent(stage: .packaging))
