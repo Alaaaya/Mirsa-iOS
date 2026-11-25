@@ -32,7 +32,7 @@ jobs:
           deno-version: v2.x
       - name: Backend unit and schema type checks
         run: |
-          node --test backend/runtime-translate/logic.test.mjs
+          node --test backend/runtime-translate/logic.test.mjs backend/mcp-translation-relay/extension.test.mjs
           deno check backend/runtime-translate/index.ts
       - name: Disposable schema and concurrent durable quota validation
         run: |
@@ -55,6 +55,7 @@ jobs:
           bash hook-engine/build.sh
           python3 scripts/test-verify-hook-engine.py
           python3 scripts/verify-hook-engine.py
+          (cd runtime-translation && clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation MergeRace.m -o /tmp/mirsa-merge-race && /tmp/mirsa-merge-race)
           bash runtime-translation/build-apple.sh
           bash background-notifications/build-apple.sh
           python3 background-notifications/test_background.py
@@ -134,6 +135,7 @@ jobs:
           bash hook-engine/build.sh
           python3 scripts/test-verify-hook-engine.py
           python3 scripts/verify-hook-engine.py
+          (cd runtime-translation && clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation MergeRace.m -o /tmp/mirsa-merge-race && /tmp/mirsa-merge-race)
           bash runtime-translation/build-apple.sh
           bash background-notifications/build-apple.sh
           python3 background-notifications/test_background.py
