@@ -66,6 +66,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
     /// Covers the exact prepare -> dispatch -> Rust signer -> pack -> retain chain.
     func testGenericDirectLoaderAndHookDependencyUseExactProductionAttempt() throws {
         let fixture = try realFixture(name: "GenericLaunch25Fixture"), bundle = Bundle(for: Self.self)
+        let mainExecutable = try XCTUnwrap(IPAEditorService.info(in: fixture.app)["CFBundleExecutable"] as? String)
         let material = PersonalIdentityVault.Material(
             p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
             password: "mirsa-test",
@@ -79,7 +80,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             options.libraries = [source]
             options.selectedComponentIDs = ["fixture:" + source.lastPathComponent]
             options.draftRevision = "original-draft"
-            options.injections = [InjectionPlanEntry(library: source.path, method: method.rawValue, target: "@main")]
+            options.injections = [InjectionPlanEntry(id: options.selectedComponentIDs[0], library: source.path, target: mainExecutable, method: method)]
             let result = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: options)
             try PersonalInjectionProof.verifyRecord(result.url)
             let proof = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
@@ -109,8 +110,8 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             // Changing the next draft cannot relabel this output's immutable evidence.
             options.selectedComponentIDs = ["different-draft"]
             options.draftRevision = "different-draft"
-            let retainedRoot = fixture.root.appendingPathComponent(UUID().uuidString)
-            let retained = try CertificateInstall.retain(result.url, root: retainedRoot)
+            let retained = try CertificateInstall.retain(result.url)
+            defer { try? FileManager.default.removeItem(at: retained.deletingLastPathComponent()) }
             try PersonalInjectionProof.verifyRecord(retained)
             let retainedProof = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
                 from: Data(contentsOf: PersonalInjectionProof.sidecar(retained)))
@@ -133,6 +134,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
 
     func testExactAlaaAndMirsaHookTestUseRealSigningAndPinnedPayloads() throws {
         let fixture = try realFixture(name: "ExactLaunch25Fixture"), bundle = Bundle(for: Self.self)
+        let mainExecutable = try XCTUnwrap(IPAEditorService.info(in: fixture.app)["CFBundleExecutable"] as? String)
         let material = PersonalIdentityVault.Material(
             p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
             password: "mirsa-test",
@@ -149,7 +151,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             var options = PersonalProjectOptions()
             options.libraries = [source]; options.selectedComponentIDs = ["exact:" + name]
             options.draftRevision = "exact-original-draft"
-            options.injections = [InjectionPlanEntry(library: source.path, method: InjectionMethod.load_control.rawValue, target: "@main")]
+            options.injections = [InjectionPlanEntry(id: options.selectedComponentIDs[0], library: source.path, target: mainExecutable, method: .load_control)]
             let result = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: options)
             try PersonalInjectionProof.verifyRecord(result.url)
             let attempt = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
