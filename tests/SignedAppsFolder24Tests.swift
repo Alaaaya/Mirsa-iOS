@@ -80,20 +80,71 @@ final class SignedAppsFolder24Tests: XCTestCase {
     private func le16(_ v: Int) -> Data { Data([UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)]) }
     private func le32(_ v: UInt32) -> Data { Data([UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8(v >> 24)]) }
 
+    private func put(_ target: inout Data, _ parts: [Data]) {
+        for part in parts { target.append(part) }
+    }
+
     /// Minimal stored-zip builder so tests control names, bytes and unix modes exactly.
+    /// Every append is a separate typed statement so the type checker never sees a long Data concatenation.
     private func zip(_ files: [(String, Data, UInt32)]) -> Data {
-        var out = Data(), central = Data()
+        var out = Data()
+        var central = Data()
         for (name, bytes, mode) in files {
-            let n = Data(name.utf8), crc = CRC32.update(0, bytes), offset = UInt32(out.count)
-            out += le32(0x04034b50) + le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(crc)
-                + le32(UInt32(bytes.count)) + le32(UInt32(bytes.count)) + le16(n.count) + le16(0) + n + bytes
-            central += le32(0x02014b50) + le16(0x031E) + le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(crc)
-                + le32(UInt32(bytes.count)) + le32(UInt32(bytes.count)) + le16(n.count) + le16(0) + le16(0)
-                + le16(0) + le16(0) + le32(mode << 16) + le32(offset) + n
+            let n = Data(name.utf8)
+            let crc: UInt32 = CRC32.update(0, bytes)
+            let offset = UInt32(out.count)
+            let size = UInt32(bytes.count)
+            let nameLength = n.count
+            var local: [Data] = []
+            local.append(le32(0x04034b50))
+            local.append(le16(20))
+            local.append(le16(0))
+            local.append(le16(0))
+            local.append(le16(0))
+            local.append(le16(0))
+            local.append(le32(crc))
+            local.append(le32(size))
+            local.append(le32(size))
+            local.append(le16(nameLength))
+            local.append(le16(0))
+            local.append(n)
+            local.append(bytes)
+            put(&out, local)
+            var entry: [Data] = []
+            entry.append(le32(0x02014b50))
+            entry.append(le16(0x031E))
+            entry.append(le16(20))
+            entry.append(le16(0))
+            entry.append(le16(0))
+            entry.append(le16(0))
+            entry.append(le16(0))
+            entry.append(le32(crc))
+            entry.append(le32(size))
+            entry.append(le32(size))
+            entry.append(le16(nameLength))
+            entry.append(le16(0))
+            entry.append(le16(0))
+            entry.append(le16(0))
+            entry.append(le16(0))
+            entry.append(le32(mode << 16))
+            entry.append(le32(offset))
+            entry.append(n)
+            put(&central, entry)
         }
         let cdOffset = UInt32(out.count)
-        return out + central + le32(0x06054b50) + le16(0) + le16(0) + le16(files.count) + le16(files.count)
-            + le32(UInt32(central.count)) + le32(cdOffset) + le16(0)
+        let count = files.count
+        var footer: [Data] = []
+        footer.append(central)
+        footer.append(le32(0x06054b50))
+        footer.append(le16(0))
+        footer.append(le16(0))
+        footer.append(le16(count))
+        footer.append(le16(count))
+        footer.append(le32(UInt32(central.count)))
+        footer.append(le32(cdOffset))
+        footer.append(le16(0))
+        put(&out, footer)
+        return out
     }
 
     private func png(_ side: Int, red: CGFloat) -> Data {
@@ -123,12 +174,44 @@ final class SignedAppsFolder24Tests: XCTestCase {
         return CGFloat(ctx.data!.load(as: UInt8.self)) / 255
     }
 
+    /// Verify all three known colors in the own-code fixture, independently of image orientation.
+    /// The cyan diagonals deliberately lower average red, so a solid-red assertion would be wrong.
+    private func assertFixtureArtwork(_ png: Data) throws {
+        let image = try XCTUnwrap(UIImage(data: png)?.cgImage)
+        let width = image.width
+        let height = image.height
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height,
+                                             bitsPerComponent: 8, bytesPerRow: width * 4,
+                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: bitmapInfo))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        var cyan = 0
+        var magenta = 0
+        var yellow = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * 4
+                let r = pixels[index]
+                let g = pixels[index + 1]
+                let b = pixels[index + 2]
+                if r < 30 && g > 150 && b > 180 { cyan += 1 }
+                if r > 220 && g < 40 && b > 150 { magenta += 1 }
+                if r > 220 && g > 180 && b < 40 { yellow += 1 }
+            }
+        }
+        let minimum = width * height / 10
+        XCTAssertGreaterThan(cyan, minimum, "Real artwork must retain its cyan diagonals")
+        XCTAssertGreaterThan(magenta, minimum, "Real artwork must retain magenta patches")
+        XCTAssertGreaterThan(yellow, minimum, "Real artwork must retain yellow patches")
+    }
+
     func testRealFixtureIconIsExtractedFromSignedIPA() throws {
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24Fixture", withExtension: "ipa"))
         let png = try XCTUnwrap(SignedIPAIcon.thumbnailPNG(in: fixture))
         let image = try XCTUnwrap(UIImage(data: png))
         XCTAssertGreaterThanOrEqual(image.size.width, 16)
-        XCTAssertGreaterThan(try dominantRed(png), 0.9, "Distinct magenta/yellow fixture art, not a generic symbol")
+        try assertFixtureArtwork(png)
     }
 
     func testFixtureWithoutIconFallsBack() throws {
@@ -192,14 +275,130 @@ final class SignedAppsFolder24Tests: XCTestCase {
         defer { try? fm.removeItem(at: root) }
         let withIcon = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24Fixture", withExtension: "ipa"))
         let noIcon = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24NoIcon", withExtension: "ipa"))
-        for (name, src) in [("A.ipa", withIcon), ("B.ipa", noIcon)] {
+        let carIcon = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24CarIcon", withExtension: "ipa"))
+        let sources: [(String, URL)] = [("A.ipa", withIcon), ("B.ipa", noIcon), ("C.ipa", carIcon)]
+        for (name, src) in sources {
             let dir = root.appendingPathComponent(UUID().uuidString)
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             try fm.copyItem(at: src, to: dir.appendingPathComponent(name))
         }
         let rows = try SignedAppsCatalog.load(root: root)
-        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.count, 3)
         XCTAssertNotNil(rows.first { $0.url.lastPathComponent == "A.ipa" }?.iconPNG)
         XCTAssertNil(rows.first { $0.url.lastPathComponent == "B.ipa" }?.iconPNG)
+        XCTAssertNotNil(rows.first { $0.url.lastPathComponent == "C.ipa" }?.iconPNG, "Assets.car-only IPA must yield its real icon")
+    }
+
+    // MARK: Strict icon names, iPad metadata, compiled asset catalog
+
+    private func runAdversarial(_ info: [String: Any], files: [(String, Data)]) throws -> Data? {
+        var entries: [(String, Data, UInt32)] = [("Payload/A.app/Info.plist", try plist(info), 0o100644)]
+        for (n, d) in files { entries.append(("Payload/A.app/" + n, d, 0o100644)) }
+        let url = try write(zip(entries))
+        defer { try? FileManager.default.removeItem(at: url) }
+        return SignedIPAIcon.thumbnailPNG(in: url)
+    }
+
+    func testStrictSuffixMatchingRejectsUnrelatedPrefixes() throws {
+        XCTAssertTrue(SignedIPAIcon.matches(file: "Icon.png", name: "Icon"))
+        XCTAssertTrue(SignedIPAIcon.matches(file: "Icon.png", name: "Icon.png"))
+        XCTAssertTrue(SignedIPAIcon.matches(file: "Icon60x60@2x.png", name: "Icon"))
+        XCTAssertTrue(SignedIPAIcon.matches(file: "Icon83.5x83.5@2x~ipad.png", name: "Icon"))
+        XCTAssertTrue(SignedIPAIcon.matches(file: "Icon@3x~iphone.png", name: "Icon"))
+        XCTAssertTrue(SignedIPAIcon.matches(file: "Icon60x60@2x.png", name: "Icon60x60"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "IconBanner.png", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon60x60@2x\n.png", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon\n", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon-Large.png", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon60x61@2x.png", name: "Icon"), "non-square size is not an icon")
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon60x60@4x.png", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon60x60@2x~tv.png", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon2000x2000.png", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon.jpg", name: "Icon"))
+        XCTAssertFalse(SignedIPAIcon.matches(file: "Icon.png", name: ""))
+    }
+
+    func testUnrelatedPrefixFileIsNotUsedAsIcon() throws {
+        let result = try runAdversarial(["CFBundleIconFiles": ["Icon"]],
+                                        files: [("IconBanner.png", png(64, red: 1)), ("Icon-extra@2x.png", png(64, red: 1))])
+        XCTAssertNil(result)
+    }
+
+    func testIPadOnlyMetadataAndExactExtensions() throws {
+        let padInfo: [String: Any] = ["CFBundleIcons~ipad": ["CFBundlePrimaryIcon": ["CFBundleIconFiles": ["PadIcon"]]]]
+        XCTAssertTrue(SignedIPAIcon.iconNames(padInfo).contains("PadIcon"))
+        XCTAssertEqual(SignedIPAIcon.iconNames(["CFBundleIconFiles~ipad": ["Top~"], "CFBundleIconFile": "Old"]), ["Top~", "Old", "AppIcon"])
+        let found = try runAdversarial(padInfo, files: [("PadIcon76x76@2x~ipad.png", png(152, red: 1))])
+        XCTAssertGreaterThan(try dominantRed(try XCTUnwrap(found)), 0.9)
+        let pngName = try runAdversarial(["CFBundleIconFiles": ["Named.png"]], files: [("Named@2x.png", png(128, red: 1))])
+        XCTAssertNotNil(pngName)
+        let wrongExtension = try runAdversarial(["CFBundleIconFiles": ["Named"]], files: [("Named.jpg", png(128, red: 1)), ("Named.png.exe", png(128, red: 1))])
+        XCTAssertNil(wrongExtension)
+    }
+
+    private func carBytes(from ipaName: String) throws -> Data {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: ipaName, withExtension: "ipa"))
+        var limits = IPALimits()
+        limits.maxEntries = 20_000
+        limits.rejectSymlinks = true
+        let zipReader = try ZipReader(data: try Data(contentsOf: url), limits: limits)
+        let entry = try XCTUnwrap(zipReader.entry("Payload/SignedFixture.app/Assets.car"))
+        return try zipReader.read(entry, length: entry.uncompressedSize, limits: limits)
+    }
+
+    private func isolatedDefaults() -> UserDefaults {
+        let suite = "SignedFolder24Tests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    func testAssetsCarOnlyFixtureHasNoLooseIconsAndYieldsRealIcon() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SignedFolder24CarIcon", withExtension: "ipa"))
+        var limits = IPALimits()
+        limits.maxEntries = 20_000
+        let zipReader = try ZipReader(data: try Data(contentsOf: url), limits: limits)
+        XCTAssertFalse(zipReader.entries.contains { $0.name.lowercased().hasSuffix(".png") }, "fixture must be compiled-asset only")
+        XCTAssertNotNil(zipReader.entry("Payload/SignedFixture.app/Assets.car"))
+        let png = try XCTUnwrap(SignedIPAIcon.thumbnailPNG(in: url))
+        XCTAssertGreaterThan(try dominantRed(png), 0.9)
+        let image = try XCTUnwrap(UIImage(data: png))
+        XCTAssertLessThanOrEqual(max(image.size.width, image.size.height), 180)
+    }
+
+    func testCarWithUnrelatedNamesYieldsNoIcon() throws {
+        let car = try carBytes(from: "SignedFolder24CarIcon")
+        XCTAssertNil(SignedIPAIcon.thumbnailPNG(carData: car, names: ["OtherIcon", "IconBanner"], defaults: isolatedDefaults()))
+        XCTAssertNotNil(SignedIPAIcon.thumbnailPNG(carData: car, names: ["AppIcon"], defaults: isolatedDefaults()))
+    }
+
+    func testInvalidMissingAndOversizeCarFallBack() throws {
+        let info: [String: Any] = ["CFBundleIcons": ["CFBundlePrimaryIcon": ["CFBundleIconName": "AppIcon"]]]
+        let defaults = isolatedDefaults()
+        XCTAssertNil(SignedIPAIcon.thumbnailPNG(carData: Data(), names: ["AppIcon"], defaults: defaults))
+        XCTAssertNil(SignedIPAIcon.thumbnailPNG(carData: Data(count: 4096), names: ["AppIcon"], defaults: defaults))
+        var truncated = Data("BOMStore".utf8)
+        truncated.append(Data(count: 600))
+        XCTAssertFalse(SignedIPAIcon.isPlausibleBOMStore(truncated), "zero block counts and offsets are malformed")
+        XCTAssertNil(SignedIPAIcon.thumbnailPNG(carData: truncated, names: ["AppIcon"], defaults: defaults))
+        XCTAssertNil(try runAdversarial(info, files: []), "missing Assets.car")
+        let junk = try runAdversarial(info, files: [("Assets.car", Data("not a car".utf8))])
+        XCTAssertNil(junk)
+        let oversize = try runAdversarial(info, files: [("Assets.car", Data(count: Int(SignedIPAIcon.maxCarBytes) + 1))])
+        XCTAssertNil(oversize)
+        XCTAssertTrue((defaults.stringArray(forKey: SignedIPAIcon.quarantineKey) ?? []).isEmpty)
+    }
+
+    func testCrashMarkerQuarantinesCarAndIsClearedAfterNormalParse() throws {
+        let car = try carBytes(from: "SignedFolder24CarIcon")
+        let digest = SignedIPAIcon.carDigest(car)
+        let defaults = isolatedDefaults()
+        XCTAssertFalse(SignedIPAIcon.isQuarantined(digest, defaults: defaults))
+        XCTAssertNotNil(SignedIPAIcon.thumbnailPNG(carData: car, names: ["AppIcon"], defaults: defaults))
+        XCTAssertFalse(SignedIPAIcon.isQuarantined(digest, defaults: defaults), "marker cleared after a normal return")
+        // Simulate a previous launch that crashed mid-parse: the marker remains and the car is skipped.
+        defaults.set([digest], forKey: SignedIPAIcon.quarantineKey)
+        XCTAssertNil(SignedIPAIcon.thumbnailPNG(carData: car, names: ["AppIcon"], defaults: defaults))
+        XCTAssertTrue(SignedIPAIcon.isQuarantined(digest, defaults: defaults))
     }
 }

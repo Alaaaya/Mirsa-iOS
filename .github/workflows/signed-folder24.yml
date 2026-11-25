@@ -120,6 +120,35 @@ jobs:
           codesign --force --sign - build/NoIconFixture/Payload/SignedFixture.app
           codesign --verify --strict build/NoIconFixture/Payload/SignedFixture.app
           (cd build/NoIconFixture && zip -q -r ../../tests/fixtures/SignedFolder24NoIcon.ipa Payload)
+      - name: Prepare Assets.car-only fixture (own actool compiled AppIcon, no loose icon PNGs)
+        run: |
+          rm -rf build/CarFixture build/CarAssets
+          mkdir -p build/CarAssets/Assets.xcassets/AppIcon.appiconset build/CarFixture/compiled
+          python3 - <<'PY'
+          import pathlib,json,zlib,struct
+          size=1024
+          row=b"\x00"+bytes((230,20,30))*size
+          raw=row*size
+          def chunk(t,d): c=struct.pack(">I",len(d))+t+d; return c+struct.pack(">I",zlib.crc32(t+d)&0xffffffff)
+          d=pathlib.Path("build/CarAssets/Assets.xcassets")
+          (d/"AppIcon.appiconset/icon-1024.png").write_bytes(b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",size,size,8,2,0,0,0))+chunk(b"IDAT",zlib.compress(raw))+chunk(b"IEND",b""))
+          (d/"Contents.json").write_text(json.dumps({"info":{"version":1,"author":"xcode"}}))
+          (d/"AppIcon.appiconset/Contents.json").write_text(json.dumps({"images":[{"idiom":"universal","platform":"ios","size":"1024x1024","filename":"icon-1024.png"}],"info":{"version":1,"author":"xcode"}}))
+          PY
+          xcrun actool build/CarAssets/Assets.xcassets --compile build/CarFixture/compiled --platform iphoneos --minimum-deployment-target 18.0 --app-icon AppIcon --output-partial-info-plist build/CarFixture/partial.plist --target-device iphone --target-device ipad
+          test -s build/CarFixture/compiled/Assets.car
+          mkdir -p build/CarFixture/Payload/SignedFixture.app
+          cp build/SignedFixture/Payload/SignedFixture.app/SignedFixture build/CarFixture/Payload/SignedFixture.app/SignedFixture
+          cp build/CarFixture/compiled/Assets.car build/CarFixture/Payload/SignedFixture.app/Assets.car
+          python3 - <<'PY'
+          import pathlib,plistlib
+          base={"CFBundleIdentifier":"com.alaa.mirsa.ci.signedfolder.car","CFBundleExecutable":"SignedFixture","CFBundlePackageType":"APPL","CFBundleDisplayName":"CI Car Icon Fixture","CFBundleShortVersionString":"1.0","CFBundleVersion":"1","CFBundleIcons":{"CFBundlePrimaryIcon":{"CFBundleIconName":"AppIcon"}}}
+          pathlib.Path("build/CarFixture/Payload/SignedFixture.app/Info.plist").write_bytes(plistlib.dumps(base))
+          PY
+          codesign --force --sign - build/CarFixture/Payload/SignedFixture.app
+          codesign --verify --strict build/CarFixture/Payload/SignedFixture.app
+          if find build/CarFixture/Payload -iname '*.png' | grep .; then echo "loose PNG present in car-only fixture"; exit 1; fi
+          (cd build/CarFixture && zip -q -r ../../tests/fixtures/SignedFolder24CarIcon.ipa Payload)
       - name: Run actual SwiftUI integration and Arabic snapshots
         run: |
           set -o pipefail
@@ -147,6 +176,11 @@ jobs:
           cp tests/fixtures/SignedFolder24NoIcon.ipa "$RETAINED2/SignedFolder24NoIcon.ipa"
           cp build/NoIconFixture/Payload/SignedFixture.app/Info.plist "$RETAINED2/Info.plist"
           cmp tests/fixtures/SignedFolder24NoIcon.ipa "$RETAINED2/SignedFolder24NoIcon.ipa"
+          RETAINED3="$CONTAINER/Library/Application Support/MirsaSignedExports/2C5D5FD4-F3C2-4FA2-9B4D-4B9F3A2D7E11"
+          mkdir -p "$RETAINED3"
+          cp tests/fixtures/SignedFolder24CarIcon.ipa "$RETAINED3/SignedFolder24CarIcon.ipa"
+          cp build/CarFixture/Payload/SignedFixture.app/Info.plist "$RETAINED3/Info.plist"
+          cmp tests/fixtures/SignedFolder24CarIcon.ipa "$RETAINED3/SignedFolder24CarIcon.ipa"
           cmp tests/fixtures/SignedFolder24Fixture.ipa "$RETAINED/SignedFolder24Fixture.ipa"
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/SignedFolderUI.xcresult -only-testing:MirsaUITests/SignedAppsFolder24UITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/signed-folder-ui.log
       - name: Export runtime screenshot attachments

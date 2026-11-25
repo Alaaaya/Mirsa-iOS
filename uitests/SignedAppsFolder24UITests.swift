@@ -22,7 +22,8 @@ final class SignedAppsFolder24UITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["CI Signing Fixture"].exists)
         let real = app.images["signed-file-icon-real"]
         XCTAssertTrue(real.waitForExistence(timeout: 10), "Row with an icon in its signed IPA must render the extracted real icon")
-        XCTAssertEqual(app.images.matching(identifier: "signed-file-icon-real").count, 1)
+        XCTAssertTrue(app.staticTexts["CI Car Icon Fixture"].exists)
+        XCTAssertEqual(app.images.matching(identifier: "signed-file-icon-real").count, 2, "loose-PNG row and Assets.car-only row both show real icons")
         XCTAssertEqual(app.images.matching(identifier: "signed-file-icon-generic").count, 1, "Icon-less signed IPA must use the generic fallback")
         XCTAssertTrue(app.staticTexts["CI No Icon Fixture"].exists)
         XCTAssertEqual(real.frame.width, 44, accuracy: 1)
