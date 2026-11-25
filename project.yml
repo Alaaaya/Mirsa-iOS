@@ -110,10 +110,10 @@ targets:
     sources:
       - path: tests
         excludes:
-          - fixtures/foreground
-          - fixtures/tendies
-          - fixtures/generic-injection25
-          - fixtures/exact-hooks25
+          - "[Ff]ixtures/foreground/**"
+          - "[Ff]ixtures/tendies/**"
+          - "[Ff]ixtures/generic-injection25/**"
+          - "[Ff]ixtures/exact-hooks25/**"
       - path: tests/fixtures/exact-hooks25/ExactLaunch25Fixture.ipa
         buildPhase: resources
       - path: tests/fixtures/exact-hooks25/Alaa.dylib
