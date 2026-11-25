@@ -191,6 +191,8 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
    results=list(pool.map(lambda _:sql('select public.mirsa_runtime_provider_slot();'),range(30)))
   assert results.count('t')==1 and results.count('f')==29
   assert sql("select next_at>clock_timestamp() and failures between 1 and 4 from public.mirsa_runtime_provider_budget;")=='t'
+  for _ in range(20):assert sql('select public.mirsa_runtime_provider_backoff();')=='t'
+  assert sql("select failures=4 and next_at>clock_timestamp()+interval '230 seconds' and next_at<clock_timestamp()+interval '241 seconds' from public.mirsa_runtime_provider_budget;")=='t'
   print('Authenticated forced 429/503 persisted queue and event fallback, shared throttle 1/30 passed')
   print(json.dumps({'proof':'isolated real HTTP PG account issuer queue relay operator OTA revocation','passed':True,'liveKatWake':False,'provider':'unconfigured failure durability + test-only deterministic transport (NOT live Gemini)','newLaunchRefresh':True,'allOutputReview':True,'katCASAndPriority':True,'batchBound32':True,'crashReplayDeduped':True,'noLiveServicesChanged':True}))
  finally:

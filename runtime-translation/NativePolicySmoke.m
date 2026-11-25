@@ -137,6 +137,7 @@ int main(int argc,char **argv) {@autoreleasepool {
  Method original=class_getClassMethod(NSURLSessionConfiguration.class,@selector(ephemeralSessionConfiguration));
  Method mocked=class_getClassMethod(NSURLSessionConfiguration.class,@selector(mirsaFixtureConfiguration));
  method_exchangeImplementations(original,mocked);
+ enabled=YES; // Execute the actual render path, not its disabled early return.
  for(NSNumber *code in @[@429,@503]){
   NSMutableDictionary *fixture=[c mutableCopy];fixture[@"endpoint"]=@"https://staging.fixture.invalid/runtime";
   fixture[@"expiresAt"]=@"2033-05-19T03:33:20Z";onlineConfig=fixture;
@@ -146,7 +147,8 @@ int main(int argc,char **argv) {@autoreleasepool {
   fixtureCode=code.integerValue;fixtureCalls=0;fixtureItems=0;
   NSArray *sources=@[@"重试按钮",@"帮助按钮",@"更多按钮"];
   NSTimeInterval started=NSDate.date.timeIntervalSince1970;
-  for(NSString *source in sources){assert([Translate(source) isEqual:source]);QueueOnline(source);}
+  for(NSString *source in sources){assert([Translate(source) isEqual:source]);}
+  assert(onlineWaiting==3); // Translate itself enqueued the missing labels.
   assert(NSDate.date.timeIntervalSince1970-started<0.2); // rendering did not wait for HTTP
   NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
   BOOL waiting=YES;

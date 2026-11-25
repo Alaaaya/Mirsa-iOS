@@ -14,7 +14,7 @@ class RuntimeTests(unittest.TestCase):
   self.assertIn("onlinePositive.count>=2048",Path("OnlineMerge.h").read_text())
  def test_online_bounds(self):
   s=Path("Online.h").read_text()
-  for token in ("s.length>256","onlineWaiting>=128","batch.count>=16","chars+source.length>2048","150*NSEC_PER_MSEC","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","body.length+d.length>1048576","done(nil)","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
+  for token in ("s.length>256","onlineWaiting>=128","batch.count>=16","chars+source.length>2048","150*NSEC_PER_MSEC","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","timeoutInterval:22","23*NSEC_PER_SEC","body.length+d.length>1048576","done(nil)","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
    self.assertIn(token,s)
  def test_scoped_contract(self):
   s=Path("Online.h").read_text()
