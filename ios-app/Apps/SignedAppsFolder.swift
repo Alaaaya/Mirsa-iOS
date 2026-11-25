@@ -359,9 +359,15 @@ struct SignedAppsFolderView: View {
                                             .accessibilityLabel(item.name)
                                             .accessibilityIdentifier("signed-file-icon-real")
                                     } else {
-                                        Image(systemName: "app.badge.checkmark")
-                                            .font(.title2).foregroundStyle(MirsaPalette.accentGradient)
+                                        ZStack {
+                                            Image(systemName: "app.badge.checkmark")
+                                                .font(.title2).foregroundStyle(MirsaPalette.accentGradient)
+                                                .accessibilityHidden(true)
+                                        }
                                             .frame(width: 44, height: 44)
+                                            .contentShape(Rectangle())
+                                            .accessibilityElement(children: .ignore)
+                                            .accessibilityAddTraits(.isImage)
                                             .accessibilityLabel(personalText("Default app icon for", "أيقونة تطبيق افتراضية لـ") + " " + item.name)
                                             .accessibilityIdentifier("signed-file-icon-generic")
                                     }

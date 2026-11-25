@@ -34,6 +34,9 @@ final class SignedAppsFolder24UITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "signed-file-share").count, 3, "Every retained signed IPA has its own share action")
         XCTAssertTrue(car.exists, "Assets.car artwork must belong to its own retained app")
         XCTAssertTrue(generic.exists, "Fallback must have the icon-less app's meaningful accessibility label")
+        capture("icon-frames-before-assert")
+        let axDump = XCTAttachment(string: "real=\(real.frame) car=\(car.frame) generic=\(generic.frame)\n" + app.debugDescription)
+        axDump.name = "icon-ax-before-dimension-assert"; axDump.lifetime = .keepAlways; add(axDump)
         for icon in [real, car, generic] {
             XCTAssertEqual(icon.frame.width, 44, accuracy: 1)
             XCTAssertEqual(icon.frame.height, 44, accuracy: 1)
