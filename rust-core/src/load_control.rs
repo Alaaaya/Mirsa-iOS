@@ -33,6 +33,7 @@ fn root_relative(source: &str) -> Result<String> {
     Ok(result)
 }
 fn target_local(app: &Path, from: &Path, dep: &str) -> Result<PathBuf> {
+    if dep == hook_engine::DEPENDENCY { return hook_engine::resolve(app, dep); }
     let p = if let Some(s) = dep.strip_prefix("@loader_path/") {
         from.parent().unwrap().join(s)
     } else if let Some(s) = dep.strip_prefix("@executable_path/") {

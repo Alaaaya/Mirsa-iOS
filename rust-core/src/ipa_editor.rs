@@ -9,6 +9,8 @@ mod fat_macho;
 mod existing_libraries;
 #[path = "load_control.rs"]
 mod load_control;
+#[path = "hook_engine.rs"]
+mod hook_engine;
 #[path = "injection_methods.rs"]
 mod injection_methods;
 #[path = "tweak_targets.rs"]
@@ -871,7 +873,7 @@ fn dependency_target(
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or("Invalid dependency path")?;
-    names.get(base).cloned().ok_or_else(|| format!("Missing dependency: {dep}. Import its compatible dylib/framework yourself; Mirsa never bundles CydiaSubstrate or ElleKit."))
+    names.get(base).cloned().ok_or_else(|| format!("Missing dependency: {dep}. Import its compatible dylib/framework yourself."))
 }
 fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     let m = fs::symlink_metadata(from).map_err(err)?;
@@ -956,6 +958,9 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
     for path in libraries {
         let source = Path::new(path);
         let name = source.file_name().ok_or("Invalid tweak filename")?;
+        if name.to_string_lossy().eq_ignore_ascii_case("CydiaSubstrate.framework") {
+            return Err("CydiaSubstrate.framework is reserved for Mirsa hook engine".into());
+        }
         let target = frameworks.join(name);
         if target.exists() {
             return Err(format!(
@@ -1015,9 +1020,21 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
         }
         let m = macho(read_macho(&p)?, true)?;
         let mut commands = Vec::new();
+        hook_engine::validate_imports(&m)?;
+        let mut uses_hook_engine = false;
         for c in &m.commands {
             if c.kind != 0xd {
                 if let Some(dep) = &c.name {
+                    if hook_engine::alias(dep) {
+                        hook_engine::stage(&app)?;
+                        uses_hook_engine = true;
+                        let mut command = dylib_command(c.kind, hook_engine::DEPENDENCY, Some(&c.data))?;
+                        // Our shim ABI is 1.0.0, not the source engine's version.
+                        put32(&mut command, 16, 0x10000);
+                        put32(&mut command, 20, 0x10000);
+                        commands.push(command);
+                        continue;
+                    }
                     if !system_dependency(dep) {
                         let target = dependency_target(dep, &p, &app, &names)?;
                         queue.push(target.clone());
@@ -1031,6 +1048,10 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
                 }
             }
             commands.push(c.data.clone());
+        }
+        if uses_hook_engine {
+            let runpath = hook_engine::runpath(&p, &app)?;
+            if !commands.iter().any(|c| c == &runpath) { commands.insert(0, runpath); }
         }
         let data = write_commands(m, commands)?;
         total_code = total_code
@@ -1732,11 +1753,14 @@ mod fat_injection_tests {
             info.to_file_xml(app.join("Info.plist")).unwrap();
             let source=root.join("Oracle.dylib");fs::write(&source,original).unwrap();
             let items:Vec<tweak_targets::Injection>=serde_json::from_value(serde_json::json!([{"id":"oracle","library":source,"target":"Main"}])).unwrap();
-            let before=fs::read(app.join("Main")).unwrap();
-            let failure=tweak_targets::inject_plan(&app,&items,&[],loader,false).unwrap_err();
-            assert!(failure.contains("Missing dependency") && failure.contains("CydiaSubstrate"),"{failure}");
-            assert_eq!(fs::read(app.join("Main")).unwrap(),before);
+            tweak_targets::inject_plan(&app,&items,&[],loader,false).unwrap();
+            assert!(app.join("Frameworks/CydiaSubstrate.framework/CydiaSubstrate").is_file());
+            assert!(dependencies(&app.join("Frameworks/Oracle.dylib")).unwrap().iter().any(|s|s==hook_engine::DEPENDENCY));
             assert_eq!(fs::read(&source).unwrap(),original);
+            // Restore a clean target before checking the standalone path.
+            fs::remove_dir_all(app.join("Frameworks")).unwrap();
+            let mut main=include_bytes!("../../loader/MirsaLoader.dylib").to_vec();put32(&mut main,12,2);
+            fs::write(app.join("Main"),main).unwrap();
             // A universal, real compiled, standalone library proves the complete path.
             let generic=include_bytes!("../../loader/MirsaLoader.dylib").to_vec();
             let mut e=generic.clone();put32(&mut e,8,2);
