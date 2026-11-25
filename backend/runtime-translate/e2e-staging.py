@@ -9,7 +9,11 @@ if not private or not base:raise SystemExit('Explicit staging signing key and ex
 pg='/usr/lib/postgresql/16/bin'
 def port():
  s=socket.socket();s.bind(('127.0.0.1',0));p=s.getsockname()[1];s.close();return str(p)
-def run(cmd,**kw):return subprocess.run(cmd,text=True,check=True,capture_output=True,**kw).stdout.strip()
+def run(cmd,**kw):
+ p=subprocess.run(cmd,text=True,capture_output=True,**kw)
+ if p.returncode:
+  raise RuntimeError(p.stderr)
+ return p.stdout.strip()
 def waitline(p,needle):
  sel=selectors.DefaultSelector();sel.register(p.stderr,selectors.EVENT_READ)
  deadline=time.monotonic()+20
@@ -74,28 +78,78 @@ with tempfile.TemporaryDirectory(prefix='queue25-proof-',dir='/home/kit') as tmp
    req=urllib.request.Request('http://127.0.0.1:'+relayport+'/mcp',data=json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}}).encode(),headers={'Authorization':'Bearer '+mcp,'Content-Type':'application/json'})
    with urllib.request.urlopen(req,timeout=5) as r:return json.loads(r.read())['result']
   events=json.loads(rpc('mirsa_pending_translation_events')['content'][0]['text'])['events']
-  assert len(events)==1 and set(events[0]['data'])=={'queue_id','user_id','bundle_id','revision'}
+  assert len(events)==1 and set(events[0]['data'])=={'batch_id','entries'}
+  assert set(events[0]['data']['entries'][0])=={'queue_id','user_id','bundle_id','revision','version','kind'}
+  assert json.loads(run(op+['emit'],env=openv))['emitted']==0
   row=json.loads(run(op+['list'],env=openv))[0]
-  assert events[0]['data']['queue_id']==row['id']
-  result=json.loads(run(op+['resolve',row['id'],'الإعدادات %d'],env=openv));assert result['resolved']
+  assert events[0]['data']['entries'][0]['queue_id']==row['id']
+  result=json.loads(run(op+['resolve',row['id'],str(row['version']),'الإعدادات %d'],env=openv));assert result['resolved']
   refreshed={**scope,'action':'refresh'}
   status,reply=post(refreshed,token,activation)
-  assert status==200 and reply['entries']==[{'source':'设置 %d','translation':'الإعدادات %d'}],(status,reply)
+  assert status==200 and reply['entries']==[{'source':'设置 %d','translation':'الإعدادات %d','version':2,'provenance':'kat'}],(status,reply)
   # New capability/launch for same authenticated account+app+revision sees the persisted review.
   status,new=post(issue,bootstrap);assert status==200
   new=new['online'];status,reply=post(refreshed,new['token'],new['activation'])
   assert status==200 and len(reply['entries'])==1
-  # Sign-time generated dictionary is persisted server-side too.
+  # Exercise the exact HTTP handler + real PG against a deterministic provider transport fixture.
+  # This is NOT a claim of a real Gemini request; provider model/origin enforcement is still real.
+  answers=t/'provider.json'
+  outputs={'Cancel':'إلغاء','设置 %d':'خيارات %d',**{'Label '+str(i):'العنصر '+str(i) for i in range(33)}}
+  answers.write_text(json.dumps(outputs))
+  providerport=port()
+  providerenv={**env,'PORT':providerport,'RUNTIME_E2E_PROVIDER_OUTPUTS':str(answers),
+   'RUNTIME_LLM_MODEL':'gemini-2.5-flash','RUNTIME_LLM_API_KEY':'isolated-fixture-not-a-key',
+   'RUNTIME_LLM_BASE_URL':'https://generativelanguage.googleapis.com/v1beta/openai',
+   'RUNTIME_STRONG_MODELS':'gemini-2.5-flash','RUNTIME_PROVIDER_ORIGINS':'https://generativelanguage.googleapis.com'}
+  pp=subprocess.Popen(['npx','--yes','deno','run','--allow-env','--allow-net','--allow-read','--allow-run=/usr/bin/psql',
+   '--preload',str(root/'backend/runtime-translate/fixture-provider.ts'),str(root/'backend/runtime-translate/staging.ts')],
+   env=providerenv,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+  children.append(pp);waitline(pp,'Listening on')
+  endpoint='http://127.0.0.1:'+providerport+path
+  status,reply=post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)
+  assert status==200 and reply['translations']=={'s':'إلغاء'} and reply['entries'][0]['provenance']=='gemini',(status,reply)
+  # Runtime fallback must enqueue every Gemini candidate, but never replace a Kat correction.
+  status,reply=post(missing,token,activation)
+  assert status==200 and reply['translations']=={'s0':'الإعدادات %d'} and reply['entries'][0]['provenance']=='kat',(status,reply)
+  rows=json.loads(run(op+['list'],env=openv))
+  fallback=next(r for r in rows if r['candidate']=='خيارات %d')
+  dictionary=next(r for r in rows if r['candidate']=='إلغاء')
+  assert fallback['kind']=='review' and fallback['provenance']=='kat'
+  assert dictionary['kind']=='review' and dictionary['provenance']=='gemini'
+  assert json.loads(run(op+['resolve',dictionary['id'],str(dictionary['version']),'إلغاء العملية'],env=openv))['resolved']
+  stale=subprocess.run(op+['resolve',dictionary['id'],str(dictionary['version']),'نص قديم'],env=openv,capture_output=True)
+  assert stale.returncode!=0
+  # Same Gemini candidate remains immutable and deduped after the correction.
+  status,reply=post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)
+  assert status==200 and reply['translations']=={'s':'إلغاء العملية'} and reply['entries'][0]['provenance']=='kat'
+  status,reply=post(refreshed,new['token'],new['activation'])
+  assert status==200 and len(reply['entries'])==2 and any(x['translation']=='إلغاء العملية' for x in reply['entries'])
+  # Move the isolated DB into a new quota minute without sleeping or changing limits.
+  sql("update public.mirsa_runtime_usage set minute=minute-interval '1 minute';")
+  # 33 dictionary inputs produce both missing/review work; every event is <=32 homogeneous entries.
+  status,reply=post({**scope,'action':'dictionary','items':[{'id':'l'+str(i),'text':'Label '+str(i)} for i in range(33)]},bootstrap,activation)
+  assert status==200 and len(reply['entries'])==33,(status,reply)
+  result=json.loads(run(op+['emit'],env=openv))
+  assert result['emitted']==67 and result['batches']==(33+31)//32+(34+31)//32,result
+  events=json.loads(rpc('mirsa_pending_translation_events')['content'][0]['text'])['events']
+  assert len(events)==5
+  for event in events:
+   entries=event['data']['entries'];assert 1<=len(entries)<=32
+   assert len({e['kind'] for e in entries})==1
+   assert all(set(e)=={'queue_id','user_id','bundle_id','revision','version','kind'} for e in entries)
+  assert json.loads(run(op+['emit'],env=openv))['emitted']==0
+  # Simulate a crash after relay acceptance, before the DB marks notification.
+  sql("update public.mirsa_runtime_batches set notified_at=null;")
+  assert json.loads(run(op+['emit'],env=openv))['batches']==len(events)
+  assert len(json.loads(rpc('mirsa_pending_translation_events')['content'][0]['text'])['events'])==len(events)
   h=hashlib.sha256(token.encode()).hexdigest()
-  sql("select public.mirsa_runtime_store('"+h+"','"+bundle+"','"+revision+"','[{\"source\":\"Cancel\",\"translation\":\"إلغاء\"}]'::jsonb);")
-  status,reply=post(refreshed,token,activation);assert status==200 and len(reply['entries'])==2
   sql("update public.mirsa_runtime_caps set revoked=true where token_hash='"+h+"';")
   assert post(refreshed,token,activation)[0]==403
   assert post(missing,token,activation)[0]==403
   assert post({**scope,'action':'dictionary','items':[{'id':'s','text':'Cancel'}]},bootstrap,activation)[0]!=200
-  rpc('mirsa_ack_translation_event',{'event_id':events[0]['eventId']})
+  for event in events:rpc('mirsa_ack_translation_event',{'event_id':event['eventId']})
   assert not json.loads(rpc('mirsa_pending_translation_events')['content'][0]['text'])['events']
-  print(json.dumps({'proof':'isolated real HTTP PG account issuer queue relay operator OTA revocation','passed':True,'liveKatWake':False,'provider':'intentionally unconfigured, queue survived 503','newLaunchRefresh':True,'noLiveServicesChanged':True}))
+  print(json.dumps({'proof':'isolated real HTTP PG account issuer queue relay operator OTA revocation','passed':True,'liveKatWake':False,'provider':'unconfigured failure durability + test-only deterministic transport (NOT live Gemini)','newLaunchRefresh':True,'allOutputReview':True,'katCASAndPriority':True,'batchBound32':True,'crashReplayDeduped':True,'noLiveServicesChanged':True}))
  finally:
   for c in children:
    c.terminate()

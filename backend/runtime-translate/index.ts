@@ -77,11 +77,9 @@ return async (req: Request, peerIP?: string) => {
       if(error || !Array.isArray(data)) fail('unavailable',503);
       return json({bundleId:body.bundleId,revision:body.revision,entries:data},200,1048576);
     }
-    if(body.action === 'missing') {
-      // Commit safe missing labels before Gemini. A failed provider never loses the queue.
-      // Queue errors are fail-open for the instant path; never invent an event receipt.
-      try {await db.rpc('mirsa_runtime_queue',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision,p_items:body.items});} catch {}
-    }
+    // Every consented input is durable before the provider call, even if the provider fails.
+    const queued=await db.rpc('mirsa_runtime_queue',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision,p_items:body.items});
+    if(queued.error) fail('queue_unavailable',503);
     const config = providerConfig(env);
     const providerDeadline = AbortSignal.any([deadline,AbortSignal.timeout(18000)]);
     // Reuse ar-localize transport; same explicit route only, hard total deadline,
@@ -106,12 +104,18 @@ return async (req: Request, peerIP?: string) => {
     const map = parseModelMap(result?.choices?.[0]?.message?.content || '');
     const translations = filterTranslations(body.items,map);
     if(!Object.keys(translations).length) fail('translation_unavailable',503);
-    if(body.action==='dictionary') {
-      const entries=body.items.filter((x:{id:string})=>Object.hasOwn(translations,x.id)).map((x:{id:string,text:string})=>({source:x.text,translation:translations[x.id]}));
-      const {error}=await db.rpc('mirsa_runtime_store',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision,p_entries:entries});
-      if(error) fail('dictionary_store_unavailable',503);
-    }
-    return json({bundleId:body.bundleId,revision:body.revision,translations});
+    const entries=body.items.filter((x:{id:string})=>Object.hasOwn(translations,x.id)).map((x:{id:string,text:string})=>({source:x.text,translation:translations[x.id]}));
+    // Store every distinct Gemini candidate for Kat, including runtime fallback output.
+    const stored=await db.rpc('mirsa_runtime_store',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision,p_entries:entries});
+    if(stored.error) fail('dictionary_store_unavailable',503);
+    const fresh=await db.rpc('mirsa_runtime_refresh',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision});
+    if(fresh.error || !Array.isArray(fresh.data)) fail('dictionary_store_unavailable',503);
+    const wanted=new Set(body.items.map((x:{text:string})=>x.text));
+    const canonical=fresh.data.filter((x:{source:string})=>wanted.has(x.source));
+    const bySource=new Map(canonical.map((x:{source:string,translation:string})=>[x.source,x.translation]));
+    // A concurrent Kat correction wins both the immediate response and all future refreshes.
+    const resultMap=Object.fromEntries(body.items.filter((x:{text:string})=>bySource.has(x.text)).map((x:{id:string,text:string})=>[x.id,bySource.get(x.text)]));
+    return json({bundleId:body.bundleId,revision:body.revision,translations:resultMap,entries:canonical});
   } catch(e) {
     // Never log request bodies, bearer values, provider errors or source labels.
     return json({error:e instanceof Fault ? e.message:'unavailable'},e instanceof Fault ? e.status:503);
