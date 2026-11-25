@@ -79,16 +79,21 @@ int main(int argc,char **argv) {@autoreleasepool {
  assert(BannerShouldShow(prefs,@"com.different.app",YES));
  window.hidden=YES;
  [prefs removePersistentDomainForName:suite];
- onlineConfig=c;onlinePositive=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet setWithObject:@"设置"];
- ApplyOnlineEntries(@[@{@"source":@"设置",@"translation":@"الإعدادات"}]);
+ onlineConfig=c;onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet setWithObject:@"设置"];
+ ApplyOnlineEntries(@[@{@"source":@"设置",@"translation":@"الإعدادات",@"provenance":@"kat",@"version":@2}]);
  assert([OnlineLookup(@"设置") isEqual:@"الإعدادات"] && !onlineUncovered.count);
- onlinePositive=[NSMutableDictionary dictionary];LoadOnlineCache();
+ assert([onlineMeta[@"设置"][@"p"] isEqual:@"kat"] && [onlineMeta[@"设置"][@"v"] integerValue]==2);
+ ApplyOnlineEntries(@[@{@"source":@"设置",@"translation":@"خطأ",@"provenance":@"gemini",@"version":@99}]);
+ assert([OnlineLookup(@"设置") isEqual:@"الإعدادات"]); // late Gemini cannot replace Kat
+ ApplyOnlineEntries(@[@{@"source":@"说明",@"translation":@"شرح"}]);
+ assert(!OnlineLookup(@"说明")); // unversioned candidates remain rejected
+ onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];LoadOnlineCache();
  assert([OnlineLookup(@"设置") isEqual:@"الإعدادات"]); // exact next-launch load path
  NSString *oldKey=DictionaryCacheKey();
  NSMutableDictionary *other=[c mutableCopy];other[@"revision"]=[@"b" stringByPaddingToLength:64 withString:@"b" startingAtIndex:0];
- onlineConfig=other;onlinePositive=[NSMutableDictionary dictionary];LoadOnlineCache();assert(!OnlineLookup(@"设置"));
+ onlineConfig=other;onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];LoadOnlineCache();assert(!OnlineLookup(@"设置"));
  onlineConfig=c;
- ApplyOnlineEntries(@[@{@"source":@"设置 %d",@"translation":@"الإعدادات %@"}]);
+ ApplyOnlineEntries(@[@{@"source":@"设置 %d",@"translation":@"الإعدادات %@",@"provenance":@"kat",@"version":@2}]);
  assert(!OnlineLookup(@"设置 %d")); // placeholders never changed
  [NSUserDefaults.standardUserDefaults removeObjectForKey:oldKey];
  NSLog(@"Native policy, activation, queue cache and banner persistence smoke passed");return 0;
