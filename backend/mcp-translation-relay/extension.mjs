@@ -31,16 +31,16 @@ export function extend({Service,equal,callbackURL,validSecret}) {
     return {content:[{type:'text',text:'{"transport_acknowledged":true,"translated":false}'}]};
    }
    if(['events/subscribe','events/unsubscribe'].includes(method)&&[TRANSLATION,REVIEW].includes(p.name)){
-    if(!p.arguments || Object.keys(p.arguments).length || p.delivery?.mode!=='webhook')throw Error('invalid_arguments');
+    if((p.arguments!=null && (typeof p.arguments!=='object'||Array.isArray(p.arguments)||Object.keys(p.arguments).length)) || p.delivery?.mode!=='webhook')throw Error('invalid_arguments');
     callbackURL(p.delivery.url);
     const id='sub_'+createHash('sha256').update('owner\n'+p.delivery.url+'\n'+p.name+'\n{}').digest('hex');
     if(method==='events/unsubscribe'){
      this.db.prepare('delete from subs where id=?').run(id);
      this.db.prepare("update jobs set status='unsubscribed' where sub_id=? and status='pending'").run(id);return {};
     }
-    if(!validSecret(p.delivery.secret) || (p.ttlMs!==undefined&&(!Number.isSafeInteger(p.ttlMs)||p.ttlMs<1)))throw Error('invalid_subscription');
+    if(!validSecret(p.delivery.secret) || (p.ttlMs!==undefined&&p.ttlMs!==null&&(!Number.isSafeInteger(p.ttlMs)||p.ttlMs<1)))throw Error('invalid_subscription');
     const expires=this.clock()+Math.min(p.ttlMs??86400000,86400000),challenge=randomBytes(32).toString('base64url');
-    const r=await this.signed({url:p.delivery.url,secret:p.delivery.secret},{type:'verification',challenge,eventId:'verify_'+randomBytes(16).toString('hex')});
+    const r=await this.signed({id,url:p.delivery.url,secret:p.delivery.secret},{type:'verification',challenge,eventId:'verify_'+randomBytes(16).toString('hex')});
     if(r.status<200||r.status>=300||!equal(JSON.parse(r.body).challenge,challenge))throw Error('callback_verification_failed');
     const old=this.db.prepare('select * from subs where id=?').get(id);
     this.db.prepare('insert or replace into subs(id,args,url,secret,old_secret,rotate_until,expires,event_name) values(?,?,?,?,?,?,?,?)')
