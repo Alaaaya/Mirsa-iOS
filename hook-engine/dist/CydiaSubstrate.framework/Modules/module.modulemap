@@ -1,0 +1,1 @@
+framework module CydiaSubstrate { umbrella header "CydiaSubstrate.h" export * }
