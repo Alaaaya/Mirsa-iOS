@@ -476,9 +476,9 @@ struct SignedAppsFolderView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await reload() } }
         }
-        .confirmationDialog(personalText("Delete retained IPA files?", "تحذف ملفات IPA المحفوظة؟"),
-                            isPresented: Binding(get: { !pendingDelete.isEmpty }, set: { if !$0 { pendingDelete = [] } }),
-                            titleVisibility: .visible, presenting: pendingDelete.isEmpty ? nil : pendingDelete) { candidates in
+        .alert(personalText("Delete retained IPA files?", "تحذف ملفات IPA المحفوظة؟"),
+               isPresented: Binding(get: { !pendingDelete.isEmpty }, set: { if !$0 { pendingDelete = [] } }),
+               presenting: pendingDelete.isEmpty ? nil : pendingDelete) { candidates in
             Button(personalText("Delete", "حذف"), role: .destructive) {
                 let urls = candidates.map(\.url)
                 pendingDelete = []
