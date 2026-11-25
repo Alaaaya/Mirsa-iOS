@@ -597,6 +597,7 @@ struct PersonalProjectDetailView: View {
                     Text(personalText("Some texts need internet to translate", "بعض النصوص بتحتاج إنترنت لتترجم")).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-hint")
                     Text(personalText("Encrypted apps, games and text inside images are not translated", "التطبيقات المشفّرة والألعاب والنصوص اللي بالصور ما بتتعرّب")).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-hint2")
                     Text(personalText("If on, UI text missing a translation is sent for translation. The original stays unchanged; re-sign with it off to disable.", "إذا شغّلته، نص الواجهة يلي ما إلو ترجمة بينبعت للترجمة. الأصل بيضل متل ما هو، ووقّع من جديد وهو طافي لتعطّله.")).font(.caption2).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-consent")
+                    RuntimeStagingImportRow()
                 }.padding(.leading, 32).frame(maxWidth: .infinity, alignment: .leading)
             }
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
