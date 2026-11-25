@@ -49,8 +49,10 @@ export function providerConfig(env) {
   const allowed = (env('RUNTIME_STRONG_MODELS') || '').split(',').map(x=>x.trim()).filter(Boolean);
   const origins = (env('RUNTIME_PROVIDER_ORIGINS') || '').split(',').map(x=>x.trim());
   let url; try { url = new URL(base); } catch { fail('not_configured',503); }
-  if (!model || !key || !allowed.includes(model) || /(?:lite|mini|nano|flash|small|weak)/i.test(model) ||
-      url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || !origins.includes(url.origin)) fail('not_configured',503);
+  if (model !== 'gemini-2.5-flash' || !key || !allowed.includes(model) ||
+      url.origin !== 'https://generativelanguage.googleapis.com' ||
+      url.pathname.replace(/\/$/,'') !== '/v1beta/openai' ||
+      url.username || url.password || url.search || url.hash || !origins.includes(url.origin)) fail('not_configured',503);
   return { model, key, url: url.href.replace(/\/$/,'') + '/chat/completions' };
 }
 export async function readBounded(stream, max, signal) {
