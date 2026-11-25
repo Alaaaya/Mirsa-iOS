@@ -12,6 +12,26 @@ import unittest
 SCRIPT = Path(__file__).with_name('verify-hook-engine.py')
 NAMES = ['MSHookMessageEx','MSHookFunction','MSFindSymbol','MSGetImageByName','LHHookFunctions','LBHookMessage','substitute_hook_functions']
 
+def uleb(n):
+    result = bytearray()
+    while n > 127:
+        result.append((n & 127) | 128); n >>= 7
+    return bytes(result + bytes([n]))
+
+def trie_fixture():
+    nodes = [b'\x03\x00\x80\x20\x00' for _ in NAMES]
+    offsets = [0] * len(nodes)
+    for _ in range(8):
+        root = b'\0' + bytes([len(nodes)]) + b''.join(
+            ('_' + name).encode() + b'\0' + uleb(offset)
+            for name, offset in zip(NAMES, offsets))
+        pos = len(root); new_offsets = []
+        for node in nodes:
+            new_offsets.append(pos); pos += len(node)
+        if offsets == new_offsets: return root + b''.join(nodes)
+        offsets = new_offsets
+    raise AssertionError('fixture offsets did not converge')
+
 def fixture():
     strings = bytearray(b'\0')
     symbols = bytearray()
@@ -24,12 +44,15 @@ def fixture():
     build=struct.pack('<IIIIII',0x32,24,2,0x120000,0x120000,0)
     symoff=4096
     stroff=symoff+len(symbols)
-    sigoff=stroff+len(strings)
+    trie = trie_fixture()
+    trieoff=stroff+len(strings)
+    sigoff=trieoff+len(trie)
     symtab=struct.pack('<IIIIII',2,24,symoff,len(NAMES),stroff,len(strings))
     sig=struct.pack('<IIII',0x1D,16,sigoff,16)
-    commands=ident+build+symtab+sig
-    header=struct.pack('<IIIIIIII',0xFEEDFACF,0x100000C,0,6,4,len(commands),0,0)
-    return bytearray(header+commands+b'\0'*(4096-32-len(commands))+symbols+strings+b'\0'*16)
+    export=struct.pack('<IIII',0x80000033,16,trieoff,len(trie))
+    commands=ident+build+symtab+export+sig
+    header=struct.pack('<IIIIIIII',0xFEEDFACF,0x100000C,0,6,5,len(commands),0,0)
+    return bytearray(header+commands+b'\0'*(4096-32-len(commands))+symbols+strings+trie+b'\0'*16)
 
 class VerifyTests(unittest.TestCase):
     def check(self, data, valid=False, info=None):
@@ -54,6 +77,20 @@ class VerifyTests(unittest.TestCase):
         d=fixture();size=struct.unpack_from('<I',d,36)[0];struct.pack_into('<I',d,32+size+8,7);self.check(d)
     def test_missing_export(self):
         d=fixture();at=d.index(b'_MSHookFunction');d[at+1]=ord('Z');self.check(d)
+    def test_private_external_is_not_public(self):
+        d=fixture()
+        for i in range(len(NAMES)): d[4096+i*16+4] |= 0x10
+        self.check(d)
+    def test_nlist_without_dyld_binding(self):
+        d=fixture(); at=d.index(b'_MSHookFunction',d.index(b'_substitute_hook_functions')+1)
+        d[at+1]=ord('Z');self.check(d)
+    def test_reexport_is_not_local_binding(self):
+        d=fixture(); at=d.index(b'\x03\x00\x80\x20\x00',4096);d[at+1]=8;self.check(d)
+    def test_missing_trie(self):
+        d=fixture();at=d.index(struct.pack('<II',0x80000033,16));struct.pack_into('<I',d,at,0x31);self.check(d)
+    def test_cyclic_trie(self):
+        d=fixture();at=d.index(b'_MSHookMessageEx',d.index(b'_substitute_hook_functions')+1)
+        stop=d.index(0,at);d[stop+1]=0;self.check(d)
     def test_truncated_signature(self): self.check(fixture()[:-1])
     def test_wrong_plist(self): self.check(fixture(),info={'CFBundleExecutable':'Other','CFBundlePackageType':'FMWK'})
     def test_oversized_commands(self):
