@@ -16,7 +16,8 @@ export async function verifyStagingAccount(token:string,secret:Uint8Array,deadli
       Number(payload.exp)-Number(payload.iat)>3600) throw Error();
    return {data:{user:{id:payload.sub}},error:null};
   }
-  if(claims.iss!==project+'/auth/v1' || claims.aud!=='authenticated') throw Error();
+  if(claims.iss!==project+'/auth/v1' || claims.aud!=='authenticated' ||
+     typeof claims.exp!=='number' || !Number.isFinite(claims.exp) || claims.exp<=0 || claims.exp*1000<=Date.now()) throw Error();
   // Pinned origin/public key, no caller-controlled URL and no persistence/refresh/signup.
   const verify=getUser ?? ((jwt:string)=>createClient(project,publicKey,{auth:{persistSession:false,autoRefreshToken:false},
     global:{fetch:(input,init)=>fetch(input,{...init,signal:deadline,redirect:'error'})}}).auth.getUser(jwt));

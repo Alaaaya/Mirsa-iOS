@@ -45,3 +45,16 @@ Deno.test('staging autoaccount verifies pinned Auth, rejects forged expired fore
  const foreign=await new SignJWT({}).setProtectedHeader({alg:'HS256'}).setSubject(uid).setIssuer('https://evil.test/auth/v1').sign(secret);
  assert((await verifyStagingAccount(foreign,secret,AbortSignal.timeout(1000),async()=>{throw Error('must not contact foreign issuer');})).error===true);
 });
+
+Deno.test('staging account rejects absent or nonnumeric expiry even if mocked live Auth accepts',async()=>{
+ const secret=new Uint8Array(64).fill(1),uid='11111111-1111-4111-8111-111111111111';
+ for(const claims of [{},{exp:'9999999999'},{exp:0},{exp:null}]) {
+  const jwt=await new SignJWT(claims as ConstructorParameters<typeof SignJWT>[0]).setProtectedHeader({alg:'HS256'}).setSubject(uid)
+   .setIssuer('https://hirebeofomiyumwysppj.supabase.co/auth/v1').setAudience('authenticated').sign(secret);
+  let reads=0;
+  const result=await verifyStagingAccount(jwt,secret,AbortSignal.timeout(1000),async()=>{
+   reads++;return {data:{user:{id:uid}},error:null};
+  });
+  assert(result.error===true && reads===0);
+ }
+});
