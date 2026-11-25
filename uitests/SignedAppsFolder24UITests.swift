@@ -42,6 +42,7 @@ final class SignedAppsFolder24UITests: XCTestCase {
             XCTAssertEqual(icon.frame.height, 44, accuracy: 1)
         }
         capture("Arabic-signed-outputs-real-IPA")
+        capture("Arabic-signed-folder-background-through-bottom-safe-area")
         share.tap()
         XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 5)
                       || app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Copy' OR label CONTAINS 'نسخ'")).firstMatch.waitForExistence(timeout: 5)

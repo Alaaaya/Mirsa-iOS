@@ -343,7 +343,7 @@ struct SignedAppsFolderView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AuroraBackground()
+                AuroraBackground().ignoresSafeArea(.container, edges: .bottom)
                 if loading {
                     ProgressView()
                 } else if let error {
