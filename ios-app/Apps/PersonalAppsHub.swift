@@ -389,6 +389,7 @@ struct PersonalAppsHub: View {
     @State private var message: String?
     @State private var detail: PersonalLibraryApp?
     @State private var showCertificates = false
+    @State private var showSignedApps = false
     @State private var sharing: PersonalLibraryApp?
     @State private var deleting: PersonalLibraryApp?
     @AppStorage("mirsa.personal.projects.sort") private var sort = "newest"
@@ -497,6 +498,11 @@ struct PersonalAppsHub: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: MirsaSpacing.l) {
                     MirsaPageHeader(title: personalText("Projects", "المشاريع")) {
+                        Button { showSignedApps = true } label: {
+                            MirsaRoundIcon(systemName: "folder")
+                        }.buttonStyle(.mirsaPress)
+                        .accessibilityLabel(SignedAppsFolderView.title)
+                        .accessibilityIdentifier("projects-signed-folder")
                         Menu {
                             Button { importing = true } label: { Label(personalText("From Files", "من الملفات"), systemImage: "folder") }
                             Button { importingURL = true } label: { Label(personalText("From link", "من رابط"), systemImage: "link") }
@@ -587,6 +593,7 @@ struct PersonalAppsHub: View {
         .fullScreenCover(isPresented: $showBrowser) { MirsaBrowserView(initialURL: nil) { showBrowser = false } }
         .onReceive(NotificationCenter.default.publisher(for: .mirsaIncomingIPA)) { _ in showBrowser = false }
         .sheet(isPresented: $importingURL) { PersonalURLImportSheet(disabled: library.loadError != nil) { try await library.add($0, signed: false) } }
+        .sheet(isPresented: $showSignedApps) { SignedAppsFolderView() }
         .sheet(isPresented: $showCertificates) {
             PersonalCertificateManagerView()
         }

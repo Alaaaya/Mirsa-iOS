@@ -74,7 +74,7 @@ final class OTANoRedirect: NSObject, URLSessionTaskDelegate {
         }
         signingProgress?(PersonalSigningEvent(stage: .packaging, fraction: 1))
         let kept: URL
-        do { kept = try CertificateInstall.retain(signed.url) }
+        do { kept = try CertificateInstall.retain(signed.url, signedInfoPlist: signed.signedInfoPlist) }
         catch { throw CertificateInstall.Failure.retained(CertificateInstall.retainedMessage(error, signed.url), signedURL: signed.url) }
         if let projectID {
             let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MirsaSignedExports")

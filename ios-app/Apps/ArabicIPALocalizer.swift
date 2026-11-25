@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-// "ترجم للعربي": translates an English-only app's UI strings to Arabic and injects ar.lproj before signing.
+// "ترجم للعربي": translates supported localized UI string resources to Arabic and injects ar.lproj before signing.
 // Pure Foundation. Only bounded string values leave the device (never the IPA or file paths).
 
 enum ArabicLocalizationFailure: String, Equatable { case network, busy, rateLimited, invalid, tooLarge, notConfigured, io }
@@ -62,7 +62,16 @@ enum ArabicIPALocalizer {
         guard s.count <= maxText, !s.isEmpty else { return false }
         if s.range(of: #"^[a-z][a-z0-9+.\-]*://"#, options: .regularExpression) != nil { return false }
         let stripped = tokenRegex.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: "")
-        return stripped.range(of: #"[A-Za-z]{2,}"#, options: .regularExpression) != nil
+        // Unicode letters include CJK, Cyrillic and other non-Latin source languages.
+        // Already Arabic-only values need no translation.
+        let letters = stripped.unicodeScalars.filter { CharacterSet.letters.contains($0) }
+        return letters.contains { scalar in
+            !((0x0600...0x06FF).contains(scalar.value) ||
+              (0x0750...0x077F).contains(scalar.value) ||
+              (0x08A0...0x08FF).contains(scalar.value) ||
+              (0xFB50...0xFDFF).contains(scalar.value) ||
+              (0xFE70...0xFEFF).contains(scalar.value))
+        }
     }
 
     static func isArabicDir(_ name: String) -> Bool {
@@ -91,23 +100,50 @@ enum ArabicIPALocalizer {
             let parent = u.deletingLastPathComponent().standardizedFileURL
             guard parent.path == appPath || parent.path.hasPrefix(appPath + "/") else { continue }
             if isArabicDir(name) { arabicIn.insert(parent); continue }
-            if sourceDirs.contains(name) { dirs += 1; guard dirs <= maxDirs else { throw CocoaError(.fileReadTooLarge) }; found[parent, default: []].append(name) }
+            dirs += 1; guard dirs <= maxDirs else { throw CocoaError(.fileReadTooLarge) }; found[parent, default: []].append(name)
         }
         var scan = Scan()
         scan.hasArabic = arabicIn.contains(app.standardizedFileURL)
         if scan.hasArabic { return scan }
-        var total = 0
+        var total = 0, resourceBytes = 0
         for parent in found.keys.sorted(by: { $0.path < $1.path }) {
             if arabicIn.contains(parent) { continue }
-            guard let chosen = sourceDirs.first(where: { found[parent]!.contains($0) }) else { continue }
-            let dir = parent.appendingPathComponent(chosen, isDirectory: true)
-            let names = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).sorted()
-            for file in names where file.hasSuffix(".strings") || file.hasSuffix(".stringsdict") {
-                let url = dir.appendingPathComponent(file)
-                let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
-                guard rv?.isRegularFile == true, rv?.isSymbolicLink != true, (rv?.fileSize ?? Int.max) <= maxFileBytes,
-                      let data = try? Data(contentsOf: url),
-                      let plist = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] else { continue }
+            let infoData = try? Data(contentsOf: parent.appendingPathComponent("Info.plist"))
+            let info = infoData.flatMap { try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil) } as? [String: Any]
+            let development = (info?["CFBundleDevelopmentRegion"] as? String ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
+            func rank(_ name: String) -> Int {
+                let locale = String(name.dropLast(6)).lowercased().replacingOccurrences(of: "_", with: "-")
+                if locale == "en" || locale == "english" { return 0 }
+                if locale.hasPrefix("en-") { return 1 }
+                if locale == "base" { return 2 }
+                if !development.isEmpty && locale == development { return 3 }
+                return 4
+            }
+            let sources = found[parent]!.sorted {
+                let left = rank($0), right = rank($1)
+                return left == right ? $0 < $1 : left < right
+            }
+            // Merge per table and top-level key, never split a plural-rule dictionary
+            // between languages. English wins where present, other resources fill holes.
+            var tables: [String: [String: Any]] = [:]
+            for source in sources {
+                let dir = parent.appendingPathComponent(source, isDirectory: true)
+                for file in ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).sorted()
+                    where file.hasSuffix(".strings") || file.hasSuffix(".stringsdict") {
+                    let url = dir.appendingPathComponent(file)
+                    let rv = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
+                    guard rv?.isRegularFile == true, rv?.isSymbolicLink != true, (rv?.fileSize ?? Int.max) <= maxFileBytes,
+                          let data = try? Data(contentsOf: url),
+                          let plist = (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String: Any] else { continue }
+                    resourceBytes += data.count
+                    guard resourceBytes <= 16 * maxFileBytes else { throw CocoaError(.fileReadTooLarge) }
+                    for (key, value) in plist where tables[file]?[key] == nil {
+                        tables[file, default: [:]][key] = value
+                    }
+                }
+            }
+            for file in tables.keys.sorted() {
+                let plist = tables[file]!
                 let isDict = file.hasSuffix(".stringsdict")
                 let fileIndex = scan.files.count
                 var local: [(String, [String])] = []
@@ -273,7 +309,7 @@ enum ArabicTranslateText {
     static var rowTitle: String { t("Translate to Arabic", "ترجم للعربي", "Ins Arabische übersetzen", "وەریبگێڕە بۆ عەرەبی", "Bi Erebî wergerîne") }
     static var rowHint: String { t("Checked after download. Only works if the app has no Arabic yet.", "يتحقق بعد التنزيل. يشتغل بس إذا التطبيق ما فيه عربي.", "Wird nach dem Download geprüft. Nur wenn die App noch kein Arabisch hat.", "دوای دابەزاندن پشکنین دەکرێت. تەنها ئەگەر ئەپەکە عەرەبی نەبێت.", "Piştî daxistinê tê kontrolkirin. Tenê heke sepan hêj Erebî nebe.") }
     static var alreadyArabic: String { t("This app already has Arabic.", "هالتطبيق فيه عربي أصلاً.", "Diese App hat bereits Arabisch.", "ئەم ئەپە پێشتر عەرەبی هەیە.", "Ev sepan jixwe Erebî heye.") }
-    static var nothing: String { t("No English text found to translate.", "ما لقيت نص إنجليزي للترجمة.", "Kein englischer Text zum Übersetzen gefunden.", "هیچ دەقێکی ئینگلیزی بۆ وەرگێڕان نەدۆزرایەوە.", "Tu nivîsa Îngilîzî ji bo wergerê nehat dîtin.") }
+    static var nothing: String { t("No supported text found to translate.", "ما لقيت نص مدعوم للترجمة.", "Kein unterstützter Text zum Übersetzen gefunden.", "هیچ دەقێکی پشتگیریکراو بۆ وەرگێڕان نەدۆزرایەوە.", "Tu nivîsa piştgirîkirî ji bo wergerê nehat dîtin.") }
     static var applied: String { t("Arabic translation added.", "انضافت الترجمة العربية.", "Arabische Übersetzung hinzugefügt.", "وەرگێڕانی عەرەبی زیادکرا.", "Wergera Erebî hat zêdekirin.") }
     static var failed: String { t("Couldn't translate to Arabic. Installing the app as is.", "ما قدرت أترجم للعربي. عم نثبّت التطبيق متل ما هو.", "Übersetzung ins Arabische fehlgeschlagen. Die App wird unverändert installiert.", "نەتوانرا وەربگێڕدرێت بۆ عەرەبی. ئەپەکە وەک خۆی دادەمەزرێت.", "Wergera Erebî nehat kirin. Sepan wekî xwe tê saz kirin.") }
     static func message(for o: ArabicLocalizationOutcome) -> String {

@@ -58,6 +58,7 @@ struct MirsaStyleShotHost: View {
         case "apps": tab(.apps)
         case "sources": tab(.sources)
         #if DEBUG
+        case "signed-folder24": PersonalAppsHub()
         case "terminal-stages23": ChatTerminalStagesTestHost()
         case "liquid-review": MirsaLiquidReviewHost()
         case "glass-dock-review": GlassDockReviewHost()

@@ -82,7 +82,7 @@ final class SigningQueue: ObservableObject {
                 }
                 if item.cancelRequested { MirsaManagedTmp.end(result.url.deletingLastPathComponent()); item.state = .cancelled }
                 else {
-                    item.output = try CertificateInstall.retain(result.url)
+                    item.output = try CertificateInstall.retain(result.url, signedInfoPlist: result.signedInfoPlist)
                     item.fraction = 1; item.state = .done
                     if !result.verification.isVerified { item.message = result.verification.warningText }
                 }
