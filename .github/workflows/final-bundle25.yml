@@ -145,9 +145,11 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Reject stale staging fixture before the native build
+      - name: Mint isolated one-hour staging fixture after runner queue
         env:
-          MIRSA_RT_STAGING_TOKEN: ${{ secrets.RT_STAGING_TOKEN }}
+          MIRSA_RT_CI_ISSUER_SECRET: ${{ secrets.RT_STAGING_CI_ISSUER_SECRET }}
+        run: python3 scripts/mint-runtime-ci-fixture25.py
+      - name: Reject stale staging fixture before the native build
         run: |
           python3 scripts/test-runtime-staging-fixture.py
           python3 scripts/check-runtime-staging-fixture.py
@@ -261,7 +263,6 @@ jobs:
         env:
           TEST_RUNNER_MIRSA_RT_STAGING_ENDPOINT: ${{ secrets.RT_STAGING_ENDPOINT }}
           TEST_RUNNER_MIRSA_RT_REQUIRED_STAGING: "1"
-          TEST_RUNNER_MIRSA_RT_STAGING_TOKEN: ${{ secrets.RT_STAGING_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$TEST_RUNNER_MIRSA_RT_STAGING_ENDPOINT" || { echo "Required staging endpoint missing"; exit 1; }
