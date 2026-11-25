@@ -2,14 +2,46 @@ name: Final integrated bundle private validation
 on:
   workflow_dispatch:
   push:
-    branches: [mirsa/final-bundle25]
+    branches: [mirsa/final-bundle25, mirsa/integrated-runtime-hook25]
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 env:
-  MIRSA_RELEASE_BUILD: "8.541.1"
+  MIRSA_RELEASE_BUILD: "8.543.1"
 jobs:
+  native-hook-smoke:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and exercise own Substrate-compatible engine
+        run: |
+          bash hook-engine/test-macos.sh
+          python3 scripts/test-hook-localization.py
+
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Backend unit and schema type checks
+        run: |
+          node --test backend/runtime-translate/logic.test.mjs
+          deno check backend/runtime-translate/index.ts
+      - name: Disposable schema and concurrent durable quota validation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-16
+          bash backend/runtime-translate/test-postgres.sh
+
   build:
-    needs: simulator
+    needs: [simulator, backend, native-hook-smoke]
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -18,6 +50,15 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Rebuild both embedded device libraries from this exact revision
+        run: |
+          bash hook-engine/build.sh
+          python3 scripts/test-verify-hook-engine.py
+          python3 scripts/verify-hook-engine.py
+          bash runtime-translation/build-apple.sh
+          mkdir -p runtime-translation/out
+          cp ios-app/RuntimeTranslationAssets/MirsaTranslate.dylib runtime-translation/out/MirsaTranslate.dylib
+          (cd runtime-translation && python3 test_runtime.py)
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -44,6 +85,26 @@ jobs:
           cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
           bash build-ipa.sh
+          python3 - <<'PYVERIFY'
+          import hashlib, json, pathlib, plistlib, zipfile
+          root = pathlib.Path(".")
+          with zipfile.ZipFile("build/Mirsa.ipa") as z:
+              app = "Payload/Mirsa.app/"
+              assets = app + "RuntimeTranslationAssets/"
+              for name in ("MirsaTranslate.dylib", "provenance.json"):
+                  expected = (root / "ios-app/RuntimeTranslationAssets" / name).read_bytes()
+                  assert z.read(assets + name) == expected, "packaged runtime resource mismatch: " + name
+              proof = json.loads(z.read(assets + "provenance.json"))
+              assert proof["genericTableEmpty"] is True
+              assert proof["dylibSHA256"] == hashlib.sha256(z.read(assets + "MirsaTranslate.dylib")).hexdigest()
+              for name, digest in proof["sources"].items():
+                  assert hashlib.sha256((root / "runtime-translation" / name).read_bytes()).hexdigest() == digest
+              info = plistlib.loads(z.read(app + "Info.plist"))
+              executable = z.read(app + info["CFBundleExecutable"])
+              hook = (root / "hook-engine/dist/CydiaSubstrate.framework/CydiaSubstrate").read_bytes()
+              assert hook in executable, "exact rebuilt hook engine not embedded in packaged executable"
+          print("Exact-revision runtime provenance and embedded hook resource verified in final IPA")
+          PYVERIFY
           shasum -a 256 build/Mirsa.ipa > build/device.sha256
           git rev-parse HEAD > build/source-revision.txt
       - uses: actions/upload-artifact@v4
@@ -56,6 +117,7 @@ jobs:
           if-no-files-found: error
 
   simulator:
+    needs: [backend, native-hook-smoke]
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +126,15 @@ jobs:
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
           xcodebuild -version
+      - name: Rebuild both embedded device libraries from this exact revision
+        run: |
+          bash hook-engine/build.sh
+          python3 scripts/test-verify-hook-engine.py
+          python3 scripts/verify-hook-engine.py
+          bash runtime-translation/build-apple.sh
+          mkdir -p runtime-translation/out
+          cp ios-app/RuntimeTranslationAssets/MirsaTranslate.dylib runtime-translation/out/MirsaTranslate.dylib
+          (cd runtime-translation && python3 test_runtime.py)
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim
@@ -78,6 +149,8 @@ jobs:
           cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Execute native UIKit, placeholder, bidi, logger and privacy smoke
+        run: bash runtime-translation/simulator-smoke.sh 2>&1 | tee runtime-native-smoke.log
       - name: Prepare own-code real ad-hoc signed IPA fixture
         run: |
           mkdir -p build/SignedFixture/Payload/SignedFixture.app
@@ -152,8 +225,14 @@ jobs:
           if find build/CarFixture/Payload -iname '*.png' | grep .; then echo "loose PNG present in car-only fixture"; exit 1; fi
           (cd build/CarFixture && zip -q -r ../../tests/fixtures/SignedFolder24CarIcon.ipa Payload)
       - name: Run actual SwiftUI integration and Arabic snapshots
+        env:
+          TEST_RUNNER_MIRSA_RT_STAGING_ENDPOINT: ${{ secrets.RT_STAGING_ENDPOINT }}
+          TEST_RUNNER_MIRSA_RT_REQUIRED_STAGING: "1"
+          TEST_RUNNER_MIRSA_RT_STAGING_TOKEN: ${{ secrets.RT_STAGING_TOKEN }}
         run: |
-          set -o pipefail
+          set -euo pipefail
+          test -n "$TEST_RUNNER_MIRSA_RT_STAGING_ENDPOINT" || { echo "Required staging endpoint missing"; exit 1; }
+          test -n "$TEST_RUNNER_MIRSA_RT_STAGING_TOKEN" || { echo "Required staging token missing"; exit 1; }
           bash scripts/prepare-privatekits-sdk.sh iphonesimulator
           brew install xcodegen
           xcodegen generate
@@ -167,7 +246,7 @@ jobs:
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
           mkdir -p build
-          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/PersonalUI.xcresult -only-testing:MirsaTests/GeneralArabicLocalization24Tests -only-testing:MirsaTests/ArabicLocalize31Tests -only-testing:MirsaTests/SignedAppsFolder24Tests -only-testing:MirsaTests/CertificateInstallTests -only-testing:MirsaTests/SourceCatalogTests/testMainAppSearchMatchesAppsOnlyAcrossSourcesAndInvalidatesCache -only-testing:MirsaTests/SourceCatalogTests/testVersionDisplayNormalizesOnlyLeadingPrefixes test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
+          xcodebuild -project Mirsa.xcodeproj -scheme Mirsa -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/PersonalUI.xcresult -only-testing:MirsaTests/RuntimeArabicTranslation25Tests -only-testing:MirsaTests/RuntimeTranslationScanner25Tests -only-testing:MirsaTests/RuntimeStagingNetwork25Tests -only-testing:MirsaTests/RuntimeStagingSession25Tests -only-testing:MirsaTests/GeneralArabicLocalization24Tests -only-testing:MirsaTests/ArabicLocalize31Tests -only-testing:MirsaTests/SignedAppsFolder24Tests -only-testing:MirsaTests/CertificateInstallTests -only-testing:MirsaTests/SourceCatalogTests/testMainAppSearchMatchesAppsOnlyAcrossSourcesAndInvalidatesCache -only-testing:MirsaTests/SourceCatalogTests/testVersionDisplayNormalizesOnlyLeadingPrefixes test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/simulator-validation.log
           CONTAINER=$(xcrun simctl get_app_container "$DEVICE" com.alaa.mirsa data)
           RETAINED="$CONTAINER/Library/Application Support/MirsaSignedExports/0A3A3FB2-D1A0-48F0-91D2-397B285B6ED5"
           mkdir -p "$RETAINED"
@@ -184,7 +263,7 @@ jobs:
           cp build/CarFixture/Payload/SignedFixture.app/Info.plist "$RETAINED3/Info.plist"
           cmp tests/fixtures/SignedFolder24CarIcon.ipa "$RETAINED3/SignedFolder24CarIcon.ipa"
           cmp tests/fixtures/SignedFolder24Fixture.ipa "$RETAINED/SignedFolder24Fixture.ipa"
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/SignedFolderUI.xcresult -only-testing:MirsaUITests/SignedAppsFolder24UITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/signed-folder-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/SignedFolderUI.xcresult -only-testing:MirsaUITests/RuntimeTranslate25UITests -only-testing:MirsaUITests/SignedAppsFolder24UITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/signed-folder-ui.log
       - name: Export runtime screenshot attachments
         if: always()
         run: |
@@ -207,4 +286,6 @@ jobs:
             build/signed-folder-ui.log
             build/PersonalUI.xcresult
             build/simulator-validation.log
+            runtime-native-smoke.log
+            ios-app/RuntimeTranslationAssets/provenance.json
           if-no-files-found: warn
