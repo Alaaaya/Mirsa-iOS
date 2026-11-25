@@ -13,7 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build and exercise own Substrate-compatible engine
-        run: bash hook-engine/test-macos.sh
+        run: |
+          bash hook-engine/test-macos.sh
+          python3 scripts/test-hook-localization.py
 
   build:
     needs: [simulator, native-hook-smoke]

@@ -2,6 +2,43 @@ import XCTest
 @testable import Mirsa
 
 final class GeneralArabicLocalization24Tests: XCTestCase {
+    func testHookDependencyErrorsAreLocalizedAndDoNotLeakSymbolsOrPaths() {
+        let errors = [
+            "Missing dependency: /private/user/secrets.dylib. Mirsa never bundles CydiaSubstrate or ElleKit.",
+            "Hook engine validation: Unsupported hook engine API: _EKPrivateSecret",
+            "Existing CydiaSubstrate.framework conflicts with Mirsa hook engine",
+            "CydiaSubstrate.framework is reserved for Mirsa hook engine",
+            "Case-colliding hook engine destination",
+            "Hook engine preparation: Permission denied /private/user",
+            "Hook engine validation: Invalid symbol strings",
+            "Hook engine resolution: No such file or directory"
+        ]
+        for error in errors {
+            let messages = AppLanguage.allCases.map { IPAEditorService.editingError(error, language: $0) }
+            XCTAssertEqual(Set(messages).count, AppLanguage.allCases.count)
+            for message in messages {
+                XCTAssertNotEqual(message, error)
+                XCTAssertFalse(message.contains("/private"))
+                XCTAssertFalse(message.contains("_EKPrivateSecret"))
+                XCTAssertFalse(message.contains("never bundles"))
+            }
+            let arabic = IPAEditorService.editingError(error, language: .arabic)
+            XCTAssertTrue(arabic.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) })
+        }
+        XCTAssertEqual(IPAEditorService.editingError("unrelated detail", language: .english), "unrelated detail")
+    }
+
+    func testHookNoticeDescribesLimitedOwnEngineInAllLanguages() {
+        let notices = AppLanguage.allCases.map { IPAEditorService.injectionNotice(language: $0) }
+        XCTAssertEqual(Set(notices).count, AppLanguage.allCases.count)
+        for notice in notices {
+            XCTAssertTrue(notice.contains("Objective-C"))
+            XCTAssertFalse(notice.contains("no CydiaSubstrate"))
+            XCTAssertFalse(notice.isEmpty)
+        }
+        XCTAssertTrue(IPAEditorService.injectionNotice(language: .english).contains("not inline"))
+    }
+
     private func app() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("Fixture.app")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

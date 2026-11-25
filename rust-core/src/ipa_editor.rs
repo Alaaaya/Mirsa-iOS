@@ -1020,13 +1020,13 @@ fn inject_scoped(app: &Path, executable: &str, libraries: &[String], first: bool
         }
         let m = macho(read_macho(&p)?, true)?;
         let mut commands = Vec::new();
-        hook_engine::validate_imports(&m)?;
+        hook_engine::validate_imports(&m).map_err(|e| format!("Hook engine validation: {e}"))?;
         let mut uses_hook_engine = false;
         for c in &m.commands {
             if c.kind != 0xd {
                 if let Some(dep) = &c.name {
                     if hook_engine::alias(dep) {
-                        hook_engine::stage(&app)?;
+                        hook_engine::stage(&app).map_err(|e| format!("Hook engine preparation: {e}"))?;
                         uses_hook_engine = true;
                         let mut command = dylib_command(c.kind, hook_engine::DEPENDENCY, Some(&c.data))?;
                         // Our shim ABI is 1.0.0, not the source engine's version.
