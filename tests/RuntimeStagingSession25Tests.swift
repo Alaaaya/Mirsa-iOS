@@ -23,6 +23,7 @@ final class RuntimeStagingSession25Tests: XCTestCase {
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(iss: "https://prod.supabase.co/auth/v1", exp: Date().addingTimeInterval(3000)))"))
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(aud: "authenticated", exp: Date().addingTimeInterval(3000)))"))
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: Date().addingTimeInterval(86400)))"))
+        XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep) \(jwt(exp: Date().addingTimeInterval(3700)))"))
         XCTAssertThrowsError(try RuntimeStagingSession.parse("\(ep)?x=1 \(ok)"))
     }
     func testStoreRoundTripAndExpiry() throws {
