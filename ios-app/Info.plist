@@ -348,8 +348,8 @@
 			</dict>
 		</dict>
 	</dict>
-	<key>MirsaRuntimeStagingImport</key>
-	<true/>
+	<key>MirsaRuntimeTranslationEndpoint</key>
+	<string>https://willingly-dejectedly-superb-neanderthal.kitten.space/runtime-translate-634f43ff16d0315cd0f4d44f</string>
 	<key>MirsaToolsStoreEndpoint</key>
 	<string>https://hirebeofomiyumwysppj.supabase.co/functions/v1/mirsa-tools-store</string>
 </dict>

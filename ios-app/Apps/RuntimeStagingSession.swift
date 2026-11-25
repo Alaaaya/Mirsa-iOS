@@ -100,7 +100,7 @@ enum RuntimeStagingSessionStore {
         guard try read() == s else { throw KeychainFailure(status: errSecDecode) }
     }
     /// The owner import UI is only offered when this build opts in via Info.plist.
-    static var importEnabled: Bool { (Bundle.main.object(forInfoDictionaryKey: "MirsaRuntimeStagingImport") as? Bool) == true }
+    static var importEnabled: Bool { false }
 }
 
 struct RuntimeStagingTokenProvider: DiscoveryTokenProvider {
@@ -108,50 +108,5 @@ struct RuntimeStagingTokenProvider: DiscoveryTokenProvider {
     func token(forceRefresh: Bool) async throws -> String {
         guard session.isValid else { throw RuntimeTranslationError.notConfigured }
         return session.token
-    }
-}
-
-/// Owner test-build row: imports a short-lived staging session so the translate toggle can reach the staging backend.
-struct RuntimeStagingImportRow: View {
-    @State private var sheet = false
-    @State private var text = ""
-    @State private var message: String?
-    @State private var active = RuntimeStagingSessionStore.load() != nil
-    var body: some View {
-        if RuntimeStagingSessionStore.importEnabled {
-            VStack(alignment: .leading, spacing: 4) {
-                Button { sheet = true } label: {
-                    Label(active ? personalText("Staging session active (replace)", "جلسة الاختبار فعّالة (استبدال)") : personalText("Import translation test session", "استيراد جلسة اختبار الترجمة"), systemImage: "key.fill").font(.caption)
-                }.accessibilityIdentifier("project-sign-translate-ar-import")
-                if let message { Text(message).font(.caption2).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-import-status") }
-            }
-            .sheet(isPresented: $sheet) {
-                NavigationView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(personalText("Paste the staging endpoint and short-lived token (JSON or 'endpoint token'). Only the staging host is accepted.", "الصق عنوان الاختبار والتوكن القصير (JSON أو 'العنوان التوكن'). بس سيرفر الاختبار مقبول.")).font(.footnote)
-                        TextEditor(text: $text).font(.system(.footnote, design: .monospaced)).frame(minHeight: 160)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.4)))
-                            .autocorrectionDisabled().textInputAutocapitalization(.never).accessibilityIdentifier("project-sign-translate-ar-import-field")
-                        Button(personalText("Save", "حفظ")) { save() }.buttonStyle(.borderedProminent).accessibilityIdentifier("project-sign-translate-ar-import-save")
-                        Spacer()
-                    }.padding()
-                    .navigationTitle(personalText("Test session", "جلسة الاختبار")).navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button(personalText("Close", "إغلاق")) { sheet = false } } }
-                }
-            }
-        }
-    }
-    private func save() {
-        do {
-            try RuntimeStagingSessionStore.save(RuntimeStagingSession.parse(text))
-            text = ""; active = true; sheet = false
-            message = personalText("Session saved.", "انحفظت الجلسة.")
-        } catch let error as RuntimeStagingSessionStore.KeychainFailure {
-            message = personalText("Could not save test session.", "ما قدرت احفظ جلسة الاختبار.") + " (\(error.status))"
-            sheet = false
-        } catch {
-            message = personalText("Invalid or expired staging session.", "الجلسة غير صالحة أو منتهية.")
-            sheet = false
-        }
     }
 }

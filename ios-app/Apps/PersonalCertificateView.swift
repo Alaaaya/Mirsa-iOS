@@ -324,17 +324,13 @@ enum PersonalCertificateSigner {
         try IPAEditorService.run("extract", input: ipa, output: root)
         let app = try IPAEditorService.app(in: root)
         ArabicLocalizationPipeline.lastNotice = nil
-        var runtimeAllowed = options.translateToArabic && arabicTranslator == nil
+        let runtimeAllowed = options.translateToArabic && arabicTranslator == nil
         if options.translateToArabic, let arabicTranslator {
             ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app, translator: arabicTranslator)
         } else if runtimeAllowed {
             // Even removed extensions must not bypass the original encryption gate.
             do { _ = try RuntimeTranslationScanner.scan(app: app) }
-            catch RuntimeTranslationScanError.encrypted {
-                runtimeAllowed = false; ArabicLocalizationPipeline.lastNotice = RuntimeArabicText.encrypted
-            } catch {
-                runtimeAllowed = false; ArabicLocalizationPipeline.lastNotice = RuntimeArabicText.failed
-            }
+            catch { throw RuntimeArabicPipeline.failure(error) }
         }
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)
@@ -405,7 +401,7 @@ enum PersonalCertificateSigner {
             try IPAEditorService.run(options.useLoader ? "inject_loader" : "inject", input: app, executable: info["CFBundleExecutable"] as? String, libraries: options.libraries, newFirst: options.newTweaksFirst)
         }
         if runtimeAllowed {
-            ArabicLocalizationPipeline.lastNotice = RuntimeArabicPipeline.applyBlocking(app: app, translator: runtimeTranslator,
+            ArabicLocalizationPipeline.lastNotice = try RuntimeArabicPipeline.applyRequired(app: app, translator: runtimeTranslator,
                 originalRevision: originalSHA, bundleIDOverride: options.bundleID)
         }
         try RuntimeOriginalIPA.verify(ipa, expected: originalSHA)
@@ -463,6 +459,10 @@ enum PersonalCertificateSigner {
         try fm.createDirectory(at: stage, withIntermediateDirectories: true,
                                attributes: [.protectionKey: FileProtectionType.complete])
         let (root, app, info) = try prepare(ipa: ipa, stage: stage, options: options, applyBundleID: false)
+        let originalSHA = try RuntimeOriginalIPA.pin(ipa)
+        let runtimeBundleID = options.bundleID ?? (info["CFBundleIdentifier"] as? String ?? "")
+        let runtimeConfiguration = options.translateToArabic
+            ? try RuntimeArabicPipeline.verifyInstalled(app: app, revision: originalSHA, bundleID: runtimeBundleID) : nil
         let reportURL = stage.appendingPathComponent("encryption.json")
         try IPAEditorService.run("signing_encryption", input: app, output: reportURL, signingOptions: options)
         let encryption = try JSONDecoder().decode(PersonalEncryptionWarning.self, from: Data(contentsOf: reportURL))
@@ -515,6 +515,11 @@ enum PersonalCertificateSigner {
         // Export contains the signed app and, unless omitted, its public profile,
         // never P12, password or private key.
         try control.checkpoint()
+        if let runtimeConfiguration {
+            try RuntimeArabicPipeline.verifyInstalled(app: app, revision: originalSHA, bundleID: runtimeBundleID,
+                                                     expectedConfiguration: runtimeConfiguration)
+        }
+        try RuntimeOriginalIPA.verify(ipa, expected: originalSHA)
         progress(PersonalSigningEvent(stage: .packaging))
         let output = try pack(root: root, options: options)
         var handedOff = false

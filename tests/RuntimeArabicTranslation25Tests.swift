@@ -96,6 +96,88 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
          "expiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))]
     }
 
+    /// No injected translator, endpoint or manual staging session. The same app account,
+    /// prepare -> Rust personal_sign -> post-sign verification -> pack path as the UI.
+    func testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let token = env["MIRSA_RT_STAGING_TOKEN"], !token.isEmpty else {
+            if env["MIRSA_RT_REQUIRED_STAGING"] == "1" { XCTFail("Required private account fixture missing"); return }
+            throw XCTSkip("private account fixture not provided")
+        }
+        let expiry = try RuntimeStagingSession.validate(token: token, now: Date())
+        let store = KeychainSessionStore(), saved = store.load()
+        defer { store.save(saved) }
+        try RuntimeStagingSessionStore.save(nil)
+        XCTAssertFalse(RuntimeStagingSessionStore.importEnabled)
+        XCTAssertNil(RuntimeStagingSessionStore.load())
+        XCTAssertNotNil(RuntimeArabicBackendTranslator.defaultEndpoint())
+        store.save(DiscoverySession(accessToken: token, refreshToken: "unused-fixture-refresh", expiresAt: expiry))
+        let fixture = try realFixture(), original = try RuntimeOriginalIPA.hash(fixture.ipa)
+        let bundle = Bundle(for: Self.self)
+        let material = PersonalIdentityVault.Material(
+            p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
+            password: "mirsa-test",
+            profile: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "mobileprovision"))))
+        var options = PersonalProjectOptions()
+        options.translateToArabic = true
+        options.backgroundNotifications = true
+        options.backgroundMethods = [.audio, .significantLocation]
+        let on = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: options)
+        let unpacked = fixture.root.appendingPathComponent("signed-on")
+        try IPAEditorService.run("extract", input: on.url, output: unpacked)
+        let app = try IPAEditorService.app(in: unpacked)
+        let info = try IPAEditorService.info(in: app), executable = try XCTUnwrap(info["CFBundleExecutable"] as? String)
+        let loads = try IPAEditorService.dependencies(of: app.appendingPathComponent(executable))
+        XCTAssertTrue(loads.contains("@loader_path/Frameworks/MirsaTranslate.dylib"))
+        XCTAssertTrue(loads.contains("@loader_path/Frameworks/MirsaBackground.dylib"))
+        let id = try XCTUnwrap(info["CFBundleIdentifier"] as? String)
+        try RuntimeArabicPipeline.verifyInstalled(app: app, revision: original, bundleID: id)
+        let config = app.appendingPathComponent("Frameworks/MirsaTranslations.json")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
+        XCTAssertTrue((object["translations"] as? [String: String])?.isEmpty == true)
+        XCTAssertNotNil(object["online"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: app.appendingPathComponent("_CodeSignature/CodeResources").path))
+        let proofRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("RuntimeSigningProof25")
+        try FileManager.default.createDirectory(at: proofRoot, withIntermediateDirectories: true)
+        let onProofURL = proofRoot.appendingPathComponent("ON.ipa")
+        try? FileManager.default.removeItem(at: onProofURL)
+        try FileManager.default.copyItem(at: on.url, to: onProofURL)
+        let proof = XCTAttachment(contentsOfFile: on.url)
+        proof.name = "production-sign-auto-account-arm64.ipa"; proof.lifetime = .keepAlways; add(proof)
+        // Post-sign/export cannot report success if any translation side effect went missing.
+        try FileManager.default.removeItem(at: config)
+        XCTAssertThrowsError(try RuntimeArabicPipeline.verifyInstalled(app: app, revision: original, bundleID: id))
+        XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
+        let off = try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "", options: .init())
+        let offRoot = fixture.root.appendingPathComponent("signed-off")
+        try IPAEditorService.run("extract", input: off.url, output: offRoot)
+        try assertNoRuntime(IPAEditorService.app(in: offRoot))
+        XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
+        let offProofURL = proofRoot.appendingPathComponent("OFF.ipa")
+        try? FileManager.default.removeItem(at: offProofURL)
+        try FileManager.default.copyItem(at: off.url, to: offProofURL)
+        let offProof = XCTAttachment(contentsOfFile: off.url)
+        offProof.name = "production-sign-toggle-off-arm64.ipa"; offProof.lifetime = .keepAlways; add(offProof)
+    }
+
+    func testRealSigningMissingAccountStopsWithActionableArabicErrorBeforeExport() throws {
+        let oldLanguage = AppLanguageStore.shared.current
+        AppLanguageStore.shared.set(.arabic)
+        defer { AppLanguageStore.shared.set(oldLanguage) }
+        let store = KeychainSessionStore(), saved = store.load()
+        store.save(nil); defer { store.save(saved) }
+        let fixture = try realFixture(), original = try RuntimeOriginalIPA.hash(fixture.ipa)
+        var options = PersonalProjectOptions(); options.translateToArabic = true
+        let stage = fixture.root.appendingPathComponent("missing-session")
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try PersonalCertificateSigner.prepare(ipa: fixture.ipa, stage: stage, options: options)) { error in
+            XCTAssertEqual(error.localizedDescription, RuntimeArabicText.signIn)
+            XCTAssertTrue(error.localizedDescription.contains("حسابك"))
+        }
+        XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
+    }
+
     func testEncryptedSkipsDictionaryAndPreservesAllBytes() throws {
         let app = try synthetic(encrypted: true), before = try snapshot(app)
         let translator = Translator(.failure(RuntimeTranslationError.network))

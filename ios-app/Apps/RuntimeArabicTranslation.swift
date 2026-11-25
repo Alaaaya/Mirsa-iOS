@@ -3,8 +3,9 @@ import CryptoKit
 
 enum RuntimeArabicText {
     static var encrypted: String { personalText("This app is encrypted, so it cannot be translated.", "هالتطبيق مشفّر، وما فينا نعرّبه.") }
-    static var unavailable: String { personalText("Arabic translation is not configured in this private build. The original app was kept.", "خدمة التعريب مو مفعّلة بهالنسخة التجريبية. التطبيق ضل متل ما هو.") }
-    static var failed: String { personalText("Could not add Arabic translation. The original app was kept.", "ما قدرت أضيف التعريب. التطبيق ضل متل ما هو.") }
+    static var unavailable: String { personalText("Arabic translation is not activated. Activate the translation service, then sign again. Signing was stopped; the original app was kept.", "خدمة التعريب مو مفعّلة. فعّل خدمة التعريب وبعدين أعد التوقيع. وقف التوقيع، والملف الأصلي ما تغيّر.") }
+    static var signIn: String { personalText("Your Mirsa session expired or is missing. Open Mirsa, sign in again, then retry signing. No file was exported.", "جلسة حسابك بمرسى منتهية أو مو موجودة. افتح مرسى وسجّل دخولك من جديد، وبعدين أعد التوقيع. ما تم تصدير أي ملف.") }
+    static var failed: String { personalText("Could not add Arabic translation. Signing was stopped; check the connection and try again. The original app was kept.", "ما قدرت أضيف التعريب. وقف التوقيع؛ تأكد من الاتصال وجرّب مرة تانية. الملف الأصلي ما تغيّر.") }
     static var offline: String { personalText("Arabic dictionary added. Online translation is unavailable.", "انضاف قاموس التعريب. ترجمة النصوص الناقصة عبر الإنترنت مو متاحة.") }
 }
 
@@ -89,6 +90,64 @@ enum RuntimeArabicPipeline {
     static func applyBlocking(app: URL, translator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator(),
                               dylib: URL? = bundledDylib, timeout: TimeInterval = 180,
                               originalRevision: String? = nil, bundleIDOverride: String? = nil) -> String? {
+        do {
+            return try applyRequired(app: app, translator: translator, dylib: dylib, timeout: timeout,
+                                     originalRevision: originalRevision, bundleIDOverride: bundleIDOverride)
+        } catch { return error.localizedDescription }
+    }
+
+    /// A requested signing feature is mandatory. Only diagnostic callers use the notice wrapper.
+    static func failure(_ error: Error) -> Error {
+        if let known = error as? SideloadError { return known }
+        switch error {
+        case RuntimeTranslationScanError.encrypted: return SideloadError.message(RuntimeArabicText.encrypted)
+        case is DiscoveryAuthError, RuntimeTranslationError.httpStatus(401): return SideloadError.message(RuntimeArabicText.signIn)
+        case RuntimeTranslationError.notConfigured: return SideloadError.message(RuntimeArabicText.unavailable)
+        default: return SideloadError.message(RuntimeArabicText.failed)
+        }
+    }
+
+    /// Validate actual filesystem state and parsed Mach-O dependencies, never a notice or substring.
+    /// Used before transactional commit AND again after the Rust signer, before any export/install.
+    @discardableResult static func verifyInstalled(app: URL, revision: String, bundleID: String,
+                                                  expectedConfiguration: String? = nil) throws -> String {
+        do {
+            let fm = FileManager.default
+            let frameworks = app.appendingPathComponent("Frameworks")
+            let dylib = frameworks.appendingPathComponent("MirsaTranslate.dylib")
+            let config = frameworks.appendingPathComponent("MirsaTranslations.json")
+            for path in [app, frameworks, dylib, config] {
+                guard (try? fm.destinationOfSymbolicLink(atPath: path.path)) == nil else { throw RuntimeTranslationError.invalid }
+            }
+            let attrs = try config.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard attrs.isRegularFile == true, let size = attrs.fileSize, size > 0, size < 4 * 1_048_576,
+                  let object = try JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any],
+                  object["revision"] as? String == revision,
+                  let table = object["translations"] as? [String: String],
+                  (try dylib.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else { throw RuntimeTranslationError.invalid }
+            let online = RuntimeArabicBackendTranslator.validOnline(object["online"] as? [String: String], bundleID: bundleID, revision: revision)
+            if object["online"] != nil {
+                guard online != nil, table.isEmpty else { throw RuntimeTranslationError.invalid }
+            } else {
+                guard !table.isEmpty, table.allSatisfy({ ArabicIPALocalizer.acceptable(source: $0.key, translated: $0.value) }) else {
+                    throw RuntimeTranslationError.invalid
+                }
+            }
+            let info = try IPAEditorService.info(in: app)
+            guard let executable = info["CFBundleExecutable"] as? String, !executable.isEmpty,
+                  !executable.contains("/"), !executable.contains("\\"), executable != ".", executable != ".." else { throw RuntimeTranslationError.invalid }
+            let loads = try IPAEditorService.dependencies(of: app.appendingPathComponent(executable))
+            guard loads.filter({ $0 == "@loader_path/Frameworks/MirsaTranslate.dylib" }).count == 1 else { throw RuntimeTranslationError.invalid }
+            try IPAEditorService.run("validate", input: dylib)
+            let actual = try RuntimeOriginalIPA.hash(config)
+            if let expectedConfiguration, actual != expectedConfiguration { throw RuntimeTranslationError.invalid }
+            return actual
+        } catch { throw failure(error) }
+    }
+
+    static func applyRequired(app: URL, translator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator(),
+                              dylib: URL? = bundledDylib, timeout: TimeInterval = 180,
+                              originalRevision: String? = nil, bundleIDOverride: String? = nil) throws -> String {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("runtime-ar-" + UUID().uuidString)
         defer { try? fm.removeItem(at: work) }
@@ -138,35 +197,27 @@ enum RuntimeArabicPipeline {
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
             guard data.count < 4 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])
+            try verifyInstalled(app: copy, revision: revision, bundleID: bundleID)
             // Original .ipa is not involved in this swap, and remains reusable with toggle off.
             let backup = work.appendingPathComponent("untranslated.app")
             try fm.moveItem(at: app, to: backup)
             do { try fm.moveItem(at: copy, to: app) }
             catch { try fm.moveItem(at: backup, to: app); throw error }
             return online == nil ? RuntimeArabicText.offline : ArabicTranslateText.applied
-        } catch RuntimeTranslationScanError.encrypted { return RuntimeArabicText.encrypted }
-        catch RuntimeTranslationError.notConfigured { return RuntimeArabicText.unavailable }
-        catch { return RuntimeArabicText.failed }
+        } catch { throw failure(error) }
     }
 }
 
 /// A release must explicitly configure a reviewed HTTPS endpoint; this branch has no live deployment.
 struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
-    /// Release endpoint from Info.plist wins; otherwise an explicitly imported owner staging session.
+    /// Public endpoint only. Every signing operation obtains an account-scoped grant automatically.
+    /// Manual owner test sessions are never used by the user signing path.
     var endpoint: URL? = RuntimeArabicBackendTranslator.defaultEndpoint()
-    var tokenProvider: DiscoveryTokenProvider? = RuntimeArabicBackendTranslator.defaultTokenProvider()
-    private static var releaseEndpoint: String? {
-        (Bundle.main.object(forInfoDictionaryKey: "MirsaRuntimeTranslationEndpoint") as? String).flatMap { $0.isEmpty ? nil : $0 }
-    }
+    var tokenProvider: DiscoveryTokenProvider? = nil
     static func defaultEndpoint() -> URL? {
-        if let raw = releaseEndpoint { return URL(string: raw) }
-        guard RuntimeStagingSessionStore.importEnabled, let s = RuntimeStagingSessionStore.load() else { return nil }
-        return URL(string: s.endpoint)
-    }
-    static func defaultTokenProvider() -> DiscoveryTokenProvider? {
-        if releaseEndpoint != nil { return nil }
-        guard RuntimeStagingSessionStore.importEnabled, let s = RuntimeStagingSessionStore.load() else { return nil }
-        return RuntimeStagingTokenProvider(session: s)
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "MirsaRuntimeTranslationEndpoint") as? String,
+              !raw.isEmpty else { return nil }
+        return URL(string: raw)
     }
     var http: RuntimeTranslationHTTP = RuntimeTranslationHTTP()
     func dictionary(bundleID: String, revision: String, items: [ArabicIPALocalizer.Item]) async throws -> RuntimeTranslationPackage {
@@ -174,16 +225,26 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
               endpoint.password == nil, endpoint.query == nil, endpoint.fragment == nil,
               DiscoveryURLPolicy.isSafe(endpoint) else { throw RuntimeTranslationError.notConfigured }
         let auth: DiscoveryTokenProvider = tokenProvider ?? DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
-            publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP())
-        let token = try await auth.token(forceRefresh: false)
+            publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP(), existingOnly: true)
+        var token = try await auth.token(forceRefresh: false)
+        let account = try ForgeClient.fixUserID(token)
         let defaults = UserDefaults.standard
         let installKey = "MirsaRuntimeInstallationClaim25"
         let installation = defaults.string(forKey: installKey) ?? UUID().uuidString.lowercased()
         defaults.set(installation, forKey: installKey)
-        let issued = try await http.post(endpoint, token: token, object: ["action": "issue", "consent": true,
-            "bundleId": bundleID, "revision": revision, "installationId": installation])
+        let issue: [String: Any] = ["action": "issue", "consent": true, "bundleId": bundleID,
+                                  "revision": revision, "installationId": installation]
+        let issued: [String: Any]
+        do { issued = try await http.post(endpoint, token: token, object: issue) }
+        catch RuntimeTranslationError.httpStatus(401) {
+            token = try await auth.token(forceRefresh: true)
+            guard try ForgeClient.fixUserID(token) == account else { throw RuntimeTranslationError.invalid }
+            issued = try await http.post(endpoint, token: token, object: issue)
+        }
         guard let online = Self.validOnline(issued["online"] as? [String: String], bundleID: bundleID, revision: revision),
-              let activation = online["activation"] else { throw RuntimeTranslationError.invalid }
+              let activation = online["activation"], try ForgeClient.fixUserID(activation) == account,
+              activationScope(activation, bundle: bundleID, revision: revision, installation: installation,
+                              capability: online["token"] ?? "") else { throw RuntimeTranslationError.invalid }
         var groups: [[ArabicIPALocalizer.Item]] = [], current: [ArabicIPALocalizer.Item] = [], chars = 0
         for item in items where RuntimeTranslationScanner.safeText(item.text) {
             if current.count == 128 || chars + item.text.utf16.count > 8192 { groups.append(current); current = []; chars = 0 }
@@ -210,6 +271,19 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
             }
         }
         return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts, deferredReasons: reasons)
+    }
+    private func activationScope(_ token: String, bundle: String, revision: String,
+                                 installation: String, capability: String) -> Bool {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return false }
+        var text = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while text.count % 4 != 0 { text += "=" }
+        guard let bytes = Data(base64Encoded: text),
+              let claims = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any] else { return false }
+        // Server verifies the signature; these checks prevent accepting any response for another scope/account.
+        let hash = SHA256.hash(data: Data(capability.utf8)).map { String(format: "%02x", $0) }.joined()
+        return claims["bundleId"] as? String == bundle && claims["revision"] as? String == revision &&
+            claims["installationId"] as? String == installation && claims["capHash"] as? String == hash
     }
     /// Only a scoped committed label + durable outbox review counts as a designed fallback.
     static func queueReceipt(_ response: [String: Any], sources: [String]) -> [[String: Any]]? {

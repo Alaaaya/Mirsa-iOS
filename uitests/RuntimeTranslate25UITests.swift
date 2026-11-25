@@ -23,6 +23,8 @@ final class RuntimeTranslate25UITests: XCTestCase {
         XCTAssertTrue(hint2.label.contains("التطبيقات المشفّرة والألعاب والنصوص اللي بالصور ما بتتعرّب"))
         XCTAssertGreaterThanOrEqual(hint.frame.minY, toggle.frame.maxY - 1)
         XCTAssertGreaterThanOrEqual(hint2.frame.minY, hint.frame.maxY - 1)
+        XCTAssertFalse(app.buttons["استيراد جلسة اختبار الترجمة"].exists)
+        XCTAssertFalse(app.textFields["Runtime staging session"].exists)
         capture("runtime-translate-hint-initial")
         let start = toggle.value as? String
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()

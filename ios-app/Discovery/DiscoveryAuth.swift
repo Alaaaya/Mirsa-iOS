@@ -80,9 +80,10 @@ actor DiscoveryAuthClient: DiscoveryTokenProvider {
     private let store: DiscoverySessionStore
     private let http: DiscoveryAuthHTTP
     private let now: () -> Date
+    private let existingOnly: Bool
 
-    init(projectURL: URL, publishableKey: String, store: DiscoverySessionStore, http: DiscoveryAuthHTTP, now: @escaping () -> Date = Date.init) {
-        self.projectURL = projectURL; self.key = publishableKey; self.store = store; self.http = http; self.now = now
+    init(projectURL: URL, publishableKey: String, store: DiscoverySessionStore, http: DiscoveryAuthHTTP, now: @escaping () -> Date = Date.init, existingOnly: Bool = false) {
+        self.projectURL = projectURL; self.key = publishableKey; self.store = store; self.http = http; self.now = now; self.existingOnly = existingOnly
     }
 
     func token(forceRefresh: Bool) async throws -> String {
@@ -91,10 +92,17 @@ actor DiscoveryAuthClient: DiscoveryTokenProvider {
         if let s = current {
             let (code, data) = try await call("auth/v1/token", query: [URLQueryItem(name: "grant_type", value: "refresh_token")],
                                               body: ["refresh_token": s.refreshToken])
-            if (200..<300).contains(code), let n = DiscoveryAuthParse.session(data, now: now()) { store.save(n); return n.accessToken }
+            if (200..<300).contains(code), let n = DiscoveryAuthParse.session(data, now: now()) {
+                if existingOnly {
+                    guard let old = try? ForgeClient.fixUserID(s.accessToken),
+                          let new = try? ForgeClient.fixUserID(n.accessToken), old == new else { throw DiscoveryAuthError.failed("Existing account required.") }
+                }
+                store.save(n); return n.accessToken
+            }
             if !(400..<500).contains(code) { throw DiscoveryAuthError.failed("Sign-in service answered \(code).") }
             store.save(nil) // refresh token rejected: start over with one sign-up
         }
+        guard !existingOnly else { throw DiscoveryAuthError.failed("Existing account required.") }
         let (code, data) = try await call("auth/v1/signup", query: [], body: [:])
         guard (200..<300).contains(code), let n = DiscoveryAuthParse.session(data, now: now()) else {
             throw DiscoveryAuthError.failed(code == 422 || code == 400 || code == 403 ? "Anonymous sign-in is not enabled on that project." : "Sign-in service answered \(code).")
