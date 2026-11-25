@@ -1,0 +1,30 @@
+# Runtime translation v1 (branch only, not deployed)
+
+One POST HTTPS endpoint, configured explicitly as RUNTIME_PUBLIC_ENDPOINT. Supabase gateway JWT verification must be disabled for this function only; function verifies bootstrap JWT itself. No endpoint defaults in clients.
+
+All requests JSON, common fields action, bundleId (ASCII reverse-domain), revision (lowercase SHA256 of original app bytes), consent true. Unknown fields rejected. Errors {"error":"code"} with 400/401/403/413/429/503. Never replace original text on error. No user text logged or persisted server-side.
+
+Mirsa bootstrap uses Authorization: Bearer <Supabase user access JWT>. Never embed this JWT in signed app.
+Dictionary request {"action":"dictionary","bundleId":"com.example.app","revision":"64 lowercase hex","consent":true,"items":[{"id":"s0","text":"设置"}]}.
+Dictionary response {"bundleId":"com.example.app","revision":"...","translations":{"s0":"الإعدادات"}}. Items up to 128, each 256 UTF16 units, combined 8192. Only safe UI strings, not arbitrary documents. Rejected sensitive items cause whole request rejection.
+
+Capability request {"action":"issue","bundleId":"com.example.app","revision":"...","consent":true}.
+Response {"online":{"endpoint":"https://.../runtime-translate","token":"mrt1.<64 random lowercase hex>","bundleId":"com.example.app","revision":"...","expiresAt":"ISO8601 UTC"}}.
+Capabilities live 24 hours, scoped to authenticated user/app/revision, stored as SHA256 digest only, never general auth tokens. Issue quota 12/day/user prevents quota reset via unlimited tokens. Capabilities cannot call dictionary or issue. Offline dictionary continues after expiry; no runtime JWT refresh.
+
+Runtime request Authorization: Bearer <online.token>.
+{"action":"missing","bundleId":"com.example.app","revision":"...","consent":true,"items":[{"id":"s0","text":"设置"}]}
+Response {"bundleId":"com.example.app","revision":"...","translations":{"s0":"الإعدادات"}}.
+Missing batch max 16, each 256 UTF16 units, total 2048, only strings containing CJK. Runtime client should deduplicate, debounce, send only strings absent from local dictionary, never block render thread. Cache by exact original string and app/revision locally; only apply translations for returned IDs matching sent originals. No text loss if subset omitted.
+Server rejects email, URLs/domains, paths, credentials, long digit sequences, private-data markers and unsafe controls before provider. Privacy screening is conservative but cannot prove arbitrary text contains no names; explicit per-app online consent required, online off by default.
+Durable atomic quotas before provider: 10 requests/minute and 256 requests/32768 chars per capability lifetime; user 100 requests/65536 chars daily (all actions). Failures consume reserved quota. Auth rate scope is user, never client-supplied ID. Scope mismatch/revocation/expiry denied. Tokens are bearer secrets, do not put in logs or URLs.
+
+Output Arabic only when safe and placeholders preserved byte-for-byte, source IDs unchanged; unsafe/malformed provider results omitted. Max HTTP body 48KiB, max response 48KiB; provider response 64KiB and each returned translation 1024 units; whole handler 25s, provider total 18s.
+No model fallback. Explicit strong model env and exact server allowlist mandatory; weak/lite/mini/nano/flash/small routes rejected. Config without approved credentials/model/provider returns 503.
+
+## Operator setup and verification
+Environment names SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RUNTIME_PUBLIC_ENDPOINT, RUNTIME_LLM_BASE_URL (OpenAI-compatible base URL), RUNTIME_LLM_API_KEY, RUNTIME_LLM_MODEL, RUNTIME_STRONG_MODELS (comma separated exact approved model names), RUNTIME_PROVIDER_ORIGINS (comma separated HTTPS origins). No credentials committed. Exact model approval is an operator responsibility, not client input. Provider credentials must be authorized for this use. No default provider/model, no downgrade route.
+Rate clarification: 10 requests/minute is per authenticated owner across all capabilities (stricter than per-capability); daily user quota includes bootstrap actions, and lifetime capability limits remain additional. JWT anonymous installs are supported, so account-farming requires independent upstream signup/abuse controls before public exposure.
+Scope ties capability to requested revision, not cryptographic app attestation; copying the signed app copies its scoped capability. Never treat capability as authorization for any other endpoint or private account data.
+Apply schema.sql only with release approval; deploy with verify_jwt=false only for this function, because capabilities are not Supabase JWTs. RLS on all tables, no anon/authenticated table policies or RPC grants, service-role-only quota RPC. Optional administrative revocation sets revoked=true.
+Checks executed locally on branch: node --test backend/runtime-translate/logic.test.mjs, npx deno check backend/runtime-translate/index.ts, backend/runtime-translate/test-postgres.sh. Last script starts disposable Unix-socket-only Postgres, tests expiry/revocation/cross-scope/durable limits/privileges and 30-way concurrent reservation with exactly 10 admitted. No production migration, provider request, native runtime or live endpoint test performed.
