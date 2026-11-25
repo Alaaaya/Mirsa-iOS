@@ -148,7 +148,7 @@ struct PersonalProjectDetailView: View {
                     depsCard
                     certificateCard
                     MirsaVersionArchiveSection(bundleID: app.bundleID)
-                    if let message { Text(message).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }
+                    if let message { Text(message).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).accessibilityIdentifier("project-sign-result-notice") }
                 }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 96)
                     .contentShape(Rectangle())
             }.scrollIndicators(.hidden)
@@ -586,16 +586,18 @@ struct PersonalProjectDetailView: View {
             toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile)
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }))
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }))
-            if !ArabicTranslatePrefs.hasArabicKnown(app.bundleID) {
+            VStack(alignment: .leading, spacing: 4) {
                 Toggle(isOn: Binding(get: { draft.translateArabic ?? false }, set: { draft.translateArabic = $0 })) {
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .center, spacing: 10) {
                         Image(systemName: "globe").foregroundStyle(LCPalette.green)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(ArabicTranslateText.rowTitle).font(.subheadline)
-                            Text(ArabicTranslateText.rowHint).font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text(ArabicTranslateText.rowTitle).font(.subheadline)
                     }
                 }.tint(LCPalette.green).accessibilityIdentifier("project-sign-translate-ar")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(personalText("Some texts need internet to translate", "بعض النصوص بتحتاج إنترنت لتترجم")).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-hint")
+                    Text(personalText("Encrypted apps, games and text inside images are not translated", "التطبيقات المشفّرة والألعاب والنصوص اللي بالصور ما بتتعرّب")).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-hint2")
+                    Text(personalText("If on, UI text missing a translation is sent for translation. The original stays unchanged; re-sign with it off to disable.", "إذا شغّلته، نص الواجهة يلي ما إلو ترجمة بينبعت للترجمة. الأصل بيضل متل ما هو، ووقّع من جديد وهو طافي لتعطّله.")).font(.caption2).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-consent")
+                }.padding(.leading, 32).frame(maxWidth: .infinity, alignment: .leading)
             }
             toggle(personalText("Strict profile match", "مطابقة صارمة للبروفايل"), personalText("Off: the app keeps its own ID and is signed with your selected profile (compatibility, install not guaranteed). On: reject apps the profile does not cover.", "طافي: التطبيق بيحافظ على معرّفه وبينوقّع ببروفايلك المختار (توافق، التثبيت مو مضمون). شغّال: بيرفض التطبيقات يلي البروفايل ما بيغطيها."), Binding(get: { draft.strictProfile ?? false }, set: { draft.strictProfile = $0 }))
             toggle(personalText("Remove Watch app", "إزالة تطبيق الساعة"), personalText("Deletes the Watch folder before signing.", "بيحذف مجلد الساعة قبل التوقيع."), $draft.removeWatchApp)
@@ -773,6 +775,11 @@ struct PersonalProjectDetailView: View {
         #endif
         draftDestination = library.draftURL(app)
         draft = d; loaded = true
+        #if DEBUG
+        if MirsaUITestHarness.active && ProcessInfo.processInfo.arguments.contains("-MirsaRuntimeEncryptedFixture") {
+            message = RuntimeArabicPipeline.encryptedFixtureNotice()
+        }
+        #endif
     }
     private func reloadIdentities() {
         do {

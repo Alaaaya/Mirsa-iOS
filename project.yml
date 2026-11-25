@@ -37,10 +37,14 @@ targets:
         excludes:
           - VideoCAML
           - WallpaperMakerMetadata
+          - RuntimeTranslationAssets
       - path: ios-app/VideoCAML
         type: folder
         buildPhase: resources
       - path: ios-app/WallpaperMakerMetadata
+        type: folder
+        buildPhase: resources
+      - path: ios-app/RuntimeTranslationAssets
         type: folder
         buildPhase: resources
       - path: LICENSES/Gester-MIT.txt
