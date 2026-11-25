@@ -1,4 +1,5 @@
 import test from 'node:test';
+import './contract.test.mjs';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import http from 'node:http';

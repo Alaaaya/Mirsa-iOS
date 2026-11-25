@@ -4,6 +4,16 @@ import {randomBytes,createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 export const TRANSLATION='mirsa.translation.missing', REVIEW='mirsa.translation.review';
 const uuid=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+export function validateBatch(p) {
+   if(!p||Object.keys(p).sort().join(',')!=='batch_id,entries'||!uuid.test(p.batch_id)||!Array.isArray(p.entries)||p.entries.length<1||p.entries.length>32)throw Error('invalid_event_data');
+   const kind=p.entries[0]?.kind, seen=new Set();
+   if(!['missing','review'].includes(kind))throw Error('invalid_event_data');
+   for(const e of p.entries){
+    if(!e||Object.keys(e).sort().join(',')!=='bundle_id,kind,queue_id,revision,user_id,version'||!uuid.test(e.queue_id)||!uuid.test(e.user_id)||e.kind!==kind||!Number.isSafeInteger(e.version)||e.version<1||!/^[A-Za-z0-9][A-Za-z0-9.-]{2,254}$/.test(e.bundle_id)||!e.bundle_id.includes('.')||!/^[a-f0-9]{64}$/.test(e.revision)||seen.has(e.queue_id))throw Error('invalid_event_data');
+    seen.add(e.queue_id);
+   }
+ return p;
+}
 export function extend({Service,equal,callbackURL,validSecret}) {
  return class TranslationService extends Service {
   catalog(){const c=super.catalog();for(const name of [TRANSLATION,REVIEW])c.events.push({name,description:'Private bounded translation batch awaits operator review. Metadata only.',delivery:['webhook'],inputSchema:{type:'object',properties:{},additionalProperties:false},payloadSchema:{type:'object',properties:{batch_id:{type:'string'},entries:{type:'array',minItems:1,maxItems:32,items:{type:'object',properties:{queue_id:{type:'string'},user_id:{type:'string'},bundle_id:{type:'string'},revision:{type:'string'},version:{type:'integer',minimum:1},kind:{enum:['missing','review']}},required:['queue_id','user_id','bundle_id','revision','version','kind'],additionalProperties:false}}},required:['batch_id','entries'],additionalProperties:false}});return c;}
@@ -40,13 +50,7 @@ export function extend({Service,equal,callbackURL,validSecret}) {
    return super.rpc(method,p);
   }
   ingestTranslation(p){
-   if(!p||Object.keys(p).sort().join(',')!=='batch_id,entries'||!uuid.test(p.batch_id)||!Array.isArray(p.entries)||p.entries.length<1||p.entries.length>32)throw Error('invalid_event_data');
-   const kind=p.entries[0]?.kind, seen=new Set();
-   if(!['missing','review'].includes(kind))throw Error('invalid_event_data');
-   for(const e of p.entries){
-    if(!e||Object.keys(e).sort().join(',')!=='bundle_id,kind,queue_id,revision,user_id,version'||!uuid.test(e.queue_id)||!uuid.test(e.user_id)||e.kind!==kind||!Number.isSafeInteger(e.version)||e.version<1||!/^[A-Za-z0-9][A-Za-z0-9.-]{2,254}$/.test(e.bundle_id)||!e.bundle_id.includes('.')||!/^[a-f0-9]{64}$/.test(e.revision)||seen.has(e.queue_id))throw Error('invalid_event_data');
-    seen.add(e.queue_id);
-   }
+   const kind=validateBatch(p).entries[0].kind;
    return this.persist(p,kind==='missing'?TRANSLATION:REVIEW,'trn_'+p.batch_id);
   }
   handler(){
