@@ -193,6 +193,35 @@ mod tests {
         serde_json::from_value(serde_json::json!({"id":target,"library":lib,"target":target,"method":if loader{"load_control"}else{"direct"}})).unwrap()
     }
     #[test]
+    fn actual_hooktest_deb_imports_and_injects_through_both_paths() {
+        let package = include_bytes!("../tests/fixtures/hook/MirsaHookTest.deb");
+        for loader in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let session = temp.path().join("import");
+            fs::create_dir(&session).unwrap();
+            let input = session.join("MirsaHookTest.deb");
+            fs::write(&input, package).unwrap();
+            tweak_import::prepare(&input, &session, &session.join("cancel")).unwrap();
+            let candidates: serde_json::Value = serde_json::from_slice(&fs::read(session.join("candidates.json")).unwrap()).unwrap();
+            let candidates = candidates.as_array().unwrap();
+            assert_eq!(candidates.len(), 1);
+            let lib = session.join(candidates[0]["path"].as_str().unwrap());
+            let original = fs::read(&lib).unwrap();
+            assert!(dependencies(&lib).unwrap().iter().any(|s| s == "/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate"));
+            let app = temp.path().join("Test.app");
+            bundle(&app, "Main", 2);
+            tweak_targets::inject_plan(&app, &[item(&lib, "Main", loader)], &[], loader, false).unwrap();
+            let patched = app.join("Frameworks/MirsaHookTest.dylib");
+            let m = macho(read_macho(&patched).unwrap(), true).unwrap();
+            assert!(m.commands.iter().any(|c| c.name.as_deref() == Some(DEPENDENCY)));
+            assert!(m.commands.iter().any(|c| c.data == runpath(&patched, &app).unwrap()));
+            assert_eq!(fs::read(app.join("Frameworks/CydiaSubstrate.framework/CydiaSubstrate")).unwrap(), BINARY);
+            assert_eq!(fs::read(&input).unwrap(), package);
+            assert_eq!(fs::read(&lib).unwrap(), original);
+        }
+    }
+
+    #[test]
     fn known_aliases_only_and_invalid_resource_fails_closed() {
         for s in ["/usr/lib/libsubstrate.dylib","/var/jb/usr/lib/libellekit.dylib","@rpath/libhooker.dylib","/usr/lib/libsubstitute.dylib","@rpath/ElleKit.framework/ElleKit"] {assert!(alias(s),"{s}");}
         for s in ["/System/Library/Frameworks/Foundation.framework/Foundation","/usr/lib/libobjc.A.dylib","@rpath/MySubstrateHelper.dylib","@rpath/libhooker_extra.dylib"] {assert!(!alias(s),"{s}");}
