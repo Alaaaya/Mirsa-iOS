@@ -362,6 +362,12 @@ jobs:
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
+          # A pending Mirsa notification prompt blocks genuine foreground activation
+          # of the later exact-payload UIKit host. Set only the CI app's permission
+          # before its first launch; never synthesize host lifecycle notifications.
+          brew tap wix/brew
+          brew install applesimutils
+          applesimutils --byId "$DEVICE" --bundle com.alaa.mirsa --setPermissions "notifications=YES"
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
           mkdir -p build
