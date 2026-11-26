@@ -269,8 +269,8 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
             guard response["bundleId"] as? String == bundleID, response["revision"] as? String == revision,
                   let map = response["translations"] as? [String: String] else { throw RuntimeTranslationError.invalid }
             if let deferred = response["deferred"] as? String {
-                guard ["provider_429", "provider_503", "provider_throttled"].contains(deferred),
-                      let verified = Self.queueReceipt(response, sources: group.map(\.text)) else { throw RuntimeTranslationError.invalid }
+                guard let verified = Self.acceptedDeferredReceipt(response, bundleID: bundleID,
+                    revision: revision, sources: group.map(\.text)) else { throw RuntimeTranslationError.invalid }
                 receipts += verified; reasons.append(deferred)
             } else if let verified = Self.queueReceipt(response, sources: group.map(\.text)) { receipts += verified }
             for item in group {
@@ -294,6 +294,18 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
             claims["aud"] as? String == "mirsa-translated-app" &&
             claims["bundleId"] as? String == bundle && claims["revision"] as? String == revision &&
             claims["installationId"] as? String == installation && claims["capHash"] as? String == hash
+    }
+    /// A deferred result is successful only when this exact app/revision's complete
+    /// public source set has a durable, versioned review receipt. No provider fallback.
+    static func acceptedDeferredReceipt(_ response: [String: Any], bundleID: String,
+                                        revision: String, sources: [String]) -> [[String: Any]]? {
+        guard response["bundleId"] as? String == bundleID,
+              response["revision"] as? String == revision,
+              response["translations"] is [String: String],
+              let reason = response["deferred"] as? String,
+              ["provider_429", "provider_503", "provider_throttled", "kat_review_required"].contains(reason)
+        else { return nil }
+        return queueReceipt(response, sources: sources)
     }
     /// Only a scoped committed label + durable outbox review counts as a designed fallback.
     static func queueReceipt(_ response: [String: Any], sources: [String]) -> [[String: Any]]? {

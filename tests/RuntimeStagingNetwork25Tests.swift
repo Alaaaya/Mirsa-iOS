@@ -49,7 +49,7 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
         if package.deferredReasons.isEmpty {
             XCTAssertFalse(package.translations.isEmpty, "Successful provider returned no translations")
         } else {
-            XCTAssertTrue(package.deferredReasons.allSatisfy { ["provider_429", "provider_503", "provider_throttled"].contains($0) })
+            XCTAssertTrue(package.deferredReasons.allSatisfy { ["provider_429", "provider_503", "provider_throttled", "kat_review_required"].contains($0) })
             // Missing values render verbatim. No error, fabricated Arabic or crash.
             for item in items where package.translations[item.text] == nil {
                 XCTAssertEqual(package.translations[item.text] ?? item.text, item.text)
@@ -81,7 +81,7 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
         if let value = map["s0"] {
             XCTAssertTrue(arabic(value)); XCTAssertTrue(value.contains("%d"))
         } else {
-            XCTAssertTrue(["provider_429", "provider_503", "provider_throttled"].contains(reply["deferred"] as? String ?? ""))
+            XCTAssertTrue(["provider_429", "provider_503", "provider_throttled", "kat_review_required"].contains(reply["deferred"] as? String ?? ""))
             XCTAssertEqual(map["s0"] ?? "删除 %d 张照片", "删除 %d 张照片")
             // A second authenticated refresh proves durable server state remains available.
             let refresh = try await RuntimeTranslationHTTP().post(grantEndpoint, token: grant, activation: online["activation"], object: [

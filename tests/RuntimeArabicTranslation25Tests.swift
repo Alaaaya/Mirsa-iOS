@@ -265,6 +265,47 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
          "expiresAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))]
     }
 
+    func testKatOnlyQueuedSigningResponseRequiresExactPersistedScopedReceipt() {
+        let bundle = "org.mirsa.test.kat-only", revision = String(repeating: "a", count: 64)
+        let sources = ["Settings", "Save %@"]
+        let entries: [[String: Any]] = sources.map { source in
+            ["source": source, "labelId": UUID().uuidString, "reviewId": UUID().uuidString,
+             "version": 1, "kind": "missing"]
+        }
+        let good: [String: Any] = ["bundleId": bundle, "revision": revision,
+            "translations": [String: String](), "deferred": "kat_review_required",
+            "queue": ["persisted": true, "entries": entries]]
+        func accepted(_ value: [String: Any]) -> Bool {
+            RuntimeArabicBackendTranslator.acceptedDeferredReceipt(value, bundleID: bundle,
+                revision: revision, sources: sources) != nil
+        }
+        XCTAssertTrue(accepted(good))
+        for key in ["queue", "deferred", "bundleId", "revision", "translations"] {
+            var missing = good; missing.removeValue(forKey: key)
+            XCTAssertFalse(accepted(missing), key)
+        }
+        for (key, value) in [("bundleId", "org.other.app"), ("revision", "other-revision"),
+                             ("deferred", "unreviewed_fallback")] {
+            var bad = good; bad[key] = value
+            XCTAssertFalse(accepted(bad), key)
+        }
+        var unpersisted = good; unpersisted["queue"] = ["persisted": false, "entries": entries]
+        XCTAssertFalse(accepted(unpersisted))
+        var wrongSources = entries; wrongSources[0]["source"] = "Private unrelated source"
+        var mismatched = good; mismatched["queue"] = ["persisted": true, "entries": wrongSources]
+        XCTAssertFalse(accepted(mismatched))
+        var missingEntry = good; missingEntry["queue"] = ["persisted": true, "entries": [entries[0]]]
+        XCTAssertFalse(accepted(missingEntry))
+        for key in ["labelId", "reviewId", "version", "kind"] {
+            var invalidEntries = entries; invalidEntries[0].removeValue(forKey: key)
+            var invalid = good; invalid["queue"] = ["persisted": true, "entries": invalidEntries]
+            XCTAssertFalse(accepted(invalid), key)
+        }
+        // This helper is the SAME guard used by dictionary() before the signing
+        // pipeline can package an empty online table. Full live staging signing
+        // remains covered by testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject.
+    }
+
     func testActivationClaimsUseTheirOwnRealmAndKeepAccountBinding() throws {
         let account = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
         let capability = "mrt1." + String(repeating: "a", count: 64)
