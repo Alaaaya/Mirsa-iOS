@@ -366,7 +366,7 @@ jobs:
           # of the later exact-payload UIKit host. Set only the CI app's permission
           # before its first launch; never synthesize host lifecycle notifications.
           brew tap wix/brew
-          brew install applesimutils
+          brew install wix/brew/applesimutils
           applesimutils --byId "$DEVICE" --bundle com.alaa.mirsa --setPermissions "notifications=YES"
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLanguages -array ar en
           xcrun simctl spawn "$DEVICE" defaults write NSGlobalDomain AppleLocale ar
