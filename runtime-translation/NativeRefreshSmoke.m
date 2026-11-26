@@ -92,7 +92,11 @@ int main(int argc,char **argv){@autoreleasepool{
  ResetOnlineBudgetLocked(fixtureTime+899);assert(onlineAttempts.count==1);
  ResetOnlineBudgetLocked(fixtureTime+900);assert(!onlineAttempts.count);
  // Generic legacy403 cannot prove authenticated revocation; signed expiry still fails closed.
- assert(OnlineUsable());fixtureTime=2000086401;assert(!OnlineUsable());
+ assert(OnlineUsable());
+ ApplyOnlineEntries(@[Entry(@"一次恢复刷入",@"استعادة التفليش مرة واحدة",8)]);
+ assert([Translate(@"一次恢复刷入") isEqual:@"استعادة التفليش مرة واحدة"]);
+ fixtureTime=2000086401;assert(!OnlineUsable());
+ assert([Translate(@"一次恢复刷入") isEqual:@"一次恢复刷入"]);
  NSLog(@"Native async UIKit reapply, source preservation, private date templates, rolling budgets and expiry passed");
  // Suspended fixture queue deliberately dies with this isolated test process; zero network calls.
  return 0;
