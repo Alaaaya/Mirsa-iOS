@@ -198,6 +198,7 @@ jobs:
         env:
           IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         run: |
+          cargo test --manifest-path rust-core/vendor/apple-codesign-quick/Cargo.toml --lib
           cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
           rm -rf AirliftFFI.xcframework
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework

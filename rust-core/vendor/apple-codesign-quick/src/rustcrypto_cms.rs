@@ -300,12 +300,10 @@ fn apple_code_directory_digest_attribute(request: &CmsSigningRequest<'_>) -> Res
     }
 
     let mut values = Vec::with_capacity(request.code_directories.len());
-    // zsign / LiveContainer list only the SHA-256 CodeDirectory here.
-    for code_directory in request
-        .code_directories
-        .iter()
-        .filter(|cd| cd.algorithm == HashAlgorithm::Sha256)
-    {
+    // Apple's StaticCode verifier requires one full digest per CodeDirectory,
+    // including the SHA-1 primary when a SHA-256 alternate is also present.
+    // Omitting either entry invalidates the CMS hash-agility binding.
+    for code_directory in request.code_directories {
         let digest = code_directory.algorithm.digest(code_directory.bytes);
         let digest = OctetStringRef::new(&digest).map_err(cms_der_error)?;
         values.push(
@@ -472,6 +470,16 @@ mod tests {
                 0x30, 0x1d, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x04, 0x14
             ]
         );
+        assert_eq!(&sha1_value_der[11..], HashAlgorithm::Sha1.digest(b"primary"));
+        let sha256_value_der = attribute.values.get(1).unwrap().to_der().unwrap();
+        assert_eq!(
+            &sha256_value_der[..15],
+            &[
+                0x30, 0x2d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x04,
+                0x20,
+            ]
+        );
+        assert_eq!(&sha256_value_der[15..], HashAlgorithm::Sha256.digest(b"alternate"));
     }
 
     #[test]
