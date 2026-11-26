@@ -10,6 +10,24 @@ import hashlib,json,pathlib,plistlib,struct,subprocess,sys,tempfile,zipfile
 root=pathlib.Path(sys.argv[1]);device=sys.argv[2];proof={}
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 def run(*args): return subprocess.run(args,check=True,text=True,capture_output=True).stdout
+def strong_loads(data):
+    assert data[:4]==b'\xcf\xfa\xed\xfe' and struct.unpack_from('<I',data,4)[0]==0x100000c
+    end=32+struct.unpack_from('<I',data,20)[0]
+    assert end<=len(data)
+    offset=32;result=[]
+    for _ in range(struct.unpack_from('<I',data,16)[0]):
+        command,size=struct.unpack_from('<II',data,offset)
+        assert size>=8 and size%8==0 and offset+size<=end
+        if command==0xc:
+            assert size>=24
+            at=struct.unpack_from('<I',data,offset+8)[0]
+            assert 24<=at<size
+            value=data[offset+at:offset+size]
+            assert b'\0' in value
+            result.append(value.split(b'\0',1)[0].decode('utf-8'))
+        offset+=size
+    assert offset==end
+    return result
 for mode in ('DIRECT','LOADER','HOOK'):
     ipa=root/('GENERIC-'+mode+'.ipa');original=sha(ipa)
     attempt=json.loads(ipa.with_suffix('.ipa.mirsa-attempt.json').read_bytes())
@@ -37,6 +55,15 @@ for mode in ('DIRECT','LOADER','HOOK'):
         assert loader.exists()==(mode!='DIRECT')
         engine=app/'Frameworks/CydiaSubstrate.framework/CydiaSubstrate'
         assert engine.exists()==(mode=='HOOK')
+        mainLoads=strong_loads((app/info['CFBundleExecutable']).read_bytes())
+        loadOrder=[]
+        if mode=='DIRECT':
+            assert mainLoads.count('@loader_path/Frameworks/GenericMarker25.dylib')==1
+            assert not any('MirsaLoader' in value for value in mainLoads)
+        else:
+            assert mainLoads.count('@loader_path/Frameworks/MirsaLoader.dylib')==1
+            loadOrder=(app/'Frameworks/MirsaLoadOrder.txt').read_text().splitlines()
+            assert loadOrder==[marker.name]
         binaries=[];changes=[]
         for path in sorted(app.rglob('*')):
             assert not path.is_symlink()
@@ -63,6 +90,6 @@ for mode in ('DIRECT','LOADER','HOOK'):
         result=run('xcrun','simctl','spawn',device,str(app/'GenericLaunch25'),'hook' if mode=='HOOK' else 'plain')
         assert 'MIRSA_GENERIC_PRODUCTION_LAUNCH25 PASS' in result
         assert sha(ipa)==original
-        proof[mode]={'deviceArchiveSHA256':original,'attemptID':attempt['attemptID'],'originalDeviceSignatureVerified':True,'originalArchiveUnmodified':True,'platformAdaptedNativeLaunch':True,'realDeviceVerified':False,'codeChanges':changes,'marker':result.strip()}
+        proof[mode]={'deviceArchiveSHA256':original,'attemptID':attempt['attemptID'],'originalMainLC_LOAD_DYLIB':mainLoads,'originalLoaderOrder':loadOrder,'originalDeviceSignatureVerified':True,'originalArchiveUnmodified':True,'platformAdaptedNativeLaunch':True,'realDeviceVerified':False,'codeChanges':changes,'marker':result.strip()}
         print(mode+': actual production injection/sign/pack, exact archive evidence, native constructor'+(' and Objective-C hook' if mode=='HOOK' else '')+' launch passed (platform-adapted own CI host)')
 (root/'generic-launch-verification.json').write_text(json.dumps(proof,indent=2))

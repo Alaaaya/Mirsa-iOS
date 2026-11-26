@@ -18,6 +18,24 @@ def commands(data):
         assert size>=8 and offset+size<=len(data)
         result.append((offset,command,size));offset+=size
     return result
+def strong_loads(data):
+    assert data[:4]==b'\xcf\xfa\xed\xfe' and struct.unpack_from('<I',data,4)[0]==0x100000c
+    end=32+struct.unpack_from('<I',data,20)[0]
+    assert end<=len(data)
+    offset=32;result=[]
+    for _ in range(struct.unpack_from('<I',data,16)[0]):
+        command,size=struct.unpack_from('<II',data,offset)
+        assert size>=8 and size%8==0 and offset+size<=end
+        if command==0xc:
+            assert size>=24
+            at=struct.unpack_from('<I',data,offset+8)[0]
+            assert 24<=at<size
+            value=data[offset+at:offset+size]
+            assert b'\0' in value
+            result.append(value.split(b'\0',1)[0].decode('utf-8'))
+        offset+=size
+    assert offset==end
+    return result
 for mode,(name,sourceSHA,title) in expected.items():
     ipa=root/('EXACT-'+mode+'.ipa');original=sha(ipa)
     attempt=json.loads(ipa.with_suffix('.ipa.mirsa-attempt.json').read_bytes())
@@ -44,6 +62,11 @@ for mode,(name,sourceSHA,title) in expected.items():
         assert (app/'Frameworks'/ (name+'.dylib')).is_file() and (app/'Frameworks/MirsaLoader.dylib').is_file()
         engine=app/'Frameworks/CydiaSubstrate.framework/CydiaSubstrate'
         assert engine.is_file()==(mode=='HOOK')
+        mainLoads=strong_loads((app/info['CFBundleExecutable']).read_bytes())
+        loadOrder=[]
+        assert mainLoads.count('@loader_path/Frameworks/MirsaLoader.dylib')==1
+        loadOrder=(app/'Frameworks/MirsaLoadOrder.txt').read_text().splitlines()
+        assert loadOrder==[name+'.dylib']
         binaries=[];changes=[]
         allowed={'ExactLaunch25','Frameworks/'+name+'.dylib','Frameworks/MirsaLoader.dylib'}
         if mode=='HOOK': allowed.add('Frameworks/CydiaSubstrate.framework/CydiaSubstrate')
@@ -77,7 +100,7 @@ for mode,(name,sourceSHA,title) in expected.items():
         screenshot=root/('exact-'+mode+'-Arabic-alert.png');shutil.copyfile(sourcePNG,screenshot)
         assert sha(ipa)==original
         proof[mode]={'sourceDylib':name+'.dylib','sourceDylibSHA256':sourceSHA,'deviceArchiveSHA256':original,
-            'attemptID':attempt['attemptID'],'originalDeviceSignatureVerified':True,'originalArchiveUnmodified':True,
+            'attemptID':attempt['attemptID'],'originalMainLC_LOAD_DYLIB':mainLoads,'originalLoaderOrder':loadOrder,'originalDeviceSignatureVerified':True,'originalArchiveUnmodified':True,
             'platformAdaptedNativeUIKitLaunch':True,'realDeviceVerified':False,'DriftLaunched':False,
             'metadataAdapted':['CFBundleSupportedPlatforms','DTPlatformName'],'codeChanges':changes,
             'actualArabicAlertTitle':title,'actualArabicAlertPNG':screenshot.name,'actualArabicAlertPNGSHA256':sha(screenshot),

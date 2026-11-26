@@ -7,9 +7,13 @@ from unittest.mock import patch
 
 SCRIPTS=pathlib.Path(__file__).parent
 PNG=b'\x89PNG\r\n\x1a\n'+b'inert-unit-test'
-def binary():
+def binary(load=None):
     command=struct.pack('<IIIIII',0x32,24,2,0,0,0)
-    return struct.pack('<IIIIIIII',0xfeedfacf,0x100000c,0,2,1,len(command),0,0)+command
+    count=1
+    if load:
+        body=load.encode()+b'\0';size=(24+len(body)+7)&~7
+        command+=struct.pack('<IIIIII',0xc,size,24,0,0,0)+body+b'\0'*(size-24-len(body));count+=1
+    return struct.pack('<IIIIIIII',0xfeedfacf,0x100000c,0,2,count,len(command),0,0)+command
 
 class LaunchVerifierTests(unittest.TestCase):
     def setUp(self):
@@ -26,8 +30,10 @@ class LaunchVerifierTests(unittest.TestCase):
             name=('Alaa' if mode=='ALAA' else 'MirsaHookTest') if exact else ('GenericHookMarker25' if mode=='HOOK' else 'GenericMarker25')
             host='ExactLaunch25' if exact else 'GenericLaunch25'
             files={'Info.plist':plistlib.dumps(dict(CFBundleExecutable=host,CFBundleIdentifier='com.mirsa.ci.'+('exactlaunch25' if exact else 'genericlaunch25'))),
-                   host:binary(),'Frameworks/'+name+'.dylib':binary()}
-            if mode!='DIRECT':files['Frameworks/MirsaLoader.dylib']=binary()
+                   host:binary('@loader_path/Frameworks/'+(name+'.dylib' if mode=='DIRECT' else 'MirsaLoader.dylib')),'Frameworks/'+name+'.dylib':binary()}
+            if mode!='DIRECT':
+                files['Frameworks/MirsaLoader.dylib']=binary()
+                files['Frameworks/MirsaLoadOrder.txt']=(name+'.dylib\n').encode()
             if mode=='HOOK':files['Frameworks/CydiaSubstrate.framework/CydiaSubstrate']=binary()
             if wrong==mode:
                 key='Frameworks/CydiaSubstrate.framework/CydiaSubstrate' if exact else 'Frameworks/MirsaLoader.dylib'
@@ -96,6 +102,38 @@ class LaunchVerifierTests(unittest.TestCase):
     def test_exact_modes_survive_archived_permissions(self):
         self.archives(True);calls=self.execute(True);self.assert_modes(True)
         self.assertEqual(sum(c.args[0][0]=='codesign' and '--strict' in c.args[0] for c in calls.call_args_list),4)
+
+    def mutate_archive(self,exact,member,value):
+        mode='ALAA' if exact else 'DIRECT'
+        host='ExactLaunch25' if exact else 'GenericLaunch25'
+        ipa=self.root/(('EXACT-' if exact else 'GENERIC-')+mode+'.ipa')
+        with zipfile.ZipFile(ipa) as archive:
+            files=[(entry,archive.read(entry.filename)) for entry in archive.infolist()]
+        with zipfile.ZipFile(ipa,'w') as archive:
+            for entry,body in files:
+                archive.writestr(entry,value if entry.filename=='Payload/'+host+'.app/'+member else body)
+        sidecar=ipa.with_suffix('.ipa.mirsa-attempt.json')
+        attempt=json.loads(sidecar.read_bytes());attempt['outputSHA256']=hashlib.sha256(ipa.read_bytes()).hexdigest()
+        sidecar.write_text(json.dumps(attempt))
+
+    def test_missing_main_load_rejected_before_launch(self):
+        for exact in (False,True):
+            with self.subTest(exact=exact):
+                self.archives(exact)
+                self.mutate_archive(exact,'ExactLaunch25' if exact else 'GenericLaunch25',binary())
+                with self.assertRaises(AssertionError):self.execute(exact)
+
+    def test_wrong_main_load_rejected_before_launch(self):
+        for exact in (False,True):
+            with self.subTest(exact=exact):
+                self.archives(exact)
+                self.mutate_archive(exact,'ExactLaunch25' if exact else 'GenericLaunch25',binary('@loader_path/Frameworks/Other.dylib'))
+                with self.assertRaises(AssertionError):self.execute(exact)
+
+    def test_wrong_exact_loader_manifest_rejected(self):
+        self.archives(True)
+        self.mutate_archive(True,'Frameworks/MirsaLoadOrder.txt',b'Other.dylib\n')
+        with self.assertRaises(AssertionError):self.execute(True)
 
     def test_generic_wrong_loader_rejected(self):
         self.archives(wrong='DIRECT')
