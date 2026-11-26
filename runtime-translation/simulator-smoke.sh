@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 cp fixtures/ActivationPublicVector.json "$TMP/"
-cp RuntimeTranslate.m LocalTemplates.h Online.h OnlineMerge.h Activation.h ActivationKey.h Banner.h Bidi.h Tokens.h fishhook.[ch] Smoke.m NativePolicySmoke.m NativeRefreshSmoke.m "$TMP/"
+cp RuntimeTranslate.m LocalTemplates.h Online.h OnlineMerge.h Activation.h ActivationKey.h Banner.h Bidi.h Tokens.h fishhook.[ch] Smoke.m NativePolicySmoke.m NativeRefreshSmoke.m NativeForegroundSmoke.m "$TMP/"
 cd "$TMP"
 python3 - <<'PY'
 import json
@@ -28,3 +28,6 @@ xcrun simctl spawn "$DEVICE" "$TMP/policy-smoke" "$TMP/ActivationPublicVector.js
 
 xcrun clang -target "$ARCH-apple-ios17.0-simulator" -isysroot "$SDK" -fobjc-arc -fblocks -Wall -Wextra -Werror NativeRefreshSmoke.m fishhook.c -framework UIKit -framework Foundation -framework CoreText -framework CoreGraphics -framework Security -o refresh-smoke
 xcrun simctl spawn "$DEVICE" "$TMP/refresh-smoke" "$TMP/ActivationPublicVector.json"
+
+xcrun clang -target "$ARCH-apple-ios17.0-simulator" -isysroot "$SDK" -fobjc-arc -fblocks -Wall -Wextra -Werror NativeForegroundSmoke.m fishhook.c -framework UIKit -framework Foundation -framework CoreText -framework CoreGraphics -framework Security -o foreground-smoke
+xcrun simctl spawn "$DEVICE" "$TMP/foreground-smoke" "$TMP/ActivationPublicVector.json"
