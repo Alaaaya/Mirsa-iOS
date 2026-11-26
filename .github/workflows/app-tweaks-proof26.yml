@@ -43,6 +43,8 @@ jobs:
         run: |
           set -o pipefail
           brew install xcodegen
+          mkdir -p tests/fixtures/exact-hooks25 tests/fixtures/generic-injection25
+          touch tests/fixtures/exact-hooks25/ExactLaunch25Fixture.ipa tests/fixtures/generic-injection25/GenericLaunch25Fixture.ipa
           xcodegen generate
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
           xcrun simctl boot "$DEVICE" || true
