@@ -288,6 +288,29 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         }
     }
 
+    /// CI readiness only: the cold simulator/edge connection must reach request validation.
+    /// The deliberately invalid action is rejected before auth, quota or capability writes.
+    /// Never retry the real signing operation or weaken its required first issue assertion.
+    private func awaitStagingTransportReadiness(_ endpoint: URL) async throws {
+        for attempt in 1...3 {
+            do {
+                _ = try await RuntimeTranslationHTTP().post(endpoint,
+                    token: "readiness-without-credentials", object: ["action": "readiness"])
+                XCTFail("Invalid readiness action unexpectedly succeeded")
+                throw RuntimeTranslationError.invalid
+            } catch RuntimeTranslationError.httpStatus(400) {
+                print("Simulator staging transport readiness reached validation on attempt \(attempt)")
+                return
+            } catch let error as URLError where
+                Set<URLError.Code>([.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet]).contains(error.code) {
+                guard attempt < 3 else { throw error }
+                print("Simulator staging transport readiness retry \(attempt), transport code \(error.code.rawValue)")
+                try await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+        throw RuntimeTranslationError.network
+    }
+
     /// No injected translator, endpoint or manual staging session. The same app account,
     /// prepare -> Rust personal_sign -> post-sign verification -> pack path as the UI.
     func testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject() async throws {
@@ -302,7 +325,8 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         try RuntimeStagingSessionStore.save(nil)
         XCTAssertFalse(RuntimeStagingSessionStore.importEnabled)
         XCTAssertNil(RuntimeStagingSessionStore.load())
-        XCTAssertNotNil(RuntimeArabicBackendTranslator.defaultEndpoint())
+        let endpoint = try XCTUnwrap(RuntimeArabicBackendTranslator.defaultEndpoint())
+        try await awaitStagingTransportReadiness(endpoint)
         store.save(DiscoverySession(accessToken: token, refreshToken: "unused-fixture-refresh", expiresAt: expiry))
         let fixture = try realFixture(), original = try RuntimeOriginalIPA.hash(fixture.ipa)
         let bundle = Bundle(for: Self.self)
