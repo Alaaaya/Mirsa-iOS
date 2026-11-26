@@ -95,6 +95,8 @@ int main(int argc,char **argv){@autoreleasepool{
  assert(OnlineUsable());
  ApplyOnlineEntries(@[Entry(@"一次恢复刷入",@"استعادة التفليش مرة واحدة",8)]);
  assert([Translate(@"一次恢复刷入") isEqual:@"استعادة التفليش مرة واحدة"]);
+ // Extending the unsigned configuration date cannot extend the signed deadline.
+ NSMutableDictionary *extended=[onlineConfig mutableCopy];extended[@"expiresAt"]=@"2099-01-01T00:00:00Z";onlineConfig=extended;
  fixtureTime=2000086401;assert(!OnlineUsable());
  assert([Translate(@"一次恢复刷入") isEqual:@"一次恢复刷入"]);
  NSLog(@"Native async UIKit reapply, source preservation, private date templates, rolling budgets and expiry passed");

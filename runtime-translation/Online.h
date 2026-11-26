@@ -29,6 +29,18 @@ static NSTimeInterval OnlineExpiry(id value) {
  if(!d){f.formatOptions=NSISO8601DateFormatWithInternetDateTime|NSISO8601DateFormatWithFractionalSeconds;d=[f dateFromString:value];}
  return d.timeIntervalSince1970;
 }
+// Configuration is signature-verified by ConfigureOnline. Keep the signed
+// deadline authoritative for cached rendering too, not just outgoing requests.
+static NSTimeInterval OnlineSignedExpiry(NSDictionary *config) {
+ id jwt=config[@"activation"];
+ if(![jwt isKindOfClass:NSString.class] || [jwt length]>4096)return 0;
+ NSArray *parts=[jwt componentsSeparatedByString:@"."];
+ if(parts.count!=3)return 0;
+ NSData *payload=ActivationDecode(parts[1]);if(!payload)return 0;
+ id claims=[NSJSONSerialization JSONObjectWithData:payload options:0 error:NULL];
+ if(![claims isKindOfClass:NSDictionary.class] || ![claims[@"exp"] isKindOfClass:NSNumber.class])return 0;
+ return [claims[@"exp"] doubleValue];
+}
 static NSDictionary *onlineConfig;
 static NSMutableDictionary *onlinePositive,*onlineNegative,*onlineMeta;
 static NSMutableSet *onlinePending;
@@ -278,7 +290,7 @@ static void FlushOnline(void) { @autoreleasepool {
  }
 }}
 static void QueueOnline(NSString *s) {
- if(!onlineConfig || OnlineDenied() || OnlineExpiry(onlineConfig[@"expiresAt"])<=OnlineNow() || !NetworkSafe(s))return;
+ if(!onlineConfig || OnlineDenied() || (OnlineExpiry(onlineConfig[@"expiresAt"])<=OnlineNow() || OnlineSignedExpiry(onlineConfig)<=OnlineNow()) || !NetworkSafe(s))return;
  NSTimeInterval now=OnlineNow();
  os_unfair_lock_lock(&onlineLock);ResetOnlineBudgetLocked(now);
  if(!onlinePositive[s] && onlineUncovered.count<128)[onlineUncovered addObject:s];
