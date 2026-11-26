@@ -61,7 +61,7 @@ jobs:
           m = json.load(open("build/raw/manifest.json"))
           for t in m:
               for a in t.get("attachments", []):
-                  shutil.copy(os.path.join("build/raw", a["exportedFileName"]), "build/shots/" + (a.get("suggestedHumanReadableName") or a["exportedFileName"]).split("_0_")[0] + ".png")
+                  shutil.copy(os.path.join("build/raw", a["exportedFileName"]), "build/shots/" + (a.get("suggestedHumanReadableName") or a["exportedFileName"]).split("_0_")[0] + ".png") if "app_tweaks" in (a.get("suggestedHumanReadableName") or "") else None
           PY
           ls build/shots; cat build/source-requests.log || true; cp scripts/proof/snap/SHA256SUMS scripts/proof/snap/ORIGIN build/ || true
       - uses: actions/upload-artifact@v4

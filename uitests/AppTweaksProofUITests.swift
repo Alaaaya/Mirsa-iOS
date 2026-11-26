@@ -7,7 +7,7 @@ final class AppTweaksProofUITests: XCTestCase {
         let language = MirsaUILanguages.primary
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "tools",
-                               "-mirsa.toolsStore.endpoint", "https://localhost:8443/",
+                               "-mirsa.toolsStore.endpoint", "https://localhost:8443/", "-mirsa.toolsStore.proofToken", "proof-local-token",
                                "-mirsa.appLanguage", language, "-mirsa.sourceTheme", "aurora",
                                "-AppleLanguages", "(\(language))", "-AppleLocale", language]
         app.launch()

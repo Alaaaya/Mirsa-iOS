@@ -214,6 +214,9 @@ enum ToolsStoreError: LocalizedError, Equatable {
 /// backends use (DiscoveryAuthClient). Nothing secret is stored in the app.
 enum ToolsStoreClient {
     private static func token(force: Bool) async throws -> String {
+        #if DEBUG
+        if MirsaUITestHarness.active, let t = UserDefaults.standard.string(forKey: "mirsa.toolsStore.proofToken") { return t } // proof-only, DEBUG+harness
+        #endif
         let auth = DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
                                        publishableKey: WebBackendConfig.defaultPublishableKey,
                                        store: KeychainSessionStore(), http: SafeMetadataHTTP())
