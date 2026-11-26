@@ -91,7 +91,7 @@ for mode,(name,sourceSHA,title) in expected.items():
             if binary!=app/'ExactLaunch25': run('codesign','--force','--sign','-','--timestamp=none',str(binary))
         run('codesign','--force','--sign','-','--timestamp=none',str(app))
         run('codesign','--verify','--deep','--strict',str(app))
-        run('xcrun','simctl','install',device,str(app))
+        run('xcrun','simctl','install',device,str(app),timeout=180)
         launched=subprocess.run(('xcrun','simctl','launch','--terminate-running-process','--console-pty',device,info['CFBundleIdentifier'],mode),check=True,text=True,capture_output=True,timeout=45)
         result=(launched.stdout or '')+(launched.stderr or '')
         (root/('exact-'+mode+'-launch.log')).write_text(result)
