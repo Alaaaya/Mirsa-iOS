@@ -24,8 +24,8 @@ for mode in ('DIRECT','LOADER','HOOK'):
         # This changes no signed file bytes and must happen before native launch.
         for entry in archive.infolist():
             if not entry.is_dir():
-                mode=(entry.external_attr >> 16) & 0o777
-                if mode: (pathlib.Path(directory)/entry.filename).chmod(mode)
+                file_mode=(entry.external_attr >> 16) & 0o777
+                if file_mode: (pathlib.Path(directory)/entry.filename).chmod(file_mode)
         app=pathlib.Path(directory)/'Payload/GenericLaunch25.app'
         assert list((pathlib.Path(directory)/'Payload').glob('*.app'))==[app]
         info=plistlib.loads((app/'Info.plist').read_bytes())
