@@ -145,7 +145,11 @@ jobs:
         run: |
           bash scripts/prepare-privatekits-sdk.sh iphoneos
           brew install xcodegen
-          xcodegen generate
+          # Device packaging does not build tests. Keep their generated IPA inputs
+          # strict in project.yml and all simulator gates, omit only in this spec.
+          python3 scripts/prepare-device-build-spec26.py
+          xcodegen generate --spec project.device.generated.yml
+          rm project.device.generated.yml
           mkdir -p Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
           cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
