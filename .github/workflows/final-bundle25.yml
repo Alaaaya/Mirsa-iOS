@@ -328,6 +328,7 @@ jobs:
           mkdir -p build/production-sign-proof
           cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/ON.ipa" build/production-sign-proof/
           cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/OFF.ipa" build/production-sign-proof/
+          python3 scripts/diagnostics/test-lcsign-identity.py
           python3 scripts/test-verify-production-sign25.py
           python3 scripts/verify-production-sign25.py build/production-sign-proof
           cp "$CONTAINER/Library/Application Support/RuntimeSigningProof25/"GENERIC-*.ipa* build/production-sign-proof/
