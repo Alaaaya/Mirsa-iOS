@@ -1,6 +1,8 @@
 name: App tweaks proof (read-only, isolated source)
 on:
   workflow_dispatch:
+  push:
+    branches: [mirsa/app-tweak-proof26]
 permissions:
   contents: read
 jobs:
