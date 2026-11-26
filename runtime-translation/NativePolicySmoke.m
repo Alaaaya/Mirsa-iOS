@@ -23,8 +23,8 @@ static NSTimeInterval FixtureNow(void){return 2000000010;}
  NSMutableArray *entries=[NSMutableArray array];
  for(NSDictionary *item in items)[entries addObject:@{@"source":item[@"text"],@"labelId":NSUUID.UUID.UUIDString,@"reviewId":NSUUID.UUID.UUIDString,@"kind":@"missing",@"version":@1}];
  NSDictionary *reply=@{@"bundleId":request[@"bundleId"],@"revision":request[@"revision"],@"translations":@{},@"entries":@[],
-  @"deferred":[NSString stringWithFormat:@"provider_%ld",(long)fixtureCode],@"queue":@{@"persisted":@YES,@"entries":entries}};
- NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc]initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type":@"application/json"}];
+  @"deferred":fixtureCode==200?@"kat_review_required":[NSString stringWithFormat:@"provider_%ld",(long)fixtureCode],@"queue":@{@"persisted":@YES,@"entries":entries}};
+ NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc]initWithURL:self.request.URL statusCode:fixtureCode HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type":@"application/json"}];
  [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
  [self.client URLProtocol:self didLoadData:[NSJSONSerialization dataWithJSONObject:reply options:0 error:NULL]];
  [self.client URLProtocolDidFinishLoading:self];
@@ -86,6 +86,7 @@ int main(int argc,char **argv) {@autoreleasepool {
  assert(argc==2);
  NSDictionary *c=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:@(argv[1])] options:0 error:NULL];
  assert(ValidActivation(c,@"com.example.activationfixture",2000000010));
+ onlineClock=FixtureNow;onlineTestActivationBundle=@"com.example.activationfixture";
  assert(!ValidActivation(c,@"com.other.app",2000000010));
  assert(!ValidActivation(c,@"com.example.activationfixture",2000086401));
  for(NSString *key in @[@"activation",@"revision",@"installationId",@"token"]){
@@ -129,7 +130,7 @@ int main(int argc,char **argv) {@autoreleasepool {
  method_exchangeImplementations(original,mocked);
  onlineClock=FixtureNow;onlineTestActivationBundle=@"com.example.activationfixture";
  enabled=YES; // Execute the actual render path, not its disabled early return.
- for(NSNumber *code in @[@429,@503]){
+ for(NSNumber *code in @[@429,@503,@403,@200]){
   NSMutableDictionary *fixture=[c mutableCopy];fixture[@"endpoint"]=@"https://staging.fixture.invalid/runtime";
   fixture[@"expiresAt"]=@"2033-05-19T03:33:20Z";onlineConfig=fixture;
   onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];
@@ -150,19 +151,34 @@ int main(int argc,char **argv) {@autoreleasepool {
   assert(!waiting);
   // A transient failure intentionally retains pending work for its bounded retry.
   os_unfair_lock_lock(&onlineLock);
-  assert(onlineWaiting==3 && onlinePending.count==3 && onlineFlushScheduled);
-  assert(onlineIssued==3 && onlineFlushDeadline>=FixtureNow()+59);
+  if(fixtureCode==200){
+   assert(!onlineWaiting && !onlinePending.count && !onlineFlushScheduled);
+   assert(onlineRefreshScheduled); // persisted Kat-only queue follows dictionary refresh, not repeated missing
+  }else{
+   assert(onlineWaiting==3 && onlinePending.count==3 && onlineFlushScheduled);
+   assert(onlineFlushDeadline>=FixtureNow()+59);
+  }
+  assert(onlineIssued==3);
   for(NSString *source in sources)assert([onlineAttempts[source] unsignedIntegerValue]==1);
   os_unfair_lock_unlock(&onlineLock);
   @synchronized(MirsaFallbackProtocol.class){assert(fixtureCalls==1 && fixtureItems==3);}
   for(NSString *source in sources){assert(!OnlineLookup(source));assert([Translate(source) isEqual:source]);}
   assert(!onlinePositive.count && onlineNegative.count==3);
+  assert(!OnlineDenied() && OnlineUsable());
+  NSString *explicitKey=[@"MirsaTranslationExplicitRevoked26." stringByAppendingString:ActivationHash(onlineConfig[@"token"])];
+  assert(![NSUserDefaults.standardUserDefaults boolForKey:explicitKey]);
+  // The final 200 succeeds after the 403 using the same signed activation.
   os_unfair_lock_lock(&onlineLock);
   [onlinePending removeAllObjects];onlineWaiting=0;
   onlineFlushScheduled=NO;onlineFlushDeadline=0;onlineFlushGeneration++;
   os_unfair_lock_unlock(&onlineLock);
  }
  method_exchangeImplementations(original,mocked);
- NSLog(@"Native batched 429/503 fallback original UI and no-crash smoke passed");
+ NSLog(@"Native 429/503/403 reject network entries without permanent denial; persisted Kat-only 200 recovers");
+ // Invalid activation cannot reach the transport, including through a retry path.
+ NSInteger previousCalls=fixtureCalls;
+ NSMutableDictionary *badActivation=[onlineConfig mutableCopy];badActivation[@"activation"]=@"tampered";onlineConfig=badActivation;
+ assert(!OnlineUsable() && !OnlinePost(@"missing",@[@{@"id":@"s0",@"text":@"重试按钮"}]));
+ assert(fixtureCalls==previousCalls);
  NSLog(@"Native policy, activation, queue cache and banner persistence smoke passed");return 0;
 }}

@@ -98,6 +98,8 @@ int main(int argc,char **argv){@autoreleasepool{
  // Extending the unsigned configuration date cannot extend the signed deadline.
  NSMutableDictionary *extended=[onlineConfig mutableCopy];extended[@"expiresAt"]=@"2099-01-01T00:00:00Z";onlineConfig=extended;
  fixtureTime=2000086401;assert(!OnlineUsable());
+ ApplyOnlineEntries(@[Entry(@"过期更新",@"تحديث منتهي",999)]);
+ assert(!OnlineLookup(@"过期更新")); // even a correctly-shaped entry cannot apply after signed expiry
  assert([Translate(@"一次恢复刷入") isEqual:@"一次恢复刷入"]);
  NSLog(@"Native async UIKit reapply, source preservation, private date templates, rolling budgets and expiry passed");
  // Suspended fixture queue deliberately dies with this isolated test process; zero network calls.

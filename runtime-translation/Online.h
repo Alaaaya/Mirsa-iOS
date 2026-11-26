@@ -54,6 +54,7 @@ static NSTimeInterval onlineBudgetStart,onlineAttemptStart;
 static NSTimeInterval (*onlineClock)(void);
 static NSTimeInterval OnlineNow(void){return onlineClock?onlineClock():NSDate.date.timeIntervalSince1970;}
 static NSTimeInterval OnlineBackoff(NSUInteger attempt){return attempt<=1?60:(attempt==2?300:900);}
+static BOOL OnlineUsable(void);
 static void ReapplyTranslations(void);
 static void RefreshOnlineDictionary(void);
 static void OnlineForeground(void);
@@ -109,6 +110,7 @@ static BOOL ValidOnlineValue(NSString *s,id v) {
   PlaceholdersPreserved(s,v) && !HasCJK(v) && [v rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0x0600,0x100)]].location!=NSNotFound;
 }
 static void ApplyOnlineEntries(NSArray *entries) {
+ if(onlineConfig && !OnlineUsable())return;
  if(![entries isKindOfClass:NSArray.class] || entries.count>1564)return;
  BOOL changed=NO;
  for(id item in entries){
