@@ -10,8 +10,8 @@ PNG=b'\x89PNG\r\n\x1a\n'+b'inert-unit-test'
 def binary(load=None):
     command=struct.pack('<IIIIII',0x32,24,2,0,0,0)
     count=1
-    if load:
-        body=load.encode()+b'\0';size=(24+len(body)+7)&~7
+    for item in ([load] if isinstance(load,str) else (load or [])):
+        body=item.encode()+b'\0';size=(24+len(body)+7)&~7
         command+=struct.pack('<IIIIII',0xc,size,24,0,0,0)+body+b'\0'*(size-24-len(body));count+=1
     return struct.pack('<IIIIIIII',0xfeedfacf,0x100000c,0,2,count,len(command),0,0)+command
 
@@ -50,7 +50,7 @@ class LaunchVerifierTests(unittest.TestCase):
             ipa.with_suffix('.ipa.mirsa-attempt.json').write_text(json.dumps(dict(outputSHA256=hashlib.sha256(ipa.read_bytes()).hexdigest(),
                  componentSHA256={'component':sourceSHA},selectedComponentIDs=['exact:'+name],attemptID=mode)))
 
-    def execute(self, exact=False, reject_apple=False, reject_marker=False, script=None, launch_timeout=False):
+    def execute(self, exact=False, reject_apple=False, reject_marker=False, script=None, launch_timeout=False, flags=(), image_evidence=True):
         script=script or SCRIPTS/('verify-exact-hook-launch25.py' if exact else 'verify-generic-launch25.py')
         def command(args,**kwargs):
             if exact and args[:3]==('xcrun','simctl','io'):
@@ -76,10 +76,15 @@ class LaunchVerifierTests(unittest.TestCase):
                 mode=args[-1]
                 self.assertIn(mode,('ALAA','HOOK'))
                 output='MIRSA_EXACT_HOOK25 PASS '+mode+' '+('علاء' if mode=='ALAA' else 'مرسى شغال ✅')
+                if '--only-alaa' in flags and image_evidence:
+                    images=['Alaa','MirsaLoader']
+                    if '--background' in flags: images.append('MirsaBackground')
+                    if '--translation' in flags: images.append('MirsaTranslate')
+                    output+='\n'+'\n'.join('EXACT_DIAGNOSTIC26 success image /owned/app/Frameworks/'+image+'.dylib' for image in images)
             elif args[2]=='get_app_container':output=str(self.container)
             else:self.assertEqual(args[2],'install')
             return subprocess.CompletedProcess(args,0,stdout='bad marker' if reject_marker else output)
-        with patch.object(sys,'argv',[str(script),str(self.root),'owned-sim']),patch('subprocess.run',side_effect=command) as calls:
+        with patch.object(sys,'argv',[str(script),str(self.root),'owned-sim',*flags]),patch('subprocess.run',side_effect=command) as calls:
             runpy.run_path(str(script),run_name='__main__')
         return calls
 
@@ -100,6 +105,49 @@ class LaunchVerifierTests(unittest.TestCase):
             self.assertFalse(item['realDeviceVerified'])
             self.assertEqual(hashlib.sha256((self.root/(('EXACT-' if exact else 'GENERIC-')+mode+'.ipa')).read_bytes()).hexdigest(),item['deviceArchiveSHA256'])
             if exact:self.assertEqual(item['actualArabicAlertPNG'],'exact-'+mode+'-Arabic-alert.png')
+
+    def optional_feature_archive(self,background=False,translation=False):
+        self.archives(True)
+        loads=['@loader_path/Frameworks/MirsaLoader.dylib']
+        archive=self.root/'EXACT-ALAA.ipa'
+        with zipfile.ZipFile(archive) as source:
+            files={entry.filename:(entry,source.read(entry)) for entry in source.infolist()}
+        prefix='Payload/ExactLaunch25.app/'
+        for enabled,name,config in [(background,'MirsaBackground','MirsaBackgroundNotifications.plist'),(translation,'MirsaTranslate','Frameworks/MirsaTranslations.json')]:
+            if not enabled:continue
+            loads.append('@loader_path/Frameworks/'+name+'.dylib')
+            for member,value in [('Frameworks/'+name+'.dylib',binary()),(config,b'inert-config')]:
+                entry=zipfile.ZipInfo(prefix+member);entry.external_attr=0o100755<<16
+                files[entry.filename]=(entry,value)
+        entry,_=files[prefix+'ExactLaunch25'];files[entry.filename]=(entry,binary(loads))
+        with zipfile.ZipFile(archive,'w') as destination:
+            for entry,value in files.values():destination.writestr(entry,value)
+        sidecar=archive.with_suffix('.ipa.mirsa-attempt.json')
+        attempt=json.loads(sidecar.read_bytes());attempt['outputSHA256']=hashlib.sha256(archive.read_bytes()).hexdigest()
+        sidecar.write_text(json.dumps(attempt))
+
+    def test_diagnostic_feature_matrix_keeps_exact_alert_and_strict_signature_gates(self):
+        for background,translation in [(False,False),(True,False),(False,True),(True,True)]:
+            with self.subTest(background=background,translation=translation):
+                self.optional_feature_archive(background,translation)
+                flags=['--only-alaa']+(['--background'] if background else [])+(['--translation'] if translation else [])
+                calls=self.execute(True,flags=flags)
+                proof=json.loads((self.root/'exact-hook-launch-verification.json').read_text())
+                self.assertEqual(set(proof),{'ALAA'})
+                self.assertEqual(proof['ALAA']['backgroundEnabled'],background)
+                self.assertEqual(proof['ALAA']['translationEnabled'],translation)
+                self.assertTrue(proof['ALAA']['originalDeviceSignatureVerified'])
+                self.assertFalse(proof['ALAA']['realDeviceVerified'])
+
+    def test_diagnostic_marker_without_per_process_loaded_images_rejected(self):
+        self.archives(True)
+        with self.assertRaises(AssertionError):self.execute(True,flags=['--only-alaa'],image_evidence=False)
+
+    def test_default_gate_rejects_optional_feature_and_diagnostic_flag_cannot_skip_payload(self):
+        self.optional_feature_archive(background=True)
+        with self.assertRaises(AssertionError):self.execute(True)
+        self.archives(True)
+        with self.assertRaises(AssertionError):self.execute(True,flags=['--only-alaa','--background'])
 
     def test_timeout_preserves_partial_evidence_but_fails_gate(self):
         self.archives(True)

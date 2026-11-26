@@ -2,6 +2,10 @@ name: Final integrated bundle private validation
 on:
   workflow_dispatch:
     inputs:
+      same_payload_ab:
+        description: 'Private owned-host released-engine comparison. Never builds a release.'
+        type: boolean
+        default: false
       exact_launch_diagnostic:
         description: 'Read-only replay of exact signed fixture from failed run 45805899206. Never builds a release.'
         type: boolean
@@ -17,8 +21,12 @@ defaults:
 env:
   MIRSA_RELEASE_BUILD: "8.543.2"
 jobs:
+  same-payload-ab:
+    if: ${{ inputs.same_payload_ab == true }}
+    uses: ./.github/workflows/same-payload-ab26.yml
+    secrets: inherit
   exact-launch-diagnostic:
-    if: ${{ inputs.exact_launch_diagnostic == true }}
+    if: ${{ inputs.exact_launch_diagnostic == true && inputs.same_payload_ab != true }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +57,7 @@ jobs:
             diagnostic-source/build/production-sign-proof/exact-*-Arabic-alert.png
 
   native-hook-smoke:
-    if: ${{ inputs.exact_launch_diagnostic != true }}
+    if: ${{ inputs.exact_launch_diagnostic != true && inputs.same_payload_ab != true }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +67,7 @@ jobs:
           python3 scripts/test-hook-localization.py
 
   backend:
-    if: ${{ inputs.exact_launch_diagnostic != true }}
+    if: ${{ inputs.exact_launch_diagnostic != true && inputs.same_payload_ab != true }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -183,7 +191,7 @@ jobs:
           if-no-files-found: error
 
   simulator:
-    if: ${{ inputs.exact_launch_diagnostic != true }}
+    if: ${{ inputs.exact_launch_diagnostic != true && inputs.same_payload_ab != true }}
     needs: [backend, native-hook-smoke]
     runs-on: macos-26
     steps:

@@ -12,7 +12,7 @@ static const char *exactString26(NSString *value) {
 static void exactImages26(const char *phase) {
     for (uint32_t index=0; index<_dyld_image_count(); ++index) {
         const char *path=_dyld_get_image_name(index);
-        if (path && (strstr(path,"ExactLaunch25") || strstr(path,"MirsaLoader") || strstr(path,"Alaa.dylib") || strstr(path,"MirsaHookTest") || strstr(path,"CydiaSubstrate")))
+        if (path && (strstr(path,"ExactLaunch25") || strstr(path,"MirsaLoader") || strstr(path,"Alaa.dylib") || strstr(path,"MirsaHookTest") || strstr(path,"CydiaSubstrate") || strstr(path,"MirsaBackground") || strstr(path,"MirsaTranslate")))
             fprintf(stderr,"EXACT_DIAGNOSTIC26 %s image %s\n",phase,path);
     }
     fflush(stderr);
@@ -83,6 +83,7 @@ static void exactState26(UIApplication *application,const char *phase) {
                     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
                     BOOL saved = [UIImagePNGRepresentation(shot) writeToFile:[documents stringByAppendingPathComponent:@"exact-alert.png"] atomically:YES];
                     if (!saved) exit(46);
+                    exactImages26("success");
                     printf("MIRSA_EXACT_HOOK25 PASS %s %s\n", mode.UTF8String, title.UTF8String); fflush(stdout); exit(0);
                 });
                 return;

@@ -5,9 +5,19 @@ Only private copies adapt device platform metadata and renew ad-hoc signatures.
 This is native simulator execution, not a physical-device or Drift launch claim.
 """
 import hashlib,json,pathlib,plistlib,shutil,stat,struct,subprocess,sys,tempfile,zipfile
-root=pathlib.Path(sys.argv[1]);device=sys.argv[2];proof={}
+import argparse
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('root',type=pathlib.Path)
+parser.add_argument('device')
+parser.add_argument('--only-alaa',action='store_true',help='Private same-payload diagnostic cell only; never the final release gate')
+parser.add_argument('--background',action='store_true')
+parser.add_argument('--translation',action='store_true')
+args=parser.parse_args()
+assert args.only_alaa or not (args.background or args.translation), 'Optional features require the explicit matrix cell mode'
+root=args.root;device=args.device;proof={}
 expected={'ALAA':('Alaa','04afc06b8a95d5ef1761bfa221bd1386f8762452970226d3c1ff64a4642d6565','علاء'),
           'HOOK':('MirsaHookTest','58e1161b49abb5ff332d6d9a368ab2d04c83a67d904b4cd5e92360b807b88997','مرسى شغال ✅')}
+if args.only_alaa: expected={key:value for key,value in expected.items() if key=='ALAA'}
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 def run(*args,timeout=60): return subprocess.run(args,check=True,text=True,capture_output=True,timeout=timeout).stdout
 def commands(data):
@@ -63,6 +73,11 @@ for mode,(name,sourceSHA,title) in expected.items():
         engine=app/'Frameworks/CydiaSubstrate.framework/CydiaSubstrate'
         assert engine.is_file()==(mode=='HOOK')
         mainLoads=strong_loads((app/info['CFBundleExecutable']).read_bytes())
+        for enabled,library in [(args.background,'MirsaBackground'),(args.translation,'MirsaTranslate')]:
+            assert (app/'Frameworks'/(library+'.dylib')).is_file()==enabled
+            assert mainLoads.count('@loader_path/Frameworks/'+library+'.dylib')==int(enabled)
+        assert (app/'MirsaBackgroundNotifications.plist').is_file()==args.background
+        assert (app/'Frameworks/MirsaTranslations.json').is_file()==args.translation
         loadOrder=[]
         assert mainLoads.count('@loader_path/Frameworks/MirsaLoader.dylib')==1
         loadOrder=(app/'Frameworks/MirsaLoadOrder.txt').read_text().splitlines()
@@ -70,6 +85,8 @@ for mode,(name,sourceSHA,title) in expected.items():
         binaries=[];changes=[]
         allowed={'ExactLaunch25','Frameworks/'+name+'.dylib','Frameworks/MirsaLoader.dylib'}
         if mode=='HOOK': allowed.add('Frameworks/CydiaSubstrate.framework/CydiaSubstrate')
+        if args.background: allowed.add('Frameworks/MirsaBackground.dylib')
+        if args.translation: allowed.add('Frameworks/MirsaTranslate.dylib')
         for path in sorted(app.rglob('*')):
             assert not path.is_symlink()
             if not path.is_file(): continue
@@ -103,16 +120,22 @@ for mode,(name,sourceSHA,title) in expected.items():
         (root/('exact-'+mode+'-launch.log')).write_text(result)
         if launchError or 'MIRSA_EXACT_HOOK25 PASS '+mode+' '+title not in result:
             # Passive diagnostics only. Never load the payload or synthesize activation.
-            for args,suffix in [
+            for diagnosticArgs,suffix in [
                 (('xcrun','simctl','io',device,'screenshot',str(root/('exact-'+mode+'-failure.png'))),'screenshot'),
                 (('xcrun','simctl','spawn',device,'log','show','--last','2m','--style','compact','--predicate','process == "ExactLaunch25"'),'system')]:
                 try:
-                    evidence=subprocess.run(args,text=True,capture_output=True,timeout=20)
+                    evidence=subprocess.run(diagnosticArgs,text=True,capture_output=True,timeout=20)
                     (root/('exact-'+mode+'-'+suffix+'-launch.log')).write_text((evidence.stdout or '')+(evidence.stderr or ''))
                 except (OSError,subprocess.TimeoutExpired) as error:
                     (root/('exact-'+mode+'-'+suffix+'-launch.log')).write_text(str(error))
         assert launchError is None,result
         assert 'MIRSA_EXACT_HOOK25 PASS '+mode+' '+title in result,result
+        if args.only_alaa:
+            requiredImages=['/Frameworks/Alaa.dylib','/Frameworks/MirsaLoader.dylib']
+            if args.background: requiredImages.append('/Frameworks/MirsaBackground.dylib')
+            if args.translation: requiredImages.append('/Frameworks/MirsaTranslate.dylib')
+            for image in requiredImages:
+                assert any('EXACT_DIAGNOSTIC26 success image ' in line and line.endswith(image) for line in result.splitlines()), 'Missing per-process successful image evidence: '+image
         container=pathlib.Path(run('xcrun','simctl','get_app_container',device,info['CFBundleIdentifier'],'data').strip())
         sourcePNG=container/'Documents/exact-alert.png'
         assert sourcePNG.is_file() and sourcePNG.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
@@ -120,6 +143,7 @@ for mode,(name,sourceSHA,title) in expected.items():
         assert sha(ipa)==original
         proof[mode]={'sourceDylib':name+'.dylib','sourceDylibSHA256':sourceSHA,'deviceArchiveSHA256':original,
             'attemptID':attempt['attemptID'],'originalMainLC_LOAD_DYLIB':mainLoads,'originalLoaderOrder':loadOrder,'originalDeviceSignatureVerified':True,'originalArchiveUnmodified':True,
+            'backgroundEnabled':args.background,'translationEnabled':args.translation,
             'platformAdaptedNativeUIKitLaunch':True,'realDeviceVerified':False,'DriftLaunched':False,
             'metadataAdapted':['CFBundleSupportedPlatforms','DTPlatformName'],'codeChanges':changes,
             'actualArabicAlertTitle':title,'actualArabicAlertPNG':screenshot.name,'actualArabicAlertPNGSHA256':sha(screenshot),
