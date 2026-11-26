@@ -325,6 +325,13 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
 final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    #if DEBUG
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        // Numeric/boolean connection milestones only, never URLs, headers or credentials.
+        let values = metrics.transactionMetrics
+        print("RuntimeTranslationHTTP metrics transactions=\(values.count) duration=\(metrics.taskInterval.duration) dns=\(values.contains { $0.domainLookupEndDate != nil }) connected=\(values.contains { $0.connectEndDate != nil }) sent=\(values.contains { $0.requestEndDate != nil }) response=\(values.contains { $0.responseStartDate != nil })")
+    }
+    #endif
     func post(_ endpoint: URL, token: String, activation: String? = nil, object: [String: Any]) async throws -> [String: Any] {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 25; configuration.timeoutIntervalForResource = 28

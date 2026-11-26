@@ -3,6 +3,37 @@ import CryptoKit
 @testable import Mirsa
 
 final class RuntimeArabicTranslation25Tests: XCTestCase {
+    @MainActor
+    func testConcurrentSigningWorkersLeaveAsyncDictionaryTasksRunnable() async {
+        enum Completion: Error { case finished, timedOut }
+        let outcomes = await withTaskGroup(of: Bool.self) { group in
+            for _ in 0..<8 {
+                group.addTask {
+                    do {
+                        _ = try await PersonalEncryptionWarning.signWithConsent { _ in
+                            let ready = DispatchSemaphore(value: 0)
+                            Task.detached {
+                                try? await Task.sleep(nanoseconds: 50_000_000)
+                                ready.signal()
+                            }
+                            guard ready.wait(timeout: .now() + 6) == .success else {
+                                throw Completion.timedOut
+                            }
+                            throw Completion.finished
+                        }
+                        return false
+                    } catch Completion.finished { return true }
+                    catch { return false }
+                }
+            }
+            var values: [Bool] = []
+            for await outcome in group { values.append(outcome) }
+            return values
+        }
+        XCTAssertEqual(outcomes.count, 8)
+        XCTAssertTrue(outcomes.allSatisfy { $0 }, "Blocking signing workers must not starve async dictionary work")
+    }
+
     private final class Translator: RuntimeDictionaryTranslating, @unchecked Sendable {
         private let lock = NSLock()
         private var recorded: [(String, String, [ArabicIPALocalizer.Item])] = []

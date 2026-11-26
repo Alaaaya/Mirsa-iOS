@@ -281,11 +281,22 @@ struct PersonalEncryptionWarning: Error, Decodable {
         ])
     }
     @MainActor static func signWithConsent(_ operation: @escaping (Bool) throws -> PersonalCertificateSigner.Result) async throws -> PersonalCertificateSigner.Result {
-        do { return try await Task.detached { try operation(false) }.value }
+        do { return try await signOnWorker { try operation(false) } }
         catch let warning as PersonalEncryptionWarning {
             guard await warning.confirm() else { throw CancellationError() }
             try Task.checkCancellation()
-            return try await Task.detached { try operation(true) }.value
+            return try await signOnWorker { try operation(true) }
+        }
+    }
+    // The synchronous signer waits for async dictionary work. It must never occupy
+    // a Swift cooperative-pool thread while waiting for work on that same pool.
+    // As before, an in-progress synchronous signing operation is not cancellable.
+    private static func signOnWorker(_ operation: @escaping () throws -> PersonalCertificateSigner.Result) async throws -> PersonalCertificateSigner.Result {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { continuation.resume(returning: try operation()) }
+                catch { continuation.resume(throwing: error) }
+            }
         }
     }
     @MainActor private func confirm() async -> Bool {
