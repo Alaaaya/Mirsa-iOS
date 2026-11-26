@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class RuntimeTranslate25UITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
@@ -6,6 +7,12 @@ final class RuntimeTranslate25UITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
+    func testProjectSettingsIconsExistInRuntimeSymbolCatalog() {
+        for symbol in ["link", "doc.text", "iphone"] {
+            XCTAssertNotNil(UIImage(systemName: symbol), "Missing project settings icon: \(symbol)")
+        }
+    }
+
     func testArabicTranslateToggleHintBelowToggleAndPersists() {
         let app = XCUIApplication()
         app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "certificate-parity-29", "-MirsaProjectThemesFixture",

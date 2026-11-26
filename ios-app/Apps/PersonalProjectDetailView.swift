@@ -629,8 +629,8 @@ struct PersonalProjectDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label(personalText("Project settings", "إعدادات المشروع"), systemImage: "gearshape.fill").font(.subheadline.weight(.semibold))
             toggle(personalText("Enable Files access", "تمكين الوصول إلى الملفات"), personalText("Shows app documents in Files.", "بيظهر ملفات التطبيق بتطبيق الملفات."), $draft.fileSharing, symbol: "folder", color: .blue)
-            toggle(personalText("Remove URL schemes", "إزالة مخططات URL"), personalText("Deletes the app's custom URL schemes.", "بيحذف مخططات URL تبع التطبيق."), $draft.removeURLSchemes, symbol: "link.slash", color: .red)
-            toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile, symbol: "doc.badge", color: .purple)
+            toggle(personalText("Remove URL schemes", "إزالة مخططات URL"), personalText("Deletes the app's custom URL schemes.", "بيحذف مخططات URL تبع التطبيق."), $draft.removeURLSchemes, symbol: "link", color: .red)
+            toggle(PersonalProfileOmissionText.title(AppLanguageStore.snapshot), PersonalProfileOmissionText.subtitle(AppLanguageStore.snapshot), $draft.removeEmbeddedProfile, symbol: "doc.text", color: .purple)
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }), symbol: "puzzlepiece", color: .orange)
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }), symbol: "appclip", color: .blue)
             VStack(alignment: .leading, spacing: 4) {
@@ -664,7 +664,7 @@ struct PersonalProjectDetailView: View {
                 }.pickerStyle(.menu)
             }
             HStack(spacing: 10) {
-                settingSymbol("iphone.gear", color: .gray)
+                settingSymbol("iphone", color: .gray)
                 Text(personalText("Minimum iOS", "أدنى إصدار iOS")).font(.subheadline)
                 Spacer()
                 Picker("", selection: $draft.minimumOS) {
