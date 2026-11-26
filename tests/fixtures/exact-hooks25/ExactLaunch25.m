@@ -5,6 +5,9 @@
 #import <mach-o/dyld.h>
 #import <string.h>
 static NSString *mode;
+static const char *exactString26(NSString *value) {
+    const char *text=value.UTF8String; return text ? text : "<nil>";
+}
 // Passive evidence only. Do not load a payload, synthesize lifecycle events or present UI.
 static void exactImages26(const char *phase) {
     for (uint32_t index=0; index<_dyld_image_count(); ++index) {
@@ -17,13 +20,13 @@ static void exactImages26(const char *phase) {
 static void exactState26(UIApplication *application,const char *phase) {
     fprintf(stderr,"EXACT_DIAGNOSTIC26 %s appState=%ld scenes=%lu\n",phase,(long)application.applicationState,(unsigned long)application.connectedScenes.count);
     for (UIScene *scene in application.connectedScenes) {
-        fprintf(stderr,"EXACT_DIAGNOSTIC26 sceneState=%ld class=%s\n",(long)scene.activationState,NSStringFromClass(scene.class).UTF8String);
+        fprintf(stderr,"EXACT_DIAGNOSTIC26 sceneState=%ld class=%s\n",(long)scene.activationState,exactString26(NSStringFromClass(scene.class)));
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *window in ((UIWindowScene *)scene).windows) {
             UIViewController *root=window.rootViewController;
-            fprintf(stderr,"EXACT_DIAGNOSTIC26 window hidden=%d key=%d root=%s rootAttached=%d\n",window.hidden,window.isKeyWindow,NSStringFromClass(root.class).UTF8String,root.viewIfLoaded.window!=nil);
+            fprintf(stderr,"EXACT_DIAGNOSTIC26 window hidden=%d key=%d root=%s rootAttached=%d\n",window.hidden,window.isKeyWindow,exactString26(NSStringFromClass(root.class)),root.viewIfLoaded.window!=nil);
             for (UIViewController *top=root; top; top=top.presentedViewController)
-                fprintf(stderr,"EXACT_DIAGNOSTIC26 controller=%s presented=%d attached=%d title=%s\n",NSStringFromClass(top.class).UTF8String,top.isBeingPresented,top.viewIfLoaded.window!=nil,top.title.UTF8String);
+                fprintf(stderr,"EXACT_DIAGNOSTIC26 controller=%s presented=%d attached=%d title=%s\n",exactString26(NSStringFromClass(top.class)),top.isBeingPresented,top.viewIfLoaded.window!=nil,exactString26(top.title));
         }
     }
     fflush(stderr);
@@ -100,7 +103,7 @@ int main(int argc, char **argv) {
         exactImages26("main");
         for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillEnterForegroundNotification, UISceneDidActivateNotification, UISceneWillEnterForegroundNotification]) {
             [[NSNotificationCenter defaultCenter] addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *notification) {
-                fprintf(stderr,"EXACT_DIAGNOSTIC26 notification=%s\n",notification.name.UTF8String); fflush(stderr);
+                fprintf(stderr,"EXACT_DIAGNOSTIC26 notification=%s\n",exactString26(notification.name)); fflush(stderr);
             }];
         }
         return UIApplicationMain(argc, argv, nil, NSStringFromClass(ExactDelegate25.class));
