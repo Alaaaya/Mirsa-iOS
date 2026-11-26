@@ -313,6 +313,66 @@ static void ObserveOnlineForeground(void) {
   OnlineForeground();ReapplyTranslations();
  }];
 }
+static void InstallTranslationHooks(void) {
+ static dispatch_once_t once;
+ dispatch_once(&once,^{
+   HookString(UILabel.class,@selector(setText:));HookAttr(UILabel.class,@selector(setAttributedText:));
+   HookString(UITextField.class,@selector(setPlaceholder:));HookAttr(UITextField.class,@selector(setAttributedPlaceholder:));
+   HookString(UINavigationItem.class,@selector(setTitle:));HookString(UINavigationItem.class,@selector(setPrompt:));
+   HookString(UITabBarItem.class,@selector(setTitle:));
+   HookString(UIAlertController.class,@selector(setTitle:));HookString(UIAlertController.class,@selector(setMessage:));
+   HookButton(@selector(setTitle:forState:),NO);HookButton(@selector(setAttributedTitle:forState:),YES);HookAlert();
+   NSMutableSet *attrClasses=[NSMutableSet setWithObjects:NSAttributedString.class,NSMutableAttributedString.class,
+      object_getClass([[NSAttributedString alloc] initWithString:@"sample"]),
+      object_getClass([[NSMutableAttributedString alloc] initWithString:@"sample"]),nil];
+   for(Class c in attrClasses)HookAttributedInit(c);
+   NSMutableSet *stringClasses=[NSMutableSet setWithObjects:NSString.class,object_getClass(@"sample"),
+      object_getClass([NSString stringWithFormat:@"sample %d",42]),nil];
+   for(Class c in stringClasses)HookDrawing(c);
+   realLine=dlsym(RTLD_DEFAULT,"CTLineCreateWithAttributedString");
+   realTypesetter=dlsym(RTLD_DEFAULT,"CTTypesetterCreateWithAttributedString");
+   realFramesetter=dlsym(RTLD_DEFAULT,"CTFramesetterCreateWithAttributedString");
+   realTypesetterOptions=dlsym(RTLD_DEFAULT,"CTTypesetterCreateWithAttributedStringAndOptions");
+   struct rebinding rb[4];size_t n=0;
+   if(realLine)rb[n++]=(struct rebinding){"CTLineCreateWithAttributedString",HookLine,NULL};
+   if(realTypesetter)rb[n++]=(struct rebinding){"CTTypesetterCreateWithAttributedString",HookTypesetter,NULL};
+   if(realFramesetter)rb[n++]=(struct rebinding){"CTFramesetterCreateWithAttributedString",HookFramesetter,NULL};
+   if(realTypesetterOptions)rb[n++]=(struct rebinding){"CTTypesetterCreateWithAttributedStringAndOptions",HookTypesetterOptions,NULL};
+   if(n)rebind_symbols(rb,n);
+   ObserveOnlineForeground();
+ });
+}
+#if defined(MIRSA_RUNTIME_TESTING)
+// Only isolated simulator fixtures export these. Device build never defines this macro.
+__attribute__((visibility("default"))) int MirsaRuntimeTestConfigure(void) {
+ if(!NSThread.isMainThread)return 0;
+ enabled=YES;table=@{};pieces=@{};rules=@[];pieceKeys=@[];
+ cache=[NSCache new];cache.countLimit=2048;cache.totalCostLimit=1024*1024;
+ onlineConfig=nil;onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];
+ onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];
+ missingSeen=[NSMutableSet set];missingQueue=dispatch_queue_create("mirsa.test.missing",DISPATCH_QUEUE_SERIAL);
+ InstallTranslationHooks();return 1;
+}
+__attribute__((visibility("default"))) int MirsaRuntimeTestPendingNotice(int action) {
+ if(!NSThread.isMainThread)return -1;
+ NSUserDefaults *prefs=NSUserDefaults.standardUserDefaults;
+ NSString *key=BannerPreferenceKey(NSBundle.mainBundle.bundleIdentifier);
+ if(action==0){BannerUpdate(YES);return 1;}
+ if(action==1){BannerRemove();bannerShownThisProcess=NO;bannerPending=NO;[prefs removeObjectForKey:key];return 1;}
+ if(action==2)return [prefs boolForKey:key]?1:0;
+ return -1;
+}
+__attribute__((visibility("default"))) int MirsaRuntimeTestApplyJSON(const char *json) {
+ if(!json)return 0;
+ @try {
+  NSData *data=[NSData dataWithBytes:json length:strlen(json)];
+  if(data.length>1048576)return 0;
+  id obj=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  if(![obj isKindOfClass:NSDictionary.class] || ![obj[@"entries"] isKindOfClass:NSArray.class])return 0;
+  ApplyOnlineEntries(obj[@"entries"]);return 1;
+ } @catch(__unused NSException *e){return 0;}
+}
+#endif
 __attribute__((constructor)) static void Start(void) {
  @autoreleasepool { @try {
    NSData *data=[NSData dataWithBytes:runtime_table length:runtime_table_len];
@@ -347,29 +407,6 @@ __attribute__((constructor)) static void Start(void) {
    ConfigureOnline(config);
    if(!onlineConfig)return;
    enabled=YES;
-   HookString(UILabel.class,@selector(setText:));HookAttr(UILabel.class,@selector(setAttributedText:));
-   HookString(UITextField.class,@selector(setPlaceholder:));HookAttr(UITextField.class,@selector(setAttributedPlaceholder:));
-   HookString(UINavigationItem.class,@selector(setTitle:));HookString(UINavigationItem.class,@selector(setPrompt:));
-   HookString(UITabBarItem.class,@selector(setTitle:));
-   HookString(UIAlertController.class,@selector(setTitle:));HookString(UIAlertController.class,@selector(setMessage:));
-   HookButton(@selector(setTitle:forState:),NO);HookButton(@selector(setAttributedTitle:forState:),YES);HookAlert();
-   NSMutableSet *attrClasses=[NSMutableSet setWithObjects:NSAttributedString.class,NSMutableAttributedString.class,
-      object_getClass([[NSAttributedString alloc] initWithString:@"sample"]),
-      object_getClass([[NSMutableAttributedString alloc] initWithString:@"sample"]),nil];
-   for(Class c in attrClasses)HookAttributedInit(c);
-   NSMutableSet *stringClasses=[NSMutableSet setWithObjects:NSString.class,object_getClass(@"sample"),
-      object_getClass([NSString stringWithFormat:@"sample %d",42]),nil];
-   for(Class c in stringClasses)HookDrawing(c);
-   realLine=dlsym(RTLD_DEFAULT,"CTLineCreateWithAttributedString");
-   realTypesetter=dlsym(RTLD_DEFAULT,"CTTypesetterCreateWithAttributedString");
-   realFramesetter=dlsym(RTLD_DEFAULT,"CTFramesetterCreateWithAttributedString");
-   realTypesetterOptions=dlsym(RTLD_DEFAULT,"CTTypesetterCreateWithAttributedStringAndOptions");
-   struct rebinding rb[4];size_t n=0;
-   if(realLine)rb[n++]=(struct rebinding){"CTLineCreateWithAttributedString",HookLine,NULL};
-   if(realTypesetter)rb[n++]=(struct rebinding){"CTTypesetterCreateWithAttributedString",HookTypesetter,NULL};
-   if(realFramesetter)rb[n++]=(struct rebinding){"CTFramesetterCreateWithAttributedString",HookFramesetter,NULL};
-   if(realTypesetterOptions)rb[n++]=(struct rebinding){"CTTypesetterCreateWithAttributedStringAndOptions",HookTypesetterOptions,NULL};
-   if(n)rebind_symbols(rb,n);
-   ObserveOnlineForeground();
+   InstallTranslationHooks();
  } @catch(__unused NSException*e){enabled=NO;} }
 }

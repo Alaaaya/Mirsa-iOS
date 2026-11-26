@@ -1,8 +1,10 @@
 // Compile/link on iOS simulator and execute via simulator-smoke.sh.
+#define MIRSA_RUNTIME_TESTING 1
 #import "RuntimeTranslate.m"
 #import <assert.h>
 #import <objc/runtime.h>
 static NSInteger fixtureCode,fixtureCalls,fixtureItems;
+static NSTimeInterval FixtureNow(void){return 2000000010;}
 @interface MirsaFallbackProtocol : NSURLProtocol
 @end
 @implementation MirsaFallbackProtocol
@@ -100,21 +102,9 @@ int main(int argc,char **argv) {@autoreleasepool {
  NSUserDefaults *restarted=[[NSUserDefaults alloc] initWithSuiteName:suite];
  assert(!BannerShouldShow(restarted,@"com.first.app",YES));
  assert(BannerShouldShow(restarted,@"com.second.app",YES));
- assert(!pendingBanner);BannerRemove();
- // Actual visible attachment marks only this app and never creates an interactive overlay.
- bannerShownThisProcess=NO;
- UIWindow *window=[[UIWindow alloc] initWithFrame:CGRectMake(0,0,390,844)];
- window.rootViewController=[UIViewController new];window.hidden=NO;
- BannerPresentInWindow(window,prefs,@"com.visible.app",YES);
- assert(pendingBanner && !pendingBanner.userInteractionEnabled && !BannerShouldShow(prefs,@"com.visible.app",YES));
- UILabel *first=pendingBanner;BannerPresentInWindow(window,prefs,@"com.visible.app",YES);assert(pendingBanner==first);
- NSDate *end=[NSDate dateWithTimeIntervalSinceNow:5.2];
- while(end.timeIntervalSinceNow>0)[NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:end];
- assert(!pendingBanner); // real auto-dismiss timer fired, no blocking alert
- bannerShownThisProcess=NO; // simulated process restart, persistent marker still prevents redisplay
- BannerPresentInWindow(window,prefs,@"com.visible.app",YES);assert(!pendingBanner);
- assert(BannerShouldShow(prefs,@"com.different.app",YES));
- window.hidden=YES;
+ assert(!pendingTranslationAlert);BannerRemove();
+ // Actual modal visibility, duration, dismissal and persistence are separately
+ // exercised by RuntimeTranslate25UITests against a UIApplication fixture.
  [prefs removePersistentDomainForName:suite];
  onlineConfig=c;onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet setWithObject:@"设置"];
  ApplyOnlineEntries(@[@{@"source":@"设置",@"translation":@"الإعدادات",@"provenance":@"kat",@"version":@2}]);
@@ -137,12 +127,13 @@ int main(int argc,char **argv) {@autoreleasepool {
  Method original=class_getClassMethod(NSURLSessionConfiguration.class,@selector(ephemeralSessionConfiguration));
  Method mocked=class_getClassMethod(NSURLSessionConfiguration.class,@selector(mirsaFixtureConfiguration));
  method_exchangeImplementations(original,mocked);
+ onlineClock=FixtureNow;onlineTestActivationBundle=@"com.example.activationfixture";
  enabled=YES; // Execute the actual render path, not its disabled early return.
  for(NSNumber *code in @[@429,@503]){
   NSMutableDictionary *fixture=[c mutableCopy];fixture[@"endpoint"]=@"https://staging.fixture.invalid/runtime";
   fixture[@"expiresAt"]=@"2033-05-19T03:33:20Z";onlineConfig=fixture;
   onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];
-  onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];onlineIssued=0;onlineWaiting=0;onlineFlushScheduled=NO;
+  onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];onlineIssued=0;onlineWaiting=0;onlineFlushScheduled=NO;onlineFlushRunning=NO;onlineFlushGeneration++;onlineFlushDeadline=0;
   onlineQueue=dispatch_queue_create("mirsa.runtime.fixture.batch",DISPATCH_QUEUE_SERIAL);
   fixtureCode=code.integerValue;fixtureCalls=0;fixtureItems=0;
   NSArray *sources=@[@"重试按钮",@"帮助按钮",@"更多按钮"];

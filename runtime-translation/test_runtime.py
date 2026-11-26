@@ -14,7 +14,7 @@ class RuntimeTests(unittest.TestCase):
   self.assertIn("onlinePositive.count>=2048",Path("OnlineMerge.h").read_text())
  def test_online_bounds(self):
   s=Path("Online.h").read_text()
-  for token in ("s.length>256","onlineWaiting>=128","batch.count>=16","chars+source.length>2048","150*NSEC_PER_MSEC","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","timeoutInterval:22","23*NSEC_PER_SEC","body.length+d.length>1048576","done(nil)","timeIntervalSince1970+60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
+  for token in ("s.length>256","onlinePending.count>=128","batch.count>=16","chars+source.length>2048","ScheduleOnlineFlushLocked(0.15)","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","timeoutIntervalForResource=5","6*NSEC_PER_SEC","body.length+d.length>1048576","now-onlineBudgetStart>=60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
    self.assertIn(token,s)
  def test_scoped_contract(self):
   s=Path("Online.h").read_text()
@@ -56,7 +56,9 @@ class RuntimeTests(unittest.TestCase):
   self.assertIn("implicitStar",header)
  def test_no_ui_wait(self):
   s=Path("Online.h").read_text()
-  self.assertGreater(s.index("dispatch_semaphore_wait"),s.index("dispatch_async(onlineQueue"))
+  self.assertIn("dispatch_semaphore_wait",s)
+  self.assertIn("dispatch_async(onlineQueue",s)
+  self.assertIn("ScheduleOnlineFlushLocked(0.15)",s)
   s=Path("RuntimeTranslate.m").read_text();self.assertIn("if(remote)return IsolateLatin(remote);",s)
   self.assertIn('[s isEqualToString:result] && HasCJK(s)',s)
 if __name__=="__main__":unittest.main()

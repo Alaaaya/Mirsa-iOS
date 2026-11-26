@@ -15,7 +15,7 @@ defaults:
   run:
     shell: bash
 env:
-  MIRSA_RELEASE_BUILD: "8.543.3"
+  MIRSA_RELEASE_BUILD: "8.543.4"
 jobs:
   exact-launch-diagnostic:
     if: ${{ inputs.exact_launch_diagnostic == true }}
@@ -253,6 +253,10 @@ jobs:
           xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
       - name: Execute native UIKit, placeholder, bidi, logger and privacy smoke
         run: bash runtime-translation/simulator-smoke.sh 2>&1 | tee runtime-native-smoke.log
+      - name: Prove retained UIKit and SwiftUI refresh on the same simulator
+        run: |
+          export SWIFTUI_REFRESH_OUTPUT="$GITHUB_WORKSPACE/build/swiftui-refresh"
+          bash runtime-translation/swiftui-refresh-smoke.sh
       - name: Prepare own-code real ad-hoc signed IPA fixture
         run: |
           mkdir -p build/SignedFixture/Payload/SignedFixture.app
@@ -431,5 +435,6 @@ jobs:
             build/PersonalUI.xcresult
             build/simulator-validation.log
             runtime-native-smoke.log
+            build/swiftui-refresh
             ios-app/RuntimeTranslationAssets/provenance.json
           if-no-files-found: warn

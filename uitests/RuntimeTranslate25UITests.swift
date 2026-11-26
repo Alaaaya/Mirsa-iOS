@@ -7,6 +7,76 @@ final class RuntimeTranslate25UITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
+    func testArabicNativePendingNoticeIsModalOnceAndPersists() {
+        let app = XCUIApplication(bundleIdentifier: "app.mirsa.tests.swiftui-refresh")
+        let arguments = ["-BannerModalFixture", "-AppleLanguages", "(ar)", "-AppleLocale", "ar"]
+        let message = "في كم كلمة لسا مو معرّبة. سكّر التطبيق وارجع بعدين، بتتعرّب لحالها"
+        app.launchArguments = arguments + ["-ResetNotice"]
+        app.launch()
+        defer { app.terminate() }
+        let show = app.buttons["notice.show"]
+        let status = app.staticTexts["notice.consumed"]
+        XCTAssertTrue(show.waitForExistence(timeout: 15))
+        XCTAssertEqual(status.label, "غير مستهلك")
+
+        // A genuine unrelated native modal must not be interrupted or consume the notice.
+        app.buttons["notice.other-modal"].tap()
+        let other = app.alerts.containing(.staticText, identifier: "نافذة تجريبية أخرى").firstMatch
+        XCTAssertTrue(other.waitForExistence(timeout: 5))
+        let notice = app.alerts.containing(.staticText, identifier: message).firstMatch
+        let premature = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: notice)
+        premature.isInverted = true
+        wait(for: [premature], timeout: 1.5)
+        XCTAssertTrue(other.exists)
+        capture("تنبيه-التعريب-نافذة-أخرى-دون-مقاطعة")
+        other.buttons["إغلاق"].tap()
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+        XCTAssertTrue(show.isHittable)
+        XCTAssertEqual(status.label, "غير مستهلك")
+        capture("تنبيه-التعريب-بعد-إغلاق-النافذة-غير-مستهلك")
+        show.tap()
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertTrue(notice.staticTexts[message].exists)
+        XCTAssertTrue(notice.buttons["موافق"].exists)
+        XCTAssertEqual(app.alerts.count, 1)
+        XCTAssertEqual(notice.frame.midX, app.frame.midX, accuracy: app.frame.width * 0.1)
+        XCTAssertEqual(notice.frame.midY, app.frame.midY, accuracy: app.frame.height * 0.15)
+        capture("تنبيه-التعريب-نافذة-وسط-الشاشة")
+        // An inverted disappearance expectation proves it remains visible past five seconds.
+        let disappearing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: notice)
+        disappearing.isInverted = true
+        wait(for: [disappearing], timeout: 6.2)
+        XCTAssertTrue(notice.exists)
+        XCTAssertFalse(show.isHittable) // Do not tap through a native modal.
+        capture("تنبيه-التعريب-باقي-بعد-خمس-ثوان")
+        notice.buttons["موافق"].tap()
+        XCTAssertTrue(notice.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(status.label, "مستهلك")
+
+        show.tap()
+        let repeated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: notice)
+        repeated.isInverted = true
+        wait(for: [repeated], timeout: 1.5)
+        XCTAssertEqual(status.label, "مستهلك")
+        capture("تنبيه-التعريب-لا-يتكرر")
+
+        app.terminate()
+        app.launchArguments = arguments // Preserve this fixture bundle's persisted flag.
+        app.launch()
+        XCTAssertTrue(show.waitForExistence(timeout: 15))
+        XCTAssertEqual(status.label, "مستهلك")
+        show.tap()
+        let afterRelaunch = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: notice)
+        afterRelaunch.isInverted = true
+        wait(for: [afterRelaunch], timeout: 1.5)
+        XCTAssertEqual(status.label, "مستهلك")
+        capture("تنبيه-التعريب-محفوظ-بعد-إعادة-الفتح")
+        let ax = XCTAttachment(string: app.debugDescription)
+        ax.name = "AX-native-pending-notice-persisted"
+        ax.lifetime = .keepAlways
+        add(ax)
+    }
+
     func testProjectSettingsIconsExistInRuntimeSymbolCatalog() {
         for symbol in ["link", "doc.text", "iphone"] {
             XCTAssertNotNil(UIImage(systemName: symbol), "Missing project settings icon: \(symbol)")
