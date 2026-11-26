@@ -36,6 +36,15 @@ static dispatch_queue_t onlineQueue;
 static BOOL onlineDenied;
 static NSUInteger onlineIssued, onlineWaiting;
 static NSMutableSet *onlineUncovered;
+static NSMutableDictionary *onlineAttempts;
+static NSTimeInterval onlineBudgetStart,onlineAttemptStart;
+// Injectable clock for deterministic policy tests. Production always uses wall time.
+static NSTimeInterval (*onlineClock)(void);
+static NSTimeInterval OnlineNow(void){return onlineClock?onlineClock():NSDate.date.timeIntervalSince1970;}
+static NSTimeInterval OnlineBackoff(NSUInteger attempt){return attempt<=1?60:(attempt==2?300:900);}
+static void ReapplyTranslations(void);
+static void RefreshOnlineDictionary(void);
+static void OnlineForeground(void);
 static os_unfair_lock onlineLock=OS_UNFAIR_LOCK_INIT;
 #import "OnlineMerge.h"
 static NSString *SafePrefix(NSString *s,NSUInteger n) {
@@ -59,9 +68,10 @@ static BOOL NetworkSafe(NSString *s){return HasCJK(s) && DictionarySourceSafe(s)
 static BOOL OnlineDenied(void) {
  os_unfair_lock_lock(&onlineLock);BOOL denied=onlineDenied;os_unfair_lock_unlock(&onlineLock);return denied;
 }
-static void DenyOnline(void) {
+// Reserved explicit-local revoke API, intentionally not inferred from HTTP errors.
+static void __attribute__((unused)) DenyOnline(void) {
  os_unfair_lock_lock(&onlineLock);onlineDenied=YES;[onlinePositive removeAllObjects];[onlineUncovered removeAllObjects];os_unfair_lock_unlock(&onlineLock);
- [NSUserDefaults.standardUserDefaults setBool:YES forKey:[@"MirsaTranslationRevoked25." stringByAppendingString:ActivationHash(onlineConfig[@"token"])]];
+ [NSUserDefaults.standardUserDefaults setBool:YES forKey:[@"MirsaTranslationExplicitRevoked26." stringByAppendingString:ActivationHash(onlineConfig[@"token"])]];
  BannerUpdate(NO);
 }
 static NSString *OnlineLookup(NSString *s) {
@@ -88,113 +98,186 @@ static BOOL ValidOnlineValue(NSString *s,id v) {
 }
 static void ApplyOnlineEntries(NSArray *entries) {
  if(![entries isKindOfClass:NSArray.class] || entries.count>1564)return;
+ BOOL changed=NO;
  for(id item in entries){
   if(![item isKindOfClass:NSDictionary.class])continue;
   id source=item[@"source"],value=item[@"translation"];
   if(![source isKindOfClass:NSString.class] || !ValidOnlineValue(source,value) || !ProvenanceValid(item[@"provenance"]) || !VersionValid(item[@"version"]))continue;
   os_unfair_lock_lock(&onlineLock);
-  MergeOnlineLocked(source,value,[item[@"version"] integerValue],item[@"provenance"]);
+  changed=MergeOnlineLocked(source,value,[item[@"version"] integerValue],item[@"provenance"]) || changed;
   os_unfair_lock_unlock(&onlineLock);
  }
- SaveOnlineCache();RefreshBannerCoverage();
+ if(changed){SaveOnlineCache();dispatch_async(dispatch_get_main_queue(),^{ReapplyTranslations();});}
+ RefreshBannerCoverage();
 }
-static void RefreshOnlineDictionary(void) {
- dispatch_async(onlineQueue,^{@autoreleasepool{
-  @try {
-   if(!ValidActivation(onlineConfig,NSBundle.mainBundle.bundleIdentifier,NSDate.date.timeIntervalSince1970))return;
-   NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:onlineConfig[@"endpoint"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5];
-   req.HTTPMethod=@"POST";[req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-   [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
-   [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
-   [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
-   req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"action":@"refresh",@"consent":@YES,@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} options:0 error:NULL];
-   NSURLSessionConfiguration *cfg=NSURLSessionConfiguration.ephemeralSessionConfiguration;
-   cfg.timeoutIntervalForRequest=5;cfg.timeoutIntervalForResource=5;cfg.HTTPShouldSetCookies=NO;cfg.HTTPCookieStorage=nil;cfg.URLCache=nil;cfg.URLCredentialStorage=nil;
-   MirsaNoRedirect *delegate=[MirsaNoRedirect new];NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
-   NSURLSession *session=[NSURLSession sessionWithConfiguration:cfg delegate:delegate delegateQueue:callbacks];
-   NSURLSessionDataTask *task=[session dataTaskWithRequest:req];[task resume];
-   BOOL completed=dispatch_semaphore_wait(delegate.finished,dispatch_time(DISPATCH_TIME_NOW,6*NSEC_PER_SEC))==0;
-   if(!completed)[task cancel];
-   if(completed && delegate.response.statusCode==403)DenyOnline();
-   if(completed && !delegate.error && delegate.response.statusCode==200){
-    id obj=[NSJSONSerialization JSONObjectWithData:delegate.body options:0 error:NULL];
-    if([obj isKindOfClass:NSDictionary.class] && [obj[@"bundleId"] isEqual:onlineConfig[@"bundleId"]] && [obj[@"revision"] isEqual:onlineConfig[@"revision"]])ApplyOnlineEntries(obj[@"entries"]);
-   }
-   [session invalidateAndCancel];
-  } @catch(__unused NSException *e){}
- }});
+// Queue-only state. A foreground event starts at most one refresh per minute.
+// One timer owns the finite receipt/failure follow-up chain, never a timer per label.
+static BOOL onlineRefreshScheduled;
+static NSUInteger onlineRefreshAttempt;
+static NSTimeInterval onlineLastRefresh;
+// Simulator-only signed public-vector context. No override is compiled into an IPA.
+#if defined(MIRSA_RUNTIME_TESTING)
+static NSString *onlineTestActivationBundle;
+#endif
+static NSString *OnlineActivationBundle(void) {
+#if defined(MIRSA_RUNTIME_TESTING)
+ if(onlineTestActivationBundle)return onlineTestActivationBundle;
+#endif
+ return NSBundle.mainBundle.bundleIdentifier;
 }
-// One debounced batch, never one provider request per rendered label.
+static BOOL OnlineUsable(void) {
+ return onlineConfig && !OnlineDenied() && OnlineExpiry(onlineConfig[@"expiresAt"])>OnlineNow() &&
+  ValidActivation(onlineConfig,OnlineActivationBundle(),OnlineNow());
+}
+static NSDictionary *OnlinePost(NSString *action,NSArray *items) {
+ if(!OnlineUsable())return nil;
+ NSMutableDictionary *payload=[@{@"action":action,@"consent":@YES,@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} mutableCopy];
+ if(items)payload[@"items"]=items;
+ NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:onlineConfig[@"endpoint"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5];
+ req.HTTPMethod=@"POST";[req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+ [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
+ [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
+ [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
+ req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+ NSURLSessionConfiguration *cfg=NSURLSessionConfiguration.ephemeralSessionConfiguration;
+ cfg.timeoutIntervalForRequest=5;cfg.timeoutIntervalForResource=5;cfg.HTTPShouldSetCookies=NO;cfg.HTTPCookieStorage=nil;cfg.URLCache=nil;cfg.URLCredentialStorage=nil;
+ MirsaNoRedirect *delegate=[MirsaNoRedirect new];NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
+ NSURLSession *session=[NSURLSession sessionWithConfiguration:cfg delegate:delegate delegateQueue:callbacks];
+ @try {
+  NSURLSessionDataTask *task=[session dataTaskWithRequest:req];[task resume];
+  BOOL completed=dispatch_semaphore_wait(delegate.finished,dispatch_time(DISPATCH_TIME_NOW,6*NSEC_PER_SEC))==0;
+  if(!completed)[task cancel];
+  // HTTP 403 alone is NOT authenticated explicit revocation. Never poison future launches.
+  // Local DenyOnline() remains the explicit persistent revocation path.
+  if(!completed || delegate.error || delegate.response.statusCode!=200 || !OnlineUsable())return nil;
+  if(items && delegate.body.length>65536)return nil;
+  id obj=[NSJSONSerialization JSONObjectWithData:delegate.body options:0 error:NULL];
+  if([obj isKindOfClass:NSDictionary.class] && [obj[@"bundleId"] isEqual:onlineConfig[@"bundleId"]] && [obj[@"revision"] isEqual:onlineConfig[@"revision"]])return obj;
+ } @finally {[session invalidateAndCancel];}
+ return nil;
+}
+static void ScheduleOnlineRefresh(void) {
+ if(onlineRefreshScheduled || onlineRefreshAttempt>=3 || !OnlineUsable())return;
+ onlineRefreshScheduled=YES;
+ NSTimeInterval delay=OnlineBackoff(++onlineRefreshAttempt);
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),onlineQueue,^{
+  onlineRefreshScheduled=NO;
+  if(!OnlineUsable())return;
+  RefreshOnlineDictionary();
+ });
+}
+static void RefreshOnlineDictionary(void) { @autoreleasepool {
+ @try {
+  if(!OnlineUsable())return;
+  if(onlineLastRefresh && OnlineNow()>=onlineLastRefresh && OnlineNow()-onlineLastRefresh<60){ScheduleOnlineRefresh();return;}
+  onlineLastRefresh=OnlineNow();
+  NSDictionary *obj=OnlinePost(@"refresh",nil);
+  if(obj)ApplyOnlineEntries(obj[@"entries"]);
+  // Finite follow-ups also recover a failed foreground refresh without render activity.
+  ScheduleOnlineRefresh();
+ } @catch(__unused NSException *e){ScheduleOnlineRefresh();}
+}}
+// All scheduling transitions below hold onlineLock; HTTP is serialized on onlineQueue.
 static BOOL onlineFlushScheduled;
 static void FlushOnline(void);
-static void ScheduleOnlineFlush(void) {
- dispatch_after(dispatch_time(DISPATCH_TIME_NOW,150*NSEC_PER_MSEC),onlineQueue,^{FlushOnline();});
+static void ScheduleOnlineFlushAfter(NSTimeInterval delay) {
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(MAX(0.15,delay)*NSEC_PER_SEC)),onlineQueue,^{FlushOnline();});
+}
+static void ResetOnlineBudgetLocked(NSTimeInterval now) {
+ if(!onlineBudgetStart || now-onlineBudgetStart>=60 || now<onlineBudgetStart){onlineBudgetStart=now;onlineIssued=0;}
+ if(!onlineAttempts)onlineAttempts=[NSMutableDictionary dictionary];
+ if(!onlineAttemptStart || now-onlineAttemptStart>=900 || now<onlineAttemptStart){
+  onlineAttemptStart=now;
+  // Preserve attempts on active retries. Clearing these at 15min would make the
+  // 15min final backoff retry forever instead of terminating at four requests.
+  for(NSString *source in [onlineAttempts allKeys])if(![onlinePending containsObject:source])[onlineAttempts removeObjectForKey:source];
+ }
+ for(NSString *source in [onlineNegative allKeys])if([onlineNegative[source] doubleValue]<=now)[onlineNegative removeObjectForKey:source];
+ if(onlineNegative.count>2048){
+  for(NSString *source in [onlineNegative allKeys]){
+   if(![onlinePending containsObject:source])[onlineNegative removeObjectForKey:source];
+   if(onlineNegative.count<=2048)break;
+  }
+ }
 }
 static void FlushOnline(void) { @autoreleasepool {
- os_unfair_lock_lock(&onlineLock);
  NSMutableArray *batch=[NSMutableArray array];NSUInteger chars=0;
+ NSTimeInterval now=OnlineNow();
+ os_unfair_lock_lock(&onlineLock);ResetOnlineBudgetLocked(now);
  for(NSString *source in [[onlinePending allObjects] sortedArrayUsingSelector:@selector(compare:)]){
-  if(batch.count>=16 || chars+source.length>2048)break;
-  [batch addObject:source];chars+=source.length;
+  if(onlinePositive[source])continue;
+  if([onlineNegative[source] doubleValue]>now)continue;
+  if(batch.count>=16 || onlineIssued>=128 || chars+source.length>2048)break;
+  [batch addObject:source];chars+=source.length;onlineIssued++;
+  onlineAttempts[source]=@([onlineAttempts[source] unsignedIntegerValue]+1);
  }
  os_unfair_lock_unlock(&onlineLock);
+ BOOL accepted=NO;
  @try {
-  if(!batch.count || OnlineDenied() || OnlineExpiry(onlineConfig[@"expiresAt"])<=NSDate.date.timeIntervalSince1970)return;
+  if(!batch.count || !OnlineUsable())return;
   NSMutableArray *items=[NSMutableArray array];
   for(NSUInteger i=0;i<batch.count;i++)[items addObject:@{@"id":[NSString stringWithFormat:@"s%lu",(unsigned long)i],@"text":batch[i]}];
-  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:onlineConfig[@"endpoint"]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:22];
-  req.HTTPMethod=@"POST";
-  [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-  [req setValue:@"MirsaRuntimeTranslation/1.0" forHTTPHeaderField:@"User-Agent"];
-  [req setValue:[@"Bearer " stringByAppendingString:onlineConfig[@"token"]] forHTTPHeaderField:@"Authorization"];
-  [req setValue:onlineConfig[@"activation"] forHTTPHeaderField:@"X-Mirsa-Activation"];
-  req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"action":@"missing",@"consent":@YES,@"items":items,@"bundleId":onlineConfig[@"bundleId"],@"revision":onlineConfig[@"revision"]} options:0 error:NULL];
-  NSURLSessionConfiguration *cfg=NSURLSessionConfiguration.ephemeralSessionConfiguration;
-  cfg.timeoutIntervalForRequest=22;cfg.timeoutIntervalForResource=22;cfg.HTTPShouldSetCookies=NO;cfg.HTTPCookieStorage=nil;cfg.URLCache=nil;cfg.URLCredentialStorage=nil;
-  MirsaNoRedirect *delegate=[MirsaNoRedirect new];NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
-  NSURLSession *session=[NSURLSession sessionWithConfiguration:cfg delegate:delegate delegateQueue:callbacks];
-  NSURLSessionDataTask *task=[session dataTaskWithRequest:req];[task resume];
-  BOOL completed=dispatch_semaphore_wait(delegate.finished,dispatch_time(DISPATCH_TIME_NOW,23*NSEC_PER_SEC))==0;
-  if(!completed)[task cancel];
-  if(completed && delegate.response.statusCode==403)DenyOnline();
-  if(completed && !delegate.error && delegate.response.statusCode==200 && delegate.body.length<=65536){
-   id obj=[NSJSONSerialization JSONObjectWithData:delegate.body options:0 error:NULL];
-   if([obj isKindOfClass:NSDictionary.class] && [obj[@"bundleId"] isEqual:onlineConfig[@"bundleId"]] && [obj[@"revision"] isEqual:onlineConfig[@"revision"]]){
-    // Empty map plus durable queued receipt is intentional: keep the EXACT original UI.
-    // Only canonical versioned entries can change text, and Kat always wins.
-    ApplyOnlineEntries(obj[@"entries"]);
+  NSDictionary *obj=OnlinePost(@"missing",items);
+  if(obj){
+   ApplyOnlineEntries(obj[@"entries"]);
+   NSDictionary *receipt=[obj[@"queue"] isKindOfClass:NSDictionary.class]?obj[@"queue"]:nil;
+   NSArray *entries=[receipt[@"entries"] isKindOfClass:NSArray.class]?receipt[@"entries"]:nil;
+   NSMutableSet *received=[NSMutableSet set];
+   if([receipt[@"persisted"] isEqual:@YES])for(id entry in entries){
+    if(![entry isKindOfClass:NSDictionary.class])continue;
+    if([entry[@"source"] isKindOfClass:NSString.class] && [entry[@"labelId"] isKindOfClass:NSString.class] && [entry[@"labelId"] length] &&
+       [entry[@"reviewId"] isKindOfClass:NSString.class] && [entry[@"reviewId"] length])[received addObject:entry[@"source"]];
    }
+   accepted=[[NSSet setWithArray:batch] isSubsetOfSet:received];
+   if(accepted){if(!onlineRefreshScheduled && onlineRefreshAttempt>=3)onlineRefreshAttempt=0;ScheduleOnlineRefresh();}
   }
-  [session invalidateAndCancel];
  } @catch(__unused NSException *e) {}
  @finally {
+  now=OnlineNow();
   os_unfair_lock_lock(&onlineLock);
   for(NSString *source in batch){
-   if(!onlinePositive[source]){
-    if(onlineNegative.count>=128)[onlineNegative removeAllObjects];
-    onlineNegative[source]=@(NSDate.date.timeIntervalSince1970+60);
-   }
-   [onlinePending removeObject:source];if(onlineWaiting)onlineWaiting--;
+   NSUInteger attempt=[onlineAttempts[source] unsignedIntegerValue];
+   if(!onlinePositive[source])onlineNegative[source]=@(now+(accepted?900:OnlineBackoff(attempt)));
+   if(accepted || onlinePositive[source] || attempt>=4){[onlinePending removeObject:source];}
   }
-  BOOL more=onlinePending.count>0;onlineFlushScheduled=more;
+  // Remove labels resolved by refresh while waiting for their next bounded attempt.
+  for(NSString *source in [onlinePending allObjects])if(onlinePositive[source])[onlinePending removeObject:source];
+  onlineWaiting=onlinePending.count;
+  BOOL more=onlineWaiting>0 && !onlineDenied && OnlineExpiry(onlineConfig[@"expiresAt"])>now;
+  NSTimeInterval delay=900;
+  if(more){
+   for(NSString *source in onlinePending)delay=MIN(delay,MAX(0.15,[onlineNegative[source] doubleValue]-now));
+   if(onlineIssued>=128)delay=MAX(delay,MAX(0.15,onlineBudgetStart+60-now));
+  }
+  onlineFlushScheduled=more;
   os_unfair_lock_unlock(&onlineLock);
   RefreshBannerCoverage();
-  if(more)ScheduleOnlineFlush();
+  if(more)ScheduleOnlineFlushAfter(delay);
  }
 }}
 static void QueueOnline(NSString *s) {
- if(!onlineConfig || OnlineDenied() || !NetworkSafe(s))return;
- os_unfair_lock_lock(&onlineLock);
+ if(!onlineConfig || OnlineDenied() || OnlineExpiry(onlineConfig[@"expiresAt"])<=OnlineNow() || !NetworkSafe(s))return;
+ NSTimeInterval now=OnlineNow();
+ os_unfair_lock_lock(&onlineLock);ResetOnlineBudgetLocked(now);
  if(!onlinePositive[s] && onlineUncovered.count<128)[onlineUncovered addObject:s];
- BOOL skip=onlinePositive[s] || [onlinePending containsObject:s] || [onlineNegative[s] doubleValue]>NSDate.date.timeIntervalSince1970 || onlineWaiting>=128 || onlineIssued>=128;
+ BOOL skip=onlinePositive[s] || [onlinePending containsObject:s] || [onlineNegative[s] doubleValue]>now || onlinePending.count>=128 ||
+  [onlineAttempts[s] unsignedIntegerValue]>=4 || (!onlineAttempts[s] && onlineAttempts.count>=2048);
  BOOL schedule=NO;
  if(!skip){
-  onlineWaiting++;onlineIssued++;[onlinePending addObject:s];
+  [onlinePending addObject:s];onlineWaiting=onlinePending.count;
   if(!onlineFlushScheduled){onlineFlushScheduled=YES;schedule=YES;}
  }
  os_unfair_lock_unlock(&onlineLock);
- if(schedule)ScheduleOnlineFlush();
- dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),onlineQueue,^{RefreshBannerCoverage();});
+ if(schedule)ScheduleOnlineFlushAfter(0.15);
+}
+static void OnlineForeground(void) {
+ if(!onlineConfig || !onlineQueue)return;
+ dispatch_async(onlineQueue,^{
+  if(!OnlineUsable())return;
+  if(onlineLastRefresh && OnlineNow()-onlineLastRefresh<60)return;
+  if(!onlineRefreshScheduled)onlineRefreshAttempt=0;
+  RefreshOnlineDictionary();
+ });
 }
 static void LoadOnlineCache(void) {
  id stored=[NSUserDefaults.standardUserDefaults objectForKey:DictionaryCacheKey()];
@@ -225,11 +308,13 @@ static void ConfigureOnline(NSDictionary *config) {
  NSURL *u=[NSURL URLWithString:c[@"endpoint"]];
  if(![u.scheme isEqual:@"https"] || !u.host.length || u.user || u.password || u.fragment || u.query)return;
  if(![c[@"bundleId"] isEqual:NSBundle.mainBundle.bundleIdentifier])return;
- NSTimeInterval exp=OnlineExpiry(c[@"expiresAt"]),now=NSDate.date.timeIntervalSince1970;
+ NSTimeInterval exp=OnlineExpiry(c[@"expiresAt"]),now=OnlineNow();
  if(exp<=now || exp>now+86400)return;
  if(!ValidActivation(c,NSBundle.mainBundle.bundleIdentifier,now))return;
- if([NSUserDefaults.standardUserDefaults boolForKey:[@"MirsaTranslationRevoked25." stringByAppendingString:ActivationHash(c[@"token"])]])return;
+ // Revoked25 was also written on transient generic403, so it cannot prove revocation.
+ // Only the separate explicit-local marker is authoritative going forward.
+ if([NSUserDefaults.standardUserDefaults boolForKey:[@"MirsaTranslationExplicitRevoked26." stringByAppendingString:ActivationHash(c[@"token"])]])return;
  onlineConfig=[c copy];
  LoadOnlineCache();
- RefreshOnlineDictionary();
+ OnlineForeground();
 }
