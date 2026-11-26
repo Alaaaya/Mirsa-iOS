@@ -58,7 +58,7 @@ int main(int argc,char **argv){@autoreleasepool{
  assert(!LocalTemplateParts(@"2026-02-30 一次恢复刷入"));
  assert(LocalTemplateParts(@"2024-02-29 一次恢复刷入"));
  for(NSString *private in @[@"2026-11-10 聊天记录",@"2026-11-10 Alice 账户",@"12 私人日记",@"12 密码",@"2026-11-10 一次恢复刷入 https://private.invalid",
-  @"２０２６-11-10 一次恢复刷入",@"2026-11-10 一次恢复刷入\n秘密",@"2026-11-10 一次恢复刷入 Alice"]){
+  @"２０２６-11-10 一次恢复刷入",@"2026-11-10 一次恢复刷入\n秘密",@"2026-11-10 一次恢复刷入 Alice",@" 15 未知历史",@" 2026-11-10 未知历史",@"٢٠٢٦ 未知历史",@"\u200f15 未知历史"]){
   assert(!LocalTemplateParts(private));assert(HasLocalHistoryPrefix(private));
   assert([Translate(private) isEqual:private]);
  }
@@ -74,7 +74,7 @@ int main(int argc,char **argv){@autoreleasepool{
  // Suspend before queuing so tests can inspect the ACTUAL network candidates without any HTTP.
  dispatch_suspend(onlineQueue);
  assert([Translate(@"2026-11-10 一次恢复刷入") isEqual:@"2026-11-10 一次恢复刷入"]);
- for(NSString *private in @[@"2026-11-10 Alice 聊天",@"12 私人日记",@"2026-11-10 一次恢复刷入 Alice"])Translate(private);
+ for(NSString *private in @[@"2026-11-10 Alice 聊天",@"12 私人日记",@"2026-11-10 一次恢复刷入 Alice",@" 15 未知历史",@" 2026-11-10 未知历史",@"٢٠٢٦ 未知历史",@"\u200f15 未知历史"])Translate(private);
  assert(onlinePending.count==1 && [onlinePending containsObject:@"一次恢复刷入"]);
  // A fresh label replaces a delayed timer, while stale callbacks retain an obsolete generation.
  os_unfair_lock_lock(&onlineLock);

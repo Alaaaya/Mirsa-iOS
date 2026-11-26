@@ -115,7 +115,7 @@ static void LogMissing(NSString *source,NSString *result) {
 
 static NSString *Translate(NSString *s) {
  if (onlineConfig && OnlineDenied())return s;
- if (onlineConfig && OnlineExpiry(onlineConfig[@"expiresAt"])<=NSDate.date.timeIntervalSince1970)return s;
+ if (onlineConfig && OnlineExpiry(onlineConfig[@"expiresAt"])<=OnlineNow())return s;
  if (!enabled || translating || ![s isKindOfClass:NSString.class] || !s.length || s.length>16384) return s;
  NSDictionary *templateParts=LocalTemplateParts(s);
  if(templateParts){
