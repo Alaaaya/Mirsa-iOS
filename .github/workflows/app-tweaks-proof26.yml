@@ -61,7 +61,7 @@ jobs:
               for a in t.get("attachments", []):
                   shutil.copy(os.path.join("build/raw", a["exportedFileName"]), "build/shots/" + (a.get("suggestedHumanReadableName") or a["exportedFileName"]).split("_0_")[0] + ".png")
           PY
-          ls build/shots; cat build/source-requests.log || true
+          ls build/shots; cat build/source-requests.log || true; cp scripts/proof/snap/SHA256SUMS scripts/proof/snap/ORIGIN build/ || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -70,3 +70,5 @@ jobs:
             build/shots
             build/source-requests.log
             build/proof.log
+            build/SHA256SUMS
+            build/ORIGIN
