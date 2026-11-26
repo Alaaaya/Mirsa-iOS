@@ -14,7 +14,9 @@ DEVICE=${SWIFTUI_REFRESH_DEVICE:-$(xcrun simctl list devices available -j | pyth
 # Reuse a CI-owned device, never erase or shut down anyone else's simulator.
 xcrun simctl boot "$DEVICE" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$DEVICE" -b
-ARCH=$(xcrun simctl spawn "$DEVICE" uname -m)
+# Simulator runtimes do not ship the Unix uname executable. The selected
+# simulator uses the runner host architecture, as the native smoke harness does.
+ARCH=$(uname -m)
 APP="$WORK/SwiftUIRefreshSmoke.app"
 mkdir -p "$APP"
 BUNDLE="app.mirsa.tests.swiftui-refresh"
