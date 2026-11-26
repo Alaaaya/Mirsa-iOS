@@ -178,10 +178,27 @@ static void RefreshOnlineDictionary(void) { @autoreleasepool {
  } @catch(__unused NSException *e){ScheduleOnlineRefresh();}
 }}
 // All scheduling transitions below hold onlineLock; HTTP is serialized on onlineQueue.
-static BOOL onlineFlushScheduled;
+static BOOL onlineFlushScheduled,onlineFlushRunning;
+static NSUInteger onlineFlushGeneration;
+static NSTimeInterval onlineFlushDeadline;
 static void FlushOnline(void);
-static void ScheduleOnlineFlushAfter(NSTimeInterval delay) {
- dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(MAX(0.15,delay)*NSEC_PER_SEC)),onlineQueue,^{FlushOnline();});
+// Caller holds onlineLock. Earlier work replaces the logical timer; superseded
+// dispatch_after blocks retain their generation and become inert on onlineQueue.
+// A running flush schedules its own earliest remaining deadline in @finally.
+static void ScheduleOnlineFlushLocked(NSTimeInterval delay) {
+ if(onlineFlushRunning)return;
+ delay=MAX(0.15,delay);
+ NSTimeInterval deadline=OnlineNow()+delay;
+ if(onlineFlushScheduled && onlineFlushDeadline<=deadline)return;
+ onlineFlushScheduled=YES;onlineFlushDeadline=deadline;
+ NSUInteger generation=++onlineFlushGeneration;
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),onlineQueue,^{
+  os_unfair_lock_lock(&onlineLock);
+  if(!onlineFlushScheduled || generation!=onlineFlushGeneration){os_unfair_lock_unlock(&onlineLock);return;}
+  onlineFlushScheduled=NO;onlineFlushDeadline=0;onlineFlushRunning=YES;
+  os_unfair_lock_unlock(&onlineLock);
+  FlushOnline();
+ });
 }
 static void ResetOnlineBudgetLocked(NSTimeInterval now) {
  if(!onlineBudgetStart || now-onlineBudgetStart>=60 || now<onlineBudgetStart){onlineBudgetStart=now;onlineIssued=0;}
@@ -249,10 +266,15 @@ static void FlushOnline(void) { @autoreleasepool {
    for(NSString *source in onlinePending)delay=MIN(delay,MAX(0.15,[onlineNegative[source] doubleValue]-now));
    if(onlineIssued>=128)delay=MAX(delay,MAX(0.15,onlineBudgetStart+60-now));
   }
-  onlineFlushScheduled=more;
+  onlineFlushRunning=NO;
+  if(more){ScheduleOnlineFlushLocked(delay);}
+  else {
+   // Invalidate any outstanding generation, including a timer installed before
+   // a direct test flush. No obsolete callback can consume a later timer.
+   onlineFlushScheduled=NO;onlineFlushDeadline=0;onlineFlushGeneration++;
+  }
   os_unfair_lock_unlock(&onlineLock);
   RefreshBannerCoverage();
-  if(more)ScheduleOnlineFlushAfter(delay);
  }
 }}
 static void QueueOnline(NSString *s) {
@@ -262,13 +284,11 @@ static void QueueOnline(NSString *s) {
  if(!onlinePositive[s] && onlineUncovered.count<128)[onlineUncovered addObject:s];
  BOOL skip=onlinePositive[s] || [onlinePending containsObject:s] || [onlineNegative[s] doubleValue]>now || onlinePending.count>=128 ||
   [onlineAttempts[s] unsignedIntegerValue]>=4 || (!onlineAttempts[s] && onlineAttempts.count>=2048);
- BOOL schedule=NO;
  if(!skip){
   [onlinePending addObject:s];onlineWaiting=onlinePending.count;
-  if(!onlineFlushScheduled){onlineFlushScheduled=YES;schedule=YES;}
+  ScheduleOnlineFlushLocked(0.15);
  }
  os_unfair_lock_unlock(&onlineLock);
- if(schedule)ScheduleOnlineFlushAfter(0.15);
 }
 static void OnlineForeground(void) {
  if(!onlineConfig || !onlineQueue)return;

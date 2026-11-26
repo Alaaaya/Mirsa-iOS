@@ -17,6 +17,37 @@ static NSCache *cache;
 static __thread BOOL translating;
 static BOOL enabled;
 static __thread BOOL drawing;
+static void ReapplyTranslations(void);
+#import "LocalTemplates.h"
+// Weak targets and immutable source snapshots. No text input/history is observed.
+static NSHashTable *translationTargets;
+static os_unfair_lock targetsLock=OS_UNFAIR_LOCK_INIT;
+static char sourceRecordsKey, attributedSourceKey;
+static __thread BOOL reapplyingTranslations;
+static BOOL reapplyScheduled;
+static void RememberSource(id target,SEL selector,id source,NSNumber *state) {
+ if(!target || reapplyingTranslations)return;
+ NSString *key=[NSString stringWithFormat:@"%s/%@",sel_getName(selector),state?:@""];
+ os_unfair_lock_lock(&targetsLock);
+ if(!translationTargets)translationTargets=[NSHashTable weakObjectsHashTable];
+ if(translationTargets.count>=4096 && ![translationTargets containsObject:target]){
+  os_unfair_lock_unlock(&targetsLock);return;
+ }
+ NSMutableDictionary *records=[objc_getAssociatedObject(target,&sourceRecordsKey) mutableCopy]?:[NSMutableDictionary dictionary];
+ if(source)records[key]=@{@"selector":NSStringFromSelector(selector),@"value":source,@"state":state?:NSNull.null};
+ else [records removeObjectForKey:key];
+ objc_setAssociatedObject(target,&sourceRecordsKey,[records copy],OBJC_ASSOCIATION_RETAIN);
+ [translationTargets addObject:target];
+ os_unfair_lock_unlock(&targetsLock);
+}
+static NSAttributedString *OriginalAttributed(NSAttributedString *value) {
+ if(![value isKindOfClass:NSAttributedString.class])return value;
+ NSString *original=objc_getAssociatedObject(value,&attributedSourceKey);
+ BOOL previous=translating;translating=YES;
+ NSMutableAttributedString *snapshot=[value mutableCopy];
+ if(original)[snapshot replaceCharactersInRange:NSMakeRange(0,snapshot.length) withString:original];
+ translating=previous;return snapshot;
+}
 
 
 // App-local diagnostic log. No network. Bounded queue/dedup and 1 MiB disk cap.
@@ -86,6 +117,11 @@ static NSString *Translate(NSString *s) {
  if (onlineConfig && OnlineDenied())return s;
  if (onlineConfig && OnlineExpiry(onlineConfig[@"expiresAt"])<=NSDate.date.timeIntervalSince1970)return s;
  if (!enabled || translating || ![s isKindOfClass:NSString.class] || !s.length || s.length>16384) return s;
+ NSDictionary *templateParts=LocalTemplateParts(s);
+ if(templateParts){
+  NSString *suffix=templateParts[@"source"],*translated=Translate(suffix);
+  return [translated isEqual:suffix]?s:[templateParts[@"prefix"] stringByAppendingString:translated];
+ }
  translating=YES;
  NSString *result=s;
  @try {
@@ -113,7 +149,7 @@ static NSString *Translate(NSString *s) {
 
    }
  LogMissing(s,result);
-   if([s isEqualToString:result] && HasCJK(s))QueueOnline(s);
+   if([s isEqualToString:result] && HasCJK(s) && !HasLocalHistoryPrefix(s))QueueOnline(s);
  } @catch (__unused NSException *e) { result=s; }
  @finally { translating=NO; }
  return result;
@@ -122,7 +158,7 @@ static NSString *Translate(NSString *s) {
 static NSAttributedString *TranslateAttr(NSAttributedString *a) {
  if (![a isKindOfClass:NSAttributedString.class] || !a.length || translating) return a;
  @try {
-  NSString *s=a.string, *t=Translate(s);
+  NSString *s=objc_getAssociatedObject(a,&attributedSourceKey)?:a.string, *t=Translate(s);
   if ([s isEqualToString:t]) return a;
   NSMutableAttributedString *out=[a mutableCopy];
   // Preserve every run when possible. If a translation crosses styled runs, inherit
@@ -137,6 +173,7 @@ static void HookString(Class c, SEL sel) {
  Method m=class_getInstanceMethod(c,sel); if (!m) return;
  IMP original=method_getImplementation(m);
  IMP hook=imp_implementationWithBlock(^(id obj, NSString *s) {
+   RememberSource(obj,sel,[s copy],nil);
    ((void(*)(id,SEL,id))original)(obj,sel,Translate(s));
  });
  if (!class_addMethod(c,sel,hook,method_getTypeEncoding(m))) class_replaceMethod(c,sel,hook,method_getTypeEncoding(m));
@@ -145,7 +182,8 @@ static void HookAttr(Class c, SEL sel) {
  Method m=class_getInstanceMethod(c,sel); if (!m) return;
  IMP original=method_getImplementation(m);
  IMP hook=imp_implementationWithBlock(^(id obj, NSAttributedString *s) {
-   ((void(*)(id,SEL,id))original)(obj,sel,TranslateAttr(s));
+   NSAttributedString *source=OriginalAttributed(s);RememberSource(obj,sel,source,nil);
+   ((void(*)(id,SEL,id))original)(obj,sel,TranslateAttr(source));
  });
  if (!class_addMethod(c,sel,hook,method_getTypeEncoding(m))) class_replaceMethod(c,sel,hook,method_getTypeEncoding(m));
 }
@@ -153,7 +191,9 @@ static void HookButton(SEL sel, BOOL attributed) {
  Class c=UIButton.class; Method m=class_getInstanceMethod(c,sel); if(!m)return;
  IMP original=method_getImplementation(m);
  IMP hook=imp_implementationWithBlock(^(id obj,id s,UIControlState state){
-  id translated=attributed ? TranslateAttr(s) : Translate(s);
+  id source=attributed?OriginalAttributed(s):[s copy];
+  RememberSource(obj,sel,source,@(state));
+  id translated=attributed ? TranslateAttr(source) : Translate(source);
   ((void(*)(id,SEL,id,UIControlState))original)(obj,sel,translated,state);
  });
  class_replaceMethod(c,sel,hook,method_getTypeEncoding(m));
@@ -164,7 +204,9 @@ static void HookAlert(void) {
  Method m=class_getClassMethod(UIAlertController.class,sel);if(!m)return;
  IMP original=method_getImplementation(m);
  class_replaceMethod(c,sel,imp_implementationWithBlock(^id(id obj,NSString *title,NSString *msg,UIAlertControllerStyle style){
-  return ((id(*)(id,SEL,id,id,UIAlertControllerStyle))original)(obj,sel,Translate(title),Translate(msg),style);
+  id alert=((id(*)(id,SEL,id,id,UIAlertControllerStyle))original)(obj,sel,Translate(title),Translate(msg),style);
+  RememberSource(alert,@selector(setTitle:),[title copy],nil);
+  RememberSource(alert,@selector(setMessage:),[msg copy],nil);return alert;
  }),method_getTypeEncoding(m));
  Class ac=object_getClass(UIAlertAction.class);SEL as=@selector(actionWithTitle:style:handler:);
  Method am=class_getClassMethod(UIAlertAction.class,as); if(!am)return; IMP ai=method_getImplementation(am);
@@ -213,9 +255,63 @@ static void HookAttributedInit(Class c) {
  SEL sel=@selector(initWithString:attributes:);
  Method m=class_getInstanceMethod(c,sel);if(!m)return;IMP orig=method_getImplementation(m);
  IMP hook=imp_implementationWithBlock(^id(id obj,NSString *s,NSDictionary *attrs){
-  return ((id(*)(id,SEL,id,id))orig)(obj,sel,Translate(s),attrs);
+  id result=((id(*)(id,SEL,id,id))orig)(obj,sel,Translate(s),attrs);
+  if(!translating && [s isKindOfClass:NSString.class] && HasCJK(s))
+   objc_setAssociatedObject(result,&attributedSourceKey,[s copy],OBJC_ASSOCIATION_RETAIN);
+  return result;
  });
  if(!class_addMethod(c,sel,hook,method_getTypeEncoding(m)))class_replaceMethod(c,sel,hook,method_getTypeEncoding(m));
+}
+// Debounced main-thread reapply. SwiftUI hosting views get public redraw/layout
+// invalidation; this does not claim to invalidate every private SwiftUI display list.
+static void InvalidateTranslationView(UIView *view,NSUInteger *remaining) {
+ if(!view || !*remaining)return;(*remaining)--;
+ [view setNeedsLayout];[view setNeedsDisplay];[view.layer setNeedsDisplay];
+ for(UIView *child in view.subviews){if(!*remaining)break;InvalidateTranslationView(child,remaining);}
+}
+static void ReapplyTranslations(void) {
+ dispatch_async(dispatch_get_main_queue(),^{
+  if(reapplyScheduled)return;reapplyScheduled=YES;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+   reapplyScheduled=NO;
+   [cache removeAllObjects];
+   os_unfair_lock_lock(&targetsLock);
+   NSArray *targets=translationTargets.allObjects;
+   NSMutableArray *snapshots=[NSMutableArray array];
+   for(id target in targets){
+    NSDictionary *records=objc_getAssociatedObject(target,&sourceRecordsKey);
+    if(records.count)[snapshots addObject:@{@"target":target,@"records":records}];
+   }
+   os_unfair_lock_unlock(&targetsLock);
+   reapplyingTranslations=YES;
+   @try {
+    for(NSDictionary *snapshot in snapshots){
+     id target=snapshot[@"target"];
+     for(NSDictionary *record in [snapshot[@"records"] allValues]){
+      SEL selector=NSSelectorFromString(record[@"selector"]);
+      id source=record[@"value"],state=record[@"state"];
+      BOOL attributed=[source isKindOfClass:NSAttributedString.class];
+      id value=attributed?TranslateAttr(source):Translate(source);
+      if(![target respondsToSelector:selector])continue;
+      IMP setter=[target methodForSelector:selector];
+      if(state==NSNull.null)((void(*)(id,SEL,id))setter)(target,selector,value);
+      else ((void(*)(id,SEL,id,UIControlState))setter)(target,selector,value,[state unsignedIntegerValue]);
+     }
+     if([target isKindOfClass:UIView.class]){[target setNeedsLayout];[target setNeedsDisplay];}
+    }
+    NSUInteger remaining=4096;
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
+     if(![scene isKindOfClass:UIWindowScene.class])continue;
+     for(UIWindow *window in ((UIWindowScene *)scene).windows)InvalidateTranslationView(window,&remaining);
+    }
+   } @finally {reapplyingTranslations=NO;}
+  });
+ });
+}
+static void ObserveOnlineForeground(void) {
+ [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note){
+  OnlineForeground();ReapplyTranslations();
+ }];
 }
 __attribute__((constructor)) static void Start(void) {
  @autoreleasepool { @try {
@@ -274,5 +370,6 @@ __attribute__((constructor)) static void Start(void) {
    if(realFramesetter)rb[n++]=(struct rebinding){"CTFramesetterCreateWithAttributedString",HookFramesetter,NULL};
    if(realTypesetterOptions)rb[n++]=(struct rebinding){"CTTypesetterCreateWithAttributedStringAndOptions",HookTypesetterOptions,NULL};
    if(n)rebind_symbols(rb,n);
+   ObserveOnlineForeground();
  } @catch(__unused NSException*e){enabled=NO;} }
 }
