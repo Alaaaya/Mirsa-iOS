@@ -151,6 +151,19 @@ jobs:
         env:
           MIRSA_RT_CI_ISSUER_SECRET: ${{ secrets.RT_STAGING_CI_ISSUER_SECRET }}
         run: python3 scripts/mint-runtime-ci-fixture25.py
+      - name: Verify packaged endpoint matches the authenticated staging gate
+        env:
+          MIRSA_RT_STAGING_ENDPOINT: ${{ secrets.RT_STAGING_ENDPOINT }}
+        run: |
+          python3 - <<'PYENDPOINT'
+          import os, plistlib
+          from pathlib import Path
+          actual = plistlib.loads(Path('ios-app/Info.plist').read_bytes()).get('MirsaRuntimeTranslationEndpoint')
+          expected = os.environ.get('MIRSA_RT_STAGING_ENDPOINT')
+          if not expected or actual != expected:
+              raise SystemExit('Packaged translation endpoint differs from the authenticated staging gate; refusing split-endpoint validation')
+          print('Packaged translation endpoint exactly matches the authenticated staging gate')
+          PYENDPOINT
       - name: Reject stale staging fixture before the native build
         run: |
           python3 scripts/test-runtime-staging-fixture.py
