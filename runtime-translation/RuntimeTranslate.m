@@ -115,7 +115,8 @@ static void LogMissing(NSString *source,NSString *result) {
 
 static NSString *Translate(NSString *s) {
  // Cached text has the same signature and signed-expiry boundary as network results.
- if (onlineConfig && !OnlineUsable())return s;
+ if (onlineConfig && (OnlineDenied() || OnlineExpiry(onlineConfig[@"expiresAt"])<=OnlineNow() ||
+  OnlineSignedExpiry(onlineConfig)<=OnlineNow()))return s;
  if (!enabled || translating || ![s isKindOfClass:NSString.class] || !s.length || s.length>16384) return s;
  NSDictionary *templateParts=LocalTemplateParts(s);
  if(templateParts){
