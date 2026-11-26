@@ -22,7 +22,9 @@ static NSTimeInterval FixtureNow(void){return 2000000010;}
  @synchronized(MirsaFallbackProtocol.class){fixtureCalls++;fixtureItems=items.count;}
  NSMutableArray *entries=[NSMutableArray array];
  for(NSDictionary *item in items)[entries addObject:@{@"source":item[@"text"],@"labelId":NSUUID.UUID.UUIDString,@"reviewId":NSUUID.UUID.UUIDString,@"kind":@"missing",@"version":@1}];
- NSDictionary *reply=@{@"bundleId":request[@"bundleId"],@"revision":request[@"revision"],@"translations":@{},@"entries":@[],
+ NSMutableArray *networkEntries=[NSMutableArray array];
+ for(NSDictionary *item in items)[networkEntries addObject:@{@"source":item[@"text"],@"translation":@"ترجمة مرفوضة",@"version":@999,@"provenance":@"kat"}];
+ NSDictionary *reply=@{@"bundleId":request[@"bundleId"],@"revision":request[@"revision"],@"translations":@{},@"entries":fixtureCode==200?@[]:networkEntries,
   @"deferred":fixtureCode==200?@"kat_review_required":[NSString stringWithFormat:@"provider_%ld",(long)fixtureCode],@"queue":@{@"persisted":@YES,@"entries":entries}};
  NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc]initWithURL:self.request.URL statusCode:fixtureCode HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type":@"application/json"}];
  [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
