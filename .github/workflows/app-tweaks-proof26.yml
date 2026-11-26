@@ -1,0 +1,70 @@
+name: App tweaks proof (read-only, isolated source)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+          key: simulator
+      - name: Build simulator FFI
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cargo build --release --manifest-path rust-core/Cargo.toml --target aarch64-apple-ios-sim
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Isolated HTTPS catalogue source
+        run: |
+          mkdir -p proof build
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout proof/ca.key -out proof/ca.pem -days 2 -subj "/CN=Proof CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign"
+          openssl req -newkey rsa:2048 -nodes -keyout proof/server.key -out proof/server.csr -subj "/CN=localhost"
+          printf "subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n" > proof/ext.cnf
+          openssl x509 -req -in proof/server.csr -CA proof/ca.pem -CAkey proof/ca.key -CAcreateserial -out proof/server.crt -days 2 -extfile proof/ext.cnf
+          cat proof/server.crt > proof/server.pem
+          python3 scripts/proof/app_tweaks_source.py 8443 build/source-requests.log &
+          sleep 2
+      - name: Run proof UITest
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=[d for g in json.load(sys.stdin)["devices"].values() for d in g if d["name"].startswith("iPhone")]; pick=[d for d in ds if d["name"] in ("iPhone 16 Pro","iPhone 17 Pro")] or ds; print(pick[0]["udid"])')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl keychain "$DEVICE" add-root-cert proof/ca.pem
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/Proof.xcresult -only-testing:MirsaUITests/AppTweaksProofUITests test CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/proof.log
+      - name: Export screenshots
+        if: always()
+        run: |
+          mkdir -p build/raw build/shots
+          [ -d build/Proof.xcresult ] && xcrun xcresulttool export attachments --path build/Proof.xcresult --output-path build/raw || true
+          python3 - <<'PY'
+          import json, os, shutil
+          m = json.load(open("build/raw/manifest.json"))
+          for t in m:
+              for a in t.get("attachments", []):
+                  shutil.copy(os.path.join("build/raw", a["exportedFileName"]), "build/shots/" + (a.get("suggestedHumanReadableName") or a["exportedFileName"]).split("_0_")[0] + ".png")
+          PY
+          ls build/shots; cat build/source-requests.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-tweaks-proof
+          path: |
+            build/shots
+            build/source-requests.log
+            build/proof.log
