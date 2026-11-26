@@ -133,7 +133,7 @@ int main(int argc,char **argv) {@autoreleasepool {
   NSMutableDictionary *fixture=[c mutableCopy];fixture[@"endpoint"]=@"https://staging.fixture.invalid/runtime";
   fixture[@"expiresAt"]=@"2033-05-19T03:33:20Z";onlineConfig=fixture;
   onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];
-  onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];onlineIssued=0;onlineWaiting=0;onlineFlushScheduled=NO;onlineFlushRunning=NO;onlineFlushGeneration++;onlineFlushDeadline=0;
+  onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];onlineAttempts=[NSMutableDictionary dictionary];onlineBudgetStart=0;onlineAttemptStart=0;onlineIssued=0;onlineWaiting=0;onlineFlushScheduled=NO;onlineFlushRunning=NO;onlineFlushGeneration++;onlineFlushDeadline=0;
   onlineQueue=dispatch_queue_create("mirsa.runtime.fixture.batch",DISPATCH_QUEUE_SERIAL);
   fixtureCode=code.integerValue;fixtureCalls=0;fixtureItems=0;
   NSArray *sources=@[@"重试按钮",@"帮助按钮",@"更多按钮"];
@@ -145,12 +145,22 @@ int main(int argc,char **argv) {@autoreleasepool {
   BOOL waiting=YES;
   while(waiting && deadline.timeIntervalSinceNow>0){
    [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
-   os_unfair_lock_lock(&onlineLock);waiting=onlineWaiting>0;os_unfair_lock_unlock(&onlineLock);
+   os_unfair_lock_lock(&onlineLock);waiting=onlineNegative.count!=3 || onlineFlushRunning;os_unfair_lock_unlock(&onlineLock);
   }
   assert(!waiting);
+  // A transient failure intentionally retains pending work for its bounded retry.
+  os_unfair_lock_lock(&onlineLock);
+  assert(onlineWaiting==3 && onlinePending.count==3 && onlineFlushScheduled);
+  assert(onlineIssued==3 && onlineFlushDeadline>=FixtureNow()+59);
+  for(NSString *source in sources)assert([onlineAttempts[source] unsignedIntegerValue]==1);
+  os_unfair_lock_unlock(&onlineLock);
   @synchronized(MirsaFallbackProtocol.class){assert(fixtureCalls==1 && fixtureItems==3);}
   for(NSString *source in sources){assert(!OnlineLookup(source));assert([Translate(source) isEqual:source]);}
   assert(!onlinePositive.count && onlineNegative.count==3);
+  os_unfair_lock_lock(&onlineLock);
+  [onlinePending removeAllObjects];onlineWaiting=0;
+  onlineFlushScheduled=NO;onlineFlushDeadline=0;onlineFlushGeneration++;
+  os_unfair_lock_unlock(&onlineLock);
  }
  method_exchangeImplementations(original,mocked);
  NSLog(@"Native batched 429/503 fallback original UI and no-crash smoke passed");
