@@ -310,7 +310,7 @@ static void ReapplyTranslations(void) {
 }
 static void ObserveOnlineForeground(void) {
  [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note){
-  OnlineForeground();ReapplyTranslations();
+  OnlineForeground();RefreshBannerCoverage();ReapplyTranslations();
  }];
 }
 static void InstallTranslationHooks(void) {

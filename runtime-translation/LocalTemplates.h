@@ -1,8 +1,18 @@
 // Local-only prefix handling. Never relax DictionarySourceSafe or transmit a date/history.
 static BOOL HasLocalHistoryPrefix(NSString *source) {
  if(![source isKindOfClass:NSString.class] || !source.length)return NO;
- unichar c=[source characterAtIndex:0];
- return (c>='0' && c<='9') || (c>=0xff10 && c<=0xff19);
+ // Unknown numeric histories stay local even with leading whitespace/bidi
+ // formatting or non-ASCII decimal digits. Only the strict ASCII parser below
+ // may opt a finite reviewed template suffix into outgoing missing requests.
+ NSCharacterSet *ignorable=[NSCharacterSet.whitespaceAndNewlineCharacterSet mutableCopy];
+ NSMutableCharacterSet *leading=[ignorable mutableCopy];
+ [leading formUnionWithCharacterSet:NSCharacterSet.controlCharacterSet];
+ NSUInteger index=0;
+ while(index<source.length && [leading characterIsMember:[source characterAtIndex:index]])index++;
+ if(index==source.length)return NO;
+ NSRange first=[source rangeOfComposedCharacterSequenceAtIndex:index];
+ NSString *character=[source substringWithRange:first];
+ return [character rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet].location!=NSNotFound;
 }
 static NSDictionary *LocalTemplateParts(NSString *source) {
  if(!HasLocalHistoryPrefix(source) || source.length>256)return nil;
