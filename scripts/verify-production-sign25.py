@@ -27,8 +27,8 @@ for mode in ('ON','OFF'):
   # zipfile extracts regular files as 0644; verify the original archive modes.
   for entry in z.infolist():
    if not entry.is_dir():
-    mode=(entry.external_attr >> 16) & 0o777
-    if mode: (pathlib.Path(d)/entry.filename).chmod(mode)
+    file_mode=(entry.external_attr >> 16) & 0o777
+    if file_mode: (pathlib.Path(d)/entry.filename).chmod(file_mode)
   payload=pathlib.Path(d)/'Payload';apps=list(payload.glob('*.app'));assert len(apps)==1
   app=apps[0];info=plistlib.loads((app/'Info.plist').read_bytes());deps=loads((app/info['CFBundleExecutable']).read_bytes())
   rt=app/'Frameworks/MirsaTranslate.dylib';cfg=app/'Frameworks/MirsaTranslations.json'
