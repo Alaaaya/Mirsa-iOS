@@ -36,7 +36,6 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           export SIMCTL_CHILD_DYLD_PRINT_LIBRARIES=1
           export SIMCTL_CHILD_DYLD_PRINT_INITIALIZERS=1
-          export SIMCTL_CHILD_DYLD_PRINT_APIS=1
           python3 scripts/verify-exact-hook-launch25.py diagnostic-source/build/production-sign-proof "$DEVICE" 2>&1 | tee diagnostic-source/exact-replay.log
       - uses: actions/upload-artifact@v4
         if: always()

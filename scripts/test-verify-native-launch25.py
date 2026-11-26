@@ -50,7 +50,7 @@ class LaunchVerifierTests(unittest.TestCase):
             ipa.with_suffix('.ipa.mirsa-attempt.json').write_text(json.dumps(dict(outputSHA256=hashlib.sha256(ipa.read_bytes()).hexdigest(),
                  componentSHA256={'component':sourceSHA},selectedComponentIDs=['exact:'+name],attemptID=mode)))
 
-    def execute(self, exact=False, reject_apple=False, reject_marker=False, script=None):
+    def execute(self, exact=False, reject_apple=False, reject_marker=False, script=None, launch_timeout=False):
         script=script or SCRIPTS/('verify-exact-hook-launch25.py' if exact else 'verify-generic-launch25.py')
         def command(args,**kwargs):
             if exact and args[:3]==('xcrun','simctl','io'):
@@ -72,6 +72,7 @@ class LaunchVerifierTests(unittest.TestCase):
                 self.assertEqual(args[-1],'hook' if 'HOOK' in self.current_mode(args) else 'plain')
                 output='MIRSA_GENERIC_PRODUCTION_LAUNCH25 PASS'
             elif args[2]=='launch':
+                if launch_timeout: raise subprocess.TimeoutExpired(args,45,output=b'partial dyld evidence',stderr=b'partial UIKit evidence')
                 mode=args[-1]
                 self.assertIn(mode,('ALAA','HOOK'))
                 output='MIRSA_EXACT_HOOK25 PASS '+mode+' '+('علاء' if mode=='ALAA' else 'مرسى شغال ✅')
@@ -99,6 +100,15 @@ class LaunchVerifierTests(unittest.TestCase):
             self.assertFalse(item['realDeviceVerified'])
             self.assertEqual(hashlib.sha256((self.root/(('EXACT-' if exact else 'GENERIC-')+mode+'.ipa')).read_bytes()).hexdigest(),item['deviceArchiveSHA256'])
             if exact:self.assertEqual(item['actualArabicAlertPNG'],'exact-'+mode+'-Arabic-alert.png')
+
+    def test_timeout_preserves_partial_evidence_but_fails_gate(self):
+        self.archives(True)
+        with self.assertRaises(AssertionError): self.execute(True,launch_timeout=True)
+        evidence=(self.root/'exact-ALAA-launch.log').read_text()
+        self.assertIn('partial dyld evidence',evidence)
+        self.assertIn('partial UIKit evidence',evidence)
+        self.assertIn('LAUNCH_TOOL_FAILURE',evidence)
+        self.assertFalse((self.root/'exact-hook-launch-verification.json').exists())
 
     def test_generic_modes_survive_archived_permissions(self):
         self.archives();calls=self.execute();self.assert_modes()
