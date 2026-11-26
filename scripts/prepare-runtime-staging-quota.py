@@ -18,9 +18,9 @@ DO $$ begin
  end if;
 end $$;
 select row_to_json(u) from public.mirsa_runtime_usage u
- where user_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' and day=current_date for update;
+ where user_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' and day=(transaction_timestamp() at time zone 'UTC')::date for update;
 update public.mirsa_runtime_usage set requests=0,chars=0,issues=0,minute_requests=0
- where user_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' and day=current_date;
+ where user_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' and day=(transaction_timestamp() at time zone 'UTC')::date;
 commit;
 """
 

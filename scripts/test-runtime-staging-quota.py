@@ -12,9 +12,13 @@ class QuotaSetupTests(unittest.TestCase):
         self.assertIn('/home/kit/runtime-staging25/pgdata', sql)
     def test_only_synthetic_current_day_usage_can_change(self):
         update = module.sql_for_fixture().split('update ', 1)[1]
-        self.assertIn("where user_id='" + module.SUBJECT + "' and day=current_date", update)
+        self.assertIn("where user_id='" + module.SUBJECT + "' and day=(transaction_timestamp() at time zone 'UTC')::date", update)
         for forbidden in ('truncate', 'delete', 'alter ', 'mirsa_runtime_caps', 'auth.users'):
             self.assertNotIn(forbidden, update.lower())
+    def test_reset_uses_same_utc_day_as_reservation_not_operator_timezone(self):
+        sql = module.sql_for_fixture()
+        self.assertNotIn('current_date', sql.lower())
+        self.assertEqual(sql.count("day=(transaction_timestamp() at time zone 'UTC')::date"), 2)
     def test_snapshot_and_transaction(self):
         sql = module.sql_for_fixture()
         self.assertTrue(sql.startswith('begin;'))
