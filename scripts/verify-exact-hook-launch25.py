@@ -92,7 +92,19 @@ for mode,(name,sourceSHA,title) in expected.items():
         run('codesign','--force','--sign','-','--timestamp=none',str(app))
         run('codesign','--verify','--deep','--strict',str(app))
         run('xcrun','simctl','install',device,str(app))
-        result=run('xcrun','simctl','launch','--terminate-running-process','--console-pty',device,info['CFBundleIdentifier'],mode,timeout=45)
+        launched=subprocess.run(('xcrun','simctl','launch','--terminate-running-process','--console-pty',device,info['CFBundleIdentifier'],mode),check=True,text=True,capture_output=True,timeout=45)
+        result=(launched.stdout or '')+(launched.stderr or '')
+        (root/('exact-'+mode+'-launch.log')).write_text(result)
+        if 'MIRSA_EXACT_HOOK25 PASS '+mode+' '+title not in result:
+            # Passive diagnostics only. Never load the payload or synthesize activation.
+            for args,suffix in [
+                (('xcrun','simctl','io',device,'screenshot',str(root/('exact-'+mode+'-failure.png'))),'screenshot'),
+                (('xcrun','simctl','spawn',device,'log','show','--last','2m','--style','compact','--predicate','process == "ExactLaunch25"'),'system')]:
+                try:
+                    evidence=subprocess.run(args,text=True,capture_output=True,timeout=20)
+                    (root/('exact-'+mode+'-'+suffix+'-launch.log')).write_text((evidence.stdout or '')+(evidence.stderr or ''))
+                except (OSError,subprocess.TimeoutExpired) as error:
+                    (root/('exact-'+mode+'-'+suffix+'-launch.log')).write_text(str(error))
         assert 'MIRSA_EXACT_HOOK25 PASS '+mode+' '+title in result,result
         container=pathlib.Path(run('xcrun','simctl','get_app_container',device,info['CFBundleIdentifier'],'data').strip())
         sourcePNG=container/'Documents/exact-alert.png'

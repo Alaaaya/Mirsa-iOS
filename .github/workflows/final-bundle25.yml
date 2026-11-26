@@ -1,17 +1,56 @@
 name: Final integrated bundle private validation
 on:
   workflow_dispatch:
+    inputs:
+      exact_launch_diagnostic:
+        description: 'Read-only replay of exact signed fixture from failed run 45805899206. Never builds a release.'
+        type: boolean
+        default: false
   push:
     branches: [mirsa/final-bundle25, mirsa/integrated-runtime-hook25]
 permissions:
   contents: read
+  actions: read
 defaults:
   run:
     shell: bash
 env:
   MIRSA_RELEASE_BUILD: "8.543.2"
 jobs:
+  exact-launch-diagnostic:
+    if: ${{ inputs.exact_launch_diagnostic == true }}
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 45805899206
+          name: Mirsa-final25-Arabic-proof
+          path: diagnostic-source
+      - name: Replay unmodified production signed own fixture with passive dyld diagnostics
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          export SIMCTL_CHILD_DYLD_PRINT_LIBRARIES=1
+          export SIMCTL_CHILD_DYLD_PRINT_INITIALIZERS=1
+          export SIMCTL_CHILD_DYLD_PRINT_APIS=1
+          python3 scripts/verify-exact-hook-launch25.py diagnostic-source/build/production-sign-proof "$DEVICE" 2>&1 | tee diagnostic-source/exact-replay.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Mirsa-exact-launch-diagnostic26
+          path: |
+            diagnostic-source/exact-replay.log
+            diagnostic-source/build/production-sign-proof/*launch*.log
+            diagnostic-source/build/production-sign-proof/*failure*.png
+            diagnostic-source/build/production-sign-proof/exact-hook-launch-verification.json
+            diagnostic-source/build/production-sign-proof/exact-*-Arabic-alert.png
+
   native-hook-smoke:
+    if: ${{ inputs.exact_launch_diagnostic != true }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +60,7 @@ jobs:
           python3 scripts/test-hook-localization.py
 
   backend:
+    if: ${{ inputs.exact_launch_diagnostic != true }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -144,6 +184,7 @@ jobs:
           if-no-files-found: error
 
   simulator:
+    if: ${{ inputs.exact_launch_diagnostic != true }}
     needs: [backend, native-hook-smoke]
     runs-on: macos-26
     steps:

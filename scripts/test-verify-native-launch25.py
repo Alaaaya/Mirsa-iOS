@@ -53,6 +53,11 @@ class LaunchVerifierTests(unittest.TestCase):
     def execute(self, exact=False, reject_apple=False, reject_marker=False, script=None):
         script=script or SCRIPTS/('verify-exact-hook-launch25.py' if exact else 'verify-generic-launch25.py')
         def command(args,**kwargs):
+            if exact and args[:3]==('xcrun','simctl','io'):
+                self.assertEqual(args[4],'screenshot')
+                return subprocess.CompletedProcess(args,0,stdout='passive screenshot diagnostics')
+            if exact and args[:3]==('xcrun','simctl','spawn') and 'log' in args:
+                return subprocess.CompletedProcess(args,0,stdout='passive process diagnostics')
             self.assertTrue(kwargs['check'])
             if args[0]=='codesign':
                 self.assertIn('--strict',args) if '--verify' in args else self.assertIn('--force',args)
