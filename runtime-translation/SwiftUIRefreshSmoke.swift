@@ -10,7 +10,7 @@ import SwiftUI
 import Darwin
 
 private let source = "异步刷新验证"
-private let target = "التحقق من التحديث"
+private let expectedArabic = "التحقق من التحديث"
 private var bodyEvaluations = 0
 private struct RetainedText: View {
     var body: some View {
@@ -194,7 +194,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         initialPNG = before.pngData() ?? Data()
         bodiesBefore = bodyEvaluations
         receipt["source"] = source
-        receipt["expected"] = target
+        receipt["expected"] = expectedArabic
         receipt["labelBefore"] = label.text ?? ""
         receipt["bodyEvaluationsBefore"] = bodiesBefore
         receipt["retainedHostIdentity"] = String(describing: ObjectIdentifier(host))
@@ -203,7 +203,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
             return
         }
         let entries: [[String: Any]] = [
-            ["source": source, "translation": target, "provenance": "kat", "version": 1]
+            ["source": source, "translation": expectedArabic, "provenance": "kat", "version": 1]
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: ["entries": entries]),
               let json = String(data: data, encoding: .utf8) else {
@@ -234,7 +234,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         // Only AFTER recording retained content, construct literal Arabic and
         // original Chinese references. Neither participates in the retained tree.
         let reference = UIHostingController(rootView:
-            Text(verbatim: target).font(.system(size: 34)).foregroundColor(.black)
+            Text(verbatim: expectedArabic).font(.system(size: 34)).foregroundColor(.black)
                 .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white))
         guard let parent = window?.rootViewController else { finish(false, "no_window"); return }
         parent.addChild(reference)
@@ -247,7 +247,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
             let match = self.difference(retainedPixels, self.pixels(expected))
             self.receipt["arabicReferenceMismatchFraction"] = match
             let changed = self.difference(self.initialPixels, retainedPixels)
-            let labelOK = self.label.text == target
+            let labelOK = self.label.text == expectedArabic
             self.receipt["uikitPassed"] = labelOK
             // Require positive changed pixels AND match against a literal Arabic
             // reference, not merely a layout/blink/invalidation difference.
