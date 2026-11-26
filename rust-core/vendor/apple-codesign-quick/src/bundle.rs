@@ -422,6 +422,9 @@ fn sign_libraries(libraries: &[PathBuf], settings: &BundleSigningSettings<'_>) -
                 settings.cms_signer,
             );
             config.cms_blob_reservation = settings.cms_blob_reservation;
+            // Standalone dylibs have no process entitlements. Leave the
+            // entitlement slot absent, as in the container library signer.
+            config.omit_entitlements = true;
             sign_macho_file(path, &config)
         })
         .collect::<Result<Vec<_>>>()?;
