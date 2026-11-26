@@ -9,7 +9,14 @@ NOT a claim that the unmodified device signature can run on the simulator.
 import hashlib,json,pathlib,plistlib,struct,subprocess,sys,tempfile,zipfile
 root=pathlib.Path(sys.argv[1]);device=sys.argv[2];proof={}
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
-def run(*args): return subprocess.run(args,check=True,text=True,capture_output=True).stdout
+def run(*args):
+    try:
+        return subprocess.run(args,check=True,text=True,capture_output=True,timeout=60).stdout
+    except subprocess.CalledProcessError as error:
+        # Only our authored, credential-free launch fixtures run through this helper.
+        print(error.stdout or '',file=sys.stderr,flush=True)
+        print(error.stderr or '',file=sys.stderr,flush=True)
+        raise
 for mode in ('DIRECT','LOADER','HOOK'):
     ipa=root/('GENERIC-'+mode+'.ipa');original=sha(ipa)
     attempt=json.loads(ipa.with_suffix('.ipa.mirsa-attempt.json').read_bytes())
