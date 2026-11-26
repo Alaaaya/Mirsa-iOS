@@ -15,7 +15,7 @@ defaults:
   run:
     shell: bash
 env:
-  MIRSA_RELEASE_BUILD: "8.543.2"
+  MIRSA_RELEASE_BUILD: "8.543.3"
 jobs:
   exact-launch-diagnostic:
     if: ${{ inputs.exact_launch_diagnostic == true }}
@@ -53,6 +53,9 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Translation injection preserves every existing dylib ordinal
+        run: python3 scripts/test-translation-ordinals26.py
       - name: Build and exercise own Substrate-compatible engine
         run: |
           bash hook-engine/test-macos.sh

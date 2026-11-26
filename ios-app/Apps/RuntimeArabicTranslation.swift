@@ -191,7 +191,14 @@ enum RuntimeArabicPipeline {
             let config = frameworks.appendingPathComponent("MirsaTranslations.json")
             guard !fm.fileExists(atPath: config.path),
                   (try? fm.destinationOfSymbolicLink(atPath: config.path)) == nil else { throw RuntimeTranslationError.invalid }
-            try IPAEditorService.run("inject", input: copy, executable: executable, libraries: [dylib], newFirst: true)
+            // Mach-O bind/fixup ordinals refer to the original dependency order.
+            // Translation is additive, never prepend its dylib ahead of those slots.
+            let originalDependencies = try IPAEditorService.dependencies(of: copy.appendingPathComponent(executable))
+            try IPAEditorService.run("inject", input: copy, executable: executable, libraries: [dylib], newFirst: false)
+            guard try IPAEditorService.dependencies(of: copy.appendingPathComponent(executable)) ==
+                    originalDependencies + ["@loader_path/Frameworks/MirsaTranslate.dylib"] else {
+                throw RuntimeTranslationError.invalid
+            }
             var dictionary: [String: Any] = ["translations": table, "substrings": [:], "regex": [], "revision": revision]
             if let online { dictionary["online"] = online; dictionary["translations"] = [:] }
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])

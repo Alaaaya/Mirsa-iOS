@@ -488,6 +488,9 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             "Not in this app": "دخيل"
         ], online: online)))
         let dylib = try XCTUnwrap(RuntimeArabicPipeline.bundledDylib, "Native app resource RuntimeTranslationAssets/MirsaTranslate.dylib is required")
+        let executable = try XCTUnwrap(info["CFBundleExecutable"] as? String)
+        let originalDependencies = try IPAEditorService.dependencies(of: fixture.app.appendingPathComponent(executable))
+        XCTAssertFalse(originalDependencies.isEmpty, "Real linked fixture must have ordinal-bearing dependencies")
         let en = try Data(contentsOf: fixture.app.appendingPathComponent("en.lproj/Localizable.strings"))
         XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: fixture.app, translator: translator, dylib: dylib),
                        onlineEnabled ? ArabicTranslateText.applied : RuntimeArabicText.offline)
@@ -511,7 +514,9 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         XCTAssertEqual(translator.calls.first?.0, bundle)
         XCTAssertEqual(translator.calls.first?.1, scan.revision)
         XCTAssertEqual(try Data(contentsOf: fixture.app.appendingPathComponent("Frameworks/MirsaTranslate.dylib")), try Data(contentsOf: dylib))
-        let executable = try XCTUnwrap(info["CFBundleExecutable"] as? String)
+        XCTAssertEqual(try IPAEditorService.dependencies(of: fixture.app.appendingPathComponent(executable)),
+                       originalDependencies + ["@loader_path/Frameworks/MirsaTranslate.dylib"],
+                       "Translation must append without shifting any existing dyld library ordinal")
         XCTAssertNotNil(try Data(contentsOf: fixture.app.appendingPathComponent(executable)).range(of: Data("MirsaTranslate.dylib".utf8)))
         XCTAssertEqual(try Data(contentsOf: fixture.app.appendingPathComponent("en.lproj/Localizable.strings")), en)
         XCTAssertEqual(try Data(contentsOf: fixture.ipa), original)
