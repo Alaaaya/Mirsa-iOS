@@ -411,6 +411,13 @@ jobs:
           cp build/CarFixture/Payload/SignedFixture.app/Info.plist "$RETAINED3/Info.plist"
           cmp tests/fixtures/SignedFolder24CarIcon.ipa "$RETAINED3/SignedFolder24CarIcon.ipa"
           cmp tests/fixtures/SignedFolder24Fixture.ipa "$RETAINED/SignedFolder24Fixture.ipa"
+          # Install the independent centered-modal fixture on the exact UI destination.
+          # The launch proof uses another bundle ID and its temporary build is gone.
+          MODAL_APP="$GITHUB_WORKSPACE/build/launch-proof/modal-host/SwiftUIRefreshSmoke.app"
+          test -f "$MODAL_APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$MODAL_APP/Info.plist")" = app.mirsa.tests.swiftui-refresh
+          xcrun simctl install "$DEVICE" "$MODAL_APP"
+          xcrun simctl get_app_container "$DEVICE" app.mirsa.tests.swiftui-refresh app
           xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/SignedFolderUI.xcresult -only-testing:MirsaUITests/RuntimeTranslate25UITests -only-testing:MirsaUITests/SignedAppsFolder24UITests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS="$GITHUB_WORKSPACE/scripts/runtime-simulator-keychain.entitlements" 2>&1 | tee build/signed-folder-ui.log
       - name: Export runtime screenshot attachments
         if: always()

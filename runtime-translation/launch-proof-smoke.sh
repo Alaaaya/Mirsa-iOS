@@ -85,3 +85,11 @@ for m in ("control","embedded","ota-seed","ota-verify"):
     ok=ok and r.get("passed") is True
 sys.exit(0 if ok else 1)
 PY
+
+# The independent modal XCTest needs this host after the temporary build is removed.
+# Give it a separate bundle ID so its persisted notice flag cannot touch launch/cache proof.
+MODAL_APP="$OUT/modal-host/SwiftUIRefreshSmoke.app"
+mkdir -p "$(dirname "$MODAL_APP")"
+cp -R "$APP" "$MODAL_APP"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier app.mirsa.tests.swiftui-refresh' "$MODAL_APP/Info.plist"
+codesign --force --sign - "$MODAL_APP"
