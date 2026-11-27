@@ -27,10 +27,12 @@ protocol DiscoveryTokenProvider {
 enum DiscoveryAuthError: Error, Equatable, LocalizedError {
     case notConfigured
     case failed(String)
+    case httpStatus(Int)
     var errorDescription: String? {
         switch self {
         case .notConfigured: return "Web search is not configured."
         case .failed(let m): return m
+        case .httpStatus(let code): return "Sign-in service answered \(code)."
         }
     }
 }
@@ -92,6 +94,9 @@ actor DiscoveryAuthClient: DiscoveryTokenProvider {
         if let s = current {
             let (code, data) = try await call("auth/v1/token", query: [URLQueryItem(name: "grant_type", value: "refresh_token")],
                                               body: ["refresh_token": s.refreshToken])
+            // Another auth actor or an explicit login can rotate/replace this shared
+            // Keychain item while the request is suspended. Never erase or overwrite it.
+            guard store.load() == s else { throw DiscoveryAuthError.failed("Account session changed. Retry.") }
             if (200..<300).contains(code), let n = DiscoveryAuthParse.session(data, now: now()) {
                 if existingOnly {
                     guard let old = try? ForgeClient.fixUserID(s.accessToken),
@@ -99,8 +104,12 @@ actor DiscoveryAuthClient: DiscoveryTokenProvider {
                 }
                 store.save(n); return n.accessToken
             }
-            if !(400..<500).contains(code) { throw DiscoveryAuthError.failed("Sign-in service answered \(code).") }
-            store.save(nil) // refresh token rejected: start over with one sign-up
+            // A client HTTP status alone is not proof that this session is revoked.
+            // Preserve it on throttling, timeouts, configuration errors and unknown responses.
+            guard Self.isDefinitiveRefreshRejection(code: code, data: data) else {
+                throw DiscoveryAuthError.httpStatus(code)
+            }
+            store.save(nil) // Definitively revoked session; existingOnly still forbids sign-up.
         }
         guard !existingOnly else { throw DiscoveryAuthError.failed("Existing account required.") }
         let (code, data) = try await call("auth/v1/signup", query: [], body: [:])
@@ -109,6 +118,16 @@ actor DiscoveryAuthClient: DiscoveryTokenProvider {
         }
         store.save(n)
         return n.accessToken
+    }
+
+    private static func isDefinitiveRefreshRejection(code: Int, data: Data) -> Bool {
+        // Only trust explicit Supabase session/token rejection codes on auth failures.
+        // Even a terminal-looking body on a retryable HTTP status must keep the session.
+        guard [400, 401, 403].contains(code),
+              let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let errorCode = body["code"] as? String else { return false }
+        return ["refresh_token_not_found", "refresh_token_already_used",
+                "session_not_found", "session_expired"].contains(errorCode)
     }
 
     private func call(_ path: String, query: [URLQueryItem], body: [String: String]) async throws -> (Int, Data) {

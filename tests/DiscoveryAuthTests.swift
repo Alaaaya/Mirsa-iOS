@@ -16,10 +16,14 @@ private final class FakeAuthHTTP: DiscoveryAuthHTTP {
     var calls: [String] = []
     var headers: [[String: String]] = []
     var replies: [(Int, String)]
+    var nextError: Error?
+    var beforeReply: (() -> Void)?
     init(_ r: [(Int, String)]) { replies = r }
     func post(_ url: URL, headers: [String: String], body: Data) async throws -> (Data, Int) {
         calls.append(url.path + (url.query.map { "?" + $0 } ?? ""))
         self.headers.append(headers)
+        beforeReply?()
+        if let error = nextError { nextError = nil; throw error }
         let r = replies.isEmpty ? (500, "") : replies.removeFirst()
         return (Data(r.1.utf8), r.0)
     }
@@ -52,7 +56,7 @@ final class DiscoveryAuthTests: XCTestCase {
 
     func testTranslationExistingOnlyNeverSignsUpForMissingOrRejectedSession() async throws {
         for existing in [false, true] {
-            let store = MemStore(), http = FakeAuthHTTP([(400, "{}")])
+            let store = MemStore(), http = FakeAuthHTTP([(400, #"{"code":"refresh_token_not_found"}"#)])
             if existing { store.s = DiscoverySession(accessToken: "expired", refreshToken: "dead", expiresAt: t0) }
             let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
                                            http: http, now: { self.t0 }, existingOnly: true)
@@ -78,6 +82,103 @@ final class DiscoveryAuthTests: XCTestCase {
             XCTAssertEqual(http.calls, ["/auth/v1/token?grant_type=refresh_token"])
         }
     }
+    private func accountJWT(_ marker: String) -> String {
+        let payload = Data(#"{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated","marker":"\#(marker)"}"#.utf8)
+        return "header." + payload.base64EncodedString().replacingOccurrences(of: "=", with: "") + ".signature"
+    }
+
+    func testTemporary429ThenRefreshRecoversSameExistingAccount() async throws {
+        let store = MemStore()
+        let original = DiscoverySession(accessToken: accountJWT("old"), refreshToken: "original-refresh", expiresAt: t0)
+        store.s = original
+        let fresh = accountJWT("fresh")
+        let http = FakeAuthHTTP([(429, #"{"code":"over_request_rate_limit"}"#), (200, sess(fresh, "rotated"))])
+        let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
+                                       http: http, now: { self.t0 }, existingOnly: true)
+        do { _ = try await auth.token(forceRefresh: false); XCTFail("Throttled refresh must fail") } catch {}
+        XCTAssertEqual(store.s, original)
+        let recovered = try await auth.token(forceRefresh: false)
+        XCTAssertEqual(recovered, fresh)
+        XCTAssertEqual(store.s?.refreshToken, "rotated")
+        XCTAssertEqual(http.calls, Array(repeating: "/auth/v1/token?grant_type=refresh_token", count: 2))
+    }
+
+    func testNonterminalRefreshResponsesPreserveSessionAndNeverSignUp() async {
+        let responses = [408, 425, 429, 500, 502, 503, 504, 400, 401, 403, 409, 422, 200]
+        for existingOnly in [false, true] {
+            for code in responses {
+                let store = MemStore()
+                let original = DiscoverySession(accessToken: accountJWT("old"), refreshToken: "keep", expiresAt: t0)
+                store.s = original
+                let http = FakeAuthHTTP([(code, "{}")])
+                let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
+                                               http: http, now: { self.t0 }, existingOnly: existingOnly)
+                do { _ = try await auth.token(forceRefresh: false); XCTFail("Invalid response must fail") } catch {}
+                XCTAssertEqual(store.s, original, "HTTP \(code) must preserve session")
+                XCTAssertEqual(http.calls, ["/auth/v1/token?grant_type=refresh_token"])
+            }
+        }
+    }
+
+    func testRetryableStatusCannotClearSessionEvenWithRejectionBody() async {
+        for code in [408, 425, 429, 503] {
+            let store = MemStore()
+            let original = DiscoverySession(accessToken: accountJWT("old"), refreshToken: "keep", expiresAt: t0)
+            store.s = original
+            let http = FakeAuthHTTP([(code, #"{"code":"refresh_token_not_found"}"#)])
+            let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
+                                           http: http, now: { self.t0 }, existingOnly: true)
+            do { _ = try await auth.token(forceRefresh: false); XCTFail() } catch {}
+            XCTAssertEqual(store.s, original)
+            XCTAssertEqual(http.calls.count, 1)
+        }
+    }
+
+    func testRefreshTransportFailurePreservesSession() async {
+        for existingOnly in [false, true] {
+            let store = MemStore()
+            let original = DiscoverySession(accessToken: accountJWT("old"), refreshToken: "keep", expiresAt: t0)
+            store.s = original
+            let http = FakeAuthHTTP([])
+            http.nextError = URLError(.timedOut)
+            let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
+                                           http: http, now: { self.t0 }, existingOnly: existingOnly)
+            do { _ = try await auth.token(forceRefresh: true); XCTFail() } catch {}
+            XCTAssertEqual(store.s, original)
+            XCTAssertEqual(http.calls, ["/auth/v1/token?grant_type=refresh_token"])
+        }
+    }
+
+    func testStaleRefreshCannotEraseOrOverwriteNewerSession() async {
+        for code in [200, 400] {
+            let store = MemStore()
+            store.s = DiscoverySession(accessToken: accountJWT("old"), refreshToken: "old-refresh", expiresAt: t0)
+            let replacement = DiscoverySession(accessToken: accountJWT("latest"), refreshToken: "latest-refresh",
+                                               expiresAt: t0.addingTimeInterval(3600))
+            let body = code == 200 ? sess(accountJWT("stale"), "stale-refresh") : #"{"code":"refresh_token_already_used"}"#
+            let http = FakeAuthHTTP([(code, body)])
+            http.beforeReply = { store.s = replacement }
+            let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
+                                           http: http, now: { self.t0 }, existingOnly: true)
+            do { _ = try await auth.token(forceRefresh: true); XCTFail("Stale request must not replace newer account session") } catch {}
+            XCTAssertEqual(store.s, replacement)
+            XCTAssertEqual(http.calls, ["/auth/v1/token?grant_type=refresh_token"])
+        }
+    }
+
+    func testDefinitiveExistingOnlyRejectionsClearSessionWithoutSignUp() async {
+        for errorCode in ["refresh_token_not_found", "refresh_token_already_used", "session_not_found", "session_expired"] {
+            let store = MemStore()
+            store.s = DiscoverySession(accessToken: accountJWT("old"), refreshToken: "revoked", expiresAt: t0)
+            let http = FakeAuthHTTP([(400, #"{"code":"\#(errorCode)"}"#)])
+            let auth = DiscoveryAuthClient(projectURL: project, publishableKey: "public", store: store,
+                                           http: http, now: { self.t0 }, existingOnly: true)
+            do { _ = try await auth.token(forceRefresh: false); XCTFail() } catch {}
+            XCTAssertNil(store.s)
+            XCTAssertEqual(http.calls, ["/auth/v1/token?grant_type=refresh_token"])
+        }
+    }
+
     func testFirstUseSignsUpAnonymouslyAndStoresSession() async throws {
         let st = MemStore(), h = FakeAuthHTTP([(200, sess("A1", "R1"))])
         let c = DiscoveryAuthClient(projectURL: project, publishableKey: "pub", store: st, http: h, now: { self.t0 })
@@ -104,7 +205,7 @@ final class DiscoveryAuthTests: XCTestCase {
 
     func testRejectedRefreshTokenFallsBackToOneSignUp() async throws {
         let st = MemStore(); st.s = DiscoverySession(accessToken: "old", refreshToken: "dead", expiresAt: t0)
-        let h = FakeAuthHTTP([(400, "{}"), (200, sess("fresh", "R3"))])
+        let h = FakeAuthHTTP([(400, #"{"code":"refresh_token_not_found"}"#), (200, sess("fresh", "R3"))])
         let c = DiscoveryAuthClient(projectURL: project, publishableKey: "pub", store: st, http: h, now: { self.t0 })
         let t = try await c.token(forceRefresh: false)
         XCTAssertEqual(t, "fresh"); XCTAssertEqual(h.calls.count, 2)
