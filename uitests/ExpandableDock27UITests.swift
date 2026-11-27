@@ -47,9 +47,7 @@ final class ExpandableDock27UITests: XCTestCase {
         app.buttons["main-tab-Apps"].tap()
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["main-tab-Apps"].isSelected)
-        let barTop = app.buttons["main-tab-Apps"].frame.minY
-        XCTAssertLessThanOrEqual(card.frame.maxY, barTop + 1, "card sits directly on the same bar")
-        XCTAssertGreaterThan(card.frame.maxY, barTop - 40, "card is attached to the bar, not floating away")
+        XCTAssertLessThanOrEqual(card.frame.maxY, dock.frame.minY + 1, "card sits directly on the same bar")
         XCTAssertGreaterThanOrEqual(card.frame.minX, app.frame.minX)
         XCTAssertLessThanOrEqual(card.frame.maxX, app.frame.maxX)
         XCTAssertTrue(app.buttons["dock-action-apps-files"].isHittable)

@@ -579,6 +579,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
 // MARK: - Root Tab View
 
 struct ContentView: View {
+    @ObservedObject private var dockState = MirsaDockState.shared
     var sourcesStore: SourcesStore = .shared
     @EnvironmentObject var vm: AppViewModel
     @AppStorage("aircard.dont_show_support_on_launch") private var dontShowSupportOnLaunch: Bool = false
@@ -716,10 +717,22 @@ struct ContentView: View {
                     // The overlay receives the safe viewport. Extend ONLY its
                     // layout to the window edge, then add the shared indicator
                     // gap once. Content viewports and their hit areas stay intact.
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        ExpandableGlassDock(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
-                            .padding(.bottom, MirsaTabBarMetrics.windowBottomGap(dockViewport.safeAreaInsets.bottom) - MirsaTabBarMetrics.bottomGap)
+                    ZStack(alignment: .bottom) {
+                        // This page-sized hit plane is deliberately a sibling
+                        // of the intrinsically sized glass dock, never its parent.
+                        if dockState.isExpanded {
+                            Color.black.opacity(0.001)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    NotificationCenter.default.post(name: .mirsaDockDismiss, object: nil)
+                                }
+                                .accessibilityHidden(true)
+                        }
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            ExpandableGlassDock(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
+                                .padding(.bottom, MirsaTabBarMetrics.windowBottomGap(dockViewport.safeAreaInsets.bottom) - MirsaTabBarMetrics.bottomGap)
+                        }
                     }
                     .frame(width: dockViewport.size.width,
                            height: dockViewport.size.height + dockViewport.safeAreaInsets.bottom,

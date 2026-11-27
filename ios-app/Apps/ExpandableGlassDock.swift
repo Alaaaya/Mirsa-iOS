@@ -6,11 +6,13 @@ import SwiftUI
 final class MirsaDockState: ObservableObject {
     static let shared = MirsaDockState()
     @Published var expansionHeight: CGFloat = 0
+    @Published var isExpanded = false
 }
 
 extension Notification.Name {
     /// Carries one of the dock action ids as `object`. Tabs that own the action listen.
     static let mirsaDockAction = Notification.Name("mirsa.dock.action")
+    static let mirsaDockDismiss = Notification.Name("mirsa.dock.dismiss")
 }
 
 /// Native adaptation of rit3zh's expandable bottom tabs: ONE continuous glass
@@ -20,7 +22,7 @@ struct ExpandableGlassDock: View {
     @Binding var selection: AppTab
     let items: [LiquidTabItem]
     var light = false
-    @State private var expanded = false
+    private var expanded: Bool { dockState.isExpanded }
     @State private var lastHold = Date.distantPast
     @ObservedObject private var dockState = MirsaDockState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -33,7 +35,7 @@ struct ExpandableGlassDock: View {
     }
     private func setExpanded(_ value: Bool) {
         guard value == false || !actions.isEmpty else { return }
-        withAnimation(spring) { expanded = value }
+        withAnimation(spring) { dockState.isExpanded = value }
         if !value { dockState.expansionHeight = 0 }
     }
     private func run(_ action: DockAction) {
@@ -46,16 +48,11 @@ struct ExpandableGlassDock: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Only an expanded card intercepts the page.
-            if expanded {
-                Color.black.opacity(0.001)
-                    .contentShape(Rectangle())
-                    .onTapGesture { setExpanded(false) }
-                    .accessibilityHidden(true)
-                    .accessibilityIdentifier("dock-dismiss-region")
-            }
-            VStack(spacing: 0) {
+        // Keep the dock intrinsically sized. A flexible full-screen dismissal
+        // sibling here stretches the SwiftUI accessibility host to the viewport,
+        // so mirsa-tab-dock incorrectly starts at the top safe area when open.
+        // ContentView owns the separate page-sized dismissal plane instead.
+        VStack(spacing: 0) {
                 if expanded && !actions.isEmpty {
                     card
                         .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
@@ -82,10 +79,11 @@ struct ExpandableGlassDock: View {
             }
             .padding(.horizontal, MirsaTabBarMetrics.sideInset)
             .padding(.bottom, MirsaTabBarMetrics.bottomGap)
-        }
+            .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(ink)
         .environment(\.colorScheme, light ? .light : .dark)
         .environment(\.layoutDirection, .leftToRight)
+        .onReceive(NotificationCenter.default.publisher(for: .mirsaDockDismiss)) { _ in setExpanded(false) }
         .onChange(of: selection) { _, _ in setExpanded(false) }
         .accessibilityAction(.escape) { setExpanded(false) }
     }
