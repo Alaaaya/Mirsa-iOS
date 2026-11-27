@@ -77,7 +77,11 @@ struct ExpandableGlassDock: View {
                         .padding(.horizontal, MirsaTabBarMetrics.sideInset + 12)
                     }
                     LiquidTabBar(selection: $selection, items: items, light: light)
-                        .simultaneousGesture(DragGesture(minimumDistance: 16).onEnded { value in
+                        .contentShape(Rectangle())
+                        // A recognised drag must cancel the child tab button's
+                        // tap. Simultaneous recognition selected that tab on
+                        // release, and its selection change closed this card.
+                        .highPriorityGesture(DragGesture(minimumDistance: 16).onEnded { value in
                             guard abs(value.translation.height) > abs(value.translation.width) else { return }
                             if value.translation.height < -28 { show(.profile) }
                             else if value.translation.height > 28 { show(nil) }

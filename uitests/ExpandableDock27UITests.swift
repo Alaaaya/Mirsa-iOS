@@ -67,6 +67,8 @@ final class ExpandableDock27UITests: XCTestCase {
         let start = dock.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)))
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["main-tab-Sources"].isSelected,
+                      "Expanding by swipe must not activate the tab underneath")
         app.buttons["dock-workspace-toggle"].tap()
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         app.buttons["dock-card-close"].tap()
