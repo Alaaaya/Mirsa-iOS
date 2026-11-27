@@ -13,6 +13,15 @@ static NSString *FixtureSource(NSUInteger n) {
  return [@"Menu item " stringByAppendingString:suffix];
 }
 static NSTimeInterval FixtureNow(void){return 2000000010;}
+// Delegate-only overflow probes must not construct a real URL loading task.
+// Cancelling a suspended task can still invoke NSURLProtocol asynchronously.
+@interface MirsaCancellationProbe : NSObject
+@property(nonatomic) NSUInteger cancellations;
+- (void)cancel;
+@end
+@implementation MirsaCancellationProbe
+- (void)cancel { self.cancellations++; }
+@end
 @interface MirsaFallbackProtocol : NSURLProtocol
 @end
 @implementation MirsaFallbackProtocol
@@ -37,7 +46,9 @@ static NSTimeInterval FixtureNow(void){return 2000000010;}
    [self.client URLProtocol:self didLoadData:[reply subdataWithRange:NSMakeRange(offset,MIN((NSUInteger)32768,reply.length-offset))]];
   [self.client URLProtocolDidFinishLoading:self];return;
  }
- NSArray *items=request[@"items"];assert(items.count==3);
+ NSArray *items=request[@"items"];
+ if(items.count!=3)NSLog(@"Unexpected fallback fixture request action=%@ path=%@ itemCount=%lu",request[@"action"],self.request.URL.path,(unsigned long)items.count);
+ assert([request[@"action"] isEqual:@"missing"] && items.count==3);
  @synchronized(MirsaFallbackProtocol.class){fixtureCalls++;fixtureItems=items.count;}
  NSMutableArray *entries=[NSMutableArray array];
  for(NSDictionary *item in items)[entries addObject:@{@"source":item[@"text"],@"labelId":NSUUID.UUID.UUIDString,@"reviewId":NSUUID.UUID.UUIDString,@"kind":@"missing",@"version":@1}];
@@ -197,14 +208,13 @@ int main(int argc,char **argv) {@autoreleasepool {
  assert(!OnlinePost(@"missing",@[@{@"id":@"s0",@"text":@"设置"}]));
  fixtureLargeResponse=nil;fixtureDictionaryEntries=nil;
  // Unknown-length chunked overflow is rejected by the actual delegate as well.
- NSURLSession *unusedSession=NSURLSession.sharedSession;
- NSURLSessionDataTask *unusedTask=[unusedSession dataTaskWithURL:[NSURL URLWithString:@"https://staging.fixture.invalid/unused"]];
+ MirsaCancellationProbe *cancelled=[MirsaCancellationProbe new];
  MirsaNoRedirect *bounded=[MirsaNoRedirect new];
- [bounded URLSession:unusedSession dataTask:unusedTask didReceiveData:[NSMutableData dataWithLength:8*1024*1024+1]];
- assert(bounded.error && !bounded.body.length);
+ [bounded URLSession:nil dataTask:(NSURLSessionDataTask *)(id)cancelled didReceiveData:[NSMutableData dataWithLength:8*1024*1024+1]];
+ assert(bounded.error && !bounded.body.length && cancelled.cancellations==1);
  bounded=[MirsaNoRedirect new];bounded.maximumBodyBytes=65536;
- [bounded URLSession:unusedSession dataTask:unusedTask didReceiveData:[NSMutableData dataWithLength:65537]];
- assert(bounded.error && !bounded.body.length);
+ [bounded URLSession:nil dataTask:(NSURLSessionDataTask *)(id)cancelled didReceiveData:[NSMutableData dataWithLength:65537]];
+ assert(bounded.error && !bounded.body.length && cancelled.cancellations==2);
  // Oversized cache is rejected before parsing, leaving no partial dictionary.
  [NSUserDefaults.standardUserDefaults setObject:[NSMutableData dataWithLength:8*1024*1024+1] forKey:DictionaryCacheKey()];
  onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];LoadOnlineCache();assert(!onlinePositive.count);
