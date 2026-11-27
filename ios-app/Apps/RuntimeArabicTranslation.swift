@@ -127,7 +127,9 @@ enum RuntimeArabicPipeline {
                   (try dylib.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else { throw RuntimeTranslationError.invalid }
             let online = RuntimeArabicBackendTranslator.validOnline(object["online"] as? [String: String], bundleID: bundleID, revision: revision)
             if object["online"] != nil {
-                guard online != nil, table.isEmpty else { throw RuntimeTranslationError.invalid }
+                guard online != nil, table.allSatisfy({ ArabicIPALocalizer.acceptable(source: $0.key, translated: $0.value) }) else {
+                    throw RuntimeTranslationError.invalid
+                }
             } else {
                 guard !table.isEmpty, table.allSatisfy({ ArabicIPALocalizer.acceptable(source: $0.key, translated: $0.value) }) else {
                     throw RuntimeTranslationError.invalid
@@ -200,7 +202,7 @@ enum RuntimeArabicPipeline {
                 throw RuntimeTranslationError.invalid
             }
             var dictionary: [String: Any] = ["translations": table, "substrings": [:], "regex": [], "revision": revision]
-            if let online { dictionary["online"] = online; dictionary["translations"] = [:] }
+            if let online { dictionary["online"] = online }  // full scoped dictionary stays embedded: first frame is Arabic
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
             guard data.count < 4 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])

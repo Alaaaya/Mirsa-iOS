@@ -113,6 +113,11 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
             finish(false, "test_configure_failed")
             return true
         }
+        if let idx = ProcessInfo.processInfo.arguments.firstIndex(of: "-LaunchProof"),
+           idx + 1 < ProcessInfo.processInfo.arguments.count {
+            runLaunchProof(ProcessInfo.processInfo.arguments[idx + 1], handle: handle)
+            return true
+        }
         if ProcessInfo.processInfo.arguments.contains("-BannerModalFixture") {
             guard let noticeSymbol = dlsym(handle, "MirsaRuntimeTestPendingNotice") else {
                 finish(false, "missing_notice_test_export")
@@ -151,6 +156,72 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    // Honest launch-time acceptance. Modes (each is a separate real process launch):
+    // control: no embedded dictionary, no cache -> must stay Chinese.
+    // embedded: full scoped dictionary in MirsaTranslations.json shape, loaded before any UI -> first frame Arabic.
+    // ota-seed: OTA entries arrive and persist to disk cache (no UI claim).
+    // ota-verify: fresh process loads persisted cache before UI -> first frame Arabic.
+    private func runLaunchProof(_ mode: String, handle: UnsafeMutableRawPointer) {
+        receipt["mode"] = mode
+        receipt["source"] = source
+        receipt["expected"] = expectedArabic
+        let name = "launch-\(mode).json"
+        func write(_ passed: Bool, _ reason: String) {
+            receipt["passed"] = passed; receipt["reason"] = reason
+            receipt["liveSwiftUIRefreshClaimed"] = false
+            if let d = try? JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys]) {
+                try? d.write(to: output.appendingPathComponent(name), options: .atomic)
+            }
+        }
+        if mode == "ota-seed" {
+            let entries: [[String: Any]] = [["source": source, "translation": expectedArabic, "provenance": "kat", "version": 1]]
+            guard let data = try? JSONSerialization.data(withJSONObject: ["entries": entries]),
+                  let json = String(data: data, encoding: .utf8) else { write(false, "json"); return }
+            let applied = json.withCString { apply($0) }
+            // Cache write happens synchronously inside the production apply path.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { write(applied == 1, applied == 1 ? "seeded_to_disk_cache" : "apply_failed") }
+            return
+        }
+        if mode == "embedded" {
+            guard let s = dlsym(handle, "MirsaRuntimeTestLoadConfigJSON") else { write(false, "missing_export"); return }
+            let load = unsafeBitCast(s, to: (@convention(c) (UnsafePointer<CChar>) -> Int32).self)
+            let cfg: [String: Any] = ["translations": [source: expectedArabic], "substrings": [:], "regex": [], "revision": "x"]
+            guard let d = try? JSONSerialization.data(withJSONObject: cfg), let j = String(data: d, encoding: .utf8),
+                  j.withCString({ load($0) }) == 1 else { write(false, "load_config_failed"); return }
+        } else if mode == "ota-verify" || mode == "control" {
+            guard let s = dlsym(handle, "MirsaRuntimeTestLoadCache") else { write(false, "missing_export"); return }
+            let load = unsafeBitCast(s, to: (@convention(c) () -> Int32).self)
+            guard load() == 1 else { write(false, "load_cache_failed"); return }
+        } else { write(false, "unknown_mode"); return }
+        // UI is built only now: first frame already has the dictionary.
+        let controller = UIViewController()
+        controller.view.backgroundColor = .white
+        let win = UIWindow(frame: UIScreen.main.bounds)
+        win.overrideUserInterfaceStyle = .light
+        win.rootViewController = controller
+        window = win
+        let hostVC = UIHostingController(rootView: RetainedText())
+        controller.addChild(hostVC)
+        hostVC.view.frame = sampleRect
+        controller.view.addSubview(hostVC.view)
+        hostVC.didMove(toParent: controller)
+        win.makeKeyAndVisible()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            let shown = self.image(hostVC.view)
+            self.save(shown, "launch-\(mode).png")
+            let ref = UIHostingController(rootView: Text(verbatim: expectedArabic).font(.system(size: 34)).foregroundColor(.black)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white))
+            controller.addChild(ref); ref.view.frame = self.sampleRect
+            controller.view.addSubview(ref.view); ref.didMove(toParent: controller)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let mismatch = self.difference(self.pixels(shown), self.pixels(self.image(ref.view)))
+                self.receipt["arabicReferenceMismatchFraction"] = mismatch
+                self.receipt["bodyEvaluations"] = bodyEvaluations
+                if mode == "control" { write(mismatch > 0.01, mismatch > 0.01 ? "control_stays_chinese" : "control_unexpectedly_arabic") }
+                else { write(mismatch < 0.002, mismatch < 0.002 ? "first_frame_arabic" : "first_frame_not_arabic") }
+            }
+        }
+    }
     private func image(_ view: UIView) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

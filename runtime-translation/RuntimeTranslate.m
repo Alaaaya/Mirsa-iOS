@@ -343,6 +343,24 @@ static void InstallTranslationHooks(void) {
    ObserveOnlineForeground();
  });
 }
+static void ApplyEmbeddedConfig(NSDictionary *config) {
+   table=[config[@"translations"] isKindOfClass:NSDictionary.class]?config[@"translations"]:@{};
+   pieces=[config[@"substrings"] isKindOfClass:NSDictionary.class]?config[@"substrings"]:@{};
+   NSMutableDictionary *safe=[NSMutableDictionary dictionary];
+   [pieces enumerateKeysAndObjectsUsingBlock:^(id k,id v,__unused BOOL *stop){if([k isKindOfClass:NSString.class]&&[v isKindOfClass:NSString.class]&&[k length])safe[k]=v;}];
+   pieces=[safe copy];
+   pieceKeys=[[pieces allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString*a,NSString*b){return a.length>b.length?NSOrderedAscending:a.length<b.length?NSOrderedDescending:NSOrderedSame;}];
+   NSMutableArray *rr=[NSMutableArray array];
+   if([config[@"regex"] isKindOfClass:NSArray.class])for(id r in config[@"regex"]){
+     if(![r isKindOfClass:NSDictionary.class]||![r[@"pattern"] isKindOfClass:NSString.class]||![r[@"replacement"] isKindOfClass:NSString.class])continue;
+     NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:r[@"pattern"] options:0 error:NULL];
+     if(re)[rr addObject:@{@"compiled":re,@"replacement":r[@"replacement"]}];
+   }
+   rules=[rr copy];
+   cache=[NSCache new];cache.countLimit=2048;cache.totalCostLimit=1024*1024;
+   missingSeen=[NSMutableSet set];
+   missingQueue=dispatch_queue_create("app.mirsa.translate.missing",DISPATCH_QUEUE_SERIAL);
+}
 #if defined(MIRSA_RUNTIME_TESTING)
 // Only isolated simulator fixtures export these. Device build never defines this macro.
 __attribute__((visibility("default"))) int MirsaRuntimeTestConfigure(void) {
@@ -362,6 +380,18 @@ __attribute__((visibility("default"))) int MirsaRuntimeTestPendingNotice(int act
  if(action==1){BannerRemove();bannerShownThisProcess=NO;bannerPending=NO;[prefs removeObjectForKey:key];return 1;}
  if(action==2)return [prefs boolForKey:key]?1:0;
  return -1;
+}
+__attribute__((visibility("default"))) int MirsaRuntimeTestLoadConfigJSON(const char *json) {
+ if(!json||!NSThread.isMainThread)return 0;
+ @try {
+  id obj=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json length:strlen(json)] options:0 error:NULL];
+  if(![obj isKindOfClass:NSDictionary.class])return 0;
+  ApplyEmbeddedConfig(obj);enabled=YES;InstallTranslationHooks();return 1;
+ } @catch(__unused NSException *e){return 0;}
+}
+__attribute__((visibility("default"))) int MirsaRuntimeTestLoadCache(void) {
+ if(!NSThread.isMainThread)return 0;
+ LoadOnlineCache();return 1;
 }
 __attribute__((visibility("default"))) int MirsaRuntimeTestApplyJSON(const char *json) {
  if(!json)return 0;
@@ -389,22 +419,7 @@ __attribute__((constructor)) static void Start(void) {
        if([obj isKindOfClass:NSDictionary.class])config=obj;
      }
    }
-   table=[config[@"translations"] isKindOfClass:NSDictionary.class]?config[@"translations"]:@{};
-   pieces=[config[@"substrings"] isKindOfClass:NSDictionary.class]?config[@"substrings"]:@{};
-   NSMutableDictionary *safe=[NSMutableDictionary dictionary];
-   [pieces enumerateKeysAndObjectsUsingBlock:^(id k,id v,__unused BOOL *stop){if([k isKindOfClass:NSString.class]&&[v isKindOfClass:NSString.class]&&[k length])safe[k]=v;}];
-   pieces=[safe copy];
-   pieceKeys=[[pieces allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString*a,NSString*b){return a.length>b.length?NSOrderedAscending:a.length<b.length?NSOrderedDescending:NSOrderedSame;}];
-   NSMutableArray *rr=[NSMutableArray array];
-   if([config[@"regex"] isKindOfClass:NSArray.class])for(id r in config[@"regex"]){
-     if(![r isKindOfClass:NSDictionary.class]||![r[@"pattern"] isKindOfClass:NSString.class]||![r[@"replacement"] isKindOfClass:NSString.class])continue;
-     NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:r[@"pattern"] options:0 error:NULL];
-     if(re)[rr addObject:@{@"compiled":re,@"replacement":r[@"replacement"]}];
-   }
-   rules=[rr copy];
-   cache=[NSCache new];cache.countLimit=2048;cache.totalCostLimit=1024*1024;
-   missingSeen=[NSMutableSet set];
-   missingQueue=dispatch_queue_create("app.mirsa.translate.missing",DISPATCH_QUEUE_SERIAL);
+   ApplyEmbeddedConfig(config);
    ConfigureOnline(config);
    if(!onlineConfig)return;
    enabled=YES;
