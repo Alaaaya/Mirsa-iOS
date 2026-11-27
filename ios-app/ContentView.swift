@@ -718,7 +718,7 @@ struct ContentView: View {
                     // gap once. Content viewports and their hit areas stay intact.
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        LiquidTabBar(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
+                        ExpandableGlassDock(selection: $vm.selectedTab, items: LiquidTabItem.mainTabs, light: lightSourcesDock)
                             .padding(.bottom, MirsaTabBarMetrics.windowBottomGap(dockViewport.safeAreaInsets.bottom) - MirsaTabBarMetrics.bottomGap)
                     }
                     .frame(width: dockViewport.size.width,

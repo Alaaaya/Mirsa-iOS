@@ -418,7 +418,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$MODAL_APP/Info.plist")" = app.mirsa.tests.swiftui-refresh
           xcrun simctl install "$DEVICE" "$MODAL_APP"
           xcrun simctl get_app_container "$DEVICE" app.mirsa.tests.swiftui-refresh app
-          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/SignedFolderUI.xcresult -only-testing:MirsaUITests/RuntimeTranslate25UITests -only-testing:MirsaUITests/SignedAppsFolder24UITests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS="$GITHUB_WORKSPACE/scripts/runtime-simulator-keychain.entitlements" 2>&1 | tee build/signed-folder-ui.log
+          xcodebuild -project Mirsa.xcodeproj -scheme MirsaUI -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/SimulatorData -resultBundlePath build/SignedFolderUI.xcresult -only-testing:MirsaUITests/RuntimeTranslate25UITests -only-testing:MirsaUITests/SignedAppsFolder24UITests -only-testing:MirsaUITests/ExpandableDock27UITests test CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS="$GITHUB_WORKSPACE/scripts/runtime-simulator-keychain.entitlements" 2>&1 | tee build/signed-folder-ui.log
       - name: Export runtime screenshot attachments
         if: always()
         run: |
