@@ -14,7 +14,7 @@ static BOOL MergeOnlineLocked(NSString *source,NSString *value,NSInteger version
   if(oldKat==newKat && version<=ov)return NO;
   if(oldKat && newKat && version<=ov)return NO;
  }
- if(!onlinePositive[source] && onlinePositive.count>=2048)return NO;
+ if(!onlinePositive[source] && onlinePositive.count>=20000)return NO;
  onlinePositive[source]=value;onlineMeta[source]=@{@"v":@(version),@"p":newKat?@"kat":@"gemini"};
  [onlineUncovered removeObject:source];return YES;
 }

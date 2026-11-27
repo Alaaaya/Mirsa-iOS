@@ -385,9 +385,9 @@ __attribute__((visibility("default"))) int MirsaRuntimeTestApplyJSON(const char 
  if(!json)return 0;
  @try {
   NSData *data=[NSData dataWithBytes:json length:strlen(json)];
-  if(data.length>1048576)return 0;
+  if(data.length>8*1024*1024)return 0;
   id obj=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
-  if(![obj isKindOfClass:NSDictionary.class] || ![obj[@"entries"] isKindOfClass:NSArray.class])return 0;
+  if(![obj isKindOfClass:NSDictionary.class] || ![obj[@"entries"] isKindOfClass:NSArray.class] || [obj[@"entries"] count]>20000)return 0;
   ApplyOnlineEntries(obj[@"entries"]);return 1;
  } @catch(__unused NSException *e){return 0;}
 }
@@ -406,7 +406,7 @@ __attribute__((constructor)) static void Start(void) {
    if(dladdr((void*)Start,&info) && info.dli_fname){
      NSString *path=[[@(info.dli_fname) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"MirsaTranslations.json"];
      NSData *override=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];
-     if(override.length && override.length<4*1024*1024){
+     if(override.length && override.length<=8*1024*1024){
        id obj=[NSJSONSerialization JSONObjectWithData:override options:0 error:NULL];
        if([obj isKindOfClass:NSDictionary.class])config=obj;
      }

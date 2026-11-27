@@ -130,7 +130,7 @@ enum RuntimeArabicPipeline {
                 guard (try? fm.destinationOfSymbolicLink(atPath: path.path)) == nil else { throw RuntimeTranslationError.invalid }
             }
             let attrs = try config.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-            guard attrs.isRegularFile == true, let size = attrs.fileSize, size > 0, size < 4 * 1_048_576,
+            guard attrs.isRegularFile == true, let size = attrs.fileSize, size > 0, size <= 8 * 1_048_576,
                   let object = try JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any],
                   object["revision"] as? String == revision,
                   let table = object["translations"] as? [String: String],
@@ -194,7 +194,7 @@ enum RuntimeArabicPipeline {
             let online = RuntimeArabicBackendTranslator.validOnline(package.online, bundleID: bundleID, revision: revision)
             if let canonical = package.canonicalDictionary {
                 guard online != nil, canonical.bundleID == bundleID, canonical.revision == revision,
-                      canonical.translations.count <= 1564 else { throw RuntimeTranslationError.invalid }
+                      canonical.translations.count <= 20_000 else { throw RuntimeTranslationError.invalid }
                 for (source, value) in canonical.translations {
                     guard RuntimeArabicBackendTranslator.safeCanonicalEntry(source: source, value: value) else {
                         throw RuntimeTranslationError.invalid
@@ -224,7 +224,7 @@ enum RuntimeArabicPipeline {
             var dictionary: [String: Any] = ["translations": table, "substrings": [:], "regex": [], "revision": revision]
             if let online { dictionary["online"] = online }  // full scoped dictionary stays embedded: first frame is Arabic
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
-            guard data.count < 4 * 1_048_576 else { throw RuntimeTranslationError.invalid }
+            guard data.count <= 8 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])
             try verifyInstalled(app: copy, revision: revision, bundleID: bundleID)
             // Original .ipa is not involved in this swap, and remains reusable with toggle off.
@@ -323,7 +323,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
     static func canonicalDictionary(_ response: [String: Any], bundleID: String,
                                     revision: String) throws -> RuntimeCanonicalDictionary {
         guard response["bundleId"] as? String == bundleID, response["revision"] as? String == revision,
-              let entries = response["entries"] as? [[String: Any]], entries.count <= 1564 else {
+              let entries = response["entries"] as? [[String: Any]], entries.count <= 20_000 else {
             throw RuntimeTranslationError.invalid
         }
         var table: [String: String] = [:], seen = Set<String>()
@@ -413,8 +413,8 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         print("RuntimeTranslationHTTP metrics transactions=\(values.count) duration=\(metrics.taskInterval.duration) dns=\(values.contains { $0.domainLookupEndDate != nil }) connected=\(values.contains { $0.connectEndDate != nil }) sent=\(values.contains { $0.requestEndDate != nil }) response=\(values.contains { $0.responseStartDate != nil })")
     }
     #endif
-    func post(_ endpoint: URL, token: String, activation: String? = nil, object: [String: Any]) async throws -> [String: Any] {
-        let configuration = URLSessionConfiguration.ephemeral
+    func post(_ endpoint: URL, token: String, activation: String? = nil, object: [String: Any],
+              configuration: URLSessionConfiguration = .ephemeral) async throws -> [String: Any] {
         configuration.timeoutIntervalForRequest = 25; configuration.timeoutIntervalForResource = 28
         configuration.httpCookieStorage = nil; configuration.urlCache = nil; configuration.urlCredentialStorage = nil
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
@@ -442,11 +442,15 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         guard let response = response as? HTTPURLResponse else { throw RuntimeTranslationError.network }
         // Status is safe to diagnose; never include response bodies, URLs or credentials in errors.
         guard response.statusCode == 200 else { throw RuntimeTranslationError.httpStatus(response.statusCode) }
-        guard response.expectedContentLength <= 48 * 1024 else { throw RuntimeTranslationError.invalid }
+        // Full canonical refreshes include runtime-learned labels, not just a
+        // scanner batch. Match the server's bounded 8 MiB refresh contract;
+        // requests and all other response types keep the smaller 48 KiB limit.
+        let responseLimit = object["action"] as? String == "refresh" ? 8 * 1_048_576 : 48 * 1024
+        guard response.expectedContentLength <= Int64(responseLimit) else { throw RuntimeTranslationError.invalid }
         var data = Data()
         for try await byte in bytes {
             data.append(byte)
-            guard data.count <= 48 * 1024 else { throw RuntimeTranslationError.invalid }
+            guard data.count <= responseLimit else { throw RuntimeTranslationError.invalid }
         }
         guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw RuntimeTranslationError.invalid }
         return result
