@@ -8,6 +8,11 @@ on:
         default: false
   push:
     branches: [mirsa/final-bundle25, mirsa/integrated-runtime-hook25]
+# One private synthetic staging account is shared by every branch of this workflow.
+# The group must not include github.ref; parallel branches exhaust its real issue quota.
+concurrency:
+  group: mirsa-runtime-staging-synthetic-account27
+  cancel-in-progress: false
 permissions:
   contents: read
   actions: read
@@ -77,6 +82,7 @@ jobs:
           node --test backend/runtime-translate/logic.test.mjs backend/mcp-translation-relay/extension.test.mjs backend/mcp-translation-relay/contract.test.mjs backend/mcp-translation-relay/routing.test.mjs
           deno check backend/runtime-translate/index.ts backend/runtime-translate/staging.ts backend/runtime-translate/operator.ts
           deno test --allow-read backend/runtime-translate/security.test.ts backend/runtime-translate/capacity.test.ts
+          python3 scripts/test-prepare-runtime-ci-allowance27.py
       - name: Disposable schema and concurrent durable quota validation
         run: |
           sudo apt-get update -qq
