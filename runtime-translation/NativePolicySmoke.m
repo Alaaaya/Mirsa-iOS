@@ -208,13 +208,16 @@ int main(int argc,char **argv) {@autoreleasepool {
  assert(!OnlinePost(@"missing",@[@{@"id":@"s0",@"text":@"设置"}]));
  fixtureLargeResponse=nil;fixtureDictionaryEntries=nil;
  // Unknown-length chunked overflow is rejected by the actual delegate as well.
+ // A session satisfies the delegate API nonnull contract; no task is created.
+ NSURLSession *probeSession=[NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
  MirsaCancellationProbe *cancelled=[MirsaCancellationProbe new];
  MirsaNoRedirect *bounded=[MirsaNoRedirect new];
- [bounded URLSession:nil dataTask:(NSURLSessionDataTask *)(id)cancelled didReceiveData:[NSMutableData dataWithLength:8*1024*1024+1]];
+ [bounded URLSession:probeSession dataTask:(NSURLSessionDataTask *)(id)cancelled didReceiveData:[NSMutableData dataWithLength:8*1024*1024+1]];
  assert(bounded.error && !bounded.body.length && cancelled.cancellations==1);
  bounded=[MirsaNoRedirect new];bounded.maximumBodyBytes=65536;
- [bounded URLSession:nil dataTask:(NSURLSessionDataTask *)(id)cancelled didReceiveData:[NSMutableData dataWithLength:65537]];
+ [bounded URLSession:probeSession dataTask:(NSURLSessionDataTask *)(id)cancelled didReceiveData:[NSMutableData dataWithLength:65537]];
  assert(bounded.error && !bounded.body.length && cancelled.cancellations==2);
+ [probeSession finishTasksAndInvalidate];
  // Oversized cache is rejected before parsing, leaving no partial dictionary.
  [NSUserDefaults.standardUserDefaults setObject:[NSMutableData dataWithLength:8*1024*1024+1] forKey:DictionaryCacheKey()];
  onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];LoadOnlineCache();assert(!onlinePositive.count);
