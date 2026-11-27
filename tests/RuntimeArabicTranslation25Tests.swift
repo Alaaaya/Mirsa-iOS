@@ -538,17 +538,9 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let config = fixture.app.appendingPathComponent("Frameworks/MirsaTranslations.json")
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
         let table = try XCTUnwrap(json["translations"] as? [String: String])
-        if onlineEnabled {
-            // Protected online dictionaries are fetched with the scoped capability at launch,
-            // never embedded in plaintext where they bypass revocation/Kat's OTA corrections.
-            XCTAssertTrue(table.isEmpty)
-            let bytes = try Data(contentsOf: config)
-            XCTAssertNil(bytes.range(of: Data("حفظ %@".utf8)))
-            XCTAssertNil(bytes.range(of: Data("الإعدادات".utf8)))
-        } else {
-            XCTAssertEqual(table["Save %@"], "حفظ %@")
-            XCTAssertEqual(table["Settings"], "الإعدادات")
-        }
+        // Full CURRENT scoped dictionary is embedded for first-frame Arabic; online activation stays for OTA.
+        XCTAssertEqual(table, ["Save %@": "حفظ %@", "Settings": "الإعدادات"])
+        XCTAssertEqual(json["online"] != nil, onlineEnabled)
         XCTAssertNil(table["%d items"]); XCTAssertNil(table["Not in this app"])
         XCTAssertEqual(json["revision"] as? String, scan.revision)
         XCTAssertEqual(json["online"] as? [String: String], online)
