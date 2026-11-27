@@ -381,18 +381,6 @@ __attribute__((visibility("default"))) int MirsaRuntimeTestPendingNotice(int act
  if(action==2)return [prefs boolForKey:key]?1:0;
  return -1;
 }
-__attribute__((visibility("default"))) int MirsaRuntimeTestLoadConfigJSON(const char *json) {
- if(!json||!NSThread.isMainThread)return 0;
- @try {
-  id obj=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json length:strlen(json)] options:0 error:NULL];
-  if(![obj isKindOfClass:NSDictionary.class])return 0;
-  ApplyEmbeddedConfig(obj);enabled=YES;InstallTranslationHooks();return 1;
- } @catch(__unused NSException *e){return 0;}
-}
-__attribute__((visibility("default"))) int MirsaRuntimeTestLoadCache(void) {
- if(!NSThread.isMainThread)return 0;
- LoadOnlineCache();return 1;
-}
 __attribute__((visibility("default"))) int MirsaRuntimeTestApplyJSON(const char *json) {
  if(!json)return 0;
  @try {
@@ -403,6 +391,10 @@ __attribute__((visibility("default"))) int MirsaRuntimeTestApplyJSON(const char 
   ApplyOnlineEntries(obj[@"entries"]);return 1;
  } @catch(__unused NSException *e){return 0;}
 }
+#endif
+#if defined(MIRSA_RUNTIME_TESTING)
+static NSTimeInterval testNow;
+static NSTimeInterval TestClock(void){return testNow;}
 #endif
 __attribute__((constructor)) static void Start(void) {
  @autoreleasepool { @try {
@@ -419,6 +411,13 @@ __attribute__((constructor)) static void Start(void) {
        if([obj isKindOfClass:NSDictionary.class])config=obj;
      }
    }
+#if defined(MIRSA_RUNTIME_TESTING)
+   // Simulator fixtures only: fixed clock for the signed public vector and a per-launch config file.
+   const char *tc=getenv("MIRSA_TEST_CONFIG");
+   if(tc){id o=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:@(tc)] options:0 error:NULL];if([o isKindOfClass:NSDictionary.class])config=o;}
+   const char *tn=getenv("MIRSA_TEST_NOW");
+   if(tn){testNow=atof(tn);onlineClock=TestClock;}
+#endif
    ApplyEmbeddedConfig(config);
    ConfigureOnline(config);
    if(!onlineConfig)return;

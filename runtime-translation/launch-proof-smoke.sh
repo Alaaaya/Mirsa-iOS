@@ -19,12 +19,12 @@ xcrun simctl bootstatus "$DEVICE" -b
 ARCH=$(uname -m)
 APP="$WORK/SwiftUIRefreshSmoke.app"
 mkdir -p "$APP"
-BUNDLE="app.mirsa.tests.swiftui-refresh"
+BUNDLE="com.example.activationfixture"
 cat > "$APP/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>app.mirsa.tests.swiftui-refresh</string>
+<key>CFBundleIdentifier</key><string>com.example.activationfixture</string>
 <key>CFBundleExecutable</key><string>SwiftUIRefreshSmoke</string>
 <key>CFBundleName</key><string>SwiftUIRefreshSmoke</string>
 <key>CFBundlePackageType</key><string>APPL</string>
@@ -61,6 +61,15 @@ for MODE in control embedded ota-seed ota-verify; do
   rm -f "$CONTAINER/Documents/launch-$MODE.json"
   xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
   sleep 1
+  python3 - "$ROOT/fixtures/ActivationPublicVector.json" "$OUT/config-$MODE.json" "$MODE" <<'PY2'
+import json,sys
+v=json.load(open(sys.argv[1]));m=sys.argv[3]
+src="异步刷新验证";ar="التحقق من التحديث"
+c={"translations":{src:ar} if m=="embedded" else {},"substrings":{},"regex":[],"revision":v["revision"]}
+if m!="control":c["online"]=v
+json.dump(c,open(sys.argv[2],"w"),ensure_ascii=False)
+PY2
+  export SIMCTL_CHILD_MIRSA_TEST_CONFIG="$OUT/config-$MODE.json" SIMCTL_CHILD_MIRSA_TEST_NOW=2000000010
   xcrun simctl launch --terminate-running-process --stdout="$OUT/$MODE.stdout.log" --stderr="$OUT/$MODE.stderr.log" "$DEVICE" "$BUNDLE" -LaunchProof "$MODE"
   for _ in $(seq 1 60); do [ ! -f "$CONTAINER/Documents/launch-$MODE.json" ] || break; sleep 1; done
   [ -f "$CONTAINER/Documents/launch-$MODE.json" ] || { echo "FAIL no receipt for $MODE" >&2; exit 1; }

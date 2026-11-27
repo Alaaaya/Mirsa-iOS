@@ -96,6 +96,11 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
                      didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         do { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
         catch { fatalError("Cannot create fixture output") }
+        if let idx = ProcessInfo.processInfo.arguments.firstIndex(of: "-LaunchProof"),
+           idx + 1 < ProcessInfo.processInfo.arguments.count {
+            runLaunchProof(ProcessInfo.processInfo.arguments[idx + 1])
+            return true
+        }
         guard let libraryPath = Bundle.main.path(forResource: "MirsaTranslate", ofType: "dylib"),
               let handle = dlopen(libraryPath, RTLD_NOW | RTLD_GLOBAL) else {
             finish(false, "dylib_load_failed")
@@ -111,11 +116,6 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         apply = unsafeBitCast(applySymbol, to: (@convention(c) (UnsafePointer<CChar>) -> Int32).self)
         guard configure() == 1 else {
             finish(false, "test_configure_failed")
-            return true
-        }
-        if let idx = ProcessInfo.processInfo.arguments.firstIndex(of: "-LaunchProof"),
-           idx + 1 < ProcessInfo.processInfo.arguments.count {
-            runLaunchProof(ProcessInfo.processInfo.arguments[idx + 1], handle: handle)
             return true
         }
         if ProcessInfo.processInfo.arguments.contains("-BannerModalFixture") {
@@ -161,7 +161,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
     // embedded: full scoped dictionary in MirsaTranslations.json shape, loaded before any UI -> first frame Arabic.
     // ota-seed: OTA entries arrive and persist to disk cache (no UI claim).
     // ota-verify: fresh process loads persisted cache before UI -> first frame Arabic.
-    private func runLaunchProof(_ mode: String, handle: UnsafeMutableRawPointer) {
+    private func runLaunchProof(_ mode: String) {
         receipt["mode"] = mode
         receipt["source"] = source
         receipt["expected"] = expectedArabic
@@ -169,30 +169,49 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         func write(_ passed: Bool, _ reason: String) {
             receipt["passed"] = passed; receipt["reason"] = reason
             receipt["liveSwiftUIRefreshClaimed"] = false
+            receipt["realConstructor"] = true
+            receipt["networkRequests"] = FixtureTransport.shared.summary()
             if let d = try? JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys]) {
                 try? d.write(to: output.appendingPathComponent(name), options: .atomic)
             }
         }
+        // Real separate process: signed activation vector arrives in the config file read by the
+        // production constructor; the only test seams are the fixed clock and the in-process transport.
+        guard let cfgPath = ProcessInfo.processInfo.environment["MIRSA_TEST_CONFIG"],
+              let cfgData = FileManager.default.contents(atPath: cfgPath),
+              let cfg = try? JSONSerialization.jsonObject(with: cfgData) as? [String: Any] else { write(false, "no_config"); return }
+        FixtureTransport.shared.install(online: cfg["online"] as? [String: Any], mode: mode)
+        guard let libraryPath = Bundle.main.path(forResource: "MirsaTranslate", ofType: "dylib"),
+              let handle = dlopen(libraryPath, RTLD_NOW | RTLD_GLOBAL) else { write(false, "dylib_load_failed"); return }
+        library = handle   // constructor Start() has now run
+        guard dlsym(handle, "MirsaRuntimeTestConfigure") != nil else { write(false, "not_testing_build"); return }
+        receipt["bundleId"] = Bundle.main.bundleIdentifier ?? ""
         if mode == "ota-seed" {
-            let entries: [[String: Any]] = [["source": source, "translation": expectedArabic, "provenance": "kat", "version": 1]]
-            guard let data = try? JSONSerialization.data(withJSONObject: ["entries": entries]),
-                  let json = String(data: data, encoding: .utf8) else { write(false, "json"); return }
-            let applied = json.withCString { apply($0) }
-            // Cache write happens synchronously inside the production apply path.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { write(applied == 1, applied == 1 ? "seeded_to_disk_cache" : "apply_failed") }
+            // Constructor configured online from the signed vector; UI renders Chinese, then the
+            // authenticated refresh arrives through URLSession and persists to UserDefaults.
+            let controller = UIViewController()
+            controller.view.backgroundColor = .white
+            let win = UIWindow(frame: UIScreen.main.bounds)
+            win.rootViewController = controller
+            window = win
+            let l = UILabel(frame: CGRect(x: 10, y: 300, width: 360, height: 80))
+            l.text = source
+            controller.view.addSubview(l)
+            win.makeKeyAndVisible()
+            var tries = 0
+            func poll() {
+                tries += 1
+                let cached = UserDefaults.standard.dictionaryRepresentation().contains { k, v in
+                    k.hasPrefix("MirsaTranslationDictionary25.") &&
+                        ((v as? Data).flatMap { String(data: $0, encoding: .utf8) }?.contains(expectedArabic) ?? false)
+                }
+                if cached && FixtureTransport.shared.authenticated { write(true, "network_refresh_persisted_to_disk"); return }
+                if tries > 40 { write(false, FixtureTransport.shared.served == 0 ? "no_network_refresh" : "cache_not_written"); return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { poll() }
+            }
+            poll()
             return
         }
-        if mode == "embedded" {
-            guard let s = dlsym(handle, "MirsaRuntimeTestLoadConfigJSON") else { write(false, "missing_export"); return }
-            let load = unsafeBitCast(s, to: (@convention(c) (UnsafePointer<CChar>) -> Int32).self)
-            let cfg: [String: Any] = ["translations": [source: expectedArabic], "substrings": [:], "regex": [], "revision": "x"]
-            guard let d = try? JSONSerialization.data(withJSONObject: cfg), let j = String(data: d, encoding: .utf8),
-                  j.withCString({ load($0) }) == 1 else { write(false, "load_config_failed"); return }
-        } else if mode == "ota-verify" || mode == "control" {
-            guard let s = dlsym(handle, "MirsaRuntimeTestLoadCache") else { write(false, "missing_export"); return }
-            let load = unsafeBitCast(s, to: (@convention(c) () -> Int32).self)
-            guard load() == 1 else { write(false, "load_cache_failed"); return }
-        } else { write(false, "unknown_mode"); return }
         // UI is built only now: first frame already has the dictionary.
         let controller = UIViewController()
         controller.view.backgroundColor = .white
@@ -341,5 +360,61 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
             try? json.write(to: output.appendingPathComponent("refresh-result.json"), options: .atomic)
         }
         // Keep the app alive for simulator screenshots and evidence extraction.
+    }
+}
+
+
+// In-process stand-in for the authenticated endpoint, reached through the real NSURLSession path.
+final class FixtureProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "fixture.invalid" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { FixtureTransport.shared.handle(self) }
+    override func stopLoading() {}
+}
+final class FixtureTransport {
+    static let shared = FixtureTransport()
+    private let lock = NSLock()
+    private var online: [String: Any] = [:]
+    private var mode = ""
+    private var log: [[String: Any]] = []
+    private(set) var authenticated = false
+    var served: Int { lock.lock(); defer { lock.unlock() }; return log.count }
+    func summary() -> [[String: Any]] { lock.lock(); defer { lock.unlock() }; return log }
+    func install(online: [String: Any]?, mode: String) {
+        self.online = online ?? [:]; self.mode = mode
+        let cls: AnyClass = object_getClass(URLSessionConfiguration.self)!
+        let sel = NSSelectorFromString("ephemeralSessionConfiguration")
+        guard let m = class_getInstanceMethod(cls, sel) else { return }
+        typealias Fn = @convention(c) (AnyObject, Selector) -> URLSessionConfiguration
+        let orig = unsafeBitCast(method_getImplementation(m), to: Fn.self)
+        let block: @convention(block) (AnyObject) -> URLSessionConfiguration = { me in
+            let c = orig(me, sel); c.protocolClasses = [FixtureProtocol.self]; return c
+        }
+        method_setImplementation(m, imp_implementationWithBlock(block))
+    }
+    func handle(_ proto: URLProtocol) {
+        let req = proto.request
+        var body = req.httpBody
+        if body == nil, let st = req.httpBodyStream {
+            st.open(); var d = Data(); var buf = [UInt8](repeating: 0, count: 1024)
+            while true { let n = st.read(&buf, maxLength: 1024); if n <= 0 { break }; d.append(buf, count: n) }
+            st.close(); body = d
+        }
+        let json = body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let auth = req.value(forHTTPHeaderField: "Authorization") == "Bearer " + (online["token"] as? String ?? "?")
+            && req.value(forHTTPHeaderField: "X-Mirsa-Activation") == (online["activation"] as? String ?? "?")
+            && req.httpMethod == "POST" && req.url?.absoluteString == online["endpoint"] as? String
+            && json.count == 4 && json["action"] as? String == "refresh" && json["consent"] as? Bool == true
+            && json["bundleId"] as? String == online["bundleId"] as? String
+            && json["revision"] as? String == online["revision"] as? String
+        lock.lock(); log.append(["authenticated": auth, "keys": json.keys.sorted()]); if auth { authenticated = true }; lock.unlock()
+        // Verify launch gets no network help: Arabic there can only come from disk.
+        let ok = auth && mode == "ota-seed"
+        let reply: [String: Any] = ["bundleId": online["bundleId"] ?? "", "revision": online["revision"] ?? "",
+            "entries": ok ? [["source": source, "translation": expectedArabic, "provenance": "kat", "version": 1]] : []]
+        let resp = HTTPURLResponse(url: req.url!, statusCode: ok ? 200 : 503, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        proto.client?.urlProtocol(proto, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        proto.client?.urlProtocol(proto, didLoad: (try? JSONSerialization.data(withJSONObject: reply)) ?? Data())
+        proto.client?.urlProtocolDidFinishLoading(proto)
     }
 }
