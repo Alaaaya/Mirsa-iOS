@@ -60,6 +60,10 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             let notice = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(error, stage)).localizedDescription
             XCTAssertEqual(notice, stage.notice + "\n[" + stage.code + "]")
             XCTAssertFalse(notice.contains(privateMessage))
+            let nativeError = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(
+                SideloadError.message(privateMessage), stage)).localizedDescription
+            XCTAssertEqual(nativeError, stage.notice + "\n[" + stage.code + "]")
+            XCTAssertFalse(nativeError.contains(privateMessage))
         }
         let auth = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(
             URLError(.timedOut), .auth)).localizedDescription

@@ -161,7 +161,9 @@ enum RuntimeArabicPipeline {
     static func failure(_ error: Error) -> Error {
         if let tagged = error as? RuntimeTranslationStageError {
             let base = failure(tagged.underlying).localizedDescription
-            let notice = base == RuntimeArabicText.failed ? tagged.stage.notice : base
+            // Never forward arbitrary localized errors (including native tool stderr).
+            let publicNotices = [RuntimeArabicText.encrypted, RuntimeArabicText.signIn, RuntimeArabicText.unavailable]
+            let notice = publicNotices.contains(base) ? base : tagged.stage.notice
             var diagnostic = tagged.stage.code
             if let transport = tagged.underlying as? URLError {
                 diagnostic += " URL " + String(transport.code.rawValue)
