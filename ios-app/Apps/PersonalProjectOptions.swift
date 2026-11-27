@@ -41,6 +41,11 @@ struct PersonalProjectOptions: Sendable {
     var backgroundNotifications = false
     var backgroundMethods: [BackgroundNotificationMethod] = []
     var translateToArabic = false
+
+    /// Copy the optional persisted choice into this attempt, never retain a live draft.
+    mutating func applyTranslationChoice(from draft: PersonalProjectDraft) {
+        translateToArabic = draft.translateArabic ?? false
+    }
 }
 
 enum PersonalGameMode: String, Codable, CaseIterable, Sendable { case keep, on, off }

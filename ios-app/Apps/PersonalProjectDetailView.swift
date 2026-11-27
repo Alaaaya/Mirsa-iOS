@@ -639,7 +639,7 @@ struct PersonalProjectDetailView: View {
                         settingSymbol("globe", color: LCPalette.green)
                         Text(ArabicTranslateText.rowTitle).font(.subheadline)
                     }
-                }.tint(LCPalette.green).accessibilityIdentifier("project-sign-translate-ar")
+                }.tint(LCPalette.green).disabled(!loaded || configBusy || signing.running).accessibilityIdentifier("project-sign-translate-ar")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(personalText("Some texts need internet to translate", "بعض النصوص بتحتاج إنترنت لتترجم")).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-hint")
                     Text(personalText("Encrypted apps, games and text inside images are not translated", "التطبيقات المشفّرة والألعاب والنصوص اللي بالصور ما بتتعرّب")).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("project-sign-translate-ar-hint2")
@@ -869,7 +869,7 @@ struct PersonalProjectDetailView: View {
         options.removeWatchApp = draft.removeWatchApp
         options.removeExtensions = draft.removeExtensions ?? false
         options.removeAppClips = draft.removeAppClips ?? false
-        options.translateToArabic = draft.translateArabic ?? false
+        options.applyTranslationChoice(from: draft)
         options.backgroundNotifications = draft.backgroundNotifications ?? false
         options.backgroundMethods = []
         if draft.backgroundAudio ?? false { options.backgroundMethods.append(.audio) }

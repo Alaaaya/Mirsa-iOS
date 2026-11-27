@@ -57,16 +57,16 @@ xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
 xcrun simctl uninstall "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
 xcrun simctl install "$DEVICE" "$APP"
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" "$BUNDLE" data)
-for MODE in control embedded ota-seed ota-verify; do
+for MODE in control english-control embedded english-embedded ota-seed ota-verify; do
   rm -f "$CONTAINER/Documents/launch-$MODE.json"
   xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
   sleep 1
   python3 - "$ROOT/fixtures/ActivationPublicVector.json" "$OUT/config-$MODE.json" "$MODE" <<'PY2'
 import json,sys
 v=json.load(open(sys.argv[1]));m=sys.argv[3]
-src="异步刷新验证";ar="التحقق من التحديث"
-c={"translations":{src:ar} if m=="embedded" else {},"substrings":{},"regex":[],"revision":v["revision"]}
-if m!="control":c["online"]=v
+src="Settings" if m.startswith("english-") else "异步刷新验证";ar="الإعدادات" if m.startswith("english-") else "التحقق من التحديث"
+c={"translations":{src:ar} if m.endswith("embedded") else {},"substrings":{},"regex":[],"revision":v["revision"]}
+if not m.endswith("control"):c["online"]=v
 json.dump(c,open(sys.argv[2],"w"),ensure_ascii=False)
 PY2
   export SIMCTL_CHILD_MIRSA_TEST_CONFIG="$OUT/config-$MODE.json" SIMCTL_CHILD_MIRSA_TEST_NOW=2000000010
@@ -80,7 +80,7 @@ xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
 python3 - "$OUT" <<'PY'
 import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]);ok=True
-for m in ("control","embedded","ota-seed","ota-verify"):
+for m in ("control","english-control","embedded","english-embedded","ota-seed","ota-verify"):
     r=json.loads((root/f"launch-{m}.json").read_text());print(m,r.get("reason"),r.get("arabicReferenceMismatchFraction"))
     ok=ok and r.get("passed") is True
 sys.exit(0 if ok else 1)

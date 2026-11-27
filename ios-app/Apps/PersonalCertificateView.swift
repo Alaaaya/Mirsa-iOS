@@ -332,6 +332,10 @@ enum PersonalInjectionProof {
         let componentSHA256: [String: String]
         let outputSHA256: String
         let installed: Snapshot
+        // Optional for backward compatibility with existing retained sidecars.
+        var translateToArabic: Bool? = nil
+        var mirsaVersion: String? = nil
+        var mirsaBuild: String? = nil
     }
     static func revision(_ draft: PersonalProjectDraft) throws -> String {
         var value = draft
@@ -355,10 +359,13 @@ enum PersonalInjectionProof {
         return result
     }
     static func record(_ archive: URL, source: URL, options: PersonalProjectOptions, hashes: [String: String], snapshot: Snapshot) throws {
-        let record = Attempt(attemptID: options.attemptID, draftRevision: options.draftRevision,
+        var record = Attempt(attemptID: options.attemptID, draftRevision: options.draftRevision,
                              selectedComponentIDs: options.selectedComponentIDs,
                              sourceSHA256: try RuntimeOriginalIPA.hash(source), componentSHA256: hashes,
                              outputSHA256: try RuntimeOriginalIPA.hash(archive), installed: snapshot)
+        record.translateToArabic = options.translateToArabic
+        record.mirsaVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        record.mirsaBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         try JSONEncoder().encode(record).write(to: sidecar(archive), options: [.atomic, .completeFileProtection])
     }
     static func verifyRecord(_ archive: URL) throws {
@@ -722,7 +729,8 @@ enum PersonalCertificateSigner {
             if options.translateToArabic {
                 let actual = try IPAEditorService.info(in: finalApp)["CFBundleIdentifier"] as? String
                 guard actual == runtimeBundleID else { throw RuntimeTranslationError.invalid }
-                try RuntimeArabicPipeline.verifyInstalled(app: finalApp, revision: originalSHA, bundleID: runtimeBundleID)
+                try RuntimeArabicPipeline.verifyInstalled(app: finalApp, revision: originalSHA, bundleID: runtimeBundleID,
+                                                         expectedConfiguration: runtimeConfiguration)
             }
             if options.backgroundNotifications {
                 try BackgroundNotifications.verifyInstalled(app: finalApp, methods: options.backgroundMethods)

@@ -281,6 +281,8 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             let proof = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
                                                 from: Data(contentsOf: PersonalInjectionProof.sidecar(result.url)))
             XCTAssertEqual(proof.attemptID, options.attemptID)
+            XCTAssertEqual(proof.translateToArabic, false)
+            XCTAssertEqual(proof.mirsaBuild, Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
             XCTAssertTrue(attempts.insert(proof.attemptID).inserted)
             XCTAssertEqual(proof.sourceSHA256, original)
             XCTAssertEqual(proof.componentSHA256.values.first, try RuntimeOriginalIPA.hash(source))
@@ -311,6 +313,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             let retainedProof = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
                 from: Data(contentsOf: PersonalInjectionProof.sidecar(retained)))
             XCTAssertEqual(retainedProof.selectedComponentIDs, proof.selectedComponentIDs)
+            XCTAssertEqual(retainedProof.translateToArabic, proof.translateToArabic)
             XCTAssertEqual(retainedProof.draftRevision, "original-draft")
             let extracted = fixture.root.appendingPathComponent(UUID().uuidString)
             try IPAEditorService.run("extract", input: retained, output: extracted)
@@ -603,6 +606,11 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             return try PersonalCertificateSigner.sign(ipa: fixture.ipa, material: material, pairingPath: "",
                 options: enabledOptions, allowEncryptedSigning: allowEncrypted)
         }
+        try PersonalInjectionProof.verifyRecord(on.url)
+        let onAttempt = try JSONDecoder().decode(PersonalInjectionProof.Attempt.self,
+            from: Data(contentsOf: PersonalInjectionProof.sidecar(on.url)))
+        XCTAssertEqual(onAttempt.translateToArabic, true)
+        XCTAssertEqual(onAttempt.mirsaBuild, Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
         let unpacked = fixture.root.appendingPathComponent("signed-on")
         try IPAEditorService.run("extract", input: on.url, output: unpacked)
         let app = try IPAEditorService.app(in: unpacked)

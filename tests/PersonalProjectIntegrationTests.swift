@@ -68,6 +68,31 @@ final class PersonalProjectIntegrationTests: XCTestCase {
         }
     }
 
+    func testTranslationChoiceRoundTripUsesSharedSigningMapping() throws {
+        for choice in [nil, false, true] as [Bool?] {
+            var draft = PersonalProjectDraft()
+            draft.translateArabic = choice
+            let copy = try JSONDecoder().decode(PersonalProjectDraft.self, from: JSONEncoder().encode(draft))
+            XCTAssertEqual(copy.translateArabic, choice)
+            var options = PersonalProjectOptions()
+            options.translateToArabic = true
+            options.applyTranslationChoice(from: copy)
+            XCTAssertEqual(options.translateToArabic, choice ?? false)
+        }
+    }
+
+    func testTranslationOptionsSnapshotDoesNotFollowLaterDraftChanges() {
+        var draft = PersonalProjectDraft()
+        draft.translateArabic = true
+        var options = PersonalProjectOptions()
+        options.applyTranslationChoice(from: draft)
+        let signingOptions = options
+        draft.translateArabic = false
+        options.applyTranslationChoice(from: draft)
+        XCTAssertTrue(signingOptions.translateToArabic)
+        XCTAssertFalse(options.translateToArabic)
+    }
+
     func testProjectDraftRoundTripPreservesOrderedTweaks() throws {
         let ids = [UUID(), UUID()]
         var draft = PersonalProjectDraft(name: "Fixture", bundleID: "com.example.fixture", version: "1.0")

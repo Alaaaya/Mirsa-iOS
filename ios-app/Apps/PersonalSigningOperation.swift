@@ -23,6 +23,14 @@ final class PersonalSigningOperation: ObservableObject {
     struct State {
         let id: UUID
         let projectID: UUID
+        /// Immutable choice actually passed to OTA for this attempt, not the current UI draft.
+        let requestedTranslateToArabic: Bool
+        init(id: UUID, projectID: UUID, selectedTweakIDs: [UUID] = [], requestedTranslateToArabic: Bool = false) {
+            self.id = id
+            self.projectID = projectID
+            self.selectedTweakIDs = selectedTweakIDs
+            self.requestedTranslateToArabic = requestedTranslateToArabic
+        }
         var selectedTweakIDs: [UUID] = []
         var stage: Stage = .preparing
         var fraction: Double?
@@ -142,7 +150,11 @@ final class PersonalSigningOperation: ObservableObject {
         let control = PersonalSigningControl()
         self.control = control
         lastActivityStage = nil
-        state = State(id: id, projectID: projectID, selectedTweakIDs: selectedTweakIDs)
+        state = State(id: id, projectID: projectID, selectedTweakIDs: selectedTweakIDs, requestedTranslateToArabic: options.translateToArabic)
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        state?.addLog("System", "Mirsa " + version + " (" + build + ")")
+        state?.addLog("Signer", "Arabic translation requested: " + (options.translateToArabic ? "ON" : "OFF"))
         let operation = MirsaOperationProgress.shared.begin(appID: projectID.uuidString, phase: .preparing)
         MirsaOperationProgress.shared.update(operation, phase: .preparing, fraction: 0)
         activityID = MirsaInstallActivity.shared.begin(title: title, phase: .preparing)

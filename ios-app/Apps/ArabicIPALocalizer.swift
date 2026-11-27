@@ -79,9 +79,22 @@ enum ArabicIPALocalizer {
         return n == "ar.lproj" || n == "arabic.lproj" || (n.hasPrefix("ar-") && n.hasSuffix(".lproj")) || (n.hasPrefix("ar_") && n.hasSuffix(".lproj"))
     }
 
+    // Runtime explicitly opts into a larger, byte-counted resource budget.
+    // Offline localization keeps its existing item/character limits by default.
+    struct ScanPolicy {
+        let maxItems: Int
+        let maxTotal: Int
+        let countsUTF8Bytes: Bool
+        let textFilter: ((String) -> Bool)?
+        var includePartialArabic = false
+        static let legacy = ScanPolicy(maxItems: ArabicIPALocalizer.maxItems,
+                                       maxTotal: ArabicIPALocalizer.maxTotal,
+                                       countsUTF8Bytes: false, textFilter: nil)
+    }
+
     // MARK: Scan
 
-    static func scan(app: URL) throws -> Scan {
+    static func scan(app: URL, policy: ScanPolicy = .legacy) throws -> Scan {
         let fm = FileManager.default
         let appPath = app.standardizedFileURL.path
         var found: [URL: [String]] = [:]   // bundle dir -> source lproj names
@@ -104,11 +117,15 @@ enum ArabicIPALocalizer {
         }
         var scan = Scan()
         scan.hasArabic = arabicIn.contains(app.standardizedFileURL)
-        if scan.hasArabic { return scan }
+        if scan.hasArabic && !policy.includePartialArabic { return scan }
         var total = 0, resourceBytes = 0
         for parent in found.keys.sorted(by: { $0.path < $1.path }) {
-            if arabicIn.contains(parent) { continue }
-            let infoData = try? Data(contentsOf: parent.appendingPathComponent("Info.plist"))
+            if arabicIn.contains(parent) && !policy.includePartialArabic { continue }
+            let infoURL = parent.appendingPathComponent("Info.plist")
+            let infoValues = try? infoURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            let runtimeInfoSafe = infoValues?.isRegularFile == true && infoValues?.isSymbolicLink != true &&
+                (infoValues?.fileSize ?? Int.max) <= maxFileBytes
+            let infoData = (!policy.includePartialArabic || runtimeInfoSafe) ? (try? Data(contentsOf: infoURL)) : nil
             let info = infoData.flatMap { try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil) } as? [String: Any]
             let development = (info?["CFBundleDevelopmentRegion"] as? String ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
             func rank(_ name: String) -> Int {
@@ -149,12 +166,12 @@ enum ArabicIPALocalizer {
                 var local: [(String, [String])] = []
                 if isDict { collect(plist, path: [], into: &local) }
                 else { for (k, v) in plist where v is String && !skipKeys.contains(k) { local.append((v as! String, [k])) } }
-                local = local.filter { worthTranslating($0.0) }.sorted { $0.1.joined(separator: "\u{1}") < $1.1.joined(separator: "\u{1}") }
+                local = local.filter { worthTranslating($0.0) && (policy.textFilter?($0.0) ?? true) }.sorted { $0.1.joined(separator: "\u{1}") < $1.1.joined(separator: "\u{1}") }
                 guard !local.isEmpty else { continue }
                 scan.files.append(FilePlan(bundleDir: parent, name: file, root: plist, isDict: isDict))
                 for (n, entry) in local.enumerated() {
-                    total += entry.0.count
-                    guard scan.items.count < maxItems, total <= maxTotal else { throw CocoaError(.fileReadTooLarge) }
+                    total += policy.countsUTF8Bytes ? entry.0.utf8.count : entry.0.count
+                    guard scan.items.count < policy.maxItems, total <= policy.maxTotal else { throw CocoaError(.fileReadTooLarge) }
                     let id = "\(fileIndex).\(n)"
                     scan.items.append(Item(id: id, text: entry.0))
                     scan.slots[id] = Slot(file: fileIndex, path: entry.1)

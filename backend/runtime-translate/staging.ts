@@ -1,6 +1,7 @@
 // WEB private staging ONLY. Never deployed as a production Edge Function.
 import { createHandler } from './index.ts';
 import {verifyStagingAccount} from './staging-auth.ts';
+import {StagingAdmission27} from './staging-admission27.ts';
 
 const env = (name: string) => Deno.env.get(name);
 if (env('RUNTIME_STAGING_ONLY') !== 'true') throw new Error('staging opt-in required');
@@ -66,12 +67,9 @@ const handler = createHandler(env, (url, key, deadline) => ({
   }})
 }));
 // Global admission bound protects auth/provider resources even before user quota.
-let active = 0, minute = 0, admissions = 0;
+const admission = new StagingAdmission27();
 Deno.serve({hostname:'0.0.0.0',port:Number(env('PORT'))}, async (req,info) => {
   if (new URL(req.url).pathname !== path) return new Response(null,{status:404});
-  const now = Math.floor(Date.now()/60000);
-  if (minute !== now) {minute=now;admissions=0;}
-  if (active >= 4 || ++admissions > 60) return new Response('{"error":"rate_limited"}',{status:429,headers:{'content-type':'application/json','cache-control':'no-store'}});
-  active++;
-  try {return await handler(req,info.remoteAddr.hostname);} finally {active--;}
+  if (!admission.enter()) return new Response('{"error":"rate_limited"}',{status:429,headers:{'content-type':'application/json','cache-control':'no-store'}});
+  try {return await handler(req,info.remoteAddr.hostname);} finally {admission.leave();}
 });

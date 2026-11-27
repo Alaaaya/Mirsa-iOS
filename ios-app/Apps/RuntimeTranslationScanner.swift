@@ -7,18 +7,45 @@ enum RuntimeTranslationScanError: Error, Equatable {
 
 /// Reads untrusted executable data only. Never loads code or modifies the app.
 enum RuntimeTranslationScanner {
+    static let maxItems = 20_000
+    static let maxTotalTextBytes = 4 * 1_048_576
+
+    /// One shared budget for unique static literals and explicit resource strings.
+    private struct Texts {
+        var values = Set<String>()
+        var bytes = 0
+        mutating func insert(_ text: String) throws {
+            guard !values.contains(text) else { return }
+            let size = text.utf8.count
+            guard values.count < RuntimeTranslationScanner.maxItems,
+                  size <= RuntimeTranslationScanner.maxTotalTextBytes - bytes else {
+                throw RuntimeTranslationScanError.tooLarge
+            }
+            values.insert(text)
+            bytes += size
+        }
+    }
+
     struct Scan {
         let revision: String
         let items: [ArabicIPALocalizer.Item]
     }
 
-    /// Binary extraction uses this CJK-only predicate. Latin text is accepted only
-    /// from explicit localization resources, never arbitrary executable bytes.
+    /// Static bundle literal heuristic, not a decompiler or runtime text collector.
     static func eligible(_ text: String) -> Bool {
-        safe(text) && text.unicodeScalars.contains {
+        guard safe(text) else { return false }
+        if text.unicodeScalars.contains(where: {
             (0x3400...0x9FFF).contains($0.value) || (0xF900...0xFAFF).contains($0.value) ||
             (0x3040...0x30FF).contains($0.value) || (0xAC00...0xD7AF).contains($0.value)
-        }
+        }) { return true }
+        return displayEnglish(text)
+    }
+
+    private static func displayEnglish(_ text: String) -> Bool {
+        guard safe(text), text.range(of: "[A-Za-z]", options: .regularExpression) != nil else { return false }
+        let symbols = #"^(?:[_$]|OBJC|Swift\.|swift_|objc_)|(?:[a-z][A-Z][a-z])|[_.][A-Za-z]|::|[{}=]|(?:\.swift|\.m|\.mm):?\d*$"#
+        return text.range(of: symbols, options: .regularExpression) == nil &&
+            !text.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
     // Mirrors runtime-translate safeText plus its per-item 256 UTF-16-unit contract.
@@ -80,6 +107,7 @@ enum RuntimeTranslationScanner {
         guard let entries = fm.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else {
             throw RuntimeTranslationScanError.invalidApp
         }
+        var catalogs: [URL] = []
         var count = 0
         for case let url as URL in entries {
             count += 1
@@ -90,6 +118,7 @@ enum RuntimeTranslationScanner {
                 // Include extension/App Clip executables in the encryption gate and revision.
                 binaries.append(try executable(url))
             } else if v.isDirectory != true, try regular(url) {
+                if url.pathExtension == "xcstrings" { catalogs.append(url) }
                 // Catch dylibs and Mach-O files outside conventional bundle locations.
                 let handle = try FileHandle(forReadingFrom: url)
                 let prefix: Data
@@ -107,7 +136,7 @@ enum RuntimeTranslationScanner {
             guard binaries.count <= 64 else { throw RuntimeTranslationScanError.tooLarge }
         }
         binaries = Array(Set(binaries)).sorted { $0.path < $1.path }
-        var totalBytes = 0, texts = Set<String>(), hasher = SHA256()
+        var totalBytes = 0, texts = Texts(), hasher = SHA256()
         for binary in binaries {
             let size = try binary.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
             guard size <= 200 * 1_048_576, size <= 256 * 1_048_576 - totalBytes else { throw RuntimeTranslationScanError.tooLarge }
@@ -120,17 +149,70 @@ enum RuntimeTranslationScanner {
             hasher.update(data: data)
             try parse(data, texts: &texts)
         }
-        let local = try ArabicIPALocalizer.scan(app: root)
-        if !local.hasArabic {
-            for item in local.items where safe(item.text) { texts.insert(item.text) }
+        let local: ArabicIPALocalizer.Scan
+        do {
+            local = try ArabicIPALocalizer.scan(app: root, policy: .init(
+                maxItems: maxItems, maxTotal: maxTotalTextBytes,
+                countsUTF8Bytes: true, textFilter: safe, includePartialArabic: true))
+        } catch let error as CocoaError where error.code == .fileReadTooLarge {
+            throw RuntimeTranslationScanError.tooLarge
         }
-        var items: [ArabicIPALocalizer.Item] = [], chars = 0
-        for text in texts.sorted() {
-            guard items.count < 1500, chars + text.count <= 120_000 else { break }
-            chars += text.count
+        for item in local.items { try texts.insert(item.text) }
+        var catalogBytes = 0
+        for url in catalogs.sorted(by: { $0.path < $1.path }) {
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+            guard size <= ArabicIPALocalizer.maxFileBytes else { throw RuntimeTranslationScanError.tooLarge }
+            guard size <= 16 * ArabicIPALocalizer.maxFileBytes - catalogBytes else { throw RuntimeTranslationScanError.tooLarge }
+            catalogBytes += size
+            let data = try Data(contentsOf: url)
+            guard data.count == size else { throw RuntimeTranslationScanError.malformed }
+            try catalog(data, texts: &texts)
+        }
+        var items: [ArabicIPALocalizer.Item] = []
+        for text in texts.values.sorted() {
             items.append(.init(id: digest(Data(text.utf8)), text: text))
         }
         return Scan(revision: hasher.finalize().map { String(format: "%02x", $0) }.joined(), items: items)
+    }
+
+    /// Only the xcstrings schema's source-language units/variants are traversed.
+    /// Never walk arbitrary JSON dictionaries or translated language values.
+    private static func catalog(_ data: Data, texts: inout Texts) throws {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let language = root["sourceLanguage"] as? String,
+              let strings = root["strings"] as? [String: Any] else { throw RuntimeTranslationScanError.malformed }
+        var visited = 0
+        func units(_ node: [String: Any], depth: Int, values: inout [String]) throws {
+            visited += 1
+            guard depth <= 8, visited <= 200_000 else { throw RuntimeTranslationScanError.tooLarge }
+            if let unit = node["stringUnit"] as? [String: Any], let value = unit["value"] as? String {
+                values.append(value)
+            }
+            if let variations = node["variations"] as? [String: Any] {
+                for axis in ["plural", "device"] {
+                    if let variants = variations[axis] as? [String: Any] {
+                        for key in variants.keys.sorted() {
+                            if let variant = variants[key] as? [String: Any] {
+                                try units(variant, depth: depth + 1, values: &values)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for key in strings.keys.sorted() {
+            guard let entry = strings[key] as? [String: Any] else { continue }
+            var values: [String] = []
+            let localizations = entry["localizations"] as? [String: Any]
+            if let source = localizations?[language] as? [String: Any] {
+                try units(source, depth: 0, values: &values)
+            }
+            if values.isEmpty, let source = entry["sourceUnit"] as? [String: Any] {
+                try units(["stringUnit": source], depth: 0, values: &values)
+            }
+            if values.isEmpty && displayEnglish(key) { values.append(key) }
+            for value in values where safe(value) { try texts.insert(value) }
+        }
     }
 
     private static func digest(_ data: Data) -> String {
@@ -165,7 +247,7 @@ enum RuntimeTranslationScanner {
         }
     }
 
-    private static func parse(_ data: Data, texts: inout Set<String>) throws {
+    private static func parse(_ data: Data, texts: inout Texts) throws {
         let outer = Reader(data: data, start: 0, size: data.count, little: false)
         let magic = try outer.uint(0, 4)
         if [0xCAFEBABE, 0xBEBAFECA, 0xCAFEBABF, 0xBFBAFECA].contains(magic) {
@@ -188,7 +270,7 @@ enum RuntimeTranslationScanner {
         }
     }
 
-    private static func thin(_ data: Data, start: Int, size: Int, texts: inout Set<String>) throws {
+    private static func thin(_ data: Data, start: Int, size: Int, texts: inout Texts) throws {
         let head = Reader(data: data, start: start, size: size, little: false)
         let magic = try head.uint(0, 4)
         guard [0xCFFAEDFE, 0xFEEDFACF, 0xCEFAEDFE, 0xFEEDFACE].contains(magic) else { throw RuntimeTranslationScanError.malformed }
@@ -215,7 +297,9 @@ enum RuntimeTranslationScanner {
                 for i in 0..<n {
                     let s = p + 72 + i * 80
                     let name = try r.name(s)
-                    if name == "__cstring" || name == "__ustring" {
+                    let segment = try r.name(s + 16)
+                    if (try r.name(p + 8)) == "__TEXT", segment == "__TEXT",
+                       ["__cstring", "__ustring", "__const"].contains(name) {
                         let bytes = try r.int(s + 40, 8), offset = try r.int(s + 48, 4)
                         guard r.valid(offset, bytes), offset >= end else { throw RuntimeTranslationScanError.malformed }
                         if arm64 { sections.append((name, offset, bytes)) }
@@ -225,6 +309,9 @@ enum RuntimeTranslationScanner {
             p += length
         }
         guard p == end else { throw RuntimeTranslationScanError.malformed }
+        // __const is general constant data, not a string table. Accept only full,
+        // printable NUL-delimited candidates, never suffix searches or disassembly.
+        // Small Swift strings encoded in instruction immediates are not recovered.
         // Extraction is deferred until every encryption command has been checked.
         for (name, offset, bytes) in sections {
             let unit = name == "__ustring" ? 2 : 1
@@ -235,9 +322,10 @@ enum RuntimeTranslationScanner {
                     if cursor > begin, cursor - begin <= 2048 {
                         let chunk = data.subdata(in: (start + begin)..<(start + cursor))
                         let encoding: String.Encoding = unit == 1 ? .utf8 : (r.little ? .utf16LittleEndian : .utf16BigEndian)
-                        if let text = String(data: chunk, encoding: encoding), eligible(text) {
+                        if let text = String(data: chunk, encoding: encoding), eligible(text),
+                           text.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) {
                             // Bound memory even when a malicious section has millions of strings.
-                            if texts.count < 6000 { texts.insert(text) }
+                            try texts.insert(text)
                         }
                     }
                     begin = cursor + unit

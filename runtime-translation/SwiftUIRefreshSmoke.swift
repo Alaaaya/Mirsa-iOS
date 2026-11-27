@@ -162,9 +162,12 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
     // ota-seed: OTA entries arrive and persist to disk cache (no UI claim).
     // ota-verify: fresh process loads persisted cache before UI -> first frame Arabic.
     private func runLaunchProof(_ mode: String) {
+        let english = mode.hasPrefix("english-")
+        let launchSource = english ? "Settings" : source
+        let launchArabic = english ? "الإعدادات" : expectedArabic
         receipt["mode"] = mode
-        receipt["source"] = source
-        receipt["expected"] = expectedArabic
+        receipt["source"] = launchSource
+        receipt["expected"] = launchArabic
         let name = "launch-\(mode).json"
         func write(_ passed: Bool, _ reason: String) {
             receipt["passed"] = passed; receipt["reason"] = reason
@@ -219,7 +222,16 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         win.overrideUserInterfaceStyle = .light
         win.rootViewController = controller
         window = win
-        let hostVC = UIHostingController(rootView: RetainedText())
+        // A real LocalizedStringKey literal, like English-only SwiftUI apps.
+        // No Arabic is supplied to the original tree or copied into its state.
+        let launchView: AnyView
+        if english {
+            launchView = AnyView(Text("Settings").font(.system(size: 34)).foregroundColor(.black)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white))
+        } else {
+            launchView = AnyView(RetainedText())
+        }
+        let hostVC = UIHostingController(rootView: launchView)
         controller.addChild(hostVC)
         hostVC.view.frame = sampleRect
         controller.view.addSubview(hostVC.view)
@@ -228,7 +240,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             let shown = self.image(hostVC.view)
             self.save(shown, "launch-\(mode).png")
-            let ref = UIHostingController(rootView: Text(verbatim: expectedArabic).font(.system(size: 34)).foregroundColor(.black)
+            let ref = UIHostingController(rootView: Text(verbatim: launchArabic).font(.system(size: 34)).foregroundColor(.black)
                 .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white))
             controller.addChild(ref); ref.view.frame = self.sampleRect
             controller.view.addSubview(ref.view); ref.didMove(toParent: controller)
@@ -236,7 +248,7 @@ final class RefreshProof: UIResponder, UIApplicationDelegate {
                 let mismatch = self.difference(self.pixels(shown), self.pixels(self.image(ref.view)))
                 self.receipt["arabicReferenceMismatchFraction"] = mismatch
                 self.receipt["bodyEvaluations"] = bodyEvaluations
-                if mode == "control" { write(mismatch > 0.01, mismatch > 0.01 ? "control_stays_chinese" : "control_unexpectedly_arabic") }
+                if mode.hasSuffix("control") { write(mismatch > 0.01, mismatch > 0.01 ? "control_stays_original" : "control_unexpectedly_arabic") }
                 else { write(mismatch < 0.002, mismatch < 0.002 ? "first_frame_arabic" : "first_frame_not_arabic") }
             }
         }
