@@ -26,7 +26,13 @@ final class ExpandableDock27UITests: XCTestCase {
         // A real hit in the Sources page remains available while collapsed.
         XCTAssertTrue(app.staticTexts["Dock Source 1"].exists)
         let handle = app.buttons["dock-expand-handle"]
-        XCTAssertTrue(handle.waitForExistence(timeout: 5)); handle.tap()
+        XCTAssertTrue(handle.waitForExistence(timeout: 5))
+        XCTAssertTrue(handle.isHittable)
+        XCTAssertGreaterThanOrEqual(handle.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(handle.frame.height, 44)
+        XCTAssertLessThanOrEqual(handle.frame.maxY, dock.frame.minY)
+        handle.tap()
+        XCTAssertTrue(app.buttons["main-tab-Sources"].isSelected)
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
         XCTAssertLessThanOrEqual(pill.frame.maxY, dock.frame.minY)
         shot("context-pill")

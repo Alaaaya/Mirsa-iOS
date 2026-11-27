@@ -55,23 +55,28 @@ struct ExpandableGlassDock: View {
                         contextPill
                             .transition(.scale(scale: 0.88, anchor: .bottomTrailing).combined(with: .opacity))
                     }
-                    LiquidTabBar(selection: $selection, items: items, light: light)
-                        .overlay(alignment: .topTrailing) {
-                            if card == nil {
-                                Button { show(.profile) } label: {
-                                    Image(systemName: "chevron.up")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(ink.opacity(0.70))
-                                        .frame(width: 42, height: 22)
-                                        .modifier(MirsaDockGlass(shape: Capsule(), light: light))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("dock-expand-handle")
-                                .accessibilityLabel(menuTitle)
-                                .padding(.trailing, MirsaTabBarMetrics.sideInset + 12)
-                                .offset(y: -12)
+                    // Keep the expansion hit area in its own layout row. An
+                    // offset overlay outside the bar's bounds was exposed to
+                    // accessibility but hit-tested as the AI tab underneath it.
+                    if card == nil {
+                        HStack {
+                            Spacer(minLength: 0)
+                            Button { show(.profile) } label: {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(ink.opacity(0.70))
+                                    .frame(width: 44, height: 22)
+                                    .modifier(MirsaDockGlass(shape: Capsule(), light: light))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("dock-expand-handle")
+                            .accessibilityLabel(menuTitle)
                         }
+                        .padding(.horizontal, MirsaTabBarMetrics.sideInset + 12)
+                    }
+                    LiquidTabBar(selection: $selection, items: items, light: light)
                         .simultaneousGesture(DragGesture(minimumDistance: 16).onEnded { value in
                             guard abs(value.translation.height) > abs(value.translation.width) else { return }
                             if value.translation.height < -28 { show(.profile) }
