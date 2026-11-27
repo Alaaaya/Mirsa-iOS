@@ -14,6 +14,7 @@ SQL
 psql -h "$p" -p "$port" -d postgres -v ON_ERROR_STOP=1 -f schema.sql
 psql -h "$p" -p "$port" -d postgres -v ON_ERROR_STOP=1 -f schema.test.sql
 psql -h "$p" -p "$port" -d postgres -v ON_ERROR_STOP=1 -f queue.test.sql
+psql -h "$p" -p "$port" -d postgres -v ON_ERROR_STOP=1 -f capacity.test.sql
 psql -h "$p" -p "$port" -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 insert into auth.users values ('22222222-2222-4222-8222-222222222222');
 insert into public.mirsa_runtime_caps(token_hash,user_id,bundle_id,revision,expires_at)
