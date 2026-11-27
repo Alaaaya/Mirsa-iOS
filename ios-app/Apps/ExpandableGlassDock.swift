@@ -76,6 +76,7 @@ struct ExpandableGlassDock: View {
                 Color.clear
                     .modifier(MirsaDockGlass(shape: RoundedRectangle(cornerRadius: expanded ? 30 : 33, style: .continuous), light: light))
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, MirsaTabBarMetrics.sideInset)
             .padding(.bottom, MirsaTabBarMetrics.bottomGap)
@@ -85,6 +86,11 @@ struct ExpandableGlassDock: View {
         .environment(\.layoutDirection, .leftToRight)
         .onReceive(NotificationCenter.default.publisher(for: .mirsaDockDismiss)) { _ in setExpanded(false) }
         .onChange(of: selection) { _, _ in setExpanded(false) }
+        // Own the escape action on the whole dock, not on the first exposed
+        // child. Otherwise SwiftUI promotes the expanded card to the enclosing
+        // dock's accessibility frame, which includes the tab row below it.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("mirsa-expandable-dock")
         .accessibilityAction(.escape) { setExpanded(false) }
     }
 
@@ -124,6 +130,7 @@ struct ExpandableGlassDock: View {
                     .onAppear { dockState.expansionHeight = geo.size.height + 8 }
                     .onChange(of: geo.size.height) { _, h in dockState.expansionHeight = h + 8 }
             }
+            .accessibilityHidden(true)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("dock-expanded-card")
