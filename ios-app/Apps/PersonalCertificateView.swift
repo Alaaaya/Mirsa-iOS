@@ -502,7 +502,7 @@ enum PersonalCertificateSigner {
         } else if runtimeAllowed {
             // Even removed extensions must not bypass the original encryption gate.
             do { _ = try RuntimeTranslationScanner.scan(app: app) }
-            catch { throw RuntimeArabicPipeline.failure(error) }
+            catch { throw RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(error, .preflight)) }
         }
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)

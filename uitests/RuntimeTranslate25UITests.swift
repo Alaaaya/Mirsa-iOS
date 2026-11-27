@@ -148,7 +148,7 @@ final class RuntimeTranslate25UITests: XCTestCase {
         let hint2 = app.staticTexts["project-sign-translate-ar-hint2"]
         for _ in 0..<30 { if notice.exists && notice.isHittable { break }; editor.swipeUp() }
         XCTAssertTrue(notice.exists)
-        XCTAssertEqual(notice.label, "هالتطبيق مشفّر، وما فينا نعرّبه.")
+        XCTAssertEqual(notice.label, "هالتطبيق مشفّر، وما فينا نعرّبه.\n[RT27-SCAN ENCRYPTED]")
         capture("runtime-encrypted-notice")
         for _ in 0..<30 { if hint.exists && hint2.exists { break }; editor.swipeDown() }
         XCTAssertTrue(hint.label.contains("بعض النصوص بتحتاج إنترنت لتترجم"))

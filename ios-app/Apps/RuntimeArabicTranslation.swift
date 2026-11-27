@@ -33,6 +33,57 @@ protocol RuntimeDictionaryTranslating {
 
 enum RuntimeTranslationError: Error { case notConfigured, network, invalid, timeout, changedOriginal, httpStatus(Int) }
 
+/// Per-attempt state only. Codes contain no paths, labels, tokens or account identifiers.
+enum RuntimeTranslationStage: String, CaseIterable {
+    case preflight, scan, metadata, endpoint, auth, identity, issue, activation, dictionary
+    case refresh, canonical, merge, copy, injection, config, verify, commit, wait
+
+    var code: String { "RT27-" + rawValue.uppercased() }
+    var notice: String {
+        switch self {
+        case .preflight, .scan:
+            return personalText("Could not scan this app before contacting the translation service. The original app was kept.",
+                                "ما قدرنا نفحص ملفات التطبيق قبل الاتصال بخدمة التعريب. الملف الأصلي ما تغيّر.")
+        case .metadata:
+            return personalText("The app identifier or revision is invalid. The original app was kept.",
+                                "معرّف التطبيق أو بصمة نسخته مو صالحين. الملف الأصلي ما تغيّر.")
+        case .endpoint:
+            return personalText("The translation service address is invalid. The original app was kept.",
+                                "عنوان خدمة التعريب مو صالح. الملف الأصلي ما تغيّر.")
+        case .auth, .identity:
+            return personalText("Could not prepare your account session before contacting translation. Check your connection and that you are signed in. The original app was kept.",
+                                "ما قدرنا نجهّز جلسة حسابك قبل الاتصال بخدمة التعريب. تأكد من الاتصال وإنك مسجّل دخولك. الملف الأصلي ما تغيّر.")
+        case .issue, .activation:
+            return personalText("Could not activate translation for this signing attempt. The original app was kept.",
+                                "ما قدرنا نفعّل التعريب لمحاولة التوقيع هاي. الملف الأصلي ما تغيّر.")
+        case .dictionary:
+            return personalText("Could not fetch the app translation batch. The original app was kept.",
+                                "ما قدرنا نجيب دفعة ترجمة التطبيق. الملف الأصلي ما تغيّر.")
+        case .refresh, .canonical:
+            return personalText("Could not fetch or validate the complete translation dictionary. The original app was kept.",
+                                "ما قدرنا نجيب قاموس التعريب الكامل أو نتحقّق منه. الملف الأصلي ما تغيّر.")
+        case .merge:
+            return personalText("Could not validate the dictionary for this exact app revision. The original app was kept.",
+                                "ما قدرنا نطابق قاموس التعريب مع نسخة التطبيق. الملف الأصلي ما تغيّر.")
+        case .copy, .injection, .config, .verify, .commit:
+            return personalText("Could not embed or verify translation inside the app. The original app was kept.",
+                                "ما قدرنا نركّب التعريب داخل التطبيق أو نتحقّق منه. الملف الأصلي ما تغيّر.")
+        case .wait:
+            return personalText("Translation preparation timed out. The original app was kept.",
+                                "تجهيز التعريب أخد وقت زيادة وتوقّف. الملف الأصلي ما تغيّر.")
+        }
+    }
+}
+
+struct RuntimeTranslationStageError: Error {
+    let stage: RuntimeTranslationStage
+    let underlying: Error
+    static func at(_ error: Error, _ stage: RuntimeTranslationStage) -> Error {
+        error is RuntimeTranslationStageError ? error : RuntimeTranslationStageError(stage: stage, underlying: error)
+    }
+}
+
+
 /// The retained library IPA is the immutable input, never a previous signed export.
 /// Hash sidecars migrate/delete alongside that original and are checked before every preparation.
 enum RuntimeOriginalIPA {
@@ -108,9 +159,32 @@ enum RuntimeArabicPipeline {
 
     /// A requested signing feature is mandatory. Only diagnostic callers use the notice wrapper.
     static func failure(_ error: Error) -> Error {
+        if let tagged = error as? RuntimeTranslationStageError {
+            let base = failure(tagged.underlying).localizedDescription
+            let notice = base == RuntimeArabicText.failed ? tagged.stage.notice : base
+            var diagnostic = tagged.stage.code
+            if let transport = tagged.underlying as? URLError {
+                diagnostic += " URL " + String(transport.code.rawValue)
+            } else if case RuntimeTranslationError.httpStatus(let status) = tagged.underlying,
+                      (100...599).contains(status) {
+                diagnostic += " HTTP " + String(status)
+            } else if case DiscoveryAuthError.httpStatus(let status) = tagged.underlying,
+                      (100...599).contains(status) {
+                diagnostic += " HTTP " + String(status)
+            } else if let scan = tagged.underlying as? RuntimeTranslationScanError {
+                switch scan {
+                case .encrypted: diagnostic += " ENCRYPTED"
+                case .malformed: diagnostic += " MALFORMED"
+                case .tooLarge: diagnostic += " LIMIT"
+                case .invalidApp: diagnostic += " APP"
+                }
+            }
+            return SideloadError.message(notice + "\n[" + diagnostic + "]")
+        }
         if let known = error as? SideloadError { return known }
         switch error {
         case RuntimeTranslationScanError.encrypted: return SideloadError.message(RuntimeArabicText.encrypted)
+        case DiscoveryAuthError.httpStatus: return SideloadError.message(RuntimeArabicText.failed)
         case is DiscoveryAuthError, RuntimeTranslationError.httpStatus(401): return SideloadError.message(RuntimeArabicText.signIn)
         case RuntimeTranslationError.notConfigured: return SideloadError.message(RuntimeArabicText.unavailable)
         default: return SideloadError.message(RuntimeArabicText.failed)
@@ -154,7 +228,7 @@ enum RuntimeArabicPipeline {
             let actual = try RuntimeOriginalIPA.hash(config)
             if let expectedConfiguration, actual != expectedConfiguration { throw RuntimeTranslationError.invalid }
             return actual
-        } catch { throw failure(error) }
+        } catch { throw failure(RuntimeTranslationStageError.at(error, .verify)) }
     }
 
     static func applyRequired(app: URL, translator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator(),
@@ -163,8 +237,10 @@ enum RuntimeArabicPipeline {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("runtime-ar-" + UUID().uuidString)
         defer { if fm.fileExists(atPath: work.path) { try? fm.removeItem(at: work) } }
+        var stage = RuntimeTranslationStage.scan
         do {
             let scan = try RuntimeTranslationScanner.scan(app: app)
+            stage = .metadata
             let revision = originalRevision ?? scan.revision
             guard revision.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { throw RuntimeTranslationError.invalid }
             let info = try IPAEditorService.info(in: app)
@@ -180,9 +256,12 @@ enum RuntimeArabicPipeline {
                 catch { box.set(.failure(error)) }
                 semaphore.signal()
             }
+            stage = .wait
             guard semaphore.wait(timeout: .now() + timeout) == .success else { task.cancel(); throw RuntimeTranslationError.timeout }
+            stage = .dictionary
             guard let result = box.get() else { throw RuntimeTranslationError.network }
             let package = try result.get()
+            stage = .merge
             let allowed = Dictionary(scan.items.map { ($0.text, $0.text) }, uniquingKeysWith: { first, _ in first })
             var table: [String: String] = [:]
             for (source, value) in package.translations where allowed[source] != nil {
@@ -203,8 +282,10 @@ enum RuntimeArabicPipeline {
                 }
             }
             guard !table.isEmpty || online != nil else { throw RuntimeTranslationError.invalid }
+            stage = .injection
             guard let dylib, (try dylib.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])).isRegularFile == true,
                   (try dylib.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink != true else { throw RuntimeTranslationError.notConfigured }
+            stage = .copy
             try fm.createDirectory(at: work, withIntermediateDirectories: true)
             let copy = work.appendingPathComponent(app.lastPathComponent)
             try fm.copyItem(at: app, to: copy)
@@ -215,25 +296,29 @@ enum RuntimeArabicPipeline {
                   (try? fm.destinationOfSymbolicLink(atPath: config.path)) == nil else { throw RuntimeTranslationError.invalid }
             // Mach-O bind/fixup ordinals refer to the original dependency order.
             // Translation is additive, never prepend its dylib ahead of those slots.
+            stage = .injection
             let originalDependencies = try IPAEditorService.dependencies(of: copy.appendingPathComponent(executable))
             try IPAEditorService.run("inject", input: copy, executable: executable, libraries: [dylib], newFirst: false)
             guard try IPAEditorService.dependencies(of: copy.appendingPathComponent(executable)) ==
                     originalDependencies + ["@loader_path/Frameworks/MirsaTranslate.dylib"] else {
                 throw RuntimeTranslationError.invalid
             }
+            stage = .config
             var dictionary: [String: Any] = ["translations": table, "substrings": [:], "regex": [], "revision": revision]
             if let online { dictionary["online"] = online }  // full scoped dictionary stays embedded: first frame is Arabic
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
             guard data.count <= 8 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])
+            stage = .verify
             try verifyInstalled(app: copy, revision: revision, bundleID: bundleID)
             // Original .ipa is not involved in this swap, and remains reusable with toggle off.
+            stage = .commit
             let backup = work.appendingPathComponent("untranslated.app")
             try fm.moveItem(at: app, to: backup)
             do { try fm.moveItem(at: copy, to: app) }
             catch { try fm.moveItem(at: backup, to: app); throw error }
             return online == nil ? RuntimeArabicText.offline : ArabicTranslateText.applied
-        } catch { throw failure(error) }
+        } catch { throw failure(RuntimeTranslationStageError.at(error, stage)) }
     }
 }
 
@@ -250,67 +335,80 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
     }
     var http: RuntimeTranslationHTTP = RuntimeTranslationHTTP()
     func dictionary(bundleID: String, revision: String, items: [ArabicIPALocalizer.Item]) async throws -> RuntimeTranslationPackage {
-        guard let endpoint, endpoint.scheme == "https", endpoint.host != nil, endpoint.user == nil,
-              endpoint.password == nil, endpoint.query == nil, endpoint.fragment == nil,
-              DiscoveryURLPolicy.isSafe(endpoint) else { throw RuntimeTranslationError.notConfigured }
-        let auth: DiscoveryTokenProvider = tokenProvider ?? DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
-            publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP(), existingOnly: true)
-        var token = try await auth.token(forceRefresh: false)
-        let account = try ForgeClient.fixUserID(token)
-        let defaults = UserDefaults.standard
-        let installKey = "MirsaRuntimeInstallationClaim25"
-        let installation = defaults.string(forKey: installKey) ?? UUID().uuidString.lowercased()
-        defaults.set(installation, forKey: installKey)
-        let issue: [String: Any] = ["action": "issue", "consent": true, "bundleId": bundleID,
-                                  "revision": revision, "installationId": installation]
-        let issued: [String: Any]
-        do { issued = try await http.post(endpoint, token: token, object: issue) }
-        catch RuntimeTranslationError.httpStatus(401) {
-            token = try await auth.token(forceRefresh: true)
-            guard try ForgeClient.fixUserID(token) == account else { throw RuntimeTranslationError.invalid }
-            issued = try await http.post(endpoint, token: token, object: issue)
-        }
-        guard let online = Self.validOnline(issued["online"] as? [String: String], bundleID: bundleID, revision: revision),
-              let activation = online["activation"],
-              activationScope(activation, account: account, bundle: bundleID, revision: revision, installation: installation,
-                              capability: online["token"] ?? "") else { throw RuntimeTranslationError.invalid }
-        var groups: [[ArabicIPALocalizer.Item]] = [], current: [ArabicIPALocalizer.Item] = [], chars = 0
-        for item in items where RuntimeTranslationScanner.safeText(item.text) {
-            if current.count == 128 || chars + item.text.utf16.count > 8192 { groups.append(current); current = []; chars = 0 }
-            current.append(item); chars += item.text.utf16.count
-        }
-        if !current.isEmpty { groups.append(current) }
-        var translations: [String: String] = [:]
-        var receipts: [[String: Any]] = [], reasons: [String] = []
-        for group in groups {
-            try Task.checkCancellation()
-            let response = try await http.post(endpoint, token: token, activation: activation, object: [
-                "action": "dictionary", "consent": true, "bundleId": bundleID, "revision": revision,
-                "items": group.map { ["id": $0.id, "text": $0.text] }
-            ])
-            guard response["bundleId"] as? String == bundleID, response["revision"] as? String == revision,
-                  let map = response["translations"] as? [String: String] else { throw RuntimeTranslationError.invalid }
-            if let deferred = response["deferred"] as? String {
-                guard let verified = Self.acceptedDeferredReceipt(response, bundleID: bundleID,
-                    revision: revision, sources: group.map(\.text)) else { throw RuntimeTranslationError.invalid }
-                receipts += verified; reasons.append(deferred)
-            } else if let verified = Self.queueReceipt(response, sources: group.map(\.text)) { receipts += verified }
-            for item in group {
-                if let value = map[item.id], ArabicIPALocalizer.acceptable(source: item.text, translated: value) { translations[item.text] = value }
+        var stage = RuntimeTranslationStage.endpoint
+        do {
+            guard let endpoint, endpoint.scheme == "https", endpoint.host != nil, endpoint.user == nil,
+                  endpoint.password == nil, endpoint.query == nil, endpoint.fragment == nil,
+                  DiscoveryURLPolicy.isSafe(endpoint) else { throw RuntimeTranslationError.notConfigured }
+            let auth: DiscoveryTokenProvider = tokenProvider ?? DiscoveryAuthClient(projectURL: URL(string: WebBackendConfig.defaultProject)!,
+                publishableKey: WebBackendConfig.defaultPublishableKey, store: KeychainSessionStore(), http: SafeMetadataHTTP(), existingOnly: true)
+            stage = .auth
+            var token = try await auth.token(forceRefresh: false)
+            stage = .identity
+            let account = try ForgeClient.fixUserID(token)
+            let defaults = UserDefaults.standard
+            let installKey = "MirsaRuntimeInstallationClaim25"
+            let installation = defaults.string(forKey: installKey) ?? UUID().uuidString.lowercased()
+            defaults.set(installation, forKey: installKey)
+            let issue: [String: Any] = ["action": "issue", "consent": true, "bundleId": bundleID,
+                                      "revision": revision, "installationId": installation]
+            let issued: [String: Any]
+            stage = .issue
+            do { issued = try await http.post(endpoint, token: token, object: issue) }
+            catch RuntimeTranslationError.httpStatus(401) {
+                stage = .auth
+                token = try await auth.token(forceRefresh: true)
+                stage = .identity
+                guard try ForgeClient.fixUserID(token) == account else { throw RuntimeTranslationError.invalid }
+                stage = .issue
+                issued = try await http.post(endpoint, token: token, object: issue)
             }
-        }
-        // Scanner requests alone omit strings learned by previous runtime sessions.
-        // Fetch the entire canonical app/revision under the newly issued capability
-        // BEFORE packaging/signing; first launch must not depend on a later OTA call.
-        guard let capability = online["token"] else { throw RuntimeTranslationError.invalid }
-        let refreshed = try await http.post(endpoint, token: capability, activation: activation,
-            object: ["action": "refresh", "consent": true, "bundleId": bundleID, "revision": revision])
-        let canonical = try Self.canonicalDictionary(refreshed, bundleID: bundleID, revision: revision)
-        // Only Kat-reviewed canonical entries are eligible for new signed exports.
-        // Historical provider values are not a fallback for missing Kat review.
-        translations = translations.filter { canonical.translations[$0.key] == $0.value }
-        return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts,
-            deferredReasons: reasons, canonicalDictionary: canonical)
+            stage = .activation
+            guard let online = Self.validOnline(issued["online"] as? [String: String], bundleID: bundleID, revision: revision),
+                  let activation = online["activation"],
+                  activationScope(activation, account: account, bundle: bundleID, revision: revision, installation: installation,
+                                  capability: online["token"] ?? "") else { throw RuntimeTranslationError.invalid }
+            var groups: [[ArabicIPALocalizer.Item]] = [], current: [ArabicIPALocalizer.Item] = [], chars = 0
+            for item in items where RuntimeTranslationScanner.safeText(item.text) {
+                if current.count == 128 || chars + item.text.utf16.count > 8192 { groups.append(current); current = []; chars = 0 }
+                current.append(item); chars += item.text.utf16.count
+            }
+            if !current.isEmpty { groups.append(current) }
+            var translations: [String: String] = [:]
+            var receipts: [[String: Any]] = [], reasons: [String] = []
+            stage = .dictionary
+            for group in groups {
+                try Task.checkCancellation()
+                let response = try await http.post(endpoint, token: token, activation: activation, object: [
+                    "action": "dictionary", "consent": true, "bundleId": bundleID, "revision": revision,
+                    "items": group.map { ["id": $0.id, "text": $0.text] }
+                ])
+                guard response["bundleId"] as? String == bundleID, response["revision"] as? String == revision,
+                      let map = response["translations"] as? [String: String] else { throw RuntimeTranslationError.invalid }
+                if let deferred = response["deferred"] as? String {
+                    guard let verified = Self.acceptedDeferredReceipt(response, bundleID: bundleID,
+                        revision: revision, sources: group.map(\.text)) else { throw RuntimeTranslationError.invalid }
+                    receipts += verified; reasons.append(deferred)
+                } else if let verified = Self.queueReceipt(response, sources: group.map(\.text)) { receipts += verified }
+                for item in group {
+                    if let value = map[item.id], ArabicIPALocalizer.acceptable(source: item.text, translated: value) { translations[item.text] = value }
+                }
+            }
+            // Scanner requests alone omit strings learned by previous runtime sessions.
+            // Fetch the entire canonical app/revision under the newly issued capability
+            // BEFORE packaging/signing; first launch must not depend on a later OTA call.
+            guard let capability = online["token"] else { throw RuntimeTranslationError.invalid }
+            stage = .refresh
+            let refreshed = try await http.post(endpoint, token: capability, activation: activation,
+                object: ["action": "refresh", "consent": true, "bundleId": bundleID, "revision": revision])
+            stage = .canonical
+            let canonical = try Self.canonicalDictionary(refreshed, bundleID: bundleID, revision: revision)
+            // Only Kat-reviewed canonical entries are eligible for new signed exports.
+            // Historical provider values are not a fallback for missing Kat review.
+            translations = translations.filter { canonical.translations[$0.key] == $0.value }
+            return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts,
+                deferredReasons: reasons, canonicalDictionary: canonical)
+        } catch { throw RuntimeTranslationStageError.at(error, stage) }
     }
 
     static func safeCanonicalEntry(source: String, value: String) -> Bool {
@@ -424,6 +522,14 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
         var request = URLRequest(url: endpoint); request.httpMethod = "POST"; request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("MirsaRuntimeTranslation/1.0", forHTTPHeaderField: "User-Agent")
+        // Public build metadata only; never install/account IDs or cached errors.
+        for (key, header) in [("CFBundleShortVersionString", "X-Mirsa-App-Version"),
+                              ("CFBundleVersion", "X-Mirsa-App-Build")] {
+            if let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+               value.range(of: "^[0-9A-Za-z.]{1,32}$", options: .regularExpression) != nil {
+                request.setValue(value, forHTTPHeaderField: header)
+            }
+        }
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         if let activation { request.setValue(activation, forHTTPHeaderField: "X-Mirsa-Activation") }
         let bytes: URLSession.AsyncBytes

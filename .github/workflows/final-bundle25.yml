@@ -8,6 +8,10 @@ on:
         default: false
   push:
     branches: [mirsa/final-bundle25, mirsa/integrated-runtime-hook25]
+# Shared private staging identity, serialized across branches without canceling another owner.
+concurrency:
+  group: mirsa-runtime-staging-synthetic-account27
+  cancel-in-progress: false
 permissions:
   contents: read
   actions: read
@@ -15,7 +19,7 @@ defaults:
   run:
     shell: bash
 env:
-  MIRSA_RELEASE_BUILD: "8.543.7"
+  MIRSA_RELEASE_BUILD: "8.543.9"
 jobs:
   exact-launch-diagnostic:
     if: ${{ inputs.exact_launch_diagnostic == true }}

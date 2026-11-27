@@ -51,6 +51,46 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         return config
     }
 
+
+    func testStageDiagnosticsDoNotLeakPathsTokensOrSourceLabels() {
+        let privateMessage = "private-path/private-token/private-ui-label"
+        for stage in RuntimeTranslationStage.allCases {
+            let error = NSError(domain: privateMessage, code: 7,
+                                userInfo: [NSLocalizedDescriptionKey: privateMessage])
+            let notice = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(error, stage)).localizedDescription
+            XCTAssertEqual(notice, stage.notice + "\n[" + stage.code + "]")
+            XCTAssertFalse(notice.contains(privateMessage))
+        }
+        let auth = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(
+            URLError(.timedOut), .auth)).localizedDescription
+        XCTAssertTrue(auth.contains("[RT27-AUTH URL -1001]"))
+        let throttled = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(
+            RuntimeTranslationError.httpStatus(429), .issue)).localizedDescription
+        XCTAssertTrue(throttled.contains("[RT27-ISSUE HTTP 429]"))
+        let authThrottle = RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(
+            DiscoveryAuthError.httpStatus(429), .auth)).localizedDescription
+        XCTAssertEqual(authThrottle, RuntimeTranslationStage.auth.notice + "\n[RT27-AUTH HTTP 429]")
+        let nested = RuntimeTranslationStageError.at(
+            RuntimeTranslationStageError.at(RuntimeTranslationError.invalid, .canonical), .dictionary)
+        XCTAssertTrue(RuntimeArabicPipeline.failure(nested).localizedDescription.contains("[RT27-CANONICAL]"))
+    }
+
+    func testLocalScanFailureHasStageCodeAndNeverCallsTranslator() throws {
+        let app = try synthetic(), before = try snapshot(app)
+        var info = try IPAEditorService.info(in: app)
+        info["CFBundleExecutable"] = "../outside-private-app"
+        try PropertyListSerialization.data(fromPropertyList: info, format: .binary, options: 0)
+            .write(to: app.appendingPathComponent("Info.plist"))
+        let pinned = try snapshot(app)
+        let translator = Translator(.failure(RuntimeTranslationError.network))
+        let notice = try XCTUnwrap(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil))
+        XCTAssertTrue(notice.contains("[RT27-SCAN APP]"))
+        XCTAssertTrue(translator.calls.isEmpty)
+        XCTAssertFalse(notice.contains("outside-private-app"))
+        XCTAssertEqual(try snapshot(app), pinned)
+        XCTAssertNotEqual(pinned, before)
+    }
+
     func testFullCanonicalRefreshAccepts200KBDictionaryWithAndWithoutContentLength() async throws {
         let fixture = try RuntimeRefreshCapProtocol27.dictionary()
         XCTAssertGreaterThanOrEqual(fixture.count, 200_000)
@@ -638,7 +678,8 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let stage = fixture.root.appendingPathComponent("missing-session")
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
         XCTAssertThrowsError(try PersonalCertificateSigner.prepare(ipa: fixture.ipa, stage: stage, options: options)) { error in
-            XCTAssertEqual(error.localizedDescription, RuntimeArabicText.signIn)
+            XCTAssertTrue(error.localizedDescription.contains(RuntimeArabicText.signIn))
+            XCTAssertTrue(error.localizedDescription.contains("RT27-AUTH"))
             XCTAssertTrue(error.localizedDescription.contains("حسابك"))
         }
         XCTAssertEqual(try RuntimeOriginalIPA.hash(fixture.ipa), original)
@@ -647,7 +688,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
     func testEncryptedSkipsDictionaryAndPreservesAllBytes() throws {
         let app = try synthetic(encrypted: true), before = try snapshot(app)
         let translator = Translator(.failure(RuntimeTranslationError.network))
-        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.encrypted)
+        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.encrypted + "\n[RT27-SCAN ENCRYPTED]")
         XCTAssertTrue(translator.calls.isEmpty)
         XCTAssertEqual(try snapshot(app), before)
         try assertNoRuntime(app)
@@ -657,14 +698,16 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
                                 (.network, RuntimeArabicText.failed), (.invalid, RuntimeArabicText.failed)] {
             let app = try synthetic(), before = try snapshot(app)
             let translator = Translator(.failure(error))
-            XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), notice)
+            let actual = RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil)
+            let expected = notice == RuntimeArabicText.failed ? RuntimeTranslationStage.dictionary.notice : notice
+            XCTAssertEqual(actual, expected + "\n[RT27-DICTIONARY]")
             XCTAssertEqual(translator.calls.count, 1)
             XCTAssertEqual(try snapshot(app), before)
             try assertNoRuntime(app)
         }
         let app = try synthetic(), before = try snapshot(app)
         let translator = Translator(.success(RuntimeTranslationPackage(translations: ["Settings": "الإعدادات"])))
-        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.unavailable)
+        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.unavailable + "\n[RT27-INJECTION]")
         XCTAssertEqual(try snapshot(app), before)
     }
     func testFullCanonicalRefreshBindsScopeAndRejectsUnsafeEntries() throws {
@@ -737,7 +780,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let translator = Translator(.success(RuntimeTranslationPackage(translations: [
             "Save %@": "حفظ", "%d items": "عناصر %n", "Not in this app": "دخيل"
         ])))
-        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.failed)
+        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeTranslationStage.merge.notice + "\n[RT27-MERGE]")
         XCTAssertEqual(try snapshot(app), before)
         let call = try XCTUnwrap(translator.calls.first)
         XCTAssertEqual(Set(call.2.map(\.text)), Set(["Save %@", "Settings", "%d items"]))
@@ -750,7 +793,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let notice = await Task.detached {
             RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil, timeout: 0.01)
         }.value
-        XCTAssertEqual(notice, RuntimeArabicText.failed)
+        XCTAssertEqual(notice, RuntimeTranslationStage.wait.notice + "\n[RT27-WAIT]")
         XCTAssertEqual(try snapshot(app), before)
         await fulfillment(of: [finished], timeout: 3)
         // Synchronize after the value-only task has resumed; no staging edits may occur.
@@ -771,7 +814,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         }
         let app = try synthetic(), before = try snapshot(app)
         let translator = Translator(.success(RuntimeTranslationPackage(translations: [:], online: valid)))
-        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.failed)
+        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeTranslationStage.merge.notice + "\n[RT27-MERGE]")
         XCTAssertEqual(try snapshot(app), before)
     }
     func testGenericRuntimeInjectionWritesOnlyPerAppSafeDictionaryAndKeepsSourceIPA() throws {
