@@ -286,12 +286,7 @@ struct LiquidTabBar: View {
     }
 
     private func glass<S: InsettableShape>(_ shape: S) -> some View {
-        shape.fill(.ultraThinMaterial)
-            // Keep light glass genuinely pale even over the window's dark aurora.
-            // Appearance preferences alone cannot guarantee the sampled material tint.
-            .overlay(shape.fill((light ? Color.white : Color.black).opacity(reduceTransparency ? 0.86 : (light ? 0.76 : 0.36))))
-            .overlay(shape.strokeBorder((light ? Color.black : Color.white).opacity(light ? 0.08 : 0.18), lineWidth: 0.75))
-            .shadow(color: .black.opacity(light ? 0.10 : 0.30), radius: 14, y: 7)
+        Color.clear.modifier(MirsaDockGlass(shape: shape, light: light))
             .allowsHitTesting(false)
     }
 
