@@ -76,7 +76,8 @@ return async (req: Request, peerIP?: string) => {
     if(body.action === 'refresh') {
       const {data,error} = await db.rpc('mirsa_runtime_refresh',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision});
       if(error || !Array.isArray(data)) fail('unavailable',503);
-      return json({bundleId:body.bundleId,revision:body.revision,entries:data},200,1048576);
+      if(data.length>20000) fail('too_large',503);
+      return json({bundleId:body.bundleId,revision:body.revision,entries:data},200,8*1024*1024);
     }
     // Every consented input is durable before the provider call, even if the provider fails.
     const queued=await db.rpc('mirsa_runtime_queue',{p_hash:hash,p_bundle:body.bundleId,p_revision:body.revision,p_items:body.items});
