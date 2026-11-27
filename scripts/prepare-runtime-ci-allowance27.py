@@ -34,12 +34,13 @@ commit;
 def active_runs(call):
     found = []
     for status in STATUSES:
-        pages = json.loads(call(['gh', 'api', '--paginate', '--slurp',
-            f'repos/{REPO}/actions/runs?status={status}&per_page=100']))
-        for page in pages:
-            for run in page['workflow_runs']:
-                if run['status'] != 'completed':
-                    found.append({'id': run['id'], 'status': run['status']})
+        raw = call(['gh', 'api', '--paginate',
+            f'repos/{REPO}/actions/runs?status={status}&per_page=100',
+            '--jq', '.workflow_runs[] | {id,status}'])
+        for line in raw.splitlines():
+            run = json.loads(line)
+            if run['status'] != 'completed':
+                found.append({'id': run['id'], 'status': run['status']})
     return found
 
 def prepare(call):

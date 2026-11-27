@@ -13,7 +13,7 @@ class AllowanceTests(unittest.TestCase):
             calls = []
             def call(args, **kw):
                 calls.append((args, kw))
-                return json.dumps([{'workflow_runs': [{'id': 123, 'status': status}]}])
+                return json.dumps({'id': 123, 'status': status})
             with self.assertRaises(RuntimeError):
                 m.prepare(call)
             self.assertTrue(all(c[0][0] == 'gh' for c in calls))
@@ -21,7 +21,7 @@ class AllowanceTests(unittest.TestCase):
     def test_wrong_database_refuses_without_mutation(self):
         def call(args, **kw):
             if args[0] == 'gh':
-                return '[{"workflow_runs":[]}]'
+                return ''
             self.assertNotIn('input', kw)
             return '/production/data'
         with self.assertRaises(RuntimeError):
@@ -36,8 +36,8 @@ class AllowanceTests(unittest.TestCase):
                 return str(m.ROOT/'pgdata')
             calls += 1
             if calls > len(m.STATUSES):
-                return '[{"workflow_runs":[{"id":124,"status":"in_progress"}]}]'
-            return '[{"workflow_runs":[]}]'
+                return '{"id":124,"status":"in_progress"}'
+            return ''
         with self.assertRaises(RuntimeError):
             m.prepare(call)
 
@@ -45,7 +45,7 @@ class AllowanceTests(unittest.TestCase):
         mutations = []
         def call(args, **kw):
             if args[0] == 'gh':
-                return '[{"workflow_runs":[]}]'
+                return ''
             if 'input' in kw:
                 mutations.append(kw['input'])
                 return 'prepared'
