@@ -1,77 +1,94 @@
 import XCTest
 
-/// Arabic real retained ContentView. Tests actual dock hit areas, context pill,
-/// workspace card, navigation menu, outside dismissal and unchanged tab order.
+/// Arabic, real ContentView with the real Apps + button. One continuous glass bar:
+/// tap/hold the ACTIVE tab to grow a contextual card out of it, no overlap with the
+/// + button, crisp hittable tabs in both states, physical tab order unchanged.
 final class ExpandableDock27UITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
     private func shot(_ name: String) {
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        a.name = "dock27-" + name + "-ar"; a.lifetime = .keepAlways; add(a)
+        a.name = "dock30-" + name + "-ar"; a.lifetime = .keepAlways; add(a)
     }
-    func testExpandCardSelectCollapseInArabic() {
+    private func launch() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-clearance-29",
+        app.launchArguments = ["-MirsaUITestHarness", "-MirsaStylePage", "dock-apps-30",
                                "-mirsa.appLanguage", "ar", "-AppleLanguages", "(ar)", "-AppleLocale", "ar"]
         app.launch()
-        let dock = app.otherElements["mirsa-tab-dock"]
-        XCTAssertTrue(dock.waitForExistence(timeout: 15))
-        let pill = app.otherElements["dock-context-pill"]
-        XCTAssertFalse(pill.exists)
-        let tabs = ["Apps", "Sources", "Pairing", "Encrypted", "Personal Apps Hub", "Mirsa AI"]
-        for (left, right) in zip(tabs, tabs.dropFirst()) {
-            XCTAssertLessThan(app.buttons["main-tab-" + left].frame.midX,
-                              app.buttons["main-tab-" + right].frame.midX)
+        return app
+    }
+    private let tabs = ["Apps", "Sources", "Pairing", "Encrypted", "Personal Apps Hub", "Mirsa AI"]
+    private func assertTabsCrisp(_ app: XCUIApplication) {
+        for t in tabs {
+            let b = app.buttons["main-tab-" + t]
+            XCTAssertTrue(b.exists, t)
+            XCTAssertTrue(b.isHittable, t + " must stay hittable")
+            XCTAssertGreaterThanOrEqual(b.frame.width, 40, t)
         }
-        shot("compact")
-        // A real hit in the Sources page remains available while collapsed.
-        XCTAssertTrue(app.staticTexts["Dock Source 1"].exists)
-        let handle = app.buttons["dock-expand-handle"]
-        XCTAssertTrue(handle.waitForExistence(timeout: 5))
-        XCTAssertTrue(handle.isHittable)
-        XCTAssertGreaterThanOrEqual(handle.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(handle.frame.height, 44)
-        XCTAssertLessThanOrEqual(handle.frame.maxY, dock.frame.minY)
-        handle.tap()
-        XCTAssertTrue(app.buttons["main-tab-Sources"].isSelected)
-        XCTAssertTrue(pill.waitForExistence(timeout: 5))
-        XCTAssertLessThanOrEqual(pill.frame.maxY, dock.frame.minY)
-        shot("context-pill")
-        app.buttons["dock-status-menu"].tap()
-        let menu = app.otherElements["dock-navigation-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        XCTAssertLessThanOrEqual(menu.frame.maxY, pill.frame.minY)
-        XCTAssertGreaterThanOrEqual(menu.frame.minX, app.frame.minX)
-        XCTAssertLessThanOrEqual(menu.frame.maxX, app.frame.maxX)
-        XCTAssertTrue(app.buttons["dock-menu-tab-Sources"].isSelected)
-        shot("navigation-menu")
-        app.buttons["dock-menu-tab-Apps"].tap()
-        XCTAssertTrue(pill.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["main-tab-Apps"].isSelected)
-        handle.tap(); XCTAssertTrue(pill.waitForExistence(timeout: 5))
-        app.buttons["dock-workspace-toggle"].tap()
+        for (l, r) in zip(tabs, tabs.dropFirst()) {
+            XCTAssertLessThan(app.buttons["main-tab-" + l].frame.midX, app.buttons["main-tab-" + r].frame.midX)
+        }
+    }
+
+    func testTapActiveTabGrowsCardFromBarWithoutFabCollision() {
+        let app = launch()
+        let dock = app.otherElements["mirsa-tab-dock"]
+        XCTAssertTrue(dock.waitForExistence(timeout: 20))
+        let fab = app.descendants(matching: .any)["apps-fab"].firstMatch
+        XCTAssertTrue(fab.waitForExistence(timeout: 10), "real Apps + button must be on screen")
+        XCTAssertLessThanOrEqual(fab.frame.maxY, dock.frame.minY, "FAB clear of compact bar")
+        // No handle, no separate capsule, no card yet.
+        XCTAssertFalse(app.buttons["dock-expand-handle"].exists)
+        XCTAssertFalse(app.otherElements["dock-context-pill"].exists)
         let card = app.otherElements["dock-expanded-card"]
+        XCTAssertFalse(card.exists)
+        assertTabsCrisp(app)
+        shot("compact")
+
+        app.buttons["main-tab-Apps"].tap()
         XCTAssertTrue(card.waitForExistence(timeout: 5))
-        XCTAssertLessThanOrEqual(card.frame.maxY, pill.frame.minY)
-        XCTAssertLessThan(app.buttons["dock-card-tab-Apps"].frame.midX,
-                          app.buttons["dock-card-tab-Sources"].frame.midX)
-        shot("workspace-dark")
-        app.buttons["dock-card-tab-Sources"].tap()
+        XCTAssertTrue(app.buttons["main-tab-Apps"].isSelected)
+        XCTAssertLessThanOrEqual(card.frame.maxY, dock.frame.minY + 1, "card sits directly on the same bar")
+        XCTAssertGreaterThanOrEqual(card.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(card.frame.maxX, app.frame.maxX)
+        XCTAssertTrue(app.buttons["dock-action-apps-files"].isHittable)
+        XCTAssertLessThan(app.buttons["dock-action-apps-files"].frame.midX, app.buttons["dock-action-apps-link"].frame.midX)
+        // FAB rides above the card with real geometry.
+        let moved = NSPredicate { _, _ in fab.frame.maxY <= card.frame.minY }
+        wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 5)
+        XCTAssertLessThanOrEqual(fab.frame.maxY, card.frame.minY, "FAB must not overlap the expanded card")
+        assertTabsCrisp(app)
+        shot("expanded")
+
+        // Tapping the active tab again closes it; the FAB returns.
+        app.buttons["main-tab-Apps"].tap()
         XCTAssertTrue(card.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(pill.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["main-tab-Sources"].isSelected)
-        // Outside dismissal must not select an underlying item.
-        handle.tap(); XCTAssertTrue(pill.waitForExistence(timeout: 5))
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
-        XCTAssertTrue(pill.waitForNonExistence(timeout: 5))
-        // Swipe from inside the dock into the page.
-        let start = dock.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
+        // Hold on the active tab opens it again.
+        app.buttons["main-tab-Apps"].press(forDuration: 0.8)
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["main-tab-Apps"].isSelected)
+        // Outside tap closes without selecting anything underneath.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        XCTAssertTrue(card.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["main-tab-Apps"].isSelected)
+        // Swipe up on the bar expands without activating a different tab.
+        let start = dock.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)))
-        XCTAssertTrue(pill.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["main-tab-Sources"].isSelected,
-                      "Expanding by swipe must not activate the tab underneath")
-        app.buttons["dock-workspace-toggle"].tap()
         XCTAssertTrue(card.waitForExistence(timeout: 5))
-        app.buttons["dock-card-close"].tap()
+        XCTAssertTrue(app.buttons["main-tab-Apps"].isSelected)
+        // Another tab closes the card and navigates.
+        app.buttons["main-tab-Sources"].tap()
         XCTAssertTrue(card.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["main-tab-Sources"].isSelected)
+        // Sources owns real actions of its own.
+        app.buttons["main-tab-Sources"].tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["dock-action-sources-add"].isHittable)
+        shot("sources-expanded")
+        app.buttons["main-tab-Sources"].tap()
+        XCTAssertTrue(card.waitForNonExistence(timeout: 5))
+        // A tab without real quick actions simply does not expand.
+        app.buttons["main-tab-Pairing"].tap()
+        app.buttons["main-tab-Pairing"].tap()
+        XCTAssertFalse(card.waitForExistence(timeout: 1.5))
     }
 }

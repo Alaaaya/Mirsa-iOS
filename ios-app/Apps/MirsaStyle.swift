@@ -268,6 +268,10 @@ struct LiquidTabBar: View {
     @Binding var selection: AppTab
     let items: [LiquidTabItem]
     var light = false
+    /// Embedded in the expandable dock: one row, no own glass or insets (the dock supplies ONE surface).
+    var embedded = false
+    var onReselect: (() -> Void)? = nil
+    var onHold: (() -> Void)? = nil
     @ObservedObject private var chatStore = ForgeChatStore.shared
     @ObservedObject private var chatLocal = ForgeChatLocal.shared
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -293,7 +297,8 @@ struct LiquidTabBar: View {
     private func tabButton(_ item: LiquidTabItem) -> some View {
         let selected = selection == item.tab
         return Button {
-            withAnimation(MirsaMotion.select) { selection = item.tab }
+            if selection == item.tab { onReselect?() }
+            else { withAnimation(MirsaMotion.select) { selection = item.tab } }
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: item.icon)
@@ -317,11 +322,11 @@ struct LiquidTabBar: View {
                     .minimumScaleFactor(0.65)
                     .allowsTightening(true)
             }
-            .foregroundStyle(light ? Color(sourcesRGB: 0x17132E).opacity(selected ? 1 : 0.6) : Color.white.opacity(selected ? 1 : 0.57))
+            .foregroundStyle(light ? Color(sourcesRGB: 0x17132E).opacity(selected ? 1 : 0.72) : Color.white.opacity(selected ? 1 : 0.76))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 if selected {
-                    if item.tab == .mirsaAI {
+                    if item.tab == .mirsaAI && !embedded {
                         Circle()
                             .fill((light ? Color.black : Color.white).opacity(light ? 0.06 : 0.14))
                             .overlay(Circle().strokeBorder((light ? Color.black : Color.white).opacity(light ? 0.06 : 0.12), lineWidth: 0.5))
@@ -335,6 +340,9 @@ struct LiquidTabBar: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.mirsaPress)
+        .highPriorityGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+            if selected { onHold?() }
+        })
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("main-tab-" + item.tab.rawValue)
         .accessibilityLabel(item.title)
@@ -342,7 +350,26 @@ struct LiquidTabBar: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    private var embeddedBody: some View {
+        HStack(spacing: 1) {
+            ForEach(items.filter { $0.tab != .mirsaAI } + items.filter { $0.tab == .mirsaAI }) { item in
+                tabButton(item)
+            }
+        }
+        .padding(5)
+        .frame(height: MirsaTabBarMetrics.height)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("mirsa-tab-dock")
+        .accessibilityValue(light ? "light" : "dark")
+        .environment(\.colorScheme, light ? .light : .dark)
+        .environment(\.layoutDirection, .leftToRight)
+    }
+
     var body: some View {
+        if embedded { embeddedBody } else { standaloneBody }
+    }
+
+    private var standaloneBody: some View {
         HStack(spacing: 10) {
             HStack(spacing: 1) {
                 ForEach(items.filter { $0.tab != .mirsaAI }) { item in

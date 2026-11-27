@@ -103,6 +103,8 @@ struct AppsTab: View {
     @ObservedObject private var progressState = MirsaOperationProgress.shared
     @ObservedObject private var hiddenStore = HiddenAppsStore.shared
     @ObservedObject private var downloads = DownloadsLibrary.shared
+    @ObservedObject private var dockState = MirsaDockState.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotionDock
     @AppStorage("mirsa.apps.homeLayout") private var homeLayout = false
     @AppStorage("mirsa.home.style") private var homeStyle = "pages"
     @Namespace private var segNS
@@ -174,7 +176,9 @@ struct AppsTab: View {
             fab
                 .padding(.trailing, MirsaSpacing.page)
                 // Clear gap above the floating dock (the tab already reserves the dock's own room).
-                .padding(.bottom, MirsaSpacing.xl + MirsaTabBarMetrics.clearance)
+                // The dock publishes its expanded card height: the button rides above it.
+                .padding(.bottom, MirsaSpacing.xl + MirsaTabBarMetrics.clearance + dockState.expansionHeight)
+                .animation(reduceMotionDock ? nil : .spring(response: 0.42, dampingFraction: 0.82), value: dockState.expansionHeight)
 
             }
 
@@ -236,6 +240,14 @@ struct AppsTab: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .mirsaShowHidden)) { _ in showHidden = true }
+        .onReceive(NotificationCenter.default.publisher(for: .mirsaDockAction)) { n in
+            switch n.object as? String {
+            case "apps-files": showPicker = true
+            case "apps-link": showURLImport = true
+            case "apps-hidden": showHidden = true
+            default: break
+            }
+        }
         .onChange(of: scenePhaseForUpdates) { _, ph in
             if ph != .active { hiddenStore.lock() }
             if ph == .active { Task { await updater.check() } }
@@ -473,6 +485,7 @@ struct AppsTab: View {
                 .shadow(color: MirsaPalette.accent.opacity(0.5), radius: 14, y: 6)
         }
         .buttonStyle(.mirsaPress)
+        .accessibilityIdentifier("apps-fab")
         .accessibilityLabel(L.t("empty.import"))
     }
 

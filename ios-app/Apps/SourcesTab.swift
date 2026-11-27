@@ -799,6 +799,13 @@ struct SourcesTab: View {
                 Text(src.name + " — " + tr("Apps already installed stay installed.", "التطبيقات المثبّتة بتضل مثبّتة.", ckb: "ئەو ئەپانەی دامەزراون وەک خۆیان دەمێننەوە.", kmr: "Sepanên ku hatine saz kirin dimînin."))
             }
             .sheet(item: Binding(get: { sharingURL.map { SharedSourceURL(url: $0) } }, set: { if $0 == nil { sharingURL = nil } })) { SourceShareSheet(url: $0.url).presentationDetents([.medium, .large]) }
+            .onReceive(NotificationCenter.default.publisher(for: .mirsaDockAction)) { n in
+                switch n.object as? String {
+                case "sources-add": input = UIPasteboard.general.string ?? ""; adding = true
+                case "sources-search": searching = true
+                default: break
+                }
+            }
             .alert(tr("Add Source", "أضف سورس"), isPresented: $adding) {
                 TextField("https://…/source.json", text: $input)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)

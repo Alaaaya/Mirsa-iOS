@@ -64,6 +64,7 @@ struct MirsaStyleShotHost: View {
         case "glass-dock-review": GlassDockReviewHost()
         case "sources-delete-validation": SourcesDeleteValidationHost()
         case "dock-clearance-29": SourcesDock29ValidationHost()
+        case "dock-apps-30": ContentView().onAppear { vm.selectedTab = .apps }
         case "certificate-parity-29": PersonalProjectDetailView(app: Self.fixturePersonalApp(1))
         case "store-preview-detail": ToolsStorePreviewShotHost(detail: true)
         case "store-preview-card": ToolsStorePreviewShotHost(detail: false)

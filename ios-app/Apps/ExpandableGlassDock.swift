@@ -1,241 +1,169 @@
 import SwiftUI
 
-/// Native adaptation of rit3zh's expandable dock. Two glass cards lift out of
-/// the dock, with a separate context/menu pill. This is navigation context, not
-/// a fabricated account-presence service. The original six destinations stay
-/// in their original physical order.
+/// Published by the dock so floating page controls (the Apps + button) can move
+/// above an expanded card instead of colliding with it.
+@MainActor
+final class MirsaDockState: ObservableObject {
+    static let shared = MirsaDockState()
+    @Published var expansionHeight: CGFloat = 0
+}
+
+extension Notification.Name {
+    /// Carries one of the dock action ids as `object`. Tabs that own the action listen.
+    static let mirsaDockAction = Notification.Name("mirsa.dock.action")
+}
+
+/// Native adaptation of rit3zh's expandable bottom tabs: ONE continuous glass
+/// surface. Tapping or holding the active tab grows a contextual card out of the
+/// bar itself; the six tabs stay crisp, in place and in physical order.
 struct ExpandableGlassDock: View {
     @Binding var selection: AppTab
     let items: [LiquidTabItem]
     var light = false
-    private enum Card { case workspace, profile }
-    @State private var card: Card?
-    @State private var menuOpen = false
-    @Namespace private var glassNamespace
+    @State private var expanded = false
+    @State private var lastHold = Date.distantPast
+    @ObservedObject private var dockState = MirsaDockState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var ink: Color { light ? Color(sourcesRGB: 0x17132E) : .white }
+    private var actions: [DockAction] { DockAction.actions(for: selection) }
     private var current: LiquidTabItem? { items.first { $0.tab == selection } }
-    private var menuTitle: String {
-        tr5("Navigate", "التنقّل", de: "Navigation", ckb: "گەڕان", kmr: "Rêgez")
-    }
     private var spring: Animation? {
-        reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.80)
+        reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)
     }
-    private func show(_ value: Card?) {
-        withAnimation(spring) { card = value; menuOpen = false }
+    private func setExpanded(_ value: Bool) {
+        guard value == false || !actions.isEmpty else { return }
+        withAnimation(spring) { expanded = value }
+        if !value { dockState.expansionHeight = 0 }
     }
-    private func choose(_ tab: AppTab) {
-        withAnimation(spring) { selection = tab; card = nil; menuOpen = false }
+    private func run(_ action: DockAction) {
+        setExpanded(false)
+        if action.id == "encrypted-downloads" {
+            NotificationCenter.default.post(name: Notification.Name("mirsa.store.wishlist.open"), object: nil)
+        } else {
+            NotificationCenter.default.post(name: .mirsaDockAction, object: action.id)
+        }
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Only expanded overlays intercept the page. The compact dock must
-            // never turn its full-screen layout frame into an invisible blocker.
-            if card != nil {
+            // Only an expanded card intercepts the page.
+            if expanded {
                 Color.black.opacity(0.001)
                     .contentShape(Rectangle())
-                    .onTapGesture { show(nil) }
+                    .onTapGesture { setExpanded(false) }
                     .accessibilityHidden(true)
                     .accessibilityIdentifier("dock-dismiss-region")
             }
-            DockGlassGroup {
-                VStack(alignment: .trailing, spacing: 9) {
-                    Spacer(minLength: 0)
-                    if menuOpen {
-                        navigationMenu
-                            .transition(.scale(scale: 0.90, anchor: .bottomTrailing).combined(with: .opacity))
-                    }
-                    if card == .workspace {
-                        workspaceCard
-                            .transition(.scale(scale: 0.88, anchor: .bottomLeading).combined(with: .opacity))
-                    }
-                    if card != nil {
-                        contextPill
-                            .transition(.scale(scale: 0.88, anchor: .bottomTrailing).combined(with: .opacity))
-                    }
-                    // Keep the expansion hit area in its own layout row. An
-                    // offset overlay outside the bar's bounds was exposed to
-                    // accessibility but hit-tested as the AI tab underneath it.
-                    if card == nil {
-                        HStack {
-                            Spacer(minLength: 0)
-                            Button { show(.profile) } label: {
-                                Image(systemName: "chevron.up")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(ink.opacity(0.70))
-                                    .frame(width: 44, height: 22)
-                                    .modifier(MirsaDockGlass(shape: Capsule(), light: light))
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("dock-expand-handle")
-                            .accessibilityLabel(menuTitle)
-                        }
-                        .padding(.horizontal, MirsaTabBarMetrics.sideInset + 12)
-                    }
-                    LiquidTabBar(selection: $selection, items: items, light: light)
-                        .contentShape(Rectangle())
-                        // A recognised drag must cancel the child tab button's
-                        // tap. Simultaneous recognition selected that tab on
-                        // release, and its selection change closed this card.
-                        .highPriorityGesture(DragGesture(minimumDistance: 16).onEnded { value in
-                            guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                            if value.translation.height < -28 { show(.profile) }
-                            else if value.translation.height > 28 { show(nil) }
-                        })
-                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in show(.workspace) })
+            VStack(spacing: 0) {
+                if expanded && !actions.isEmpty {
+                    card
+                        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
                 }
+                LiquidTabBar(selection: $selection, items: items, light: light, embedded: true,
+                             onReselect: {
+                                 // The press that ends a hold must not toggle it shut again.
+                                 guard Date().timeIntervalSince(lastHold) > 0.8 else { return }
+                                 setExpanded(!expanded)
+                             },
+                             onHold: { lastHold = Date(); setExpanded(true) })
+                    // A recognised vertical drag cancels the child tab tap.
+                    .highPriorityGesture(DragGesture(minimumDistance: 16).onEnded { value in
+                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                        if value.translation.height < -28 { setExpanded(true) }
+                        else if value.translation.height > 28 { setExpanded(false) }
+                    })
             }
+            // The ONE material, behind all foreground content.
+            .background {
+                Color.clear
+                    .modifier(MirsaDockGlass(shape: RoundedRectangle(cornerRadius: expanded ? 30 : 33, style: .continuous), light: light))
+                    .allowsHitTesting(false)
+            }
+            .padding(.horizontal, MirsaTabBarMetrics.sideInset)
+            .padding(.bottom, MirsaTabBarMetrics.bottomGap)
         }
         .foregroundStyle(ink)
         .environment(\.colorScheme, light ? .light : .dark)
         .environment(\.layoutDirection, .leftToRight)
-        .onChange(of: selection) { _, _ in show(nil) }
-        .accessibilityAction(.escape) { show(nil) }
+        .onChange(of: selection) { _, _ in setExpanded(false) }
+        .accessibilityAction(.escape) { setExpanded(false) }
     }
 
-    // The left quick button and right profile/context capsule reproduce the
-    // reference's split layout instead of placing a duplicate tab grid above it.
-    private var contextPill: some View {
-        HStack(spacing: 9) {
-            Button { show(card == .workspace ? .profile : .workspace) } label: {
-                Image(systemName: card == .workspace ? "bubble.left.and.bubble.right.fill" : "square.stack.3d.up.fill")
-                    .font(.system(size: 20, weight: .medium))
-                    .frame(width: 58, height: 58)
-                    .modifier(MirsaDockGlass(shape: Circle(), light: light))
-                    .modifier(DockGlassIdentity(id: "workspace-toggle", namespace: glassNamespace))
-            }
-            .buttonStyle(.mirsaPress)
-            .accessibilityIdentifier("dock-workspace-toggle")
-            .accessibilityLabel(tr5("Workspace", "مساحة العمل", de: "Arbeitsbereich", ckb: "شوێنی کار", kmr: "Qada xebatê"))
-
-            HStack(spacing: 10) {
-                Button { choose(.personalHub) } label: { appMark }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("dock-certificate-shortcut")
-                    .accessibilityLabel(items.first { $0.tab == .personalHub }?.title ?? "Mirsa")
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Mirsa").font(.system(size: 16, weight: .semibold))
-                    Text(current?.title ?? menuTitle)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ink.opacity(0.58))
-                        .lineLimit(1).minimumScaleFactor(0.75)
-                }
-                Spacer(minLength: 4)
-                Button {
-                    withAnimation(spring) { menuOpen.toggle() }
-                } label: {
-                    Image(systemName: menuOpen ? "chevron.down" : (current?.icon ?? "ellipsis"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 36, height: 36)
-                        .background(Color.accentColor.opacity(0.13), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("dock-status-menu")
-                .accessibilityLabel(menuTitle)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 58)
-            .modifier(MirsaDockGlass(shape: Capsule(), light: light))
-            .modifier(DockGlassIdentity(id: "context-pill", namespace: glassNamespace))
-        }
-        .padding(.horizontal, MirsaTabBarMetrics.sideInset)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("dock-context-pill")
-    }
-
-    private var appMark: some View {
-        Image("DockMirsaMark").resizable().scaledToFill()
-        .frame(width: 34, height: 34)
-        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .accessibilityHidden(true)
-    }
-
-    private var workspaceCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(spacing: 12) {
-                appMark
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Mirsa").font(.system(size: 20, weight: .bold))
-                    Text(current?.title ?? menuTitle).font(.system(size: 12)).foregroundStyle(ink.opacity(0.6))
-                }
-                Spacer()
-                Button { show(nil) } label: {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
-                        .frame(width: 30, height: 30).background(ink.opacity(0.07), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("dock-card-close")
-                .accessibilityLabel(tr5("Close", "إغلاق", de: "Schließen", ckb: "داخستن", kmr: "Bigire"))
-            }
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(current?.title ?? "")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(ink.opacity(0.62))
+                .padding(.horizontal, 6)
+                .accessibilityAddTraits(.isHeader)
             HStack(spacing: 8) {
-                workspaceShortcut(.apps)
-                workspaceShortcut(.sources)
+                ForEach(actions) { action in
+                    Button { run(action) } label: {
+                        VStack(spacing: 7) {
+                            Image(systemName: action.icon)
+                                .font(.system(size: 20, weight: .medium))
+                                .frame(height: 24)
+                            Text(action.title)
+                                .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(2).multilineTextAlignment(.center)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 74)
+                        .padding(.horizontal, 4)
+                        .background(ink.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    }
+                    .buttonStyle(.mirsaPress)
+                    .accessibilityIdentifier("dock-action-" + action.id)
+                }
             }
         }
-        .padding(18)
-        .modifier(MirsaDockGlass(shape: RoundedRectangle(cornerRadius: 28, style: .continuous), light: light))
-        .modifier(DockGlassIdentity(id: "workspace-card", namespace: glassNamespace))
-        .padding(.horizontal, MirsaTabBarMetrics.sideInset)
+        .padding(.top, 14).padding(.horizontal, 12).padding(.bottom, 6)
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { dockState.expansionHeight = geo.size.height + 8 }
+                    .onChange(of: geo.size.height) { _, h in dockState.expansionHeight = h + 8 }
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("dock-expanded-card")
     }
+}
 
-    private func workspaceShortcut(_ tab: AppTab) -> some View {
-        let item = items.first { $0.tab == tab }
-        return Button { choose(tab) } label: {
-            HStack(spacing: 8) {
-                Image(systemName: item?.icon ?? "square.grid.2x2")
-                Text(item?.title ?? "Mirsa").lineLimit(1).minimumScaleFactor(0.65)
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold))
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .padding(12)
-            .background(ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.mirsaPress)
-        .accessibilityIdentifier("dock-card-tab-" + tab.rawValue)
-    }
+/// A real, existing action of the selected tab. Tabs without one do not expand.
+struct DockAction: Identifiable {
+    let id: String
+    let icon: String
+    let title: String
 
-    private var navigationMenu: some View {
-        VStack(spacing: 2) {
-            ForEach(items) { item in
-                Button { choose(item.tab) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .opacity(item.tab == selection ? 1 : 0)
-                            .frame(width: 16)
-                        Text(item.title)
-                            .font(.system(size: 14, weight: .medium))
-                            .lineLimit(1).minimumScaleFactor(0.75)
-                        Spacer(minLength: 10)
-                        Image(systemName: item.icon)
-                            .foregroundStyle(item.tab == selection ? Color.accentColor : ink.opacity(0.60))
-                            .frame(width: 22)
-                    }
-                    .padding(.horizontal, 12).frame(minHeight: 42)
-                    .contentShape(Rectangle())
-                    .background(item.tab == selection ? ink.opacity(0.07) : .clear,
-                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("dock-menu-tab-" + item.tab.rawValue)
-                .accessibilityAddTraits(item.tab == selection ? .isSelected : [])
-            }
+    @MainActor static func actions(for tab: AppTab) -> [DockAction] {
+        switch tab {
+        case .apps:
+            return [
+                DockAction(id: "apps-files", icon: "folder",
+                           title: tr5("From Files", "من الملفات", de: "Aus Dateien", ckb: "لە فایلەکانەوە", kmr: "Ji Pelan")),
+                DockAction(id: "apps-link", icon: "link",
+                           title: tr5("From link", "من رابط", de: "Per Link", ckb: "لە بەستەرەوە", kmr: "Ji lînkê")),
+                DockAction(id: "apps-hidden", icon: "eye.slash",
+                           title: tr5("Hidden apps", "التطبيقات المخفية", de: "Versteckte Apps", ckb: "ئەپە شاراوەکان", kmr: "Sepanên veşartî")),
+            ]
+        case .sources:
+            return [
+                DockAction(id: "sources-add", icon: "plus",
+                           title: tr5("Add source", "أضف سورس", de: "Quelle hinzufügen", ckb: "سەرچاوە زیاد بکە", kmr: "Çavkaniyê lê zêde bike")),
+                DockAction(id: "sources-search", icon: "magnifyingglass",
+                           title: tr5("Search", "بحث", de: "Suchen", ckb: "گەڕان", kmr: "Lêgerîn")),
+            ]
+        case .encrypted:
+            return [
+                DockAction(id: "encrypted-downloads", icon: "arrow.down.circle",
+                           title: tr5("Downloads", "التنزيلات", de: "Downloads", ckb: "داگرتنەکان", kmr: "Daxistin")),
+            ]
+        default:
+            return []
         }
-        .padding(7)
-        .frame(width: 248)
-        .modifier(MirsaDockGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous), light: light))
-        .modifier(DockGlassIdentity(id: "context-menu", namespace: glassNamespace))
-        .padding(.trailing, MirsaTabBarMetrics.sideInset)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("dock-navigation-menu")
     }
 }
 
@@ -260,25 +188,3 @@ struct MirsaDockGlass<S: InsettableShape>: ViewModifier {
     }
 }
 
-private struct DockGlassIdentity: ViewModifier {
-    let id: String
-    let namespace: Namespace.ID
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffectID(id, in: namespace)
-        } else {
-            content
-        }
-    }
-}
-
-private struct DockGlassGroup<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-    var body: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 8, content: content)
-        } else {
-            content()
-        }
-    }
-}
