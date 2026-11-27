@@ -352,6 +352,50 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         throw RuntimeTranslationError.network
     }
 
+    /// Kat-only staging intentionally queues unknown source revisions. Prepare the
+    /// own-code fixture through the real public protocol, then wait for the private
+    /// operator to save Kat-authored canonical entries. No translation/test override
+    /// is injected into the production signer below.
+    private func awaitCanonicalSigningFixture(_ fixture: (ipa: URL, app: URL, root: URL),
+                                              revision: String, endpoint: URL) async throws {
+        let info = try IPAEditorService.info(in: fixture.app)
+        let id = try XCTUnwrap(info["CFBundleIdentifier"] as? String)
+        guard id == "com.alaa.mirsa.ci.signedfolder" else { throw RuntimeTranslationError.invalid }
+        let scan = try RuntimeTranslationScanner.scan(app: fixture.app)
+        let items = scan.items.filter { RuntimeTranslationScanner.safeText($0.text) }
+        let expected = Set(["Settings", "Save %@", "%d items"])
+        guard Set(items.map(\.text)) == expected else { throw RuntimeTranslationError.invalid }
+        let queued = try await RuntimeArabicBackendTranslator().dictionary(bundleID: id, revision: revision, items: items)
+        let online = try XCTUnwrap(queued.online)
+        let capability = try XCTUnwrap(online["token"])
+        let activation = try XCTUnwrap(online["activation"])
+        for _ in 0..<6 {
+            try await Task.sleep(nanoseconds: 10_000_000_000)
+            let response = try await RuntimeTranslationHTTP().post(endpoint, token: capability, activation: activation,
+                object: ["action": "refresh", "consent": true, "bundleId": id, "revision": revision])
+            guard response["bundleId"] as? String == id, response["revision"] as? String == revision,
+                  let entries = response["entries"] as? [[String: Any]] else { throw RuntimeTranslationError.invalid }
+            var canonical: [String: String] = [:]
+            for entry in entries {
+                guard let source = entry["source"] as? String, let value = entry["translation"] as? String,
+                      entry["provenance"] as? String == "kat",
+                      ArabicIPALocalizer.acceptable(source: source, translated: value) else {
+                    throw RuntimeTranslationError.invalid
+                }
+                canonical[source] = value
+            }
+            if Set(canonical.keys) == expected {
+                // Fixture setup has its own quota window. Keep the real per-minute
+                // service limits unchanged for the subsequent production/network tests.
+                try await Task.sleep(nanoseconds: 61_000_000_000)
+                print("Exact Kat-only scoped signing fixture is canonical and ready")
+                return
+            }
+        }
+        XCTFail("Kat-only signing fixture was not canonically reviewed before production signing")
+        throw RuntimeTranslationError.timeout
+    }
+
     /// No injected translator, endpoint or manual staging session. The same app account,
     /// prepare -> Rust personal_sign -> post-sign verification -> pack path as the UI.
     func testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject() async throws {
@@ -370,6 +414,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         try await awaitStagingTransportReadiness(endpoint)
         store.save(DiscoverySession(accessToken: token, refreshToken: "unused-fixture-refresh", expiresAt: expiry))
         let fixture = try realFixture(), original = try RuntimeOriginalIPA.hash(fixture.ipa)
+        try await awaitCanonicalSigningFixture(fixture, revision: original, endpoint: endpoint)
         let bundle = Bundle(for: Self.self)
         let material = PersonalIdentityVault.Material(
             p12: try Data(contentsOf: XCTUnwrap(bundle.url(forResource: "LCSignSynthetic", withExtension: "p12"))),
