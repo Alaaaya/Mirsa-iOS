@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import CoreFoundation
 
 enum RuntimeArabicText {
     static var encrypted: String { personalText("This app is encrypted, so it cannot be translated.", "هالتطبيق مشفّر، وما فينا نعرّبه.") }
@@ -9,12 +10,21 @@ enum RuntimeArabicText {
     static var offline: String { personalText("Arabic dictionary added. Online translation is unavailable.", "انضاف قاموس التعريب. ترجمة النصوص الناقصة عبر الإنترنت مو متاحة.") }
 }
 
+/// A complete, authenticated refresh for precisely one account capability/app revision.
+/// Unlike scanner results this includes reviewed strings first discovered at runtime.
+struct RuntimeCanonicalDictionary {
+    let bundleID: String
+    let revision: String
+    let translations: [String: String]
+}
+
 struct RuntimeTranslationPackage {
     /// Exact source text to Arabic. Contains no user/provider credentials.
     let translations: [String: String]
     var online: [String: String]? = nil
     var queueReceipts: [[String: Any]] = []
     var deferredReasons: [String] = []
+    var canonicalDictionary: RuntimeCanonicalDictionary? = nil
 }
 
 protocol RuntimeDictionaryTranslating {
@@ -182,6 +192,16 @@ enum RuntimeArabicPipeline {
                 }
             }
             let online = RuntimeArabicBackendTranslator.validOnline(package.online, bundleID: bundleID, revision: revision)
+            if let canonical = package.canonicalDictionary {
+                guard online != nil, canonical.bundleID == bundleID, canonical.revision == revision,
+                      canonical.translations.count <= 1564 else { throw RuntimeTranslationError.invalid }
+                for (source, value) in canonical.translations {
+                    guard RuntimeArabicBackendTranslator.safeCanonicalEntry(source: source, value: value) else {
+                        throw RuntimeTranslationError.invalid
+                    }
+                    table[source] = value
+                }
+            }
             guard !table.isEmpty || online != nil else { throw RuntimeTranslationError.invalid }
             guard let dylib, (try dylib.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])).isRegularFile == true,
                   (try dylib.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink != true else { throw RuntimeTranslationError.notConfigured }
@@ -279,7 +299,47 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
                 if let value = map[item.id], ArabicIPALocalizer.acceptable(source: item.text, translated: value) { translations[item.text] = value }
             }
         }
-        return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts, deferredReasons: reasons)
+        // Scanner requests alone omit strings learned by previous runtime sessions.
+        // Fetch the entire canonical app/revision under the newly issued capability
+        // BEFORE packaging/signing; first launch must not depend on a later OTA call.
+        guard let capability = online["token"] else { throw RuntimeTranslationError.invalid }
+        let refreshed = try await http.post(endpoint, token: capability, activation: activation,
+            object: ["action": "refresh", "consent": true, "bundleId": bundleID, "revision": revision])
+        let canonical = try Self.canonicalDictionary(refreshed, bundleID: bundleID, revision: revision)
+        // Only Kat-reviewed canonical entries are eligible for new signed exports.
+        // Historical provider values are not a fallback for missing Kat review.
+        translations = translations.filter { canonical.translations[$0.key] == $0.value }
+        return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts,
+            deferredReasons: reasons, canonicalDictionary: canonical)
+    }
+
+    static func safeCanonicalEntry(source: String, value: String) -> Bool {
+        RuntimeTranslationScanner.safeText(source) && value.utf16.count <= 1024 &&
+            ArabicIPALocalizer.acceptable(source: source, translated: value) &&
+            value.range(of: "[\\u0600-\\u06ff]", options: .regularExpression) != nil &&
+            value.range(of: "[\\u3400-\\u9fff\\uf900-\\ufaff\\u3040-\\u30ff\\uac00-\\ud7af]", options: .regularExpression) == nil
+    }
+
+    static func canonicalDictionary(_ response: [String: Any], bundleID: String,
+                                    revision: String) throws -> RuntimeCanonicalDictionary {
+        guard response["bundleId"] as? String == bundleID, response["revision"] as? String == revision,
+              let entries = response["entries"] as? [[String: Any]], entries.count <= 1564 else {
+            throw RuntimeTranslationError.invalid
+        }
+        var table: [String: String] = [:], seen = Set<String>()
+        for entry in entries {
+            guard let source = entry["source"] as? String, let value = entry["translation"] as? String,
+                  let provenance = entry["provenance"] as? String,
+                  let version = entry["version"] as? NSNumber,
+                  CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue.isFinite,
+                  version.doubleValue >= 1, version.doubleValue.rounded(.down) == version.doubleValue,
+                  seen.insert(source).inserted, safeCanonicalEntry(source: source, value: value) else {
+                throw RuntimeTranslationError.invalid
+            }
+            guard provenance == "kat" else { continue }
+            table[source] = value
+        }
+        return RuntimeCanonicalDictionary(bundleID: bundleID, revision: revision, translations: table)
     }
     func activationScope(_ token: String, account: UUID, bundle: String, revision: String,
                                  installation: String, capability: String) -> Bool {

@@ -363,9 +363,13 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         guard id == "com.alaa.mirsa.ci.signedfolder" else { throw RuntimeTranslationError.invalid }
         let scan = try RuntimeTranslationScanner.scan(app: fixture.app)
         let items = scan.items.filter { RuntimeTranslationScanner.safeText($0.text) }
-        let expected = Set(["Settings", "Save %@", "%d items"])
-        guard Set(items.map(\.text)) == expected else { throw RuntimeTranslationError.invalid }
-        let queued = try await RuntimeArabicBackendTranslator().dictionary(bundleID: id, revision: revision, items: items)
+        let scannedSources = Set(["Settings", "Save %@", "%d items"])
+        guard Set(items.map(\.text)) == scannedSources else { throw RuntimeTranslationError.invalid }
+        // This entry is intentionally absent from the IPA scan, as if discovered by
+        // an earlier runtime session. Production signing must embed it as well.
+        let runtimeItem = ArabicIPALocalizer.Item(id: "runtime-menu", text: "Runtime menu")
+        let expected = scannedSources.union([runtimeItem.text])
+        let queued = try await RuntimeArabicBackendTranslator().dictionary(bundleID: id, revision: revision, items: items + [runtimeItem])
         let online = try XCTUnwrap(queued.online)
         let capability = try XCTUnwrap(online["token"])
         let activation = try XCTUnwrap(online["activation"])
@@ -455,31 +459,27 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let proofRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("RuntimeSigningProof25")
         try FileManager.default.createDirectory(at: proofRoot, withIntermediateDirectories: true)
-        // Independently re-read the canonical dictionary under this exact activation.
-        // Compare every eligible source, not merely a nonempty/Arabic sample.
+        // Independently fetch the FULL canonical scope, including previously learned
+        // runtime strings that cannot be found by the binary/localization scanner.
         let online = try XCTUnwrap(object["online"] as? [String: String])
         let activation = try XCTUnwrap(online["activation"])
-        let scanned = try RuntimeTranslationScanner.scan(app: fixture.app)
-        let items = scanned.items.filter { RuntimeTranslationScanner.safeText($0.text) }
+        let capability = try XCTUnwrap(online["token"])
+        let response = try await RuntimeTranslationHTTP().post(endpoint, token: capability, activation: activation,
+            object: ["action": "refresh", "consent": true, "bundleId": id, "revision": original])
+        XCTAssertEqual(response["bundleId"] as? String, id)
+        XCTAssertEqual(response["revision"] as? String, original)
+        let entries = try XCTUnwrap(response["entries"] as? [[String: Any]])
         var canonical: [String: String] = [:]
-        for start in stride(from: 0, to: items.count, by: 32) {
-            let group = Array(items[start..<min(start + 32, items.count)])
-            let response = try await RuntimeTranslationHTTP().post(endpoint, token: token, activation: activation,
-                object: ["action": "dictionary", "consent": true, "bundleId": id, "revision": original,
-                         "items": group.map { ["id": $0.id, "text": $0.text] }])
-            XCTAssertEqual(response["bundleId"] as? String, id)
-            XCTAssertEqual(response["revision"] as? String, original)
-            let map = try XCTUnwrap(response["translations"] as? [String: String])
-            for item in group {
-                if let value = map[item.id],
-                   ArabicIPALocalizer.acceptable(source: item.text, translated: value),
-                   value.range(of: "[\\u0600-\\u06ff]", options: .regularExpression) != nil {
-                    canonical[item.text] = value
-                }
-            }
+        for entry in entries {
+            let source = try XCTUnwrap(entry["source"] as? String)
+            let value = try XCTUnwrap(entry["translation"] as? String)
+            XCTAssertEqual(entry["provenance"] as? String, "kat")
+            XCTAssertTrue(ArabicIPALocalizer.acceptable(source: source, translated: value))
+            XCTAssertNil(canonical.updateValue(value, forKey: source), "Duplicate scoped source")
         }
-        XCTAssertFalse(canonical.isEmpty)
-        XCTAssertEqual(embedded, canonical, "Signed dictionary must equal all eligible canonical scoped entries")
+        XCTAssertEqual(canonical, ["Settings": "الإعدادات", "Save %@": "حفظ %@",
+                                   "%d items": "%d عنصر", "Runtime menu": "قائمة التطبيق"])
+        XCTAssertEqual(embedded, canonical, "Signed dictionary must equal ALL canonical scoped entries, not just scanned strings")
         let scopeProof: [String: Any] = ["bundleId": id, "revision": original, "translations": canonical]
         try JSONSerialization.data(withJSONObject: scopeProof, options: [.sortedKeys])
             .write(to: proofRoot.appendingPathComponent("ON-dictionary-proof.json"), options: .atomic)
@@ -548,6 +548,44 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeArabicText.unavailable)
         XCTAssertEqual(try snapshot(app), before)
     }
+    func testFullCanonicalRefreshBindsScopeAndRejectsUnsafeEntries() throws {
+        let bundle = "com.mirsa.fixture", revision = String(repeating: "a", count: 64)
+        let kat: [String: Any] = ["source": "Runtime menu", "translation": "قائمة التطبيق", "provenance": "kat", "version": 2]
+        let old: [String: Any] = ["source": "Settings", "translation": "الإعدادات", "provenance": "gemini", "version": 1]
+        let good: [String: Any] = ["bundleId": bundle, "revision": revision, "entries": [kat, old]]
+        func parse(_ value: [String: Any]) throws -> RuntimeCanonicalDictionary {
+            try RuntimeArabicBackendTranslator.canonicalDictionary(value, bundleID: bundle, revision: revision)
+        }
+        XCTAssertEqual(try parse(good).translations, ["Runtime menu": "قائمة التطبيق"])
+        for (key, value) in [("bundleId", "com.other.app"), ("revision", String(repeating: "b", count: 64))] {
+            var bad = good; bad[key] = value
+            XCTAssertThrowsError(try parse(bad))
+        }
+        for (key, value) in [("source", "secret=user@example.com" as Any),
+                             ("translation", "قائمة %@" as Any), ("translation", "菜单" as Any),
+                             ("version", true as Any), ("version", 1.5 as Any), ("version", 0 as Any)] {
+            var item = kat; item[key] = value
+            var bad = good; bad["entries"] = [item]
+            XCTAssertThrowsError(try parse(bad), key)
+        }
+        var duplicate = good; duplicate["entries"] = [kat, kat]
+        XCTAssertThrowsError(try parse(duplicate))
+    }
+
+    func testRealSigningPipelineEmbedsPreviouslyLearnedCanonicalRuntimeSource() throws {
+        let fixture = try realFixture(), scan = try RuntimeTranslationScanner.scan(app: fixture.app)
+        let bundle = try XCTUnwrap(IPAEditorService.info(in: fixture.app)["CFBundleIdentifier"] as? String)
+        XCTAssertFalse(scan.items.contains { $0.text == "Runtime menu" })
+        let canonical = RuntimeCanonicalDictionary(bundleID: bundle, revision: scan.revision,
+            translations: ["Runtime menu": "قائمة التطبيق", "Settings": "الإعدادات"])
+        let translator = Translator(.success(RuntimeTranslationPackage(translations: ["Settings": "الإعدادات"],
+            online: grant(bundle: bundle, revision: scan.revision), canonicalDictionary: canonical)))
+        try RuntimeArabicPipeline.applyRequired(app: fixture.app, translator: translator)
+        let config = fixture.app.appendingPathComponent("Frameworks/MirsaTranslations.json")
+        let data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
+        XCTAssertEqual(data["translations"] as? [String: String], canonical.translations)
+    }
+
     func testDynamicSourcesAndPlaceholderMismatchCannotCreateDictionary() throws {
         let app = try synthetic(), before = try snapshot(app)
         let translator = Translator(.success(RuntimeTranslationPackage(translations: [

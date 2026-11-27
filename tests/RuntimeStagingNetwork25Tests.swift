@@ -34,6 +34,9 @@ final class RuntimeStagingNetwork25Tests: XCTestCase {
             XCTFail("Staging fixture expired or too close to expiry; refresh before dispatch.")
             return
         }
+        // Production signing now authenticates one complete canonical refresh too.
+        // Keep independent live gates in separate real quota windows, never relax limits.
+        try await Task.sleep(nanoseconds: 61_000_000_000)
         let endpoint = try XCTUnwrap(URL(string: raw))
         let translator = RuntimeArabicBackendTranslator(endpoint: endpoint, tokenProvider: EnvAuth(value: token))
         let items = [
