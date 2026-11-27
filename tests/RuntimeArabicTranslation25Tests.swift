@@ -398,7 +398,9 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         try RuntimeArabicPipeline.verifyInstalled(app: app, revision: original, bundleID: id)
         let config = app.appendingPathComponent("Frameworks/MirsaTranslations.json")
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
-        XCTAssertTrue((object["translations"] as? [String: String])?.isEmpty == true)
+        let embedded = try XCTUnwrap(object["translations"] as? [String: String])
+        XCTAssertFalse(embedded.isEmpty, "Full scoped dictionary must be embedded at signing")
+        XCTAssertTrue(embedded.values.allSatisfy { $0.range(of: "[\\u0600-\\u06ff]", options: .regularExpression) != nil })
         XCTAssertNotNil(object["online"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: app.appendingPathComponent("_CodeSignature/CodeResources").path))
         let proofRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
