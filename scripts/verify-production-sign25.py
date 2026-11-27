@@ -36,7 +36,15 @@ for mode in ('ON','OFF'):
    assert rt.is_file() and cfg.is_file() and (app/'Frameworks/MirsaBackground.dylib').is_file()
    assert deps.count('@loader_path/Frameworks/MirsaTranslate.dylib')==1
    assert deps.count('@loader_path/Frameworks/MirsaBackground.dylib')==1
-   obj=json.loads(cfg.read_bytes());assert obj['translations']=={} and obj['online']['bundleId']==info['CFBundleIdentifier']
+   obj=json.loads(cfg.read_bytes())
+   expected=json.loads((root/'ON-dictionary-proof.json').read_bytes())
+   table=obj['translations']
+   assert isinstance(table,dict) and table and table==expected['translations']
+   assert expected['bundleId']==obj['online']['bundleId']==info['CFBundleIdentifier']
+   assert expected['revision']==obj['revision']
+   assert all(isinstance(k,str) and k and isinstance(v,str) and
+              any('\u0600'<=c<='\u06ff' for c in v) for k,v in table.items())
+   assert obj.get('substrings')=={} and obj.get('regex')==[]
    assert obj['revision']==obj['online']['revision'] and obj['online']['token'].startswith('mrt1.')
   else:assert not rt.exists() and not cfg.exists() and not any('Mirsa' in dep for dep in deps)
   for binary in app.glob('Frameworks/*.dylib'):

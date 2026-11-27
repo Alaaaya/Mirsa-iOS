@@ -40,7 +40,7 @@ def archive(path, enabled):
             'Frameworks/MirsaTranslate.dylib': binary(),
             'Frameworks/MirsaBackground.dylib': binary(),
             'Frameworks/MirsaTranslations.json': json.dumps({
-                'translations': {}, 'revision': 1,
+                'translations': {'Settings': 'الإعدادات'}, 'revision': 1, 'substrings': {}, 'regex': [],
                 'online': {'bundleId': 'com.example.ownedfixture',
                            'revision': 1, 'token': 'mrt1.inert-unit-fixture'}
             }).encode(),
@@ -58,6 +58,25 @@ class VerifyTests(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         archive(self.root / 'ON.ipa', True)
         archive(self.root / 'OFF.ipa', False)
+        self.expected = {'bundleId': 'com.example.ownedfixture', 'revision': 1,
+                         'translations': {'Settings': 'الإعدادات'}}
+        self.write_expected()
+
+    def write_expected(self):
+        (self.root / 'ON-dictionary-proof.json').write_text(json.dumps(self.expected))
+
+    def test_rejects_empty_partial_extra_wrong_scope_and_wrong_revision(self):
+        for changes in ({'translations': {}},
+                        {'translations': {'Settings': 'الإعدادات', 'Search': 'بحث'}},
+                        {'translations': {'Settings': 'خطأ'}},
+                        {'bundleId': 'other.app'}, {'revision': 2}):
+            with self.subTest(changes=changes):
+                original = dict(self.expected)
+                self.expected.update(changes)
+                self.write_expected()
+                with self.assertRaises(AssertionError):
+                    self.run_verifier()
+                self.expected = original
 
     def run_verifier(self, codesign=None):
         with patch.object(sys, 'argv', [str(SCRIPT), str(self.root)]), \

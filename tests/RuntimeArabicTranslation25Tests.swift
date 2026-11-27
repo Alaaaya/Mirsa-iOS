@@ -406,6 +406,34 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let proofRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("RuntimeSigningProof25")
         try FileManager.default.createDirectory(at: proofRoot, withIntermediateDirectories: true)
+        // Independently re-read the canonical dictionary under this exact activation.
+        // Compare every eligible source, not merely a nonempty/Arabic sample.
+        let online = try XCTUnwrap(object["online"] as? [String: String])
+        let activation = try XCTUnwrap(online["activation"])
+        let scanned = try RuntimeTranslationScanner.scan(app: fixture.app)
+        let items = scanned.items.filter { RuntimeTranslationScanner.safeText($0.text) }
+        var canonical: [String: String] = [:]
+        for start in stride(from: 0, to: items.count, by: 32) {
+            let group = Array(items[start..<min(start + 32, items.count)])
+            let response = try await RuntimeTranslationHTTP().post(endpoint, token: token, activation: activation,
+                object: ["action": "dictionary", "consent": true, "bundleId": id, "revision": original,
+                         "items": group.map { ["id": $0.id, "text": $0.text] }])
+            XCTAssertEqual(response["bundleId"] as? String, id)
+            XCTAssertEqual(response["revision"] as? String, original)
+            let map = try XCTUnwrap(response["translations"] as? [String: String])
+            for item in group {
+                if let value = map[item.id],
+                   ArabicIPALocalizer.acceptable(source: item.text, translated: value),
+                   value.range(of: "[\\u0600-\\u06ff]", options: .regularExpression) != nil {
+                    canonical[item.text] = value
+                }
+            }
+        }
+        XCTAssertFalse(canonical.isEmpty)
+        XCTAssertEqual(embedded, canonical, "Signed dictionary must equal all eligible canonical scoped entries")
+        let scopeProof: [String: Any] = ["bundleId": id, "revision": original, "translations": canonical]
+        try JSONSerialization.data(withJSONObject: scopeProof, options: [.sortedKeys])
+            .write(to: proofRoot.appendingPathComponent("ON-dictionary-proof.json"), options: .atomic)
         let onProofURL = proofRoot.appendingPathComponent("ON.ipa")
         try? FileManager.default.removeItem(at: onProofURL)
         try FileManager.default.copyItem(at: on.url, to: onProofURL)
