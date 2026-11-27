@@ -378,10 +378,14 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             var canonical: [String: String] = [:]
             for entry in entries {
                 guard let source = entry["source"] as? String, let value = entry["translation"] as? String,
-                      entry["provenance"] as? String == "kat",
+                      expected.contains(source),
                       ArabicIPALocalizer.acceptable(source: source, translated: value) else {
+                    XCTFail("Scoped signing fixture refresh has invalid source/value schema or placeholders")
                     throw RuntimeTranslationError.invalid
                 }
+                // Historical provider entries are not Kat approval. Wait for the
+                // canonical CAS review instead of treating pending review as corruption.
+                guard entry["provenance"] as? String == "kat" else { continue }
                 canonical[source] = value
             }
             if Set(canonical.keys) == expected {
