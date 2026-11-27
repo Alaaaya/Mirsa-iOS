@@ -2,7 +2,126 @@ import XCTest
 import CryptoKit
 @testable import Mirsa
 
+/// Inert public-label fixtures exercise the real HTTP byte stream, never the network.
+private final class RuntimeRefreshCapProtocol27: URLProtocol {
+    static let bundleID = "com.mirsa.refresh.cap.fixture"
+    static let revision = String(repeating: "a", count: 64)
+    static func dictionary(count: Int = 910) throws -> Data {
+        let entries: [[String: Any]] = (0..<count).map { index in
+            ["source": "Menu item \(index) with more public interface context before confirming selection",
+             "translation": "خيار من قائمة التطبيق لعرض تفاصيل العنصر المحدد",
+             "version": 1, "provenance": "kat"]
+        }
+        return try JSONSerialization.data(withJSONObject: [
+            "bundleId": bundleID, "revision": revision, "entries": entries
+        ], options: [.sortedKeys])
+    }
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "runtime-cap.example.invalid"
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            let path = request.url!.path
+            let data: Data
+            if path.contains("oversized") { data = Data(repeating: 32, count: 8 * 1_048_576 + 1) }
+            else { data = try Self.dictionary(count: path.contains("ten-thousand") ? 10_000 : 910) }
+            var headers: [String: String] = ["Content-Type": "application/json"]
+            if path.contains("known") && !path.contains("unknown") {
+                headers["Content-Length"] = String(data.count)
+            } else if path.contains("understated") {
+                headers["Content-Length"] = "1"
+            }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                           httpVersion: "HTTP/1.1", headerFields: headers)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            for start in stride(from: 0, to: data.count, by: 4096) {
+                client?.urlProtocol(self, didLoad: data.subdata(in: start..<min(start + 4096, data.count)))
+            }
+            client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
+    override func stopLoading() {}
+}
+
 final class RuntimeArabicTranslation25Tests: XCTestCase {
+    private func capConfiguration27() -> URLSessionConfiguration {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RuntimeRefreshCapProtocol27.self]
+        return config
+    }
+
+    func testFullCanonicalRefreshAccepts200KBDictionaryWithAndWithoutContentLength() async throws {
+        let fixture = try RuntimeRefreshCapProtocol27.dictionary()
+        XCTAssertGreaterThanOrEqual(fixture.count, 200_000)
+        XCTAssertLessThan(fixture.count, 250_000)
+        for path in ["known", "unknown", "understated"] {
+            let response = try await RuntimeTranslationHTTP().post(
+                URL(string: "https://runtime-cap.example.invalid/\(path)")!, token: "inert-fixture",
+                object: ["action": "refresh"], configuration: capConfiguration27())
+            let canonical = try RuntimeArabicBackendTranslator.canonicalDictionary(response,
+                bundleID: RuntimeRefreshCapProtocol27.bundleID, revision: RuntimeRefreshCapProtocol27.revision)
+            XCTAssertEqual(canonical.translations.count, 910)
+            XCTAssertEqual(canonical.translations[
+                "Menu item 909 with more public interface context before confirming selection"],
+                "خيار من قائمة التطبيق لعرض تفاصيل العنصر المحدد")
+        }
+    }
+
+    func testFullCanonicalRefreshAcceptsTenThousandEntriesAboveOneMiB() async throws {
+        let fixture = try RuntimeRefreshCapProtocol27.dictionary(count: 10_000)
+        XCTAssertGreaterThan(fixture.count, 1_048_576)
+        XCTAssertLessThan(fixture.count, 8 * 1_048_576)
+        for path in ["ten-thousand-known", "ten-thousand-unknown"] {
+            let response = try await RuntimeTranslationHTTP().post(
+                URL(string: "https://runtime-cap.example.invalid/\(path)")!, token: "inert-fixture",
+                object: ["action": "refresh"], configuration: capConfiguration27())
+            let canonical = try RuntimeArabicBackendTranslator.canonicalDictionary(response,
+                bundleID: RuntimeRefreshCapProtocol27.bundleID, revision: RuntimeRefreshCapProtocol27.revision)
+            XCTAssertEqual(canonical.translations.count, 10_000)
+            XCTAssertEqual(canonical.translations[
+                "Menu item 9999 with more public interface context before confirming selection"],
+                "خيار من قائمة التطبيق لعرض تفاصيل العنصر المحدد")
+        }
+    }
+
+    func testRefreshRejectsOverEightMiBByDeclaredAndActualStreamLength() async {
+        for path in ["oversized-known", "oversized-unknown", "oversized-understated"] {
+            do {
+                _ = try await RuntimeTranslationHTTP().post(
+                    URL(string: "https://runtime-cap.example.invalid/\(path)")!, token: "inert-fixture",
+                    object: ["action": "refresh"], configuration: capConfiguration27())
+                XCTFail("Refresh larger than 8 MiB must be rejected")
+            } catch RuntimeTranslationError.invalid { }
+            catch { XCTFail("Expected bounded response rejection, got \(error)") }
+        }
+    }
+
+    func testNonRefreshResponsesKeep48KiBCap() async {
+        for action in ["issue", "dictionary", "missing"] {
+            for path in ["known", "unknown"] {
+                do {
+                    _ = try await RuntimeTranslationHTTP().post(
+                        URL(string: "https://runtime-cap.example.invalid/\(path)")!, token: "inert-fixture",
+                        object: ["action": action], configuration: capConfiguration27())
+                    XCTFail("Non-refresh responses must retain the 48 KiB cap")
+                } catch RuntimeTranslationError.invalid { }
+                catch { XCTFail("Expected bounded response rejection, got \(error)") }
+            }
+        }
+    }
+
+    func testRefreshRequestsStillKeep48KiBCap() async {
+        do {
+            _ = try await RuntimeTranslationHTTP().post(
+                URL(string: "https://runtime-cap.example.invalid/known")!, token: "inert-fixture",
+                object: ["action": "refresh", "padding": String(repeating: "x", count: 49_152)],
+                configuration: capConfiguration27())
+            XCTFail("A refresh must not raise the request byte cap")
+        } catch RuntimeTranslationError.invalid { }
+        catch { XCTFail("Expected bounded request rejection, got \(error)") }
+    }
+
     @MainActor
     func testConcurrentSigningWorkersLeaveAsyncDictionaryTasksRunnable() async {
         enum Completion: Error { case finished, timedOut }
@@ -570,6 +689,33 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         }
         var duplicate = good; duplicate["entries"] = [kat, kat]
         XCTAssertThrowsError(try parse(duplicate))
+    }
+
+    func testCanonicalRefreshStillRejectsEntryCountAboveTwentyThousand() throws {
+        let data = try RuntimeRefreshCapProtocol27.dictionary(count: 20_001)
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertThrowsError(try RuntimeArabicBackendTranslator.canonicalDictionary(response,
+            bundleID: RuntimeRefreshCapProtocol27.bundleID, revision: RuntimeRefreshCapProtocol27.revision))
+    }
+
+    func testRealSigningPipelineEmbedsTenThousandCanonicalTranslations() throws {
+        let fixture = try realFixture(), scan = try RuntimeTranslationScanner.scan(app: fixture.app)
+        let bundle = try XCTUnwrap(IPAEditorService.info(in: fixture.app)["CFBundleIdentifier"] as? String)
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: RuntimeRefreshCapProtocol27.dictionary(count: 10_000)) as? [String: Any])
+        let parsed = try RuntimeArabicBackendTranslator.canonicalDictionary(response,
+            bundleID: RuntimeRefreshCapProtocol27.bundleID, revision: RuntimeRefreshCapProtocol27.revision)
+        let canonical = RuntimeCanonicalDictionary(bundleID: bundle, revision: scan.revision,
+            translations: parsed.translations)
+        let translator = Translator(.success(RuntimeTranslationPackage(translations: [:],
+            online: grant(bundle: bundle, revision: scan.revision), canonicalDictionary: canonical)))
+        try RuntimeArabicPipeline.applyRequired(app: fixture.app, translator: translator)
+        let path = fixture.app.appendingPathComponent("Frameworks/MirsaTranslations.json")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        XCTAssertEqual(object["translations"] as? [String: String], canonical.translations)
+        XCTAssertEqual((object["translations"] as? [String: String])?.count, 10_000)
+        XCTAssertNoThrow(try RuntimeArabicPipeline.verifyInstalled(app: fixture.app,
+            revision: scan.revision, bundleID: bundle))
     }
 
     func testRealSigningPipelineEmbedsPreviouslyLearnedCanonicalRuntimeSource() throws {

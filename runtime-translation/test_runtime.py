@@ -11,11 +11,30 @@ class RuntimeTests(unittest.TestCase):
   for token in ("O_NOFOLLOW","fchmod(fd,0600)","st.st_nlink==1","missingWaiting<16","1024*1024","SafePrefix(result,4096)"):
    self.assertIn(token,s)
   self.assertIn("CFStringIsSurrogateHighCharacter",o)
-  self.assertIn("onlinePositive.count>=2048",Path("OnlineMerge.h").read_text())
+  self.assertIn("onlinePositive.count>=20000",Path("OnlineMerge.h").read_text())
  def test_online_bounds(self):
   s=Path("Online.h").read_text()
-  for token in ("s.length>256","onlinePending.count>=128","batch.count>=16","chars+source.length>2048","ScheduleOnlineFlushLocked(0.15)","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","timeoutIntervalForResource=5","6*NSEC_PER_SEC","body.length+d.length>1048576","now-onlineBudgetStart>=60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
+  for token in ("s.length>256","onlinePending.count>=128","batch.count>=16","chars+source.length>2048","ScheduleOnlineFlushLocked(0.15)","onlineIssued>=128","DISPATCH_QUEUE_SERIAL","timeoutInterval:5","timeoutIntervalForResource=5","6*NSEC_PER_SEC","d.length>self.maximumBodyBytes-self.body.length","now-onlineBudgetStart>=60","NSURLSessionConfiguration.ephemeralSessionConfiguration"):
    self.assertIn(token,s)
+ def test_large_dictionary_bounds(self):
+  s=Path("Online.h").read_text();runtime=Path("RuntimeTranslate.m").read_text()
+  for token in ("delegate.maximumBodyBytes=items?65536:8*1024*1024",
+                "entries.count>20000", "d.length<=8*1024*1024",
+                "[stored length]>8*1024*1024", "e.count>20000",
+                "if(items && delegate.body.length>65536)return nil"):
+   self.assertIn(token,s)
+  self.assertIn("override.length<=8*1024*1024",runtime)
+  self.assertIn("data.length>8*1024*1024",runtime)
+  self.assertIn('[obj[@"entries"] count]>20000',runtime)
+  # Unrelated render-cache, request, negative and attempt budgets stay small.
+  self.assertIn("cache.countLimit=2048;cache.totalCostLimit=1024*1024",runtime)
+  self.assertIn("onlineNegative.count>2048",s)
+  self.assertIn("onlineAttempts.count>=2048",s)
+  smoke=Path("NativePolicySmoke.m").read_text()
+  for token in ("i<10000", "RefreshOnlineDictionary();", "LoadOnlineCache();",
+                "onlinePositive.count==10000", "onlinePositive.count==20000",
+                "fixtureLargeResponse", "8*1024*1024+1", "ApplyEmbeddedConfig"):
+   self.assertIn(token,smoke)
  def test_scoped_contract(self):
   s=Path("Online.h").read_text()
   for token in ('@"missing"','@"consent":@YES','@"items"','@"s%lu"','OnlineExpiry','@"mrt1'):

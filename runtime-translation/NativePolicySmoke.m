@@ -4,6 +4,14 @@
 #import <assert.h>
 #import <objc/runtime.h>
 static NSInteger fixtureCode,fixtureCalls,fixtureItems;
+// Generated public UI fixtures only, no production text, accounts or network.
+static NSArray *fixtureDictionaryEntries;
+static NSData *fixtureLargeResponse;
+static NSString *FixtureSource(NSUInteger n) {
+ NSMutableString *suffix=[NSMutableString string];
+ do{[suffix insertString:[NSString stringWithFormat:@"%c",(int)('a'+n%26)] atIndex:0];n/=26;}while(n);
+ return [@"Menu item " stringByAppendingString:suffix];
+}
 static NSTimeInterval FixtureNow(void){return 2000000010;}
 @interface MirsaFallbackProtocol : NSURLProtocol
 @end
@@ -18,6 +26,17 @@ static NSTimeInterval FixtureNow(void){return 2000000010;}
   [stream close];body=data;
  }
  NSDictionary *request=[NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+ if(fixtureDictionaryEntries || fixtureLargeResponse){
+  NSData *reply=fixtureLargeResponse?:[NSJSONSerialization dataWithJSONObject:
+   @{@"bundleId":request[@"bundleId"],@"revision":request[@"revision"],@"entries":fixtureDictionaryEntries} options:0 error:NULL];
+  NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc]initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1"
+    headerFields:@{@"Content-Type":@"application/json",@"Content-Length":[NSString stringWithFormat:@"%lu",(unsigned long)reply.length]}];
+  [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+  // Chunked delivery also exercises the streaming cap, not just content length.
+  for(NSUInteger offset=0;offset<reply.length;offset+=32768)
+   [self.client URLProtocol:self didLoadData:[reply subdataWithRange:NSMakeRange(offset,MIN((NSUInteger)32768,reply.length-offset))]];
+  [self.client URLProtocolDidFinishLoading:self];return;
+ }
  NSArray *items=request[@"items"];assert(items.count==3);
  @synchronized(MirsaFallbackProtocol.class){fixtureCalls++;fixtureItems=items.count;}
  NSMutableArray *entries=[NSMutableArray array];
@@ -130,6 +149,87 @@ int main(int argc,char **argv) {@autoreleasepool {
  Method original=class_getClassMethod(NSURLSessionConfiguration.class,@selector(ephemeralSessionConfiguration));
  Method mocked=class_getClassMethod(NSURLSessionConfiguration.class,@selector(mirsaFixtureConfiguration));
  method_exchangeImplementations(original,mocked);
+ // Ten thousand Kat-authored synthetic entries must survive every dictionary path.
+ // Keep English public UI sources alphabetic, so the privacy screen stays unchanged.
+ NSMutableArray *large=[NSMutableArray array];
+ NSMutableDictionary *embedded=[NSMutableDictionary dictionary];
+ NSString *arabic=@"خيار من قائمة التطبيق لعرض تفاصيل العنصر المحدد";
+ for(NSUInteger i=0;i<10000;i++){
+  NSString *source=FixtureSource(i);assert(DictionarySourceSafe(source));
+  [large addObject:@{@"source":source,@"translation":arabic,@"version":@1,@"provenance":@"kat"}];
+  embedded[source]=arabic;
+ }
+ NSString *last=FixtureSource(9999);
+ NSDictionary *savedTable=table,*savedPieces=pieces;
+ NSArray *savedRules=rules,*savedPieceKeys=pieceKeys;
+ ApplyEmbeddedConfig(@{@"translations":embedded,@"substrings":@{},@"regex":@[]});
+ enabled=YES;assert(table.count==10000 && [Translate(last) isEqual:arabic]);
+ InstallTranslationHooks();
+ UILabel *largeLabel=[UILabel new];largeLabel.text=last;assert([largeLabel.text isEqual:arabic]);
+ table=@{};pieces=@{};rules=@[];pieceKeys=@[];
+ NSMutableDictionary *largeConfig=[c mutableCopy];largeConfig[@"endpoint"]=@"https://staging.fixture.invalid/runtime";
+ onlineConfig=largeConfig;onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];
+ onlineNegative=[NSMutableDictionary dictionary];onlinePending=[NSMutableSet set];onlineUncovered=[NSMutableSet set];
+ onlineQueue=dispatch_queue_create("mirsa.runtime.fixture.large",DISPATCH_QUEUE_SERIAL);
+ fixtureDictionaryEntries=large;onlineLastRefresh=0;onlineRefreshScheduled=YES;
+ NSData *wire=[NSJSONSerialization dataWithJSONObject:@{@"entries":large} options:0 error:NULL];
+ assert(wire.length>1048576 && wire.length<8*1024*1024);
+ RefreshOnlineDictionary();
+ assert(onlinePositive.count==10000 && [Translate(last) isEqual:arabic]);
+ largeLabel.text=last;assert([largeLabel.text isEqual:arabic]);
+ assert([onlineMeta[last][@"p"] isEqual:@"kat"] && [onlineMeta[last][@"v"] integerValue]==1);
+ NSData *cached=[NSUserDefaults.standardUserDefaults objectForKey:DictionaryCacheKey()];
+ assert(cached.length>1048576 && cached.length<=8*1024*1024);
+ onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];
+ LoadOnlineCache();assert(onlinePositive.count==10000 && [Translate(last) isEqual:arabic]);
+ largeLabel.text=last;assert([largeLabel.text isEqual:arabic]);
+ // Scope, monotonic provenance, and expiry remain enforced on the large dictionary.
+ ApplyOnlineEntries(@[@{@"source":last,@"translation":@"نص آخر",@"version":@999,@"provenance":@"gemini"}]);
+ assert([Translate(last) isEqual:arabic]);
+ NSMutableDictionary *expired=[largeConfig mutableCopy];expired[@"expiresAt"]=@"2000-01-01T00:00:00Z";
+ onlineConfig=expired;assert([Translate(last) isEqual:last]);onlineConfig=largeConfig;
+ // Refresh response byte overflow fails closed without replacing the cache.
+ fixtureLargeResponse=[NSMutableData dataWithLength:8*1024*1024+1];
+ assert(!OnlinePost(@"refresh",nil));
+ assert(onlinePositive.count==10000 && [[NSUserDefaults.standardUserDefaults objectForKey:DictionaryCacheKey()] isEqual:cached]);
+ // Missing retains its separate 64KiB transport cap even for these larger apps.
+ fixtureLargeResponse=[NSMutableData dataWithLength:65537];
+ assert(!OnlinePost(@"missing",@[@{@"id":@"s0",@"text":@"设置"}]));
+ fixtureLargeResponse=nil;fixtureDictionaryEntries=nil;
+ // Unknown-length chunked overflow is rejected by the actual delegate as well.
+ NSURLSession *unusedSession=NSURLSession.sharedSession;
+ NSURLSessionDataTask *unusedTask=[unusedSession dataTaskWithURL:[NSURL URLWithString:@"https://staging.fixture.invalid/unused"]];
+ MirsaNoRedirect *bounded=[MirsaNoRedirect new];
+ [bounded URLSession:unusedSession dataTask:unusedTask didReceiveData:[NSMutableData dataWithLength:8*1024*1024+1]];
+ assert(bounded.error && !bounded.body.length);
+ bounded=[MirsaNoRedirect new];bounded.maximumBodyBytes=65536;
+ [bounded URLSession:unusedSession dataTask:unusedTask didReceiveData:[NSMutableData dataWithLength:65537]];
+ assert(bounded.error && !bounded.body.length);
+ // Oversized cache is rejected before parsing, leaving no partial dictionary.
+ [NSUserDefaults.standardUserDefaults setObject:[NSMutableData dataWithLength:8*1024*1024+1] forKey:DictionaryCacheKey()];
+ onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];LoadOnlineCache();assert(!onlinePositive.count);
+ [NSUserDefaults.standardUserDefaults setObject:cached forKey:DictionaryCacheKey()];
+ LoadOnlineCache();assert(onlinePositive.count==10000);
+ // Reject an over-count batch atomically. Test the store ceiling independently.
+ NSMutableArray *tooMany=[NSMutableArray arrayWithCapacity:20001];
+ for(NSUInteger i=0;i<20001;i++)[tooMany addObject:large[0]];
+ ApplyOnlineEntries(tooMany);assert(onlinePositive.count==10000);
+ assert(!MirsaRuntimeTestApplyJSON([[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:@{@"entries":tooMany} options:0 error:NULL] encoding:NSUTF8StringEncoding] UTF8String]));
+ for(NSUInteger i=10000;i<20001;i++){
+  NSString *source=FixtureSource(i);
+  os_unfair_lock_lock(&onlineLock);
+  BOOL merged=MergeOnlineLocked(source,arabic,1,@"kat");
+  os_unfair_lock_unlock(&onlineLock);assert(merged==(i<20000));
+ }
+ assert(onlinePositive.count==20000 && !OnlineLookup(FixtureSource(20000)));
+ // Existing entries can still receive newer Kat versions at the capacity limit.
+ ApplyOnlineEntries(@[@{@"source":last,@"translation":arabic,@"version":@2,@"provenance":@"kat"}]);
+ assert([onlineMeta[last][@"v"] integerValue]==2);
+ [NSUserDefaults.standardUserDefaults removeObjectForKey:DictionaryCacheKey()];
+ onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];onlineConfig=c;
+ table=savedTable;pieces=savedPieces;rules=savedRules;pieceKeys=savedPieceKeys;
+ onlineRefreshScheduled=NO;onlineLastRefresh=0;
+ NSLog(@"Native 10000-entry embedded / full refresh / cache roundtrip and bounded overflow smoke passed");
  onlineClock=FixtureNow;onlineTestActivationBundle=@"com.example.activationfixture";
  enabled=YES; // Execute the actual render path, not its disabled early return.
  for(NSNumber *code in @[@429,@503,@403,@200]){

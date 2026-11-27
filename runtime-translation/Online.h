@@ -1,22 +1,23 @@
 // Missing-only, fail-open translation. Never blocks the rendering thread.
 @interface MirsaNoRedirect : NSObject <NSURLSessionDataDelegate>
 @property(nonatomic,strong) NSMutableData *body;
+@property(nonatomic) NSUInteger maximumBodyBytes;
 @property(nonatomic,strong) NSHTTPURLResponse *response;
 @property(nonatomic,strong) NSError *error;
 @property(nonatomic) dispatch_semaphore_t finished;
 @end
 @implementation MirsaNoRedirect
-- (instancetype)init {if((self=[super init])){_body=[NSMutableData data];_finished=dispatch_semaphore_create(0);}return self;}
+- (instancetype)init {if((self=[super init])){_maximumBodyBytes=8*1024*1024;_body=[NSMutableData data];_finished=dispatch_semaphore_create(0);}return self;}
 - (void)URLSession:(NSURLSession *)s task:(NSURLSessionTask *)t willPerformHTTPRedirection:(NSHTTPURLResponse *)r newRequest:(NSURLRequest *)q completionHandler:(void (^)(NSURLRequest *))done {
  (void)s;(void)t;(void)r;(void)q;done(nil);
 }
 - (void)URLSession:(NSURLSession *)s dataTask:(NSURLSessionDataTask *)t didReceiveResponse:(NSURLResponse *)r completionHandler:(void (^)(NSURLSessionResponseDisposition))done {
  (void)s;(void)t;
  self.response=[r isKindOfClass:NSHTTPURLResponse.class]?(id)r:nil;
- done(self.response.statusCode==200 && r.expectedContentLength<=1048576?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
+ done(self.response.statusCode==200 && r.expectedContentLength<=(int64_t)self.maximumBodyBytes?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
 }
 - (void)URLSession:(NSURLSession *)s dataTask:(NSURLSessionDataTask *)t didReceiveData:(NSData *)d {
- (void)s;if(self.body.length+d.length>1048576){self.error=[NSError errorWithDomain:@"MirsaTranslate" code:1 userInfo:nil];[t cancel];return;}[self.body appendData:d];
+ (void)s;if(d.length>self.maximumBodyBytes-self.body.length){self.error=[NSError errorWithDomain:@"MirsaTranslate" code:1 userInfo:nil];[t cancel];return;}[self.body appendData:d];
 }
 - (void)URLSession:(NSURLSession *)s task:(NSURLSessionTask *)t didCompleteWithError:(NSError *)e {
  (void)s;(void)t;if(e)self.error=e;dispatch_semaphore_signal(self.finished);
@@ -99,7 +100,7 @@ static void SaveOnlineCache(void) {
  for(NSString *k in onlinePositive){NSDictionary *m=onlineMeta[k];snapshot[k]=@{@"t":onlinePositive[k],@"v":m[@"v"]?:@0,@"p":m[@"p"]?:@"gemini"};}
  os_unfair_lock_unlock(&onlineLock);
  NSData *d=[NSJSONSerialization dataWithJSONObject:@{@"format":@2,@"entries":snapshot} options:0 error:NULL];
- if(d.length && d.length<=1048576)[NSUserDefaults.standardUserDefaults setObject:d forKey:DictionaryCacheKey()];
+ if(d.length && d.length<=8*1024*1024)[NSUserDefaults.standardUserDefaults setObject:d forKey:DictionaryCacheKey()];
 }
 static void RefreshBannerCoverage(void) {
  os_unfair_lock_lock(&onlineLock);BOOL pending=onlineUncovered.count>0;os_unfair_lock_unlock(&onlineLock);
@@ -111,7 +112,7 @@ static BOOL ValidOnlineValue(NSString *s,id v) {
 }
 static void ApplyOnlineEntries(NSArray *entries) {
  if(onlineConfig && !OnlineUsable())return;
- if(![entries isKindOfClass:NSArray.class] || entries.count>1564)return;
+ if(![entries isKindOfClass:NSArray.class] || entries.count>20000)return;
  BOOL changed=NO;
  for(id item in entries){
   if(![item isKindOfClass:NSDictionary.class])continue;
@@ -155,7 +156,7 @@ static NSDictionary *OnlinePost(NSString *action,NSArray *items) {
  req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
  NSURLSessionConfiguration *cfg=NSURLSessionConfiguration.ephemeralSessionConfiguration;
  cfg.timeoutIntervalForRequest=5;cfg.timeoutIntervalForResource=5;cfg.HTTPShouldSetCookies=NO;cfg.HTTPCookieStorage=nil;cfg.URLCache=nil;cfg.URLCredentialStorage=nil;
- MirsaNoRedirect *delegate=[MirsaNoRedirect new];NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
+ MirsaNoRedirect *delegate=[MirsaNoRedirect new];delegate.maximumBodyBytes=items?65536:8*1024*1024;NSOperationQueue *callbacks=[NSOperationQueue new];callbacks.maxConcurrentOperationCount=1;
  NSURLSession *session=[NSURLSession sessionWithConfiguration:cfg delegate:delegate delegateQueue:callbacks];
  @try {
   NSURLSessionDataTask *task=[session dataTaskWithRequest:req];[task resume];
@@ -315,17 +316,17 @@ static void OnlineForeground(void) {
 }
 static void LoadOnlineCache(void) {
  id stored=[NSUserDefaults.standardUserDefaults objectForKey:DictionaryCacheKey()];
- if(![stored isKindOfClass:NSData.class] || [stored length]>1048576)return;
+ if(![stored isKindOfClass:NSData.class] || [stored length]>8*1024*1024)return;
  id map=[NSJSONSerialization JSONObjectWithData:stored options:0 error:NULL];
  if(![map isKindOfClass:NSDictionary.class])return;
  if([map[@"format"] isEqual:@2] && [map[@"entries"] isKindOfClass:NSDictionary.class]){
-  NSDictionary *e=map[@"entries"];if(e.count>2048)return;
+  NSDictionary *e=map[@"entries"];if(e.count>20000)return;
   for(id source in e){
    id it=e[source];
    if(![source isKindOfClass:NSString.class] || ![it isKindOfClass:NSDictionary.class] || !ValidOnlineValue(source,it[@"t"]) || !ProvenanceValid(it[@"p"]) || !VersionValid(it[@"v"]))continue;
    os_unfair_lock_lock(&onlineLock);MergeOnlineLocked(source,it[@"t"],[it[@"v"] integerValue],it[@"p"]);os_unfair_lock_unlock(&onlineLock);
   }
- } else if([map count]<=2048){
+ } else if([map count]<=20000){
   // Legacy v1 cache: unversioned Gemini, any later entry supersedes it.
   for(id source in map)if([source isKindOfClass:NSString.class] && ValidOnlineValue(source,map[source])){
    os_unfair_lock_lock(&onlineLock);MergeOnlineLocked(source,map[source],0,@"gemini");os_unfair_lock_unlock(&onlineLock);}

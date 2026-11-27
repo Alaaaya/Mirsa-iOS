@@ -15,7 +15,7 @@ defaults:
   run:
     shell: bash
 env:
-  MIRSA_RELEASE_BUILD: "8.543.6"
+  MIRSA_RELEASE_BUILD: "8.543.8"
 jobs:
   exact-launch-diagnostic:
     if: ${{ inputs.exact_launch_diagnostic == true }}
@@ -76,7 +76,7 @@ jobs:
         run: |
           node --test backend/runtime-translate/logic.test.mjs backend/mcp-translation-relay/extension.test.mjs backend/mcp-translation-relay/contract.test.mjs backend/mcp-translation-relay/routing.test.mjs
           deno check backend/runtime-translate/index.ts backend/runtime-translate/staging.ts backend/runtime-translate/operator.ts
-          deno test --allow-read backend/runtime-translate/security.test.ts
+          deno test --allow-read backend/runtime-translate/security.test.ts backend/runtime-translate/capacity.test.ts
       - name: Disposable schema and concurrent durable quota validation
         run: |
           sudo apt-get update -qq
