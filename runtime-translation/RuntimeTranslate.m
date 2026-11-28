@@ -169,6 +169,48 @@ static NSAttributedString *TranslateAttr(NSAttributedString *a) {
  } @catch (__unused NSException *e) { return a; }
 }
 
+// Only localization lookups inside this application's own bundle may be translated.
+// Explicit en.lproj sub-bundles are included; OS/framework bundles outside it are not.
+static BOOL AppLocalizationBundle(NSBundle *bundle) {
+ NSString *path=bundle.bundleURL.URLByResolvingSymlinksInPath.path;
+ NSString *root=NSBundle.mainBundle.bundleURL.URLByResolvingSymlinksInPath.path;
+ return path.length && root.length && ([path isEqual:root] || [path hasPrefix:[root stringByAppendingString:@"/"]]);
+}
+static void HookBundleLocalization(void) {
+ Class cls=NSBundle.class;
+ SEL sel=@selector(localizedStringForKey:value:table:);
+ Method method=class_getInstanceMethod(cls,sel);
+ if(method){
+  IMP original=method_getImplementation(method);
+  IMP hook=imp_implementationWithBlock(^NSString *(NSBundle *bundle,NSString *key,NSString *value,NSString *name){
+   NSString *result=((id(*)(id,SEL,id,id,id))original)(bundle,sel,key,value,name);
+   if(!enabled || translating || !AppLocalizationBundle(bundle))return result;
+   NSString *translated=Translate(result);
+   // Source tables can use stable opaque keys. Translate the resolved UI text first.
+   return translated;
+  });
+  class_replaceMethod(cls,sel,hook,method_getTypeEncoding(method));
+ }
+ // Only string tables, never images, executable/config files, or system resources.
+ SEL pathSel=@selector(pathForResource:ofType:inDirectory:forLocalization:);
+ Method pathMethod=class_getInstanceMethod(cls,pathSel);
+ if(pathMethod){
+  IMP original=method_getImplementation(pathMethod);
+  IMP hook=imp_implementationWithBlock(^NSString *(NSBundle *bundle,NSString *name,NSString *ext,NSString *directory,NSString *localization){
+   if(enabled && !translating && AppLocalizationBundle(bundle) &&
+      ([ext isEqual:@"strings"] || [ext isEqual:@"stringsdict"]) &&
+      localization.length && ![localization isEqual:@"ar"]){
+    NSString *arabic=((id(*)(id,SEL,id,id,id,id))original)(bundle,pathSel,name,ext,directory,@"ar");
+    NSString *root=NSBundle.mainBundle.bundleURL.URLByResolvingSymlinksInPath.path;
+    NSString *resolved=[arabic stringByResolvingSymlinksInPath];
+    if([resolved hasPrefix:[root stringByAppendingString:@"/"]])return arabic;
+   }
+   return ((id(*)(id,SEL,id,id,id,id))original)(bundle,pathSel,name,ext,directory,localization);
+  });
+  class_replaceMethod(cls,pathSel,hook,method_getTypeEncoding(pathMethod));
+ }
+}
+
 // Add an override on this class rather than mutating an inherited superclass method.
 static void HookString(Class c, SEL sel) {
  Method m=class_getInstanceMethod(c,sel); if (!m) return;
@@ -317,6 +359,7 @@ static void ObserveOnlineForeground(void) {
 static void InstallTranslationHooks(void) {
  static dispatch_once_t once;
  dispatch_once(&once,^{
+   HookBundleLocalization();
    HookString(UILabel.class,@selector(setText:));HookAttr(UILabel.class,@selector(setAttributedText:));
    HookString(UITextField.class,@selector(setPlaceholder:));HookAttr(UITextField.class,@selector(setAttributedPlaceholder:));
    HookString(UINavigationItem.class,@selector(setTitle:));HookString(UINavigationItem.class,@selector(setPrompt:));

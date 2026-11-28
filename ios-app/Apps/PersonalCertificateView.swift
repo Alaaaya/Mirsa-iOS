@@ -503,13 +503,13 @@ enum PersonalCertificateSigner {
         try IPAEditorService.run("extract", input: ipa, output: root)
         let app = try IPAEditorService.app(in: root)
         ArabicLocalizationPipeline.lastNotice = nil
-        let runtimeAllowed = options.translateToArabic && arabicTranslator == nil
-        if options.translateToArabic, let arabicTranslator {
-            ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app, translator: arabicTranslator)
-        } else if runtimeAllowed {
-            // Even removed extensions must not bypass the original encryption gate.
+        let runtimeAllowed = options.translateToArabic
+        if runtimeAllowed {
             do { _ = try RuntimeTranslationScanner.scan(app: app) }
             catch { throw RuntimeArabicPipeline.failure(RuntimeTranslationStageError.at(error, .preflight)) }
+        }
+        if options.translateToArabic, let arabicTranslator {
+            ArabicLocalizationPipeline.lastNotice = ArabicLocalizationPipeline.applyBlocking(app: app, translator: arabicTranslator)
         }
         if let overlay = options.bundleOverlay, !overlay.isEmpty, let blobs = options.bundleBlobs, let original = options.bundleOriginal {
             try BundleStagingApplier.apply(overlay, blobs: blobs, original: original, to: app)

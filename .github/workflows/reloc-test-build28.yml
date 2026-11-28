@@ -1,0 +1,95 @@
+name: Reloc compile-only private test IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  MIRSA_RELEASE_BUILD: "8.543.11"
+defaults:
+  run:
+    shell: bash
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+      - name: Rebuild all embedded device libraries from this exact revision
+        run: |
+          python3 scripts/test-hook-build-boundary.py
+          python3 scripts/verify-native-fixture-uuid26.py
+          rm -f hook-engine/dist/CydiaSubstrate.framework/CydiaSubstrate
+          bash hook-engine/build.sh
+          python3 scripts/test-verify-hook-engine.py
+          python3 scripts/verify-hook-engine.py
+          (cd runtime-translation && clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation MergeRace.m -o /tmp/mirsa-merge-race && /tmp/mirsa-merge-race)
+          bash runtime-translation/build-apple.sh
+          bash background-notifications/build-apple.sh
+          python3 background-notifications/test_background.py
+          mkdir -p runtime-translation/out
+          cp ios-app/RuntimeTranslationAssets/MirsaTranslate.dylib runtime-translation/out/MirsaTranslate.dylib
+          (cd runtime-translation && python3 test_runtime.py)
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core
+      - name: Build Rust device library
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        run: |
+          cd rust-core
+          cargo build --release --target aarch64-apple-ios
+          cd ..
+          rm -rf AirliftFFI.xcframework
+          xcodebuild -create-xcframework -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a -headers rust-core/include -output AirliftFFI.xcframework
+      - name: Build application
+        run: |
+          bash scripts/prepare-privatekits-sdk.sh iphoneos
+          brew install xcodegen
+          # Device packaging does not build tests. Keep their generated IPA inputs
+          # strict in project.yml and all simulator gates, omit only in this spec.
+          python3 scripts/prepare-device-build-spec26.py
+          xcodegen generate --spec project.device.generated.yml
+          rm project.device.generated.yml
+          mkdir -p Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Dependencies/Package.resolved Mirsa.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          cp Dependencies/Package.resolved vendor/ApplePackage/Package.resolved
+          bash build-ipa.sh
+          python3 background-notifications/validate_ipa.py build/Mirsa.ipa
+          python3 - <<'PYVERIFY'
+          import hashlib, json, pathlib, plistlib, zipfile
+          root = pathlib.Path(".")
+          with zipfile.ZipFile("build/Mirsa.ipa") as z:
+              app = "Payload/Mirsa.app/"
+              assets = app + "RuntimeTranslationAssets/"
+              for name in ("MirsaTranslate.dylib", "provenance.json"):
+                  expected = (root / "ios-app/RuntimeTranslationAssets" / name).read_bytes()
+                  assert z.read(assets + name) == expected, "packaged runtime resource mismatch: " + name
+              proof = json.loads(z.read(assets + "provenance.json"))
+              assert proof["genericTableEmpty"] is True
+              assert proof["dylibSHA256"] == hashlib.sha256(z.read(assets + "MirsaTranslate.dylib")).hexdigest()
+              for name, digest in proof["sources"].items():
+                  assert hashlib.sha256((root / "runtime-translation" / name).read_bytes()).hexdigest() == digest
+              info = plistlib.loads(z.read(app + "Info.plist"))
+              executable = z.read(app + info["CFBundleExecutable"])
+              hook = (root / "hook-engine/dist/CydiaSubstrate.framework/CydiaSubstrate").read_bytes()
+              assert hook in executable, "exact rebuilt hook engine not embedded in packaged executable"
+          print("Exact-revision runtime provenance and embedded hook resource verified in final IPA")
+          PYVERIFY
+          shasum -a 256 build/Mirsa.ipa > build/device.sha256
+          git rev-parse HEAD > build/source-revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mirsa-final25-private-device
+          path: |
+            build/Mirsa.ipa
+            build/device.sha256
+            build/source-revision.txt
+          if-no-files-found: error
+

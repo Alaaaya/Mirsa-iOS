@@ -536,7 +536,7 @@ final class AppsStore: ObservableObject {
             // Optional "translate to Arabic": inspects the downloaded contents; fail-open, original IPA kept for Downloads.
             let pristineIPA = work.appendingPathComponent("pristine.ipa")
             try? fm.copyItem(at: ipa, to: pristineIPA)
-            if let notice = await ArabicLocalizationPipeline.apply(workDir: work, ipa: ipa, app: app, bundleID: bid, version: version) { toast = notice }
+            // Import stays pristine. Translation is applied by the shared runtime signing/export pipeline, never static-only here.
             info = (try? IPAEditorService.info(in: app)) ?? info
             let modes = info["UIBackgroundModes"] as? [String] ?? []
             let plugins = app.appendingPathComponent("PlugIns")
