@@ -29,6 +29,10 @@ enum RuntimeTranslationScanner {
     struct Scan {
         let revision: String
         let items: [ArabicIPALocalizer.Item]
+        /// Table name -> localization key -> source text. The runtime dictionary
+        /// is keyed by English text, but NSBundle lookups arrive by key, so the
+        /// signer also embeds this map (see `keys` in MirsaTranslations.json).
+        let keyedTexts: [String: [String: String]]
     }
 
     /// Static bundle literal heuristic, not a decompiler or runtime text collector.
@@ -158,6 +162,13 @@ enum RuntimeTranslationScanner {
             throw RuntimeTranslationScanError.tooLarge
         }
         for item in local.items { try texts.insert(item.text) }
+        var keyedTexts: [String: [String: String]] = [:]
+        for item in local.items {
+            guard let slot = local.slots[item.id], let key = slot.path.first, !key.isEmpty else { continue }
+            let file = local.files[slot.file]
+            let tableName = (file.name as NSString).deletingPathExtension
+            if keyedTexts[tableName]?[key] == nil { keyedTexts[tableName, default: [:]][key] = item.text }
+        }
         var catalogBytes = 0
         for url in catalogs.sorted(by: { $0.path < $1.path }) {
             let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
@@ -166,18 +177,20 @@ enum RuntimeTranslationScanner {
             catalogBytes += size
             let data = try Data(contentsOf: url)
             guard data.count == size else { throw RuntimeTranslationScanError.malformed }
-            try catalog(data, texts: &texts)
+            try catalog(data, texts: &texts, keyed: &keyedTexts, tableName: (url.lastPathComponent as NSString).deletingPathExtension)
         }
         var items: [ArabicIPALocalizer.Item] = []
         for text in texts.values.sorted() {
             items.append(.init(id: digest(Data(text.utf8)), text: text))
         }
-        return Scan(revision: hasher.finalize().map { String(format: "%02x", $0) }.joined(), items: items)
+        return Scan(revision: hasher.finalize().map { String(format: "%02x", $0) }.joined(), items: items, keyedTexts: keyedTexts)
     }
 
     /// Only the xcstrings schema's source-language units/variants are traversed.
     /// Never walk arbitrary JSON dictionaries or translated language values.
-    private static func catalog(_ data: Data, texts: inout Texts) throws {
+    /// `keyed` records catalog key -> primary source text so the signer can also
+    /// embed a key-based map; plural/device variants resolve through the text map.
+    private static func catalog(_ data: Data, texts: inout Texts, keyed: inout [String: [String: String]], tableName: String) throws {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let language = root["sourceLanguage"] as? String,
               let strings = root["strings"] as? [String: Any] else { throw RuntimeTranslationScanError.malformed }
@@ -212,6 +225,9 @@ enum RuntimeTranslationScanner {
             }
             if values.isEmpty && displayEnglish(key) { values.append(key) }
             for value in values where safe(value) { try texts.insert(value) }
+            if let first = values.first, safe(first), keyed[tableName]?[key] == nil {
+                keyed[tableName, default: [:]][key] = first
+            }
         }
     }
 

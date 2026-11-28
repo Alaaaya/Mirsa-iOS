@@ -26,6 +26,17 @@ export function acceptable(src, out) {
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(t)) return false;
   return sameTokens(src, out);
 }
+// A genuine Arabic translation: placeholders intact, actually Arabic, and
+// different from the source. An echo of the English source is NOT a translation:
+// it used to pass `acceptable`, get cached, and get written into ar.lproj as an
+// "Arabic" value (Reloc shipped 240 English values that way). Keep `acceptable`
+// itself a pure placeholder validator: its unit tests assert token-only cases.
+export const hasArabic = (s) => /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(String(s));
+export function isRealTranslation(src, out) {
+  if (!acceptable(src, out)) return false;
+  const t = String(out).trim();
+  return t !== String(src).trim() && hasArabic(t);
+}
 export function validateRequest(b) {
   if (!b || typeof b !== "object") return "bad_body";
   if (typeof b.bundleId !== "string" || !BUNDLE_RE.test(b.bundleId)) return "bad_bundle";
@@ -57,11 +68,12 @@ export async function cacheHash(contentHash, items) {
   return Array.from(new Uint8Array(digest), (v) => v.toString(16).padStart(2, "0")).join("");
 }
 // Never claim a cache hit if any requested string is absent, corrupt or has different placeholders.
+// An echoed (untranslated) cached value is not a hit either: it must be re-translated, not served.
 export function completeCachedTranslations(items, translations) {
   if (!translations || typeof translations !== "object" || Array.isArray(translations)) return null;
   const out = Object.create(null);
   for (const it of items) {
-    if (!Object.hasOwn(translations, it.id) || !acceptable(it.text, translations[it.id])) return null;
+    if (!Object.hasOwn(translations, it.id) || !isRealTranslation(it.text, translations[it.id])) return null;
     out[it.id] = translations[it.id];
   }
   return out;

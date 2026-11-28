@@ -3,7 +3,7 @@
 // Cache is private per user (user_id + bundle + version + content hash). Same free-tier attestation and model env as tweak-forge;
 // this function never changes model configuration. Secrets (names only): LLM_API_KEY/GEMINI_API_KEY, GEMINI_FREE_TIER_ATTESTED, LLM_MODEL.
 import { createClient } from "npm:@supabase/supabase-js@2.106.2";
-import { acceptable, chunk, parseModelMap, validateRequest, cacheHash, completeCachedTranslations } from "./logic.mjs";
+import { isRealTranslation, chunk, parseModelMap, validateRequest, cacheHash, completeCachedTranslations } from "./logic.mjs";
 
 import { fetchModelJSON } from "./provider.mjs";
 
@@ -38,7 +38,7 @@ async function ask(batch: { id: string; text: string }[]): Promise<Record<string
   const map = parseModelMap(text);
   if (!map) throw new Error("llm_failed");
   const out: Record<string, string> = {};
-  for (const b of batch) if (acceptable(b.text, map[b.id])) out[b.id] = (map[b.id] as string).trim();
+  for (const b of batch) if (isRealTranslation(b.text, map[b.id])) out[b.id] = (map[b.id] as string).trim();
   return out;
 }
 

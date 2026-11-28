@@ -11,7 +11,7 @@
 #import <unistd.h>
 #import <errno.h>
 
-static NSDictionary *table, *pieces;
+static NSDictionary *table, *pieces, *keyTable;
 static NSArray *rules, *pieceKeys;
 static NSCache *cache;
 static __thread BOOL translating;
@@ -114,9 +114,6 @@ static void LogMissing(NSString *source,NSString *result) {
 }
 
 static NSString *Translate(NSString *s) {
- // Cached text has the same signature and signed-expiry boundary as network results.
- if (onlineConfig && (OnlineDenied() || OnlineExpiry(onlineConfig[@"expiresAt"])<=OnlineNow() ||
-  OnlineSignedExpiry(onlineConfig)<=OnlineNow()))return s;
  if (!enabled || translating || ![s isKindOfClass:NSString.class] || !s.length || s.length>16384) return s;
  NSDictionary *templateParts=LocalTemplateParts(s);
  if(templateParts){
@@ -126,9 +123,15 @@ static NSString *Translate(NSString *s) {
  translating=YES;
  NSString *result=s;
  @try {
-   NSString *remote=OnlineLookup(s);
+   // The signed capability deadline binds ONLY the network path and its cache:
+   // a cached online result must not render after expiry. The embedded verified
+   // dictionary is authoritative on its own (offline dictionary continues after
+   // expiry), so an expired capability must never blank the static table.
+   BOOL onlineLive=onlineConfig && !OnlineDenied() && OnlineExpiry(onlineConfig[@"expiresAt"])>OnlineNow() &&
+     OnlineSignedExpiry(onlineConfig)>OnlineNow();
+   NSString *remote=onlineLive?OnlineLookup(s):nil;
    if(remote)return IsolateLatin(remote);
-   NSString *known=[cache objectForKey:s];
+   NSString *known=onlineLive?[cache objectForKey:s]:nil;
    if (known) { result=known; }
    else {
      NSString *exact=table[s];
@@ -185,6 +188,13 @@ static void HookBundleLocalization(void) {
   IMP hook=imp_implementationWithBlock(^NSString *(NSBundle *bundle,NSString *key,NSString *value,NSString *name){
    NSString *result=((id(*)(id,SEL,id,id,id))original)(bundle,sel,key,value,name);
    if(!enabled || translating || !AppLocalizationBundle(bundle))return result;
+   // Key first: opaque localization keys and SwiftUI catalog keys never appear
+   // as the resolved text. A nil table name means the default Localizable table.
+   if(key.length){
+     NSDictionary *byTable=keyTable[name.length?name:@"Localizable"];
+     NSString *byKey=[byTable isKindOfClass:NSDictionary.class]?byTable[key]:nil;
+     if([byKey isKindOfClass:NSString.class] && byKey.length && PlaceholdersPreserved(result,byKey))return IsolateLatin(byKey);
+   }
    NSString *translated=Translate(result);
    // Source tables can use stable opaque keys. Translate the resolved UI text first.
    return translated;
@@ -197,7 +207,7 @@ static void HookBundleLocalization(void) {
  if(pathMethod){
   IMP original=method_getImplementation(pathMethod);
   IMP hook=imp_implementationWithBlock(^NSString *(NSBundle *bundle,NSString *name,NSString *ext,NSString *directory,NSString *localization){
-   if(enabled && !translating && (!onlineConfig || OnlineUsable()) && AppLocalizationBundle(bundle) &&
+   if(enabled && !translating && AppLocalizationBundle(bundle) &&
       ([ext isEqual:@"strings"] || [ext isEqual:@"stringsdict"]) &&
       localization.length && ![localization isEqual:@"ar"]){
     NSString *arabic=((id(*)(id,SEL,id,id,id,id))original)(bundle,pathSel,name,ext,directory,@"ar");
@@ -389,6 +399,24 @@ static void InstallTranslationHooks(void) {
 static void ApplyEmbeddedConfig(NSDictionary *config) {
    table=[config[@"translations"] isKindOfClass:NSDictionary.class]?config[@"translations"]:@{};
    pieces=[config[@"substrings"] isKindOfClass:NSDictionary.class]?config[@"substrings"]:@{};
+   // Key-based map: table name -> localization key -> Arabic. Values must be
+   // real Arabic strings; anything else is dropped rather than rendered.
+   NSMutableDictionary *keys=[NSMutableDictionary dictionary];
+   __block NSUInteger keyCount=0;
+   NSCharacterSet *arabic=[NSCharacterSet characterSetWithRange:NSMakeRange(0x0600,0x100)];
+   id rawKeys=config[@"keys"];
+   if([rawKeys isKindOfClass:NSDictionary.class])for(id t in (NSDictionary*)rawKeys){
+     id entries=rawKeys[t];
+     if(![t isKindOfClass:NSString.class]||![t length]||![entries isKindOfClass:NSDictionary.class])continue;
+     NSMutableDictionary *safeTable=[NSMutableDictionary dictionary];
+     [entries enumerateKeysAndObjectsUsingBlock:^(id k,id v,__unused BOOL *stop){
+       if(keyCount>=20000)return;
+       if([k isKindOfClass:NSString.class]&&[k length]&&[v isKindOfClass:NSString.class]&&[v length]&&[v length]<=4096&&
+          [v rangeOfCharacterFromSet:arabic].location!=NSNotFound){safeTable[k]=v;keyCount++;}
+     }];
+     if(safeTable.count)keys[t]=[safeTable copy];
+   }
+   keyTable=[keys copy];
    NSMutableDictionary *safe=[NSMutableDictionary dictionary];
    [pieces enumerateKeysAndObjectsUsingBlock:^(id k,id v,__unused BOOL *stop){if([k isKindOfClass:NSString.class]&&[v isKindOfClass:NSString.class]&&[k length])safe[k]=v;}];
    pieces=[safe copy];
@@ -408,7 +436,7 @@ static void ApplyEmbeddedConfig(NSDictionary *config) {
 // Only isolated simulator fixtures export these. Device build never defines this macro.
 __attribute__((visibility("default"))) int MirsaRuntimeTestConfigure(void) {
  if(!NSThread.isMainThread)return 0;
- enabled=YES;table=@{};pieces=@{};rules=@[];pieceKeys=@[];
+ enabled=YES;table=@{};pieces=@{};keyTable=@{};rules=@[];pieceKeys=@[];
  cache=[NSCache new];cache.countLimit=2048;cache.totalCostLimit=1024*1024;
  onlineConfig=nil;onlinePositive=[NSMutableDictionary dictionary];onlineMeta=[NSMutableDictionary dictionary];
  onlineNegative=[NSMutableDictionary dictionary];onlineUncovered=[NSMutableSet set];
@@ -463,7 +491,10 @@ __attribute__((constructor)) static void Start(void) {
 #endif
    ApplyEmbeddedConfig(config);
    ConfigureOnline(config);
-   if(!onlineConfig)return;
+   // The embedded verified dictionary is authoritative on its own: install hooks
+   // even when no live online capability exists (offline dictionary continues
+   // after expiry, and a capability may never have been issued for this launch).
+   if(!onlineConfig && !table.count && !keyTable.count)return;
    enabled=YES;
    InstallTranslationHooks();
  } @catch(__unused NSException*e){enabled=NO;} }

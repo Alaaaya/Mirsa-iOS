@@ -499,9 +499,10 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
             var invalid = good; invalid["queue"] = ["persisted": true, "entries": invalidEntries]
             XCTAssertFalse(accepted(invalid), key)
         }
-        // This helper is the SAME guard used by dictionary() before the signing
-        // pipeline can package an empty online table. Full live staging signing
-        // remains covered by testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject.
+        // This helper is the SAME guard used by dictionary() when the server defers
+        // a batch. The signing pipeline itself no longer packages an empty online
+        // table: applyRequired fails at .merge when the merged dictionary is empty.
+        // Full live staging signing remains covered by testRealProductionSigningAutoActivatesFromCurrentAccountAndOffDoesNotInject.
     }
 
     func testActivationClaimsUseTheirOwnRealmAndKeepAccountBinding() throws {
@@ -861,6 +862,43 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: app, translator: translator, dylib: nil), RuntimeTranslationStage.merge.notice + "\n[RT27-MERGE]")
         XCTAssertEqual(try snapshot(app), before)
     }
+    func testQuotaExhaustionContinuesSigningQueuesForReviewAndShowsArabicNotice() throws {
+        let fixture = try realFixture()
+        let sha = try RuntimeOriginalIPA.pin(fixture.ipa)
+        let scan = try RuntimeTranslationScanner.scan(app: fixture.app)
+        let info = try IPAEditorService.info(in: fixture.app)
+        let bundle = try XCTUnwrap(info["CFBundleIdentifier"] as? String)
+        let online = grant(bundle: bundle, revision: scan.revision)
+        let receipt: [String: Any] = ["kind": "missing", "source": "Settings",
+            "labelId": UUID().uuidString, "reviewId": UUID().uuidString, "version": 1]
+        let translator = Translator(.success(RuntimeTranslationPackage(translations: [:], online: online,
+            queueReceipts: [receipt], deferredReasons: ["provider_429"])))
+        let dylib = try XCTUnwrap(RuntimeArabicPipeline.bundledDylib, "Native app resource RuntimeTranslationAssets/MirsaTranslate.dylib is required")
+        let executable = try XCTUnwrap(info["CFBundleExecutable"] as? String)
+        let originalDependencies = try IPAEditorService.dependencies(of: fixture.app.appendingPathComponent(executable))
+        XCTAssertEqual(RuntimeArabicPipeline.applyBlocking(app: fixture.app, translator: translator, dylib: dylib),
+                       RuntimeArabicText.queued)
+        let config = fixture.app.appendingPathComponent("Frameworks/MirsaTranslations.json")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
+        XCTAssertEqual(try XCTUnwrap(json["translations"] as? [String: String]), [:])
+        XCTAssertEqual(json["pendingReview"] as? Bool, true)
+        XCTAssertNil(json["keys"])
+        XCTAssertEqual(json["online"] as? [String: String], online)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.app.appendingPathComponent("ar.lproj").path))
+        XCTAssertEqual(try IPAEditorService.dependencies(of: fixture.app.appendingPathComponent(executable)),
+                       originalDependencies + ["@loader_path/Frameworks/MirsaTranslate.dylib"])
+        try RuntimeOriginalIPA.verify(fixture.ipa, expected: sha)
+    }
+    func testMuseCanonicalEntryOverridesProviderTranslation() throws {
+        let bundle = "org.mirsa.runtime25.generic", revision = String(repeating: "a", count: 64)
+        let response: [String: Any] = ["bundleId": bundle, "revision": revision, "entries": [
+            ["source": "Save %@", "translation": "حفظ %@", "provenance": "gemini", "version": 1],
+            ["source": "Settings", "translation": "الإعدادات", "provenance": "muse", "version": 2],
+            ["source": "Welcome back", "translation": "أهلاً بعودتك", "provenance": "kat", "version": 3],
+        ]]
+        let canonical = try RuntimeArabicBackendTranslator.canonicalDictionary(response, bundleID: bundle, revision: revision)
+        XCTAssertEqual(canonical.translations, ["Settings": "الإعدادات", "Welcome back": "أهلاً بعودتك"])
+    }
     func testGenericRuntimeInjectionWritesOnlyPerAppSafeDictionaryAndKeepsSourceIPA() throws {
         try assertGenericRuntimeInjection(onlineEnabled: true)
     }
@@ -892,6 +930,12 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         XCTAssertEqual(table, ["Save %@": "حفظ %@", "Settings": "الإعدادات"])
         XCTAssertEqual(json["online"] != nil, onlineEnabled)
         XCTAssertNil(table["%d items"]); XCTAssertNil(table["Not in this app"])
+        // Key-based map alongside the text-based table: NSBundle lookups arrive by key.
+        let keys = try XCTUnwrap(json["keys"] as? [String: [String: String]])
+        XCTAssertEqual(keys["Localizable"]?["save"], "حفظ %@")
+        XCTAssertEqual(keys["Localizable"]?["settings"], "الإعدادات")
+        XCTAssertNil(keys["Localizable"]?["count"])
+        XCTAssertTrue(keys.values.flatMap(\.values).allSatisfy { $0.range(of: "[\\u0600-\\u06ff]", options: .regularExpression) != nil })
         XCTAssertEqual(json["revision"] as? String, scan.revision)
         XCTAssertEqual(json["online"] as? [String: String], online)
         XCTAssertEqual(translator.calls.first?.0, bundle)

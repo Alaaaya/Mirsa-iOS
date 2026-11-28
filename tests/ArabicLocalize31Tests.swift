@@ -3,6 +3,28 @@ import CryptoKit
 @testable import Mirsa
 
 final class ArabicLocalize31Tests: XCTestCase {
+    func testEchoIsNotATranslation() {
+        XCTAssertFalse(ArabicIPALocalizer.isArabicTranslation(source: "Welcome back", translated: "Welcome back"))
+        XCTAssertFalse(ArabicIPALocalizer.isArabicTranslation(source: "Settings", translated: "Settings"))
+        XCTAssertFalse(ArabicIPALocalizer.isArabicTranslation(source: "Save %@", translated: "Save %@"))
+        XCTAssertTrue(ArabicIPALocalizer.isArabicTranslation(source: "Welcome back", translated: "أهلاً بعودتك"))
+        XCTAssertTrue(ArabicIPALocalizer.isArabicTranslation(source: "Settings", translated: "الإعدادات"))
+        XCTAssertTrue(ArabicIPALocalizer.isArabicTranslation(source: "Save %@", translated: "حفظ %@"))
+        // acceptable() stays a pure placeholder validator: echoes still pass it.
+        XCTAssertTrue(ArabicIPALocalizer.acceptable(source: "Settings", translated: "Settings"))
+    }
+    private struct EchoTranslator: ArabicTranslating {
+        func translate(bundleID: String, version: String, contentHash: String, items: [ArabicIPALocalizer.Item]) async throws -> [String: String] {
+            Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.text) })
+        }
+    }
+    func testEchoOnlyLocalizationFailsInsteadOfWritingEnglish() async throws {
+        let dir = try temp(), original = try fixture(at: dir)
+        try plist(["greeting": "Welcome back"], to: original.app.appendingPathComponent("en.lproj/Localizable.strings"))
+        let outcome = await ArabicIPALocalizer.localize(app: original.app, bundleID: "org.mirsa.ar32.english", version: "1.0", translator: EchoTranslator())
+        XCTAssertEqual(outcome, .failed(.invalid))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: original.app.appendingPathComponent("ar.lproj").path))
+    }
     func testTokensMustMatch() {
         XCTAssertTrue(ArabicIPALocalizer.acceptable(source: "Hello %@, %d items", translated: "مرحبا %@، %d عناصر"))
         XCTAssertFalse(ArabicIPALocalizer.acceptable(source: "Hello %@", translated: "مرحبا"))

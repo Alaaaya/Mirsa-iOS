@@ -228,6 +228,28 @@ end $$;
 revoke all on function public.mirsa_runtime_review(uuid,bigint,text) from public,anon,authenticated;
 grant execute on function public.mirsa_runtime_review(uuid,bigint,text) to service_role;
 
+-- A Muse review is the same explicit compare-and-swap as a Kat review,
+-- but the correction is recorded with provenance 'muse' so it wins over
+-- the Gemini provider output (the client accepts 'kat' and 'muse' as
+-- canonical). Deployed by Supabase migration, not by this branch.
+create or replace function public.mirsa_runtime_review_muse(p_id uuid,p_expected bigint,p_translation text)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare l public.mirsa_runtime_labels%rowtype; r public.mirsa_runtime_reviews%rowtype;
+begin
+ select x.* into l from public.mirsa_runtime_labels x join public.mirsa_runtime_reviews y on y.label_id=x.id where y.id=p_id;
+ if not found then raise exception 'unknown_review';end if;
+ perform pg_advisory_xact_lock(hashtextextended(l.user_id::text,812589));
+ select * into r from public.mirsa_runtime_reviews where id=p_id for update;
+ select * into l from public.mirsa_runtime_labels where id=r.label_id for update;
+ if r.status<>'pending' or l.version<>p_expected or p_translation is null or length(p_translation) not between 1 and 1024 or octet_length(p_translation)>4096 then raise exception using errcode='40001',message='review_conflict_or_invalid';end if;
+ if (select coalesce(sum(octet_length(source)+coalesce(octet_length(translation),0)),0) from public.mirsa_runtime_labels where user_id=l.user_id and bundle_id=l.bundle_id and revision=l.revision)+octet_length(p_translation)>4194304 then raise exception 'dictionary_capacity';end if;
+ update public.mirsa_runtime_labels set translation=p_translation,provenance='muse',version=version+1,resolved_at=clock_timestamp() where id=l.id returning * into l;
+ update public.mirsa_runtime_reviews set status=case when id=p_id then 'approved' else 'superseded' end,reviewed_at=clock_timestamp() where label_id=l.id and status='pending';
+ return jsonb_build_object('id',r.id,'resolved',true,'version',l.version,'provenance','muse');
+end $$;
+revoke all on function public.mirsa_runtime_review_muse(uuid,bigint,text) from public,anon,authenticated;
+grant execute on function public.mirsa_runtime_review_muse(uuid,bigint,text) to service_role;
+
 -- Immutable metadata batches make a crash after relay acceptance replay the exact same event.
 create table if not exists public.mirsa_runtime_batches (
  id uuid primary key default gen_random_uuid(),

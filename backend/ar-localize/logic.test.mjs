@@ -1,5 +1,5 @@
 import test from "node:test"; import assert from "node:assert/strict";
-import { acceptable, sameTokens, validateRequest, parseModelMap, chunk } from "./logic.mjs";
+import { acceptable, isRealTranslation, hasArabic, sameTokens, validateRequest, parseModelMap, chunk } from "./logic.mjs";
 test("placeholders must match as multiset", () => {
   assert.ok(sameTokens("%d items in %@", "%d عناصر في %@"));
   assert.ok(!sameTokens("%d items", "عناصر"));
@@ -11,6 +11,21 @@ test("stringsdict token", () => { assert.ok(sameTokens("%#@items@", "%#@items@ �
 test("acceptable rejects empty and control", () => {
   assert.ok(!acceptable("Hi", "  ")); assert.ok(!acceptable("Hi", "x\u0001")); assert.ok(acceptable("Hi", "مرحبا"));
   assert.ok(!acceptable("Hi", 5));
+});
+test("an echo of the English source is not a translation", () => {
+  assert.ok(!isRealTranslation("Welcome back", "Welcome back"));
+  assert.ok(!isRealTranslation("Settings", "Settings"));
+  assert.ok(isRealTranslation("Welcome back", "أهلاً بعودتك"));
+  assert.ok(isRealTranslation("Settings", "الإعدادات"));
+  assert.ok(!isRealTranslation("Save %@", "Save %@"));
+  assert.ok(isRealTranslation("Save %@", "حفظ %@"));
+  assert.ok(hasArabic("الإعدادات"));
+  assert.ok(!hasArabic("Settings"));
+});
+test("cached echoes are a miss, not a hit", () => {
+  const items = [{ id: "0.0", text: "Welcome back" }, { id: "0.1", text: "Settings" }];
+  assert.equal(completeCachedTranslations(items, { "0.0": "Welcome back", "0.1": "الإعدادات" }), null);
+  assert.deepEqual({ ...completeCachedTranslations(items, { "0.0": "أهلاً بعودتك", "0.1": "الإعدادات" }) }, { "0.0": "أهلاً بعودتك", "0.1": "الإعدادات" });
 });
 const ok = { bundleId: "com.a.b", version: "1.0", contentHash: "a".repeat(64), items: [{ id: "x", text: "Hi" }] };
 test("request bounds", () => {

@@ -58,6 +58,23 @@ enum ArabicIPALocalizer {
         return allExplicit || args == translatedArgs
     }
 
+    /// A genuine Arabic translation: placeholders intact, actually Arabic, and
+    /// different from the source. An echo of the English source is NOT a translation:
+    /// it used to pass `acceptable`, get cached, and get written into ar.lproj as
+    /// an "Arabic" value (Reloc shipped 240 English values that way).
+    static func isArabicTranslation(source: String, translated: String) -> Bool {
+        guard acceptable(source: source, translated: translated) else { return false }
+        let t = translated.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t != source.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return t.unicodeScalars.contains { scalar in
+            (0x0600...0x06FF).contains(scalar.value) ||
+            (0x0750...0x077F).contains(scalar.value) ||
+            (0x08A0...0x08FF).contains(scalar.value) ||
+            (0xFB50...0xFDFF).contains(scalar.value) ||
+            (0xFE70...0xFEFF).contains(scalar.value)
+        }
+    }
+
     static func worthTranslating(_ s: String) -> Bool {
         guard s.count <= maxText, !s.isEmpty else { return false }
         if s.range(of: #"^[a-z][a-z0-9+.\-]*://"#, options: .regularExpression) != nil { return false }
@@ -213,8 +230,20 @@ enum ArabicIPALocalizer {
         catch let e as ArabicTranslationError { return .failed(e.failure) }
         catch { return .failed(.network) }
         var good: [String: String] = [:]
-        for item in scan.items { if let t = raw[item.id], acceptable(source: item.text, translated: t) { good[item.id] = t.trimmingCharacters(in: .whitespacesAndNewlines) } }
-        guard good.count * 10 >= scan.items.count * 6 else { return .failed(.invalid) }
+        var untranslatable = 0
+        for item in scan.items {
+            guard let t = raw[item.id] else { continue }
+            if isArabicTranslation(source: item.text, translated: t) {
+                good[item.id] = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if acceptable(source: item.text, translated: t) {
+                // Brand names, codes and other literals the provider rightly leaves
+                // unchanged: not a translation, but not a failure either. They stay
+                // out of the denominator instead of counting as missing Arabic.
+                untranslatable += 1
+            }
+        }
+        let translatable = scan.items.count - untranslatable
+        guard translatable > 0, good.count * 10 >= translatable * 6 else { return .failed(.invalid) }
         return write(scan: scan, translations: good, app: app)
     }
 
@@ -250,6 +279,9 @@ enum ArabicIPALocalizer {
                 }
                 staged.append((lproj, bundle.appendingPathComponent("ar.lproj", isDirectory: true)))
             }
+            // Never stage an "Arabic" bundle with zero real translations: the
+            // files would be English values under an ar.lproj name.
+            guard count > 0 else { rollback(); return .failed(.invalid) }
             for (from, to) in staged {
                 guard !fm.fileExists(atPath: to.path) else { continue }
                 try fm.moveItem(at: from, to: to); created.append(to)

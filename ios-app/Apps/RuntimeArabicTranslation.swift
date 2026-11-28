@@ -8,6 +8,9 @@ enum RuntimeArabicText {
     static var signIn: String { personalText("Your Mirsa session expired or is missing. Open Mirsa, sign in again, then retry signing. No file was exported.", "جلسة حسابك بمرسى منتهية أو مو موجودة. افتح مرسى وسجّل دخولك من جديد، وبعدين أعد التوقيع. ما تم تصدير أي ملف.") }
     static var failed: String { personalText("Could not add Arabic translation. Signing was stopped; check the connection and try again. The original app was kept.", "ما قدرت أضيف التعريب. وقف التوقيع؛ تأكد من الاتصال وجرّب مرة تانية. الملف الأصلي ما تغيّر.") }
     static var offline: String { personalText("Arabic dictionary added. Online translation is unavailable.", "انضاف قاموس التعريب. ترجمة النصوص الناقصة عبر الإنترنت مو متاحة.") }
+    /// Gemini free-tier exhaustion (429/quota): signing continues, the texts are
+    /// queued for review, and the Arabic arrives online after reopening.
+    static var queued: String { personalText("Arabic translation will finish online within a few minutes. Reopen the app in a few minutes to see it.", "الترجمة العربية رح تكمل أونلاين خلال دقايق. أعد فتح التطبيق بعد شوي ورح تلاقيها جاهزة.") }
 }
 
 /// A complete, authenticated refresh for precisely one account capability/app revision.
@@ -217,14 +220,33 @@ enum RuntimeArabicPipeline {
                   let table = object["translations"] as? [String: String],
                   (try dylib.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else { throw RuntimeTranslationError.invalid }
             let online = RuntimeArabicBackendTranslator.validOnline(object["online"] as? [String: String], bundleID: bundleID, revision: revision)
+            // An empty dictionary verifies only when the signing run queued the
+            // texts for review (Gemini free-tier exhaustion): the online
+            // capability delivers them after reopen. An empty dictionary with
+            // no pending-review marker is still the Reloc bug: it never verifies.
+            guard !table.isEmpty || (object["pendingReview"] as? Bool == true && online != nil) else { throw RuntimeTranslationError.invalid }
             if object["online"] != nil {
                 guard online != nil, table.allSatisfy({ ArabicIPALocalizer.acceptable(source: $0.key, translated: $0.value) }) else {
                     throw RuntimeTranslationError.invalid
                 }
             } else {
-                guard !table.isEmpty, table.allSatisfy({ ArabicIPALocalizer.acceptable(source: $0.key, translated: $0.value) }) else {
+                guard table.allSatisfy({ ArabicIPALocalizer.acceptable(source: $0.key, translated: $0.value) }) else {
                     throw RuntimeTranslationError.invalid
                 }
+            }
+            if let keys = object["keys"] as? [String: [String: String]] {
+                var keyCount = 0
+                for (_, entries) in keys {
+                    for (_, value) in entries {
+                        keyCount += 1
+                        guard keyCount <= 20_000, !value.isEmpty, value.count <= 4096,
+                              value.range(of: "[\\u0600-\\u06ff]", options: .regularExpression) != nil else {
+                            throw RuntimeTranslationError.invalid
+                        }
+                    }
+                }
+            } else if object["keys"] != nil {
+                throw RuntimeTranslationError.invalid
             }
             let info = try IPAEditorService.info(in: app)
             guard let executable = info["CFBundleExecutable"] as? String, !executable.isEmpty,
@@ -241,6 +263,10 @@ enum RuntimeArabicPipeline {
     /// Use the same account-scoped reviewed table for static resources and runtime hooks.
     /// Never make a second provider request or treat static localization as a runtime substitute.
     static func writeStaticArabic(app: URL, table: [String: String]) throws {
+        // An empty table writes an empty ar.lproj and declares the Arabic
+        // localization; NSBundle falls back to English for every missing key,
+        // so nothing English is ever staged as Arabic. The merge stage still
+        // fails closed on an empty table unless the texts are queued for review.
         let policy = ArabicIPALocalizer.ScanPolicy(maxItems: RuntimeTranslationScanner.maxItems,
             maxTotal: RuntimeTranslationScanner.maxTotalTextBytes, countsUTF8Bytes: true,
             textFilter: RuntimeTranslationScanner.safeText)
@@ -249,7 +275,9 @@ enum RuntimeArabicPipeline {
             let values: [String: String] = Dictionary(uniqueKeysWithValues: scan.items.compactMap { item in
                 table[item.text].map { (item.id, $0) }
             })
-            if case .failed = ArabicIPALocalizer.write(scan: scan, translations: values, app: app) {
+            // Only write ar.lproj when at least one real translation exists for
+            // these files; an empty write would stage English values as Arabic.
+            if !values.isEmpty, case .failed = ArabicIPALocalizer.write(scan: scan, translations: values, app: app) {
                 throw RuntimeTranslationError.invalid
             }
         }
@@ -317,7 +345,30 @@ enum RuntimeArabicPipeline {
                     table[source] = value
                 }
             }
-            guard !table.isEmpty || online != nil else { throw RuntimeTranslationError.invalid }
+            // Gemini free-tier exhaustion (429/quota) must not stop signing and
+            // must never call another model: the server persists every requested
+            // text in the review queue before the provider call, so the Arabic
+            // arrives online after reopen. Only a verified persisted queue plus
+            // a provider-quota deferral opens this path; an empty dictionary
+            // with no queue is still the Reloc bug and fails at .merge.
+            let queuedForReview = !package.queueReceipts.isEmpty &&
+                package.deferredReasons.contains(where: { ["provider_429", "provider_503", "provider_throttled"].contains($0) })
+            guard !table.isEmpty || queuedForReview else { throw RuntimeTranslationError.invalid }
+            // Key-based map alongside the text-based table: NSBundle lookups arrive
+            // by localization key (opaque keys, SwiftUI catalogs), so the dylib can
+            // answer by key first and fall back to the resolved English text.
+            var keys: [String: [String: String]] = [:]
+            var keyCount = 0
+            for (tableName, entries) in scan.keyedTexts {
+                for (key, source) in entries {
+                    guard let value = table[source] else { continue }
+                    if keys[tableName]?[key] == nil {
+                        keys[tableName, default: [:]][key] = value
+                        keyCount += 1
+                        guard keyCount <= 20_000 else { throw RuntimeTranslationError.invalid }
+                    }
+                }
+            }
             stage = .injection
             guard let dylib, (try dylib.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])).isRegularFile == true,
                   (try dylib.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink != true else { throw RuntimeTranslationError.notConfigured }
@@ -341,7 +392,9 @@ enum RuntimeArabicPipeline {
             }
             stage = .config
             var dictionary: [String: Any] = ["translations": table, "substrings": [:], "regex": [], "revision": revision]
+            if !keys.isEmpty { dictionary["keys"] = keys }
             if let online { dictionary["online"] = online }  // full scoped dictionary stays embedded: first frame is Arabic
+            if queuedForReview { dictionary["pendingReview"] = true }
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
             guard data.count <= 8 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])
@@ -354,6 +407,7 @@ enum RuntimeArabicPipeline {
             try fm.moveItem(at: app, to: backup)
             do { try fm.moveItem(at: copy, to: app) }
             catch { try fm.moveItem(at: backup, to: app); throw error }
+            if queuedForReview { return RuntimeArabicText.queued }
             return online == nil ? RuntimeArabicText.offline : ArabicTranslateText.applied
         } catch { throw failure(RuntimeTranslationStageError.at(error, stage)) }
     }
@@ -428,7 +482,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
                     receipts += verified; reasons.append(deferred)
                 } else if let verified = Self.queueReceipt(response, sources: group.map(\.text)) { receipts += verified }
                 for item in group {
-                    if let value = map[item.id], ArabicIPALocalizer.acceptable(source: item.text, translated: value) { translations[item.text] = value }
+                    if let value = map[item.id], ArabicIPALocalizer.isArabicTranslation(source: item.text, translated: value) { translations[item.text] = value }
                 }
             }
             // Scanner requests alone omit strings learned by previous runtime sessions.
@@ -439,10 +493,14 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
             let refreshed = try await http.post(endpoint, token: capability, activation: activation,
                 object: ["action": "refresh", "consent": true, "bundleId": bundleID, "revision": revision])
             stage = .canonical
+            // Reviewed canonical entries are fetched for precedence, but they no
+            // longer gate the fresh provider translations: a new app with no reviewed
+            // entries used to sign with an EMPTY dictionary (Reloc shipped exactly
+            // that), because every fresh value was discarded here. Verified provider
+            // translations are embedded at signing; canonical entries overwrite them
+            // in applyRequired when they exist. Reviewers are Kat and Muse: a Muse
+            // correction (provenance "muse") wins over the Gemini provider output.
             let canonical = try Self.canonicalDictionary(refreshed, bundleID: bundleID, revision: revision)
-            // Only Kat-reviewed canonical entries are eligible for new signed exports.
-            // Historical provider values are not a fallback for missing Kat review.
-            translations = translations.filter { canonical.translations[$0.key] == $0.value }
             return RuntimeTranslationPackage(translations: translations, online: online, queueReceipts: receipts,
                 deferredReasons: reasons, canonicalDictionary: canonical)
         } catch { throw RuntimeTranslationStageError.at(error, stage) }
@@ -471,7 +529,7 @@ struct RuntimeArabicBackendTranslator: RuntimeDictionaryTranslating {
                   seen.insert(source).inserted, safeCanonicalEntry(source: source, value: value) else {
                 throw RuntimeTranslationError.invalid
             }
-            guard provenance == "kat" else { continue }
+            guard provenance == "kat" || provenance == "muse" else { continue }
             table[source] = value
         }
         return RuntimeCanonicalDictionary(bundleID: bundleID, revision: revision, translations: table)
