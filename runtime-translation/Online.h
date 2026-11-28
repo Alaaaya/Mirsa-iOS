@@ -78,7 +78,12 @@ static BOOL DictionarySourceSafe(NSString *s) {
  if([screened rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound)return NO;
  return YES;
 }
-static BOOL NetworkSafe(NSString *s){return HasCJK(s) && DictionarySourceSafe(s);}
+// The online path is language-agnostic: any untranslated label may be queued,
+// not only CJK text. A label that stays in its source language at runtime
+// (English included) is a missing translation, and it must reach the queue so
+// it can come back OTA. DictionarySourceSafe still screens out URLs, tokens,
+// credentials and other material that must never be sent.
+static BOOL NetworkSafe(NSString *s){return DictionarySourceSafe(s);}
 static BOOL OnlineDenied(void) {
  os_unfair_lock_lock(&onlineLock);BOOL denied=onlineDenied;os_unfair_lock_unlock(&onlineLock);return denied;
 }

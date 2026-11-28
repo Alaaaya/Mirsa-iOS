@@ -39,9 +39,9 @@ switch(Deno.args[0]) {
 begin;
 do $$ begin perform pg_advisory_xact_lock(81258925); end $$;
 insert into public.mirsa_runtime_batches(kind,entries)
-select kind,jsonb_agg(jsonb_build_object('queue_id',id,'user_id',user_id,'bundle_id',bundle_id,'revision',revision,'version',version,'kind',kind) order by created_at,id)
+select kind,jsonb_agg(jsonb_build_object('queue_id',id,'user_id',user_id,'bundle_id',bundle_id,'revision',revision,'version',version,'kind',kind,'source',source,'candidate',candidate) order by created_at,id)
 from (
- select r.*,l.user_id,l.bundle_id,l.revision,(row_number() over(partition by r.kind order by r.created_at,r.id)-1)/32 as grp
+ select r.*,l.user_id,l.bundle_id,l.revision,l.source,(row_number() over(partition by r.kind order by r.created_at,r.id)-1)/32 as grp
  from public.mirsa_runtime_reviews r join public.mirsa_runtime_labels l on l.id=r.label_id
  where r.status='pending' and r.notified_at is null
  and not exists(select 1 from public.mirsa_runtime_batches b,jsonb_array_elements(b.entries) e where e->>'queue_id'=r.id::text)

@@ -79,5 +79,5 @@ class RuntimeTests(unittest.TestCase):
   self.assertIn("dispatch_async(onlineQueue",s)
   self.assertIn("ScheduleOnlineFlushLocked(0.15)",s)
   s=Path("RuntimeTranslate.m").read_text();self.assertIn("if(remote)return IsolateLatin(remote);",s)
-  self.assertIn('[s isEqualToString:result] && HasCJK(s)',s)
+  self.assertIn('[s isEqualToString:result] && !HasLocalHistoryPrefix(s)',s)
 if __name__=="__main__":unittest.main()

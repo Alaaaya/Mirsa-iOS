@@ -75,7 +75,7 @@ static BOOL HasCJK(NSString *s) {
 #import "Online.h"
 #import "Bidi.h"
 static void LogMissing(NSString *source,NSString *result) {
- if(!missingQueue || !HasCJK(result))return;
+ if(!missingQueue)return;
  NSString *sample=SafePrefix(result,4096);
  os_unfair_lock_lock(&missingLock);
  BOOL add=missingWaiting<16 && missingSeen.count<1024 && ![missingSeen containsObject:sample];
@@ -153,7 +153,7 @@ static NSString *Translate(NSString *s) {
 
    }
  LogMissing(s,result);
-   if([s isEqualToString:result] && HasCJK(s) && !HasLocalHistoryPrefix(s))QueueOnline(s);
+   if([s isEqualToString:result] && !HasLocalHistoryPrefix(s))QueueOnline(s);
  } @catch (__unused NSException *e) { result=s; }
  @finally { translating=NO; }
  return result;
@@ -309,7 +309,7 @@ static void HookAttributedInit(Class c) {
  Method m=class_getInstanceMethod(c,sel);if(!m)return;IMP orig=method_getImplementation(m);
  IMP hook=imp_implementationWithBlock(^id(id obj,NSString *s,NSDictionary *attrs){
   id result=((id(*)(id,SEL,id,id))orig)(obj,sel,Translate(s),attrs);
-  if(!translating && [s isKindOfClass:NSString.class] && HasCJK(s))
+  if(!translating && [s isKindOfClass:NSString.class])
    objc_setAssociatedObject(result,&attributedSourceKey,[s copy],OBJC_ASSOCIATION_RETAIN);
   return result;
  });
