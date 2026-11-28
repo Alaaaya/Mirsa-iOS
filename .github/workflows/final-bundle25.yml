@@ -2,6 +2,10 @@ name: Final integrated bundle private validation
 on:
   workflow_dispatch:
     inputs:
+      test_build_only:
+        description: Compile-only unverified private IPA, no simulator or snapshots
+        type: boolean
+        default: false
       exact_launch_diagnostic:
         description: 'Read-only replay of exact signed fixture from failed run 45805899206. Never builds a release.'
         type: boolean
@@ -53,7 +57,7 @@ jobs:
             diagnostic-source/build/production-sign-proof/exact-*-Arabic-alert.png
 
   native-hook-smoke:
-    if: ${{ inputs.exact_launch_diagnostic != true }}
+    if: ${{ inputs.exact_launch_diagnostic != true && inputs.test_build_only != true }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +70,7 @@ jobs:
           python3 scripts/test-hook-localization.py
 
   backend:
-    if: ${{ inputs.exact_launch_diagnostic != true }}
+    if: ${{ inputs.exact_launch_diagnostic != true && inputs.test_build_only != true }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -108,6 +112,7 @@ jobs:
           if-no-files-found: error
 
   build:
+    if: ${{ always() && inputs.exact_launch_diagnostic != true && (inputs.test_build_only == true || (needs.simulator.result == 'success' && needs.backend.result == 'success' && needs.native-hook-smoke.result == 'success')) }}
     needs: [simulator, backend, native-hook-smoke]
     runs-on: macos-26
     steps:
@@ -195,7 +200,7 @@ jobs:
           if-no-files-found: error
 
   simulator:
-    if: ${{ inputs.exact_launch_diagnostic != true }}
+    if: ${{ inputs.exact_launch_diagnostic != true && inputs.test_build_only != true }}
     needs: [backend, native-hook-smoke]
     runs-on: macos-26
     steps:
