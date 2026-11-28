@@ -23,7 +23,7 @@ defaults:
   run:
     shell: bash
 env:
-  MIRSA_RELEASE_BUILD: "8.543.11"
+  MIRSA_RELEASE_BUILD: "8.543.12"
 jobs:
   exact-launch-diagnostic:
     if: ${{ inputs.exact_launch_diagnostic == true }}

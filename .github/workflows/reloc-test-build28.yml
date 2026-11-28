@@ -4,7 +4,7 @@ on:
 permissions:
   contents: read
 env:
-  MIRSA_RELEASE_BUILD: "8.543.11"
+  MIRSA_RELEASE_BUILD: "8.543.12"
 defaults:
   run:
     shell: bash

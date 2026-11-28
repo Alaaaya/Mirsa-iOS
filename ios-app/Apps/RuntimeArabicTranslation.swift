@@ -149,7 +149,7 @@ enum RuntimeArabicPipeline {
     static var bundledDylib: URL? { Bundle.main.url(forResource: "MirsaTranslate", withExtension: "dylib", subdirectory: "RuntimeTranslationAssets") }
 
     static func applyBlocking(app: URL, translator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator(),
-                              dylib: URL? = bundledDylib, timeout: TimeInterval = 180,
+                              dylib: URL? = bundledDylib, timeout: TimeInterval = 300,
                               originalRevision: String? = nil, bundleIDOverride: String? = nil) -> String? {
         do {
             return try applyRequired(app: app, translator: translator, dylib: dylib, timeout: timeout,
@@ -199,6 +199,11 @@ enum RuntimeArabicPipeline {
                                                   expectedConfiguration: String? = nil) throws -> String {
         do {
             let fm = FileManager.default
+            let arabic = app.appendingPathComponent("ar.lproj")
+            let arabicValues = try arabic.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard arabicValues.isDirectory == true, arabicValues.isSymbolicLink != true else {
+                throw RuntimeTranslationError.invalid
+            }
             let frameworks = app.appendingPathComponent("Frameworks")
             let dylib = frameworks.appendingPathComponent("MirsaTranslate.dylib")
             let config = frameworks.appendingPathComponent("MirsaTranslations.json")
@@ -233,8 +238,37 @@ enum RuntimeArabicPipeline {
         } catch { throw failure(RuntimeTranslationStageError.at(error, .verify)) }
     }
 
+    /// Use the same account-scoped reviewed table for static resources and runtime hooks.
+    /// Never make a second provider request or treat static localization as a runtime substitute.
+    static func writeStaticArabic(app: URL, table: [String: String]) throws {
+        let policy = ArabicIPALocalizer.ScanPolicy(maxItems: RuntimeTranslationScanner.maxItems,
+            maxTotal: RuntimeTranslationScanner.maxTotalTextBytes, countsUTF8Bytes: true,
+            textFilter: RuntimeTranslationScanner.safeText)
+        let scan = try ArabicIPALocalizer.scan(app: app, policy: policy)
+        if !scan.hasArabic {
+            let values: [String: String] = Dictionary(uniqueKeysWithValues: scan.items.compactMap { item in
+                table[item.text].map { (item.id, $0) }
+            })
+            if case .failed = ArabicIPALocalizer.write(scan: scan, translations: values, app: app) {
+                throw RuntimeTranslationError.invalid
+            }
+        }
+        let arabic = app.appendingPathComponent("ar.lproj", isDirectory: true)
+        let fm = FileManager.default
+        guard (try? fm.destinationOfSymbolicLink(atPath: arabic.path)) == nil else {
+            throw RuntimeTranslationError.invalid
+        }
+        // Apps made entirely of code literals can have no string resource plans.
+        if !fm.fileExists(atPath: arabic.path) {
+            try fm.createDirectory(at: arabic, withIntermediateDirectories: false)
+            try PropertyListSerialization.data(fromPropertyList: table, format: .xml, options: 0)
+                .write(to: arabic.appendingPathComponent("Localizable.strings"), options: .atomic)
+        }
+        try ArabicIPALocalizer.addLocalization(app.appendingPathComponent("Info.plist"))
+    }
+
     static func applyRequired(app: URL, translator: RuntimeDictionaryTranslating = RuntimeArabicBackendTranslator(),
-                              dylib: URL? = bundledDylib, timeout: TimeInterval = 180,
+                              dylib: URL? = bundledDylib, timeout: TimeInterval = 300,
                               originalRevision: String? = nil, bundleIDOverride: String? = nil) throws -> String {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("runtime-ar-" + UUID().uuidString)
@@ -311,6 +345,7 @@ enum RuntimeArabicPipeline {
             let data = try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
             guard data.count <= 8 * 1_048_576 else { throw RuntimeTranslationError.invalid }
             try data.write(to: config, options: [.atomic, .completeFileProtection])
+            try writeStaticArabic(app: copy, table: table)
             stage = .verify
             try verifyInstalled(app: copy, revision: revision, bundleID: bundleID)
             // Original .ipa is not involved in this swap, and remains reusable with toggle off.
@@ -515,13 +550,35 @@ final class RuntimeTranslationHTTP: NSObject, URLSessionTaskDelegate, @unchecked
     #endif
     func post(_ endpoint: URL, token: String, activation: String? = nil, object: [String: Any],
               configuration: URLSessionConfiguration = .ephemeral) async throws -> [String: Any] {
-        configuration.timeoutIntervalForRequest = 25; configuration.timeoutIntervalForResource = 28
+        // Issuance may wait for mobile TLS/auth and staging database recovery.
+        // Only issuance retries, never dictionary mutations or arbitrary HTTP failures.
+        let isIssue = object["action"] as? String == "issue"
+        let attempts = isIssue ? 2 : 1
+        for attempt in 0..<attempts {
+            try Task.checkCancellation()
+            do {
+                return try await postOnce(endpoint, token: token, activation: activation,
+                    object: object, configuration: configuration, isIssue: isIssue)
+            } catch let error as URLError {
+                guard isIssue, attempt + 1 < attempts,
+                      [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) else { throw error }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        throw RuntimeTranslationError.network
+    }
+
+    private func postOnce(_ endpoint: URL, token: String, activation: String?, object: [String: Any],
+                          configuration: URLSessionConfiguration, isIssue: Bool) async throws -> [String: Any] {
+        configuration.timeoutIntervalForRequest = isIssue ? 60 : 30
+        configuration.timeoutIntervalForResource = isIssue ? 65 : 35
         configuration.httpCookieStorage = nil; configuration.urlCache = nil; configuration.urlCredentialStorage = nil
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let body = try JSONSerialization.data(withJSONObject: object)
         guard body.count <= 48 * 1024 else { throw RuntimeTranslationError.invalid }
-        var request = URLRequest(url: endpoint); request.httpMethod = "POST"; request.httpBody = body
+        var request = URLRequest(url: endpoint, timeoutInterval: isIssue ? 60 : 30)
+        request.httpMethod = "POST"; request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("MirsaRuntimeTranslation/1.0", forHTTPHeaderField: "User-Agent")
         // Public build metadata only; never install/account IDs or cached errors.
