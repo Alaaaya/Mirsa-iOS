@@ -43,8 +43,8 @@ struct PersonalProjectOptions: Sendable {
     var translateToArabic = false
 
     /// Copy the optional persisted choice into this attempt, never retain a live draft.
-    mutating func applyTranslationChoice(from draft: PersonalProjectDraft) {
-        translateToArabic = draft.translateArabic ?? false
+    mutating func applyTranslationChoice(from draft: PersonalProjectDraft, originalBundleID: String? = nil) {
+        translateToArabic = draft.translateArabic ?? originalBundleID.map { ArabicTranslatePrefs.isOn($0) } ?? false
     }
 }
 

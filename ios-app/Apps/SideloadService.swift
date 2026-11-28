@@ -296,6 +296,10 @@ enum SideloadService {
     }
 
     static func containerSign(appDir: String) throws -> [String: Any] {
+        let info = try IPAEditorService.info(in: URL(fileURLWithPath: appDir, isDirectory: true))
+        if let bundleID = info["CFBundleIdentifier"] as? String, ArabicTranslatePrefs.isOn(bundleID) {
+            throw SideloadError.message("التعريب ضمن الحاوية لسا مو مدعوم. افتح التطبيق من مشاريع الشهادة ووقّعه مع «ترجم للعربي». [RT28-CONTAINER-SCOPE]")
+        }
         var out: UnsafeMutablePointer<CChar>?
         var err: UnsafeMutablePointer<CChar>?
         let rc = al_container_sign_as(appDir, Bundle.main.bundleIdentifier ?? "", &out, &err)

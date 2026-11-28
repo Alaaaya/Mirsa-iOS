@@ -634,7 +634,7 @@ struct PersonalProjectDetailView: View {
             toggle(personalText("Remove extensions", "إزالة الإضافات المضمّنة"), personalText("Removes PlugIns before signing.", "بيحذف مجلد PlugIns قبل التوقيع."), Binding(get: { draft.removeExtensions ?? false }, set: { draft.removeExtensions = $0 }), symbol: "puzzlepiece", color: .orange)
             toggle(personalText("Remove App Clips", "إزالة App Clips"), personalText("Removes AppClips before signing.", "بيحذف مجلد AppClips قبل التوقيع."), Binding(get: { draft.removeAppClips ?? false }, set: { draft.removeAppClips = $0 }), symbol: "appclip", color: .blue)
             VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: Binding(get: { draft.translateArabic ?? false }, set: { draft.translateArabic = $0 })) {
+                Toggle(isOn: Binding(get: { draft.translateArabic ?? ArabicTranslatePrefs.isOn(app.bundleID) }, set: { draft.translateArabic = $0 })) {
                     HStack(alignment: .center, spacing: 10) {
                         settingSymbol("globe", color: LCPalette.green)
                         Text(ArabicTranslateText.rowTitle).font(.subheadline)
@@ -869,7 +869,7 @@ struct PersonalProjectDetailView: View {
         options.removeWatchApp = draft.removeWatchApp
         options.removeExtensions = draft.removeExtensions ?? false
         options.removeAppClips = draft.removeAppClips ?? false
-        options.applyTranslationChoice(from: draft)
+        options.applyTranslationChoice(from: draft, originalBundleID: app.bundleID)
         options.backgroundNotifications = draft.backgroundNotifications ?? false
         options.backgroundMethods = []
         if draft.backgroundAudio ?? false { options.backgroundMethods.append(.audio) }

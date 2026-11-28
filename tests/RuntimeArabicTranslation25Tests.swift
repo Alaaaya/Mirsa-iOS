@@ -52,6 +52,38 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
     }
 
 
+    func testSourcePreferenceInheritedOnlyForNilDraftAndOriginalBundle() {
+        let original = "com.mirsa.reloc.preference.fixture"
+        let edited = "com.mirsa.reloc.edited.fixture"
+        ArabicTranslatePrefs.set(true, bundleID: original)
+        defer { ArabicTranslatePrefs.set(false, bundleID: original) }
+        var draft = PersonalProjectDraft()
+        draft.bundleID = edited
+        var options = PersonalProjectOptions()
+        options.applyTranslationChoice(from: draft, originalBundleID: original)
+        XCTAssertTrue(options.translateToArabic)
+        draft.translateArabic = false
+        options.applyTranslationChoice(from: draft, originalBundleID: original)
+        XCTAssertFalse(options.translateToArabic)
+    }
+
+    func testPreexistingStaticArabicDoesNotBypassRuntimePrepare() throws {
+        let fixture = try realFixture()
+        let ar = fixture.app.appendingPathComponent("ar.lproj")
+        try FileManager.default.createDirectory(at: ar, withIntermediateDirectories: true)
+        try Data(""Settings" = "الإعدادات";".utf8).write(to: ar.appendingPathComponent("Localizable.strings"))
+        try FileManager.default.removeItem(at: fixture.ipa)
+        try IPAEditorService.run("pack", input: fixture.app.deletingLastPathComponent().deletingLastPathComponent(), output: fixture.ipa)
+        var options = PersonalProjectOptions()
+        options.translateToArabic = true
+        let translator = Translator(.success(RuntimeTranslationPackage(translations: ["Settings": "الإعدادات"], online: nil)))
+        let prepared = try PersonalCertificateSigner.prepare(ipa: fixture.ipa,
+            stage: fixture.root.appendingPathComponent("runtime-required"), options: options, runtimeTranslator: translator)
+        XCTAssertEqual(translator.calls.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.app.appendingPathComponent("Frameworks/MirsaTranslate.dylib").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.app.appendingPathComponent("Frameworks/MirsaTranslations.json").path))
+    }
+
     func testStageDiagnosticsDoNotLeakPathsTokensOrSourceLabels() {
         let privateMessage = "private-path/private-token/private-ui-label"
         for stage in RuntimeTranslationStage.allCases {

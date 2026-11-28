@@ -881,6 +881,9 @@ final class AppsStore: ObservableObject {
         defer { busy = nil }
         let ipa = Self.originalIPA(app.id).path
         do {
+            if ArabicTranslatePrefs.isOn(app.id) {
+                throw SideloadError.message("التعريب بهالمسار لسا مو مدعوم. افتح التطبيق من مشاريع الشهادة ووقّعه مع «ترجم للعربي». [RT28-LEGACY-SCOPE]")
+            }
             let o = try await Task.detached {
                 try SideloadService.install(appPath: ipa) { f, stage in
                     Task { @MainActor in

@@ -197,7 +197,7 @@ static void HookBundleLocalization(void) {
  if(pathMethod){
   IMP original=method_getImplementation(pathMethod);
   IMP hook=imp_implementationWithBlock(^NSString *(NSBundle *bundle,NSString *name,NSString *ext,NSString *directory,NSString *localization){
-   if(enabled && !translating && AppLocalizationBundle(bundle) &&
+   if(enabled && !translating && (!onlineConfig || OnlineUsable()) && AppLocalizationBundle(bundle) &&
       ([ext isEqual:@"strings"] || [ext isEqual:@"stringsdict"]) &&
       localization.length && ![localization isEqual:@"ar"]){
     NSString *arabic=((id(*)(id,SEL,id,id,id,id))original)(bundle,pathSel,name,ext,directory,@"ar");
