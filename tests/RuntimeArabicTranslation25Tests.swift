@@ -71,7 +71,7 @@ final class RuntimeArabicTranslation25Tests: XCTestCase {
         let fixture = try realFixture()
         let ar = fixture.app.appendingPathComponent("ar.lproj")
         try FileManager.default.createDirectory(at: ar, withIntermediateDirectories: true)
-        try Data(""Settings" = "الإعدادات";".utf8).write(to: ar.appendingPathComponent("Localizable.strings"))
+        try Data(#""Settings" = "الإعدادات";"#.utf8).write(to: ar.appendingPathComponent("Localizable.strings"))
         try FileManager.default.removeItem(at: fixture.ipa)
         try IPAEditorService.run("pack", input: fixture.app.deletingLastPathComponent().deletingLastPathComponent(), output: fixture.ipa)
         var options = PersonalProjectOptions()
