@@ -128,3 +128,17 @@ extension CertificateInstallTests {
         }
     }
 }
+
+extension CertificateInstallTests {
+    func testP12ImportSnapshotsTranslationToggle() {
+        let bundle = "dev.mirsa.p12-regression-" + UUID().uuidString.lowercased()
+        defer { ArabicTranslatePrefs.set(false, bundleID: bundle) }
+        ArabicTranslatePrefs.set(true, bundleID: bundle)
+        let enabled = CertificateInstall.signingOptions(appID: bundle)
+        XCTAssertTrue(enabled.translateToArabic)
+        ArabicTranslatePrefs.set(false, bundleID: bundle)
+        XCTAssertTrue(enabled.translateToArabic)
+        XCTAssertFalse(CertificateInstall.signingOptions(appID: bundle).translateToArabic)
+        XCTAssertFalse(CertificateInstall.signingOptions(appID: nil).translateToArabic)
+    }
+}

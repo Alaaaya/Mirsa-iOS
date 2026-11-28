@@ -49,6 +49,13 @@ enum CertificateInstall {
 
     static func shouldUseOTA(ownCertificateMode: Bool, wifi: Bool) -> Bool { true }
 
+    // Snapshot the import/source toggle before the asynchronous signing attempt.
+    static func signingOptions(appID: String?) -> PersonalProjectOptions {
+        var options = PersonalProjectOptions()
+        options.translateToArabic = appID.map { ArabicTranslatePrefs.isOn($0) } ?? false
+        return options
+    }
+
     @MainActor private static var running = false
 
     /// Signs `input` with `identity`, installs it, and reports one operation.
@@ -61,7 +68,7 @@ enum CertificateInstall {
         store?.busy = personalText("Signing with certificate", "عم نوقّع بالشهادة")
         defer { running = false; store?.busy = nil }
         guard FileManager.default.fileExists(atPath: input.path) else { throw Failure.missingIPA }
-        let verification = try await CertificateOTA.install(source: input, sourceIsArchive: true, material: identity.material, options: PersonalProjectOptions())
+        let verification = try await CertificateOTA.install(source: input, sourceIsArchive: true, material: identity.material, options: signingOptions(appID: appID))
         return ["otaInstallerOpened": true, "installed": false,
                 "warnings": verification.warnings.map { ["code": $0.code, "message": PersonalProfileVerification.localizedWarning($0)] },
                 "device_authorization": verification.device_authorization ?? "not_checked"]
